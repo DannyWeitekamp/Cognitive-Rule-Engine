@@ -9,7 +9,7 @@ import numpy as np
 import re
 from collections.abc import Iterable 
 import timeit
-N = 20
+N = 10
 
 def parse_signature(s):
 	fn_match = re.match(r"(?P<out_type>\w+)\s?\((?P<arg_types>(?P<args>\w+(,\s?)?)+)\)", s)
@@ -21,9 +21,9 @@ def parse_signature(s):
 
 
 
-class NBRT_KnowledgeBase(object):
-	def __init__(self):
-		pass
+
+
+		# [time][op]
 
 class BaseOperator(object):
 	registered_operators = {}
@@ -140,14 +140,26 @@ def compile_forward(op):
 
 class Add(BaseOperator):
 	commutes = True
-	signature = 'float(float,float,string,float)'
+	signature = 'float(float,float)'
 	def forward(x, y):
 		return x + y
 
-compile_forward(Add)
+class Subtract(BaseOperator):
+	commutes = False
+	signature = 'float(float,float)'
+	def forward(x, y):
+		return x - y
 
-def Multiply(x, y):
-	return x * y
+class Concatenate(BaseOperator):
+	commutes = True
+	signature = 'string(string,string)'
+	def forward(x, y):
+		return x + y
+
+# compile_forward(Add)
+
+# def Multiply(x, y):
+# 	return x * y
 
 def forward(state, goal, operators):
 	for op in operators:
@@ -182,8 +194,8 @@ def forward(state, goal, operators):
 
 bloop_type = ListType(u8[:])
 sloop_type = u8[:]
-@njit(nogil=True,fastmath=True,parallel=True) 
-def Add_forward1(x0,x1): 
+@njit(nogil=True,fastmath=True,parallel=True,cache=True) 
+def Grumbo_forward1(x0,x1): 
 	L0, L1 = len(x0), len(x1)
 
 	out = np.empty((L0,L0,L1,L0))
@@ -214,26 +226,120 @@ def Add_forward1(x0,x1):
 	for i,v in enumerate(d_out):
 		u_vs[i] = v
 
-	sqeep = np.where(out == 1)
+	# sqeep = np.where(out == 1)
+	# out[sqeep[0]] = 7
 	return u_vs
 
 
-@njit(nogil=True,fastmath=True,parallel=False) 
-def cat_forward1(x0): 
+HE_deffered = deferred_type()
+@jitclass([('op_id', i8),
+           ('args',  i8[:]),
+           ('next', optional(HE_deffered))])
+class HistElm(object):
+    def __init__(self,op_id,args):
+        self.op_id = op_id
+        self.args = args
+        self.next = None
+# print(BinElem)
+HE = HistElm.class_type.instance_type
+HE_deffered.define(HE)
+
+
+bloop_type = ListType(u8[:])
+sloop_type = u8[:]
+@njit(nogil=True,fastmath=True,parallel=False,cache=True) 
+def Grumbo_forward2(x0,x1): 
+	L0, L1 = len(x0), len(x1)
+
+	out = np.empty((L0,L0,L1,L0))
+	# da =[]
+	# for i0 in range(0,L0):
+	# 	da.append(Dict.empty(f8,i8))
+	d = Dict.empty(f8,i8)
+	uid = 0
+	for i0 in range(0,L0):
+		# d = da[i0]
+		# uid = 0
+		# d = Dict.empty(f8,i8)
+		# for i1 in range(i0+1,L0):
+		# 	for i2 in range(i1+1,L0):
+		for i1 in range(0,L0):
+			for i2 in range(0,L0):
+				for i3 in range(0,L1):
+					if(i1 > i0 and i2 > i1):
+						v = x0[i0] + x0[i1] + x0[i2] * x1[i3]
+						# v = x0[i0] + x0[i1]# + x0[i2] + x0[i3] 
+						if(v not in d):
+							d[v] =uid; uid +=1; 
+						out[i0,i1,i2,i3] = d[v]
+						# HistElm(0,np.array([i0,i1,i2,i3]))
+					else:
+						out[i0,i1,i2,i3] = 0
+					
+	# d_out = d
+	# u_vs = np.empty(len(d_out))
+	# for i,v in enumerate(d_out):
+	# 	u_vs[i] = v
+
+	# sqeep = np.where(out == 1)
+	return out, d
+
+
+@njit(nogil=True,fastmath=True,parallel=False,cache=True) 
+def Add_forward(x0): 
+	L0 = len(x0)
+	out = np.empty((L0,L0))
+	d = Dict.empty(f4,i8)
+	uid = 1
+	for i0 in range(0,L0):
+		for i1 in range(0,L0):
+			if(i1 > i0):
+				v = x0[i0] + x0[i1]
+				if(v not in d):
+					d[v] = uid; uid +=1; 
+				out[i0,i1] = d[v]
+			else:
+				out[i0,i1] = 0
+	return out, d
+
+
+@njit(nogil=True,fastmath=True,parallel=False,cache=True) 
+def Subtract_forward(x0): 
+	L0 = len(x0)
+	out = np.empty((L0,L0))
+	d = Dict.empty(f4,i8)
+	uid = 1
+	for i0 in range(0,L0):
+		for i1 in range(0,L0):
+			if(i1 != i0):
+				v = x0[i0] - x0[i1]
+				if(v not in d):
+					d[v] = uid; uid +=1; 
+				out[i0,i1] = d[v]
+			else:
+				out[i0,i1] = 0
+	return out, d
+
+
+
+@njit(nogil=True,fastmath=True,parallel=False,cache=True) 
+def cat_forward(x0): 
 	L0= len(x0)
 	out = np.empty((L0,L0))
 	d = Dict.empty(unicode_type,i8)
-	ind = 0
+	uid = 1
 	for i0 in range(0,L0):
 		# d = da[i0]
-		for i1 in range(i0+1,L0):
+		for i1 in range(0,L0):
 			# for i2 in range(i1+1,L0):
 			# 	for i3 in range(0,L0):
-			v = x0[i0] + x0[i1]# + x0[i2] + x0[i3] 
-			if(v not in d):
-				d[v] =ind; ind +=1; 
-			out[i0,i1] = d[v]
-
+			if(i1 != i0):
+				v = x0[i0] + x0[i1]# + x0[i2] + x0[i3] 
+				if(v not in d):
+					d[v] = uid; uid +=1; 
+				out[i0,i1] = d[v]
+			else:
+				out[i0,i1] = 0
 				# d[v] = 1
 			# print(v)
 
@@ -249,49 +355,108 @@ def cat_forward1(x0):
 	# u_vs = np.empty(len(d_out))
 	# for i,v in enumerate(d_out):
 	# 	u_vs[i] = v
-	return 0
+	return out, d#, uid
 
+@njit(nogil=True,fastmath=True,cache=True) 
+def join_new_vals(vd,new_ds):
+	for d in new_ds:
+		for v in d:
+			if(v not in vd):
+				vd[v] = 1
+	return vd
 
-@njit(nogil=True,fastmath=True,parallel=True) 
-def Add_forward2(x0,x1): 
-	L0, L1 = len(x0), len(x1)
-	Total_Len = (L0)*(L0-1)*(L0-2)/(1*2*3) * \
-				  L1 
-	Total_Len = int(Total_Len)    			 
-	# print(Total_Len)
-	# Total_Len = L0*L0*L0*L1
-	# out = np.empty((L0,L0,L1,L0))
-	# out = np.empty((Total_Len,))#.tolist()
-	out = np.empty((Total_Len,))
-	# out = List.empty_list(f8,Total_Len)
-	# print(len(out))
-	ind = 0
-	for i0 in prange(0,L0):
-		# m1 = i0*(L0)(L0-1)(L0-2)
-		m1 = int(Total_Len-(((L0-i0)*(L0-i0-1)*(L0-i0-2))/6)*L1) #+ (((L0-(i1-i0))*(L0-(i1-i0)-1))/2))
-		# print(i0,m1)
-		ind = m1
-		for i1 in range(i0+1,L0):
-			for i2 in range(i1+1,L0):
-				for i3 in range(0,L1):
-					# i3=0
-				
-					# ind = i0*L0*L0*L1 + i1*L0*L1 + i2*L0 + i3
-					# out[i0,i1,i2,i3] = x0[i0] + x0[i1] + x0[i3] * x1[i2]
-					# b = i2*L0+i3+((i0)*(i0-1)/2)*(((i1)*(i1-1)/2))
-					
-					# print((L0-i0-1)*(L0-i0-2)/2  - ((i1-i0))*((i1-i0-1))/2)
-					# m2 = ((L0-(i1-i0+1))*(L0-(i1-i0+1))/2)
-					# m2 = (L0-i0-1)*(L0-i0-2)  - (L0-(i1-i0))*(L0-(i1-i0-1))/2
-					# print(m1,((L0-i1)*((L0-i1)-1)/2))
-					# print(ind, m1,m2,":" ,i0, i1-i0-1,i2-i1-1,i3)#, i0,i1,i2,i3)
-					# print(ind,"\t ",i0, i1-i0-1,i2-i1-1,i3)
-					# out.append(x0[i0] + x0[i1] + x0[i3] * x1[i2])
-					out[ind] = x0[i0] + x0[i1] + x0[i3] * x1[i2] #+ m1 + m2
-					# print(out[ind])
-					ind += 1
-	# print(ind,Total_Len)
+@njit(nogil=True,fastmath=True,cache=True) 
+def array_from_dict(d):
+	out = np.empty(len(d))
+	for i,v in enumerate(d):
+		out[i] = v
 	return out
+
+@njit(nogil=True,fastmath=True,cache=True) 
+def list_from_dict(d):
+	out = List()
+	for i,v in enumerate(d):
+		out.append(v)
+	return out
+	
+class NBRT_KnowledgeBase(object):
+	def __init__(self):
+		self.hists = {}
+		self.vmaps = {}
+		self.u_vds = {}
+		self.u_vs = {}
+		self.registered_types ={'f4': f4, 'unicode_type' : unicode_type}
+
+
+# @njit(nogil=True,fastmath=True,parallel=False) 
+
+Add.broadcast_forward = Add_forward
+Subtract.broadcast_forward = Subtract_forward
+Concatenate.broadcast_forward = cat_forward
+def forward(kb,ops):
+	# uid = 1; d = Dict.empty(unicode_type,i8)
+	# max_d = 2
+
+	# og_str_vs = 
+	# kb.hists.append()
+	# kb.vmaps.append()
+	# kb.u_vs.append()
+
+
+	depth = max(kb.hists.keys())+1 if len(kb.hists) > 0 else 1
+	output_typs = set([op.out_type for op in ops])
+	# for depth in range(1,max_d+1):
+	hists = kb.hists.get(depth,{})
+	vmaps = kb.vmaps.get(depth,{})
+	for op in ops:
+		typ = op.out_type
+		hst, vm = op.broadcast_forward(kb.u_vs[typ])
+		# print("HERE",typ)
+
+		typ_hists = hists.get(typ,[])
+		typ_vmaps = vmaps.get(typ,List.empty_list(
+			DictType(kb.registered_types[typ],i8)))
+
+		typ_hists.append(hst)
+		typ_vmaps.append(vm)
+		hists[typ] = typ_hists
+		vmaps[typ] = typ_vmaps
+
+		# print(hst,vm)
+
+	for typ in output_typs:
+		# typ_hists = hists.get(typ,[])
+		typ_vmaps = vmaps.get(typ,None)
+		if(typ_vmaps is not None):
+			# print("IN",typ_vmaps)
+			kb.u_vds[typ] = join_new_vals(kb.u_vds[typ],typ_vmaps)
+			# print("OUT",kb.u_vds[typ])
+
+			if(typ == TYPE_ALIASES['float']):
+				kb.u_vs[typ] = array_from_dict(kb.u_vds[typ])
+			else:
+				kb.u_vs[typ] = list_from_dict(kb.u_vds[typ])
+
+			# print(depth, typ)
+			
+		# join_new_vals(kb.u_vds[typ])
+		
+		# print("TYPE:",typ)
+		# print(typ_vmaps)
+
+
+		# for h,v in zip(typ_hists,typ_vmaps):
+
+		# print(out)
+		# print(d)
+
+	kb.hists[depth] = hists
+	kb.vmaps[depth] = vmaps
+
+	# u_lst = List.empty_list(unicode_type,)
+	# print(u.keys())
+
+
 
 
 def time_ms(f):
@@ -301,28 +466,76 @@ def time_ms(f):
 
 
 
-X = np.array(np.arange(50),np.float32)
+X = np.array(np.arange(10),np.float32)
 y = 17
-forward(X,y,[Add,Multiply])
-print("OUT",Add_forward1(X,X))
-print(Add_forward2(X,X))
+# forward(X,y,[Add,Multiply])
+# print("OUT",Add_forward1(X,X))
+# print(Add_forward2(X,X))
 
-S = List.empty_list(unicode_type)
-for x in range(97,97+50):
-	S.append(chr(x))
+@njit
+def make_S(offset):
+	S = List.empty_list(unicode_type)
+	for x in range(97+offset,97+offset+5):
+		S.append("bloop" + chr(x))
+	return S#np.array(S)
+S1 = make_S(0)
+S2 = make_S(5)
 
-print(cat_forward1(S))
+def buildKB():
+	kb = NBRT_KnowledgeBase()
 
-def v1():
-	Add_forward1(X,X)	
+	kb.u_vs['unicode_type'] = S1
+	kb.u_vs['f4'] = X
 
-def v2():
-	Add_forward2(X,X)	
+	kb.u_vds['unicode_type'] = Dict.empty(unicode_type,i8)
+	kb.u_vds['f4'] = Dict.empty(f4,i8)
 
+	for s in S1:
+		kb.u_vds['unicode_type'][s] = 1
+	for x in X:
+		kb.u_vds['f4'][x] = 1
+
+	return kb
+
+kb = buildKB()
+# forward(kb,[Add,Subtract,Concatenate])
+# forward(kb,[Add,Subtract,Concatenate])
+# forward(kb,[Add,Subtract,Concatenate])
+for typ in kb.registered_types:
+	print(typ)
+	print(kb.u_vs[typ])
+
+# print(cat_forward1(S))
+
+@njit
+def g1():
+	# uid = 1; d = Dict.empty(f8,i8)
+	# Add_forward1(uid,d, X,X)	
+	Grumbo_forward1(X,X)	
+
+@njit
+def g2():
+	# uid = 1; d = Dict.empty(f8,i8)
+	# Add_forward2(uid,d, X,X)	
+	Grumbo_forward2(X,X)	
+
+# @njit
 def s1():
-	cat_forward1(S)	
+	# uid = 1; d = Dict.empty(unicode_type,i8)
+	# cat_forward1(uid,d, S1)	
+	cat_forward(S1)	
+
+def f1():
+	kb = buildKB()
+	forward(kb,[Add,Subtract])
+	forward(kb,[Add,Subtract])
+	forward(kb,[Add,Subtract])
+	forward(kb,[Add,Subtract])
+	forward(kb,[Add,Subtract])
+	forward(kb,[Add,Subtract])
 
 
-print("v1", time_ms(v1))
-print("v2", time_ms(v2))
-print("s1", time_ms(s1))
+# print("g1", time_ms(g1))
+# print("g2", time_ms(g2))
+# print("s1", time_ms(s1))
+print("forward", time_ms(f1))

@@ -3,12 +3,13 @@ from numba import types, njit, jit, prange
 from numba import deferred_type, optional
 from numba import void,b1,u1,u2,u4,u8,i1,i2,i4,i8,f4,f8,c8,c16
 from numba.typed import List, Dict
-from numba.core.types import ListType, DictType, unicode_type
+from numba.core.types import ListType, DictType, unicode_type, Array, Tuple
 from numba.experimental import jitclass
 import numpy as np
 import re
 from collections.abc import Iterable 
 import timeit
+from pprint import pprint
 N = 10
 
 def parse_signature(s):
@@ -27,6 +28,7 @@ def parse_signature(s):
 
 class BaseOperator(object):
 	registered_operators = {}
+	operators_by_uid = []
 	# def __init__(self):
 	# 	self.num_flt_inputs = 0;
 	# 	self.num_str_inputs = 0;
@@ -70,7 +72,15 @@ class BaseOperator(object):
 
 	@classmethod
 	def register(cls):
-		cls.registered_operators[cls.__name__.lower()] = cls
+		name = cls.__name__.lower()
+		
+		if(name in cls.registered_operators):
+			raise Warning("Duplicate Operator Definition %s" % name)
+
+		uid = len(cls.operators_by_uid)
+		cls.uid = uid
+		cls.operators_by_uid.append(cls)
+		cls.registered_operators[name] = cls
 
 	def __init_subclass__(cls, **kwargs):
 		super().__init_subclass__(**kwargs)
@@ -231,18 +241,18 @@ def Grumbo_forward1(x0,x1):
 	return u_vs
 
 
-HE_deffered = deferred_type()
-@jitclass([('op_id', i8),
-           ('args',  i8[:]),
-           ('next', optional(HE_deffered))])
-class HistElm(object):
-    def __init__(self,op_id,args):
-        self.op_id = op_id
-        self.args = args
-        self.next = None
-# print(BinElem)
-HE = HistElm.class_type.instance_type
-HE_deffered.define(HE)
+# HE_deffered = deferred_type()
+# @jitclass([('op_id', i8),
+#            ('args',  i8[:]),
+#            ('next', optional(HE_deffered))])
+# class HistElm(object):
+#     def __init__(self,op_id,args):
+#         self.op_id = op_id
+#         self.args = args
+#         self.next = None
+# # print(BinElem)
+# HE = HistElm.class_type.instance_type
+# HE_deffered.define(HE)
 
 
 bloop_type = ListType(u8[:])
@@ -288,7 +298,7 @@ def Grumbo_forward2(x0,x1):
 @njit(nogil=True,fastmath=True,parallel=False,cache=True) 
 def Add_forward(x0): 
 	L0 = len(x0)
-	out = np.empty((L0,L0))
+	out = np.empty((L0,L0),dtype=np.int64)
 	d = Dict.empty(f4,i8)
 	uid = 1
 	for i0 in range(0,L0):
@@ -306,7 +316,7 @@ def Add_forward(x0):
 @njit(nogil=True,fastmath=True,parallel=False,cache=True) 
 def Subtract_forward(x0): 
 	L0 = len(x0)
-	out = np.empty((L0,L0))
+	out = np.empty((L0,L0),dtype=np.int64)
 	d = Dict.empty(f4,i8)
 	uid = 1
 	for i0 in range(0,L0):
@@ -325,7 +335,7 @@ def Subtract_forward(x0):
 @njit(nogil=True,fastmath=True,parallel=False,cache=True) 
 def cat_forward(x0): 
 	L0= len(x0)
-	out = np.empty((L0,L0))
+	out = np.empty((L0,L0),dtype=np.int64)
 	d = Dict.empty(unicode_type,i8)
 	uid = 1
 	for i0 in range(0,L0):
@@ -333,13 +343,13 @@ def cat_forward(x0):
 		for i1 in range(0,L0):
 			# for i2 in range(i1+1,L0):
 			# 	for i3 in range(0,L0):
-			if(i1 != i0):
+			# if(i1 != i0):
 				v = x0[i0] + x0[i1]# + x0[i2] + x0[i3] 
 				if(v not in d):
 					d[v] = uid; uid +=1; 
 				out[i0,i1] = d[v]
-			else:
-				out[i0,i1] = 0
+			# else:
+			# 	out[i0,i1] = 0
 				# d[v] = 1
 			# print(v)
 
@@ -358,11 +368,11 @@ def cat_forward(x0):
 	return out, d#, uid
 
 @njit(nogil=True,fastmath=True,cache=True) 
-def join_new_vals(vd,new_ds):
+def join_new_vals(vd,new_ds,depth):
 	for d in new_ds:
 		for v in d:
 			if(v not in vd):
-				vd[v] = 1
+				vd[v] = depth
 	return vd
 
 @njit(nogil=True,fastmath=True,cache=True) 
@@ -382,7 +392,9 @@ def list_from_dict(d):
 class NBRT_KnowledgeBase(object):
 	def __init__(self):
 		self.hists = {}
-		self.vmaps = {}
+		self.hist_structs = {}
+		self.curr_infer_depth = 0
+		# self.vmaps = {}
 		self.u_vds = {}
 		self.u_vs = {}
 		self.registered_types ={'f4': f4, 'unicode_type' : unicode_type}
@@ -390,71 +402,260 @@ class NBRT_KnowledgeBase(object):
 
 # @njit(nogil=True,fastmath=True,parallel=False) 
 
+def insert_record(kb,depth,op, btsr, vmap):
+	typ = op.out_type
+	if(typ not in kb.hist_structs):
+		typ_cls = kb.registered_types[typ]
+		kb.hist_structs[typ] = Tuple([i8,
+									 i8[::1], i8[::1], ListType(unicode_type),
+									 DictType(typ_cls,i8)])
+
+	typ_store = kb.hists[typ] = kb.hists.get(typ,Dict.empty(i8,ListType(kb.hist_structs[typ])))
+	tsd = typ_store[depth] = typ_store.get(depth, List.empty_list(kb.hist_structs[typ]))
+	tsd.append(tuple([op.uid,
+					  btsr.reshape(-1), np.array(btsr.shape,np.int64), List(op.arg_types),
+					  vmap]))
+
+	return tsd
+
+
 Add.broadcast_forward = Add_forward
 Subtract.broadcast_forward = Subtract_forward
 Concatenate.broadcast_forward = cat_forward
 def forward(kb,ops):
-	# uid = 1; d = Dict.empty(unicode_type,i8)
-	# max_d = 2
-
-	# og_str_vs = 
-	# kb.hists.append()
-	# kb.vmaps.append()
-	# kb.u_vs.append()
-
-
-	depth = max(kb.hists.keys())+1 if len(kb.hists) > 0 else 1
 	output_typs = set([op.out_type for op in ops])
-	# for depth in range(1,max_d+1):
-	hists = kb.hists.get(depth,{})
-	vmaps = kb.vmaps.get(depth,{})
+	new_records = {typ:[] for typ in output_typs}
+	depth = kb.curr_infer_depth = kb.curr_infer_depth+1
+	
 	for op in ops:
 		typ = op.out_type
-		hst, vm = op.broadcast_forward(kb.u_vs[typ])
-		# print("HERE",typ)
 
-		typ_hists = hists.get(typ,[])
-		typ_vmaps = vmaps.get(typ,List.empty_list(
-			DictType(kb.registered_types[typ],i8)))
-
-		typ_hists.append(hst)
-		typ_vmaps.append(vm)
-		hists[typ] = typ_hists
-		vmaps[typ] = typ_vmaps
-
-		# print(hst,vm)
-
+		btsr, vmap = op.broadcast_forward(kb.u_vs[typ])
+		records = insert_record(kb,depth,op,btsr,vmap)
+		new_records[typ] = records
+		
 	for typ in output_typs:
-		# typ_hists = hists.get(typ,[])
-		typ_vmaps = vmaps.get(typ,None)
-		if(typ_vmaps is not None):
-			# print("IN",typ_vmaps)
-			kb.u_vds[typ] = join_new_vals(kb.u_vds[typ],typ_vmaps)
-			# print("OUT",kb.u_vds[typ])
+		if(typ in new_records):
+			vmaps = List([rec[4] for rec in new_records[typ]])
+			kb.u_vds[typ] = join_new_vals(kb.u_vds[typ],vmaps,depth)
 
 			if(typ == TYPE_ALIASES['float']):
 				kb.u_vs[typ] = array_from_dict(kb.u_vds[typ])
 			else:
 				kb.u_vs[typ] = list_from_dict(kb.u_vds[typ])
 
-			# print(depth, typ)
+
+HE_deffered = deferred_type()
+@jitclass([('op_uid', i8),
+		   ('args', i8[:])])
+class HistElm(object):
+	def __init__(self,op_uid,args):
+		self.op_uid = op_uid
+		self.args = args
+HE = HistElm.class_type.instance_type
+HE_deffered.define(HE)
+
+def new_HE_list(n):
+	out = List.empty_list(ListType(HE))
+	for i in range(n):
+		out.append(List.empty_list(HE))
+	return out
+def retrace_solutions(kb,ops,goal,g_typ):
+
+	# depth = kb.u_vds[g_typ][goal]
+	u_vds = kb.u_vds[g_typ]
+	records = kb.hists[g_typ]
+	goal = kb.registered_types[g_typ](goal)
+	
+	goals = List.empty_list(kb.registered_types[g_typ])
+	goals.append(goal)
+
+	# hist_elems, , new_inds = retrace_one(goals,records)
+	# print(":0")
+	hist_elems = List.empty_list(ListType(HE))#new_HE_list(1)#List([List.empty_list(HE)],listtype=ListType(HE))
+	arg_inds = retrace_back_one(goals,records,u_vds,hist_elems)
+	out = [{g_typ: hist_elems}]
+	
+	# goals = kb.u_vs[g_typ][arg_inds[g_typ]]
+	finished, i = False, 1
+	while(not finished):
+		nxt = {}
+		for typ in arg_inds:
+			records,u_vds = kb.hists[typ], kb.u_vds[typ]
+			hist_elems = List.empty_list(ListType(HE))#new_HE_list(len(goals))#List([List.empty_list(HE) for i in range(len(goals))])
 			
-		# join_new_vals(kb.u_vds[typ])
+			goals = kb.u_vs[typ][arg_inds[typ]]
+			arg_inds = retrace_back_one(goals,records,u_vds,hist_elems)
+			nxt[typ] = hist_elems
+			if(len(arg_inds) == 0):
+				finished = True
+				# print("FINISHED")
+				break
+		out.append(nxt)
+		assert i <= kb.curr_infer_depth, "Retrace has persisted past current infer depth."
+		i += 1
+
+			
+	# for i in range(len(out)):
+	# 	print(i)
+	# 	pprint(out[i])
+
 		
-		# print("TYPE:",typ)
-		# print(typ_vmaps)
 
 
-		# for h,v in zip(typ_hists,typ_vmaps):
 
-		# print(out)
-		# print(d)
+	# hist_elems = List.empty_list(ListType(HE))#new_HE_list(1)#List([List.empty_list(HE)],listtype=ListType(HE))
+	# arg_inds = retrace_back_one(goals,records,u_vds,hist_elems)
+	# print("1:",arg_inds)
+	# for typ in arg_inds:
+	# 	goals = kb.u_vs[typ][arg_inds[typ]]
+	# 	records = kb.hists[typ]
+	# 	hist_elems = List.empty_list(ListType(HE))#new_HE_list(len(goals))#List([List.empty_list(HE) for i in range(len(goals))])
+	# 	u_vds = kb.u_vds[typ]
+	# 	arg_inds = retrace_back_one(goals,records,u_vds,hist_elems)
 
-	kb.hists[depth] = hists
-	kb.vmaps[depth] = vmaps
 
-	# u_lst = List.empty_list(unicode_type,)
-	# print(u.keys())
+	# 	print("2:",arg_inds)
+		# arg_inds = retrace_back_one(u_vs,records,hist_elems)
+		
+	# new_goals = new
+
+	# for typ in new_inds:
+	# 	u_vs = kb.u_vs[typ][new_inds[typ]]
+	# 	print(kb.u_vds[typ])
+	# 	print(kb.u_vs[typ])
+	# 	print(u_vs)
+	# 	for v in u_vs:
+	# 		print(kb.u_vds[typ][v])
+	# print("moo")
+	# for i,record in enumerate(records):
+	# 	_hist, shape, vmap = record
+	# 	hist = _hist.reshape(shape)
+
+	# 	# print("MEEP")
+	# 	# print(np.where(hist == 0))
+		
+	# 	# print(_hists,_vmaps)
+	# 	# for hist,vmap in zip(_hists,_vmaps):
+	# 	if(goal in vmap):
+	# 		print(ops)
+	# 		print(vmap[goal])
+	# 		print(np.where(hist == vmap[goal]))
+
+#Adapted from here: https://gitter.im/numba/numba?at=5dc1f9d13d669b28a0408463
+@njit
+def unravel_indicies(indicies, shape):
+	sizes = np.zeros(len(shape), dtype=np.int64)
+	result = np.zeros(len(shape), dtype=np.int64)
+	sizes[-1] = 1
+	for i in range(len(shape) - 2, -1, -1):
+		sizes[i] = sizes[i + 1] * shape[i + 1]
+
+	out = np.empty((len(indicies),len(shape)), dtype=np.int64)
+	for j,index in enumerate(indicies):
+		remainder = index
+		for i in range(len(shape)):
+			out[j,i] = remainder // sizes[i]
+			remainder %= sizes[i]
+	return out
+
+i8_u1_dict = DictType(i8,u1)
+i8_arr = i8[:]
+@njit
+def retrace_back_one(goals,records,u_vds,hist_elems):
+	unq_arg_inds = Dict.empty(unicode_type, i8_u1_dict)
+	pos_by_typ = Dict.empty(unicode_type, i8)
+
+
+	# for record in records[0]:
+	# 	op_name, _hist, shape, arg_types, vmap = record
+	# 	for typ in arg_types:
+	# 		if(typ not in unq_arg_inds):
+	# 			unq_arg_inds[typ] = Dict.empty(i8,u1)
+	# 			pos_by_typ[typ] = 0
+
+	#Go through each goal in goals, and find applications of operations 
+	#	which resulted in each subgoal. Add the indicies of args of each 
+	#	goal satisficing operation application to the set of subgoals for 
+	#	the next iteration.
+	# _hist_elems = List.empty_list(ListType(HE))
+	for goal in goals:
+		hist_elems_k = List.empty_list(HE)
+		hist_elems.append(hist_elems_k)
+		shallowest_depth = u_vds[goal]
+		# print([x for x in records.keys()],shallowest_depth)
+		# print([x for x in u_vds.keys()])
+		if(shallowest_depth == 0): continue
+		_records = records[shallowest_depth]
+		for record in _records:
+			op_uid, _hist, shape, arg_types, vmap = record
+
+			#Make a dictionary for each type to collect unique arg values
+			# for _records in records:
+			# 	print(_records)
+			for typ in arg_types:
+				if(typ not in unq_arg_inds):
+					unq_arg_inds[typ] = Dict.empty(i8,u1)
+					pos_by_typ[typ] = 0
+
+			if(goal in vmap):
+				wher = np.where(_hist == vmap[goal])[0]
+				inds = unravel_indicies(wher,shape)
+				
+				for i in range(inds.shape[0]):
+					arg_uids = np.empty(inds.shape[1],np.int64)
+					for j in range(inds.shape[1]):
+						d = unq_arg_inds[arg_types[j]]
+						v = inds[i,j]
+						if(v not in d):
+							d[v] = pos_by_typ[typ]
+							pos_by_typ[typ] += 1
+						arg_uids[j] = d[v]
+					
+					# print(arg_uids)
+					hist_elems_k.append(HistElm(op_uid,arg_uids))
+
+	#Consolidate the dictionaries of unique arg indicies into arrays
+	out_arg_inds = Dict.empty(unicode_type,i8_arr)
+	for typ in unq_arg_inds:
+		u_vals = out_arg_inds[typ] = np.empty((len(unq_arg_inds[typ])),np.int64)
+		for i, v in enumerate(unq_arg_inds[typ]):
+			u_vals[i] = v
+	# print(out_arg_inds)
+
+	return out_arg_inds
+
+
+
+
+
+
+
+def how_search(kb,ops,goal,search_depth=1):
+	if(isinstance(goal, (int,float))):
+		g_typ = TYPE_ALIASES['float']
+	elif(isinstance(goal, (str))):
+		g_typ = TYPE_ALIASES['string']
+	else:
+		raise NotImplemented("Object goals not implemented yet")
+
+	# depth = 0
+	while(goal not in kb.u_vds[g_typ]):
+		if(kb.curr_infer_depth > search_depth): break
+		forward(kb,ops)
+		# for typ in kb.registered_types:
+		# 	print("MOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOO",kb.curr_infer_depth)
+		# 	print(typ)
+		# 	print(kb.u_vs[typ])
+
+
+	if(goal in kb.u_vds[g_typ]):
+		retrace_solutions(kb,ops,goal,g_typ)
+	# 	print("FOUND IT ", kb.curr_infer_depth)
+
+		
+	# else:
+	# 	print("NOT HERE")
 
 
 
@@ -476,7 +677,7 @@ y = 17
 def make_S(offset):
 	S = List.empty_list(unicode_type)
 	for x in range(97+offset,97+offset+5):
-		S.append("bloop" + chr(x))
+		S.append(chr(x))
 	return S#np.array(S)
 S1 = make_S(0)
 S2 = make_S(5)
@@ -491,19 +692,27 @@ def buildKB():
 	kb.u_vds['f4'] = Dict.empty(f4,i8)
 
 	for s in S1:
-		kb.u_vds['unicode_type'][s] = 1
+		kb.u_vds['unicode_type'][s] = 0
 	for x in X:
-		kb.u_vds['f4'][x] = 1
+		kb.u_vds['f4'][x] = 0
 
 	return kb
 
 kb = buildKB()
+
+# print("STAAAAART")
+# for op in [Add,Subtract,Concatenate]:
+# 	print(op, op.uid)
+# for op in [Add,Subtract,Concatenate]:
+# 	print(op, op.uid)
+# print(BaseOperator.operators_by_uid)
 # forward(kb,[Add,Subtract,Concatenate])
 # forward(kb,[Add,Subtract,Concatenate])
+how_search(kb,[Add,Subtract,Concatenate],21,2)
 # forward(kb,[Add,Subtract,Concatenate])
-for typ in kb.registered_types:
-	print(typ)
-	print(kb.u_vs[typ])
+# for typ in kb.registered_types:
+# 	print(typ)
+# 	print(kb.u_vs[typ])
 
 # print(cat_forward1(S))
 
@@ -534,8 +743,13 @@ def f1():
 	forward(kb,[Add,Subtract])
 	forward(kb,[Add,Subtract])
 
+def h1():
+	kb = buildKB()
+	how_search(kb,[Add,Subtract],21,2)
+
 
 # print("g1", time_ms(g1))
 # print("g2", time_ms(g2))
 # print("s1", time_ms(s1))
-print("forward", time_ms(f1))
+# print("forward", time_ms(f1))
+print("how_search", time_ms(h1))

@@ -12,6 +12,8 @@ import timeit
 from pprint import pprint
 N = 10
 
+print("START")
+
 def parse_signature(s):
 	fn_match = re.match(r"(?P<out_type>\w+)\s?\((?P<arg_types>(?P<args>\w+(,\s?)?)+)\)", s)
 	fn_dict = fn_match.groupdict()
@@ -20,7 +22,16 @@ def parse_signature(s):
 
 # def norm_check_types(s):
 
-
+import linecache
+def cache_safe_exec(source,lcs=None,gbls=None,cache_name='cache-safe'):
+    fp = "<ipython-%s>" %cache_name
+    lines = [line + '\n' for line in source.splitlines()]
+    linecache.cache[fp] = (len(source), None, lines, fp)
+    code = compile(source,fp,'exec')
+    l = lcs if lcs is not None else {}
+    g = gbls if gbls is not None else globals()
+    exec(code,g,l)
+    return l,g
 
 
 
@@ -29,16 +40,10 @@ def parse_signature(s):
 class BaseOperator(object):
 	registered_operators = {}
 	operators_by_uid = []
-	# def __init__(self):
-	# 	self.num_flt_inputs = 0;
-	# 	self.num_str_inputs = 0;
-	# 	self.out_arg_types = ["value"]
-	# 	self.in_arg_types= ["value","value"]
-	# 	self.commutative = False;
-	# 	self.template = "BaseOperator"
 
 	@classmethod
 	def init_signature(cls):
+		assert hasattr(cls,'signature'), "Operator must have signature"
 		out_type, arg_types = parse_signature(cls.signature)
 		out_type = TYPE_ALIASES.get(out_type,out_type)
 		arg_types = [TYPE_ALIASES.get(x,x) for x in arg_types]
@@ -51,7 +56,10 @@ class BaseOperator(object):
 		cls.u_arg_inds = u_inds
 
 		if(isinstance(cls.commutes,bool)):
-			cls.commutes = [np.where(i == u_inds)[0].tolist() for i in range(len(u_types))]
+			if(cls.commutes == True):
+				cls.commutes = [np.where(i == u_inds)[0].tolist() for i in range(len(u_types))]
+			else:
+				cls.commutes = []
 		else:
 			assert(isinstance(cls.commutes,Iterable))
 
@@ -82,29 +90,73 @@ class BaseOperator(object):
 		cls.operators_by_uid.append(cls)
 		cls.registered_operators[name] = cls
 
+	@classmethod
+	def init_template(cls):
+		if(not hasattr(cls,"template")):
+			brks = ["{%i}"%i for i in range(len(cls.arg_types))]
+			cls.template = "{name}("+",".join(brks)+")"
+
+	
 	def __init_subclass__(cls, **kwargs):
 		super().__init_subclass__(**kwargs)
 		cls.init_signature()
 		cls.register()
+		cls.init_template()
+		compile_forward(cls)
+
+
+	def _assert_cargs(self,args,allow_zero=True):
+		cls = type(self)
+		assert (allow_zero and len(args) == 0) or len(cls.arg_types) == len(args), \
+			"incorrect number of arguments for signature: %s" % cls.signature
+		return args if(len(args) != 0) else [None]*len(cls.arg_types)
+
+	def _assert_iargs(self,args,allow_zero=True):
+		assert (allow_zero and len(args) == 0) or len(self.arg_types) == len(args), \
+			"incorrect number of arguments for signature: %s" % self.signature
+		return args if(len(args) != 0) else [None]*len(self.arg_types)
+
+	def __init__(self,*args):
+		self.args, cls = self._assert_cargs(args), type(self)
+
+		arg_types = []
+		for typ, arg in zip(cls.arg_types,self.args):
+			if(isinstance(arg,BaseOperator)):
+				arg_types += arg.arg_types
+			elif(arg is None):
+				arg_types.append(typ)
+		self.arg_types = arg_types
+		self.signature = cls.out_type + "("+",".join(arg_types) +")"
+
+	def get_template(self,*args):
+		iargs, cls = self._assert_iargs(args), type(self)
+
+		arg_strs = []
+		for arg in self.args:
+			if(isinstance(arg,BaseOperator)):
+				arg_strs.append(arg.get_template())
+			elif(arg is None):
+				arg_strs.append("{}")
+			else:
+				arg_strs.append(str(arg))
+
+		temp = cls.template.format(*arg_strs,name=cls.__name__)
+		iarg_strs = ["{}" if (arg is None) else str(arg) for arg in iargs ]
+		print(temp, iarg_strs)
+		return temp.format(*iarg_strs)
+
+	def __str__(self):
+		return self.get_template()
+
+	def __call__(self,*args):
+		self._assert_iargs(args,False)
+		raise NotImplementedError()
 	
 
 
-	# def forward(self, args):
-	# 	raise NotImplementedError("Not Implemeneted")
-
-	# def backward(self, args):
-	# 	raise NotImplementedError("Not Implemeneted")
-	# def search_mask(self,*args):
-	# 	return args
-	def __str__(self):
-		# print(self.template)
-		# print(self.in_arg_types)
-		# print(tuple(["E" + str(i) for i in range(len(self.in_arg_types))]))
-		return self.template.format(*["E" + str(i) for i in range(len(self.in_arg_types))])
-
 
 TYPE_ALIASES = {
-	"float" : 'f4',
+	"float" : 'f8',
 	"string" : 'unicode_type'
 }
 
@@ -113,34 +165,79 @@ TYPE_ALIASES = {
 def compile_forward(op):
 	_ = "    "
 	
-	exec_code = '@njit(nogil=True,fastmath=True) \n' + \
+	f_name = op.__name__+"_forward"
+	func_def = '@njit(nogil=True,fastmath=True,cache=True) \n' + \
 				'def {}({}): \n' #+ \
 				# _ + 'L1,L2 = len(x1),len(x2)\n'+ \
 				# _ + 'for i1 in range(len(x1)):\n'+ \
 				# _*2 +	'for i2 in range(len(x1)):\n'+ \
 				# _*3 +		'out[i2 * L1 + i1] = f(x1,x2)'
+	func_def = func_def.format(f_name,
+		 ",".join(["x%i"%i for i in range(len(op.u_arg_types))]) )
 
-	loops = _+", ".join(["L%i"%i for i in range(len(op.u_arg_types))]) + " = " + \
+	defs = _+", ".join(["L%i"%i for i in range(len(op.u_arg_types))]) + " = " + \
 			  ", ".join(["len(x%i)"%i for i in range(len(op.u_arg_types))]) + "\n"
 	# ", ".join(["len(x%i)"%(np.where(i==op.u_arg_inds)[0][0]) 
 	# 		  				for i in range(len(op.u_arg_types))]) + "\n"
+
+	defs += _+"out = np.empty((%s),dtype=np.int64)\n"%",".join(["L%s"%x for x in op.u_arg_inds])
+	defs += _+"d = Dict.empty({},i8)\n".format(op.out_type)
+	defs += _+"uid = 0\n"
+			
+	# da =[]
+	# for i0 in range(0,L0):
+	# 	da.append(Dict.empty(f8,i8))
+	
+	
+	loops = ""
+	curr_indent = 1
 	for i in range(len(op.arg_types)):
-		l = _*(i+1) + "for i{} in range({},L{}):\n"
-
-		start = 0
-		if(len(op.right_commutes.get(i,[])) > 0):
-			start = "i{}+1".format(op.right_commutes[i][-1])
-
-		l = l.format(i,start,op.u_arg_inds[i])
+		curr_indent = i+1
+		l = _*curr_indent + "for i{} in range(L{}):\n"
+		l = l.format(i,op.u_arg_inds[i])
 		loops += l
+	
+		# start = 0
+		# if(len(op.right_commutes.get(i,[])) > 0):
+		# 	start = "i{}+1".format(op.right_commutes[i][-1])
 
+	all_indicies = ["i%s"%i for i in range(len(op.arg_types))]
+	cond_expr = "{}\n"
+	if(len(op.right_commutes) > 0):
+		curr_indent += 1
+		conds = []
+		for i_a, i_bs in op.right_commutes.items():
+			conds.append("i{} >= i{}".format(i_a,i_bs[-1]))
+		cond_expr =  _*curr_indent     + "if({}):\n".format(",".join(conds))
+		cond_expr += "{}\n"#_*(curr_indent+1) + "{}\n"
+		cond_expr += _*(curr_indent)   + "else:\n"
+		cond_expr += _*(curr_indent+1) + "out[{}] =  0\n".format(",".join(all_indicies))
+		print("COMMUTES", op.right_commutes)
 
-	exec_code = exec_code.format(op.__name__+"_forward",
-		 ",".join(["x%i"%i for i in range(len(op.u_arg_types))]) )
+	exec_code =  _*(curr_indent+1) +"v = f(x0[i0], x0[i1])\n"
+	exec_code += _*(curr_indent+1) +"if(v not in d):\n"
+	exec_code += _*(curr_indent+2) +"d[v] = uid; uid +=1;\n"
+	exec_code += _*(curr_indent+1) +"out[{}] = d[v]".format(",".join(all_indicies))
+
+	cond_expr = cond_expr.format(exec_code)
+	ret_expr = _+"return out, d\n"
+	# v = x0[i0] + x0[i1]
+	# 			if(v not in d):
+	# 				d[v] = uid; uid +=1; 
+	# 			out[i0,i1] = d[v]
+
+	# v = x0[i0] + x0[i1] + x0[i2] * x1[i3]
+	# if(v not in d):
+	# d[v] = 1
+
 	# for 
 	# for 
-
-	print(exec_code + loops)
+	source = func_def + defs +  loops + cond_expr+ret_expr
+	print(source)
+	l,g = cache_safe_exec(source,gbls={'f':njit(op.forward,cache=True),**globals()})
+	print("TIS HERE:",l[f_name])
+	op.broadcast_forward = l[f_name]
+	# print(func_def + defs +  loops + cond_expr)
 
 				# '	return {}({}) \n' + \
 				# 'out_func = {}'
@@ -166,16 +263,25 @@ class Concatenate(BaseOperator):
 	def forward(x, y):
 		return x + y
 
+
+a = Add(None,Add())
+print(type(a).signature , ":", a.signature )
+print(a.get_template(1,2,None))
+# Add(None)
+
+# raise ValueError("STOP")
 # compile_forward(Add)
+# compile_forward(Subtract)
+# compile_forward(Concatenate)
 
 # def Multiply(x, y):
 # 	return x * y
 
-def forward(state, goal, operators):
-	for op in operators:
-		for i in range(len(state)):
-			for j in range(len(state)):
-				pass
+# def forward(state, goal, operators):
+# 	for op in operators:
+# 		for i in range(len(state)):
+# 			for j in range(len(state)):
+# 				pass
 
 
 
@@ -299,7 +405,7 @@ def Grumbo_forward2(x0,x1):
 def Add_forward(x0): 
 	L0 = len(x0)
 	out = np.empty((L0,L0),dtype=np.int64)
-	d = Dict.empty(f4,i8)
+	d = Dict.empty(f8,i8)
 	uid = 1
 	for i0 in range(0,L0):
 		for i1 in range(0,L0):
@@ -317,7 +423,7 @@ def Add_forward(x0):
 def Subtract_forward(x0): 
 	L0 = len(x0)
 	out = np.empty((L0,L0),dtype=np.int64)
-	d = Dict.empty(f4,i8)
+	d = Dict.empty(f8,i8)
 	uid = 1
 	for i0 in range(0,L0):
 		for i1 in range(0,L0):
@@ -397,12 +503,13 @@ class NBRT_KnowledgeBase(object):
 		# self.vmaps = {}
 		self.u_vds = {}
 		self.u_vs = {}
-		self.registered_types ={'f4': f4, 'unicode_type' : unicode_type}
+		self.registered_types ={'f8': f8, 'unicode_type' : unicode_type}
 
 
 # @njit(nogil=True,fastmath=True,parallel=False) 
 
 def insert_record(kb,depth,op, btsr, vmap):
+	print('is')
 	typ = op.out_type
 	if(typ not in kb.hist_structs):
 		typ_cls = kb.registered_types[typ]
@@ -415,16 +522,19 @@ def insert_record(kb,depth,op, btsr, vmap):
 	tsd.append(tuple([op.uid,
 					  btsr.reshape(-1), np.array(btsr.shape,np.int64), List(op.arg_types),
 					  vmap]))
-
+	print('istop')
 	return tsd
 
+# @njit(cache=True):
+# def extract_vmaps():
 
-Add.broadcast_forward = Add_forward
-Subtract.broadcast_forward = Subtract_forward
-Concatenate.broadcast_forward = cat_forward
+# Add.broadcast_forward = Add_forward
+# Subtract.broadcast_forward = Subtract_forward
+# Concatenate.broadcast_forward = cat_forward
 def forward(kb,ops):
-	output_typs = set([op.out_type for op in ops])
-	new_records = {typ:[] for typ in output_typs}
+	print("F_start")
+	output_types = set([op.out_type for op in ops])
+	new_records = {typ:[] for typ in output_types}
 	depth = kb.curr_infer_depth = kb.curr_infer_depth+1
 	
 	for op in ops:
@@ -434,16 +544,18 @@ def forward(kb,ops):
 		records = insert_record(kb,depth,op,btsr,vmap)
 		new_records[typ] = records
 		
-	for typ in output_typs:
+	for typ in output_types:
 		if(typ in new_records):
+			print("A")
 			vmaps = List([rec[4] for rec in new_records[typ]])
+			print("_A")
 			kb.u_vds[typ] = join_new_vals(kb.u_vds[typ],vmaps,depth)
 
 			if(typ == TYPE_ALIASES['float']):
 				kb.u_vs[typ] = array_from_dict(kb.u_vds[typ])
 			else:
 				kb.u_vs[typ] = list_from_dict(kb.u_vds[typ])
-
+	print("F_end")
 
 HE_deffered = deferred_type()
 @jitclass([('op_uid', i8),
@@ -455,11 +567,18 @@ class HistElm(object):
 HE = HistElm.class_type.instance_type
 HE_deffered.define(HE)
 
-def new_HE_list(n):
-	out = List.empty_list(ListType(HE))
-	for i in range(n):
-		out.append(List.empty_list(HE))
-	return out
+# def new_HE_list(n):
+# 	out = List.empty_list(ListType(HE))
+# 	for i in range(n):
+# 		out.append(List.empty_list(HE))
+# 	return out
+
+
+he_list = ListType(HE)
+@njit(cache=True)
+def HistElmListList():
+	return List.empty_list(he_list)
+
 def retrace_solutions(kb,ops,goal,g_typ):
 
 	# depth = kb.u_vds[g_typ][goal]
@@ -467,12 +586,14 @@ def retrace_solutions(kb,ops,goal,g_typ):
 	records = kb.hists[g_typ]
 	goal = kb.registered_types[g_typ](goal)
 	
+	print("RS_S")
 	goals = List.empty_list(kb.registered_types[g_typ])
 	goals.append(goal)
+	print("RS_E")
 
 	# hist_elems, , new_inds = retrace_one(goals,records)
 	# print(":0")
-	hist_elems = List.empty_list(ListType(HE))#new_HE_list(1)#List([List.empty_list(HE)],listtype=ListType(HE))
+	hist_elems = HistElmListList()#List.empty_list(ListType(HE))#new_HE_list(1)#List([List.empty_list(HE)],listtype=ListType(HE))
 	arg_inds = retrace_back_one(goals,records,u_vds,hist_elems)
 	out = [{g_typ: hist_elems}]
 	
@@ -482,7 +603,7 @@ def retrace_solutions(kb,ops,goal,g_typ):
 		nxt = {}
 		for typ in arg_inds:
 			records,u_vds = kb.hists[typ], kb.u_vds[typ]
-			hist_elems = List.empty_list(ListType(HE))#new_HE_list(len(goals))#List([List.empty_list(HE) for i in range(len(goals))])
+			hist_elems = HistElmListList()#List.empty_list(ListType(HE))#new_HE_list(len(goals))#List([List.empty_list(HE) for i in range(len(goals))])
 			
 			goals = kb.u_vs[typ][arg_inds[typ]]
 			arg_inds = retrace_back_one(goals,records,u_vds,hist_elems)
@@ -543,7 +664,7 @@ def retrace_solutions(kb,ops,goal,g_typ):
 	# 		print(np.where(hist == vmap[goal]))
 
 #Adapted from here: https://gitter.im/numba/numba?at=5dc1f9d13d669b28a0408463
-@njit
+@njit(nogil=True,fastmath=True,cache=True) 
 def unravel_indicies(indicies, shape):
 	sizes = np.zeros(len(shape), dtype=np.int64)
 	result = np.zeros(len(shape), dtype=np.int64)
@@ -559,11 +680,11 @@ def unravel_indicies(indicies, shape):
 			remainder %= sizes[i]
 	return out
 
-i8_u1_dict = DictType(i8,u1)
+i8_i8_dict = DictType(i8,i8)
 i8_arr = i8[:]
-@njit
+@njit(nogil=True,fastmath=True,cache=True) 
 def retrace_back_one(goals,records,u_vds,hist_elems):
-	unq_arg_inds = Dict.empty(unicode_type, i8_u1_dict)
+	unq_arg_inds = Dict.empty(unicode_type, i8_i8_dict)
 	pos_by_typ = Dict.empty(unicode_type, i8)
 
 
@@ -595,7 +716,7 @@ def retrace_back_one(goals,records,u_vds,hist_elems):
 			# 	print(_records)
 			for typ in arg_types:
 				if(typ not in unq_arg_inds):
-					unq_arg_inds[typ] = Dict.empty(i8,u1)
+					unq_arg_inds[typ] = Dict.empty(i8,i8)
 					pos_by_typ[typ] = 0
 
 			if(goal in vmap):
@@ -673,7 +794,7 @@ y = 17
 # print("OUT",Add_forward1(X,X))
 # print(Add_forward2(X,X))
 
-@njit
+@njit(nogil=True,fastmath=True,cache=True) 
 def make_S(offset):
 	S = List.empty_list(unicode_type)
 	for x in range(97+offset,97+offset+5):
@@ -682,24 +803,33 @@ def make_S(offset):
 S1 = make_S(0)
 S2 = make_S(5)
 
+
+@njit(cache=True)
+def newVmap(X,typ):
+	d = Dict.empty(typ,i8)
+	for x in X:
+		d[x] = 0
+	return d
+
 def buildKB():
 	kb = NBRT_KnowledgeBase()
 
 	kb.u_vs['unicode_type'] = S1
-	kb.u_vs['f4'] = X
+	kb.u_vs['f8'] = X
 
-	kb.u_vds['unicode_type'] = Dict.empty(unicode_type,i8)
-	kb.u_vds['f4'] = Dict.empty(f4,i8)
+	kb.u_vds['unicode_type'] = newVmap(S1,unicode_type)
+	kb.u_vds['f8'] = newVmap(X,f8)
 
-	for s in S1:
-		kb.u_vds['unicode_type'][s] = 0
-	for x in X:
-		kb.u_vds['f4'][x] = 0
+	# for s in S1:
+	# 	kb.u_vds['unicode_type'][s] = 0
+	# for x in X:
+	# 	kb.u_vds['f8'][x] = 0
 
 	return kb
 
+print("MID")
 kb = buildKB()
-
+print("MID2")
 # print("STAAAAART")
 # for op in [Add,Subtract,Concatenate]:
 # 	print(op, op.uid)
@@ -708,7 +838,19 @@ kb = buildKB()
 # print(BaseOperator.operators_by_uid)
 # forward(kb,[Add,Subtract,Concatenate])
 # forward(kb,[Add,Subtract,Concatenate])
+import time
+start = time.time()
 how_search(kb,[Add,Subtract,Concatenate],21,2)
+end = time.time()
+print("Time elapsed: ",end - start)
+
+print(Add.broadcast_forward.stats.cache_hits)
+
+start = time.time()
+how_search(kb,[Add,Subtract,Concatenate],21,2)
+end = time.time()
+print("Time elapsed: ",end - start)
+
 # forward(kb,[Add,Subtract,Concatenate])
 # for typ in kb.registered_types:
 # 	print(typ)
@@ -716,13 +858,13 @@ how_search(kb,[Add,Subtract,Concatenate],21,2)
 
 # print(cat_forward1(S))
 
-@njit
+@njit(nogil=True,fastmath=True,cache=True) 
 def g1():
 	# uid = 1; d = Dict.empty(f8,i8)
 	# Add_forward1(uid,d, X,X)	
 	Grumbo_forward1(X,X)	
 
-@njit
+@njit(nogil=True,fastmath=True,cache=True) 
 def g2():
 	# uid = 1; d = Dict.empty(f8,i8)
 	# Add_forward2(uid,d, X,X)	
@@ -747,9 +889,11 @@ def h1():
 	kb = buildKB()
 	how_search(kb,[Add,Subtract],21,2)
 
-
+# d  =Dict()
+# d['unicode_type'] = unicode_type
+# d['f8'] = f8
 # print("g1", time_ms(g1))
 # print("g2", time_ms(g2))
 # print("s1", time_ms(s1))
 # print("forward", time_ms(f1))
-print("how_search", time_ms(h1))
+# print("how_search", time_ms(h1))

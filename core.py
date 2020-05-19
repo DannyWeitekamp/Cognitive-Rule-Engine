@@ -5,6 +5,7 @@ from numba import void,b1,u1,u2,u4,u8,i1,i2,i4,i8,f4,f8,c8,c16
 from numba.typed import List, Dict
 from numba.core.types import ListType, DictType, unicode_type, Array, Tuple
 from numba.experimental import jitclass
+from numba.core import sigutils 
 import numpy as np
 import re
 from collections.abc import Iterable 
@@ -40,6 +41,7 @@ def cache_safe_exec(source,lcs=None,gbls=None,cache_name='cache-safe'):
 class BaseOperator(object):
 	registered_operators = {}
 	operators_by_uid = []
+	commutes = False
 
 	@classmethod
 	def init_signature(cls):
@@ -50,6 +52,7 @@ class BaseOperator(object):
 		print(arg_types)
 		cls.out_type = out_type
 		cls.arg_types = arg_types
+		cls.signature = "{}({})".format(out_type,",".join(arg_types))
 
 		u_types,u_inds = np.unique(arg_types,return_inverse=True)
 		cls.u_arg_types = u_types
@@ -153,42 +156,45 @@ class BaseOperator(object):
 		raise NotImplementedError()
 	
 
-
-
+JIT_NOPYTHON = True
+UID_START = 1
 TYPE_ALIASES = {
 	"float" : 'f8',
-	"string" : 'unicode_type'
+	"flt" : 'f8',
+	"number" : 'f8',
+	"string" : 'unicode_type',
+	"str" : 'unicode_type'
 }
 
 # ALLOWED_TYPES = []
 
 def compile_forward(op):
 	_ = "    "
-	
+	forward_func, nopython = njit(op.forward,cache=True), True
+	try:
+		forward_func.compile(op.signature)
+	except Exception:
+		forward_func, nopython = op.forward, False
+
 	f_name = op.__name__+"_forward"
-	func_def = '@njit(nogil=True,fastmath=True,cache=True) \n' + \
-				'def {}({}): \n' #+ \
-				# _ + 'L1,L2 = len(x1),len(x2)\n'+ \
-				# _ + 'for i1 in range(len(x1)):\n'+ \
-				# _*2 +	'for i2 in range(len(x1)):\n'+ \
-				# _*3 +		'out[i2 * L1 + i1] = f(x1,x2)'
+	if(nopython):
+		header = '@jit(nogil=True, fastmath=True, cache=True) \n'
+	elif(JIT_NOPYTHON):
+		header = '@jit(fastmath=True, looplift=True, forceobj=True) \n'
+	else:
+		header = ""
+	func_def =	'def {}({}): \n' #+ \
+
 	func_def = func_def.format(f_name,
 		 ",".join(["x%i"%i for i in range(len(op.u_arg_types))]) )
 
 	defs = _+", ".join(["L%i"%i for i in range(len(op.u_arg_types))]) + " = " + \
 			  ", ".join(["len(x%i)"%i for i in range(len(op.u_arg_types))]) + "\n"
-	# ", ".join(["len(x%i)"%(np.where(i==op.u_arg_inds)[0][0]) 
-	# 		  				for i in range(len(op.u_arg_types))]) + "\n"
 
 	defs += _+"out = np.empty((%s),dtype=np.int64)\n"%",".join(["L%s"%x for x in op.u_arg_inds])
 	defs += _+"d = Dict.empty({},i8)\n".format(op.out_type)
-	defs += _+"uid = 0\n"
-			
-	# da =[]
-	# for i0 in range(0,L0):
-	# 	da.append(Dict.empty(f8,i8))
-	
-	
+	defs += _+"uid = {}\n".format(UID_START)
+				
 	loops = ""
 	curr_indent = 1
 	for i in range(len(op.arg_types)):
@@ -197,10 +203,6 @@ def compile_forward(op):
 		l = l.format(i,op.u_arg_inds[i])
 		loops += l
 	
-		# start = 0
-		# if(len(op.right_commutes.get(i,[])) > 0):
-		# 	start = "i{}+1".format(op.right_commutes[i][-1])
-
 	all_indicies = ["i%s"%i for i in range(len(op.arg_types))]
 	cond_expr = "{}\n"
 	if(len(op.right_commutes) > 0):
@@ -214,29 +216,31 @@ def compile_forward(op):
 		cond_expr += _*(curr_indent+1) + "out[{}] =  0\n".format(",".join(all_indicies))
 		print("COMMUTES", op.right_commutes)
 
-	exec_code =  _*(curr_indent+1) +"v = f(x0[i0], x0[i1])\n"
+	sel_terms = ["x{}[i{}]".format(op.u_arg_inds[i],i) for i in range(len(op.arg_types))]
+	exec_code =  _*(curr_indent+1) +"v = f({})\n".format(",".join(sel_terms))
 	exec_code += _*(curr_indent+1) +"if(v not in d):\n"
 	exec_code += _*(curr_indent+2) +"d[v] = uid; uid +=1;\n"
 	exec_code += _*(curr_indent+1) +"out[{}] = d[v]".format(",".join(all_indicies))
 
 	cond_expr = cond_expr.format(exec_code)
 	ret_expr = _+"return out, d\n"
-	# v = x0[i0] + x0[i1]
-	# 			if(v not in d):
-	# 				d[v] = uid; uid +=1; 
-	# 			out[i0,i1] = d[v]
-
-	# v = x0[i0] + x0[i1] + x0[i2] * x1[i3]
-	# if(v not in d):
-	# d[v] = 1
-
-	# for 
-	# for 
-	source = func_def + defs +  loops + cond_expr+ret_expr
-	print(source)
-	l,g = cache_safe_exec(source,gbls={'f':njit(op.forward,cache=True),**globals()})
+	source = header + func_def + defs +  loops + cond_expr+ret_expr
+	
+	print("END----------------------")
+	l,g = cache_safe_exec(source,gbls={'f':forward_func,**globals()})
 	print("TIS HERE:",l[f_name])
-	op.broadcast_forward = l[f_name]
+	if(nopython):
+		op.broadcast_forward = l[f_name]
+	else:
+		print(op.__name__,"NOPYTHON")
+		_bf = l[f_name]
+		def bf(*args):
+			global f
+			f = forward_func
+			return _bf(*args)
+		op.broadcast_forward = bf
+	print(source)
+
 	# print(func_def + defs +  loops + cond_expr)
 
 				# '	return {}({}) \n' + \
@@ -262,6 +266,12 @@ class Concatenate(BaseOperator):
 	signature = 'string(string,string)'
 	def forward(x, y):
 		return x + y
+
+class StrToFloat(BaseOperator):
+	signature = 'float(string)'
+	def forward(x):
+		return float(x)
+
 
 
 a = Add(None,Add())
@@ -572,6 +582,18 @@ HE_deffered.define(HE)
 # 	for i in range(n):
 # 		out.append(List.empty_list(HE))
 # 	return out
+@njit(cache=True)
+def select_from_list(lst,sel):
+	out = List()
+	for s in sel:
+		out.append(lst[s])
+	return out
+
+def select_from_collection(col,sel):
+	if(isinstance(col,np.ndarray)):
+		return col[sel]
+	elif(isinstance(col,List)):
+		return select_from_list(col,sel)
 
 
 he_list = ListType(HE)
@@ -584,7 +606,7 @@ def retrace_solutions(kb,ops,goal,g_typ):
 	# depth = kb.u_vds[g_typ][goal]
 	u_vds = kb.u_vds[g_typ]
 	records = kb.hists[g_typ]
-	goal = kb.registered_types[g_typ](goal)
+	# goal = kb.registered_types[g_typ](goal)
 	
 	print("RS_S")
 	goals = List.empty_list(kb.registered_types[g_typ])
@@ -595,17 +617,19 @@ def retrace_solutions(kb,ops,goal,g_typ):
 	# print(":0")
 	hist_elems = HistElmListList()#List.empty_list(ListType(HE))#new_HE_list(1)#List([List.empty_list(HE)],listtype=ListType(HE))
 	arg_inds = retrace_back_one(goals,records,u_vds,hist_elems)
+
 	out = [{g_typ: hist_elems}]
 	
 	# goals = kb.u_vs[g_typ][arg_inds[g_typ]]
 	finished, i = False, 1
 	while(not finished):
 		nxt = {}
+		print("AQUI",[(k,type(v),v) for k,v in arg_inds.items()])
 		for typ in arg_inds:
 			records,u_vds = kb.hists[typ], kb.u_vds[typ]
 			hist_elems = HistElmListList()#List.empty_list(ListType(HE))#new_HE_list(len(goals))#List([List.empty_list(HE) for i in range(len(goals))])
 			
-			goals = kb.u_vs[typ][arg_inds[typ]]
+			goals = select_from_collection(kb.u_vs[typ],arg_inds[typ])
 			arg_inds = retrace_back_one(goals,records,u_vds,hist_elems)
 			nxt[typ] = hist_elems
 			if(len(arg_inds) == 0):
@@ -797,7 +821,8 @@ y = 17
 @njit(nogil=True,fastmath=True,cache=True) 
 def make_S(offset):
 	S = List.empty_list(unicode_type)
-	for x in range(97+offset,97+offset+5):
+	for x in range(48+offset,48+offset+5):
+	# for x in range(97+offset,97+offset+5):
 		S.append(chr(x))
 	return S#np.array(S)
 S1 = make_S(0)
@@ -846,8 +871,16 @@ print("Time elapsed: ",end - start)
 
 print(Add.broadcast_forward.stats.cache_hits)
 
+
+kb = buildKB()
 start = time.time()
-how_search(kb,[Add,Subtract,Concatenate],21,2)
+how_search(kb,[Add,Subtract,Concatenate,StrToFloat],"abab",2)
+end = time.time()
+print("Time elapsed: ",end - start)
+
+kb = buildKB()
+start = time.time()
+how_search(kb,[Add,Subtract,Concatenate],"abab",2)
 end = time.time()
 print("Time elapsed: ",end - start)
 

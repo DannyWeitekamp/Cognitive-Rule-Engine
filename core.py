@@ -39,9 +39,13 @@ def cache_safe_exec(source,lcs=None,gbls=None,cache_name='cache-safe'):
 		# [time][op]
 
 class BaseOperator(object):
+	#Static Attributes
 	registered_operators = {}
 	operators_by_uid = []
+
+	#Subclass Attributes
 	commutes = False
+	muted_exceptions = []
 
 	@classmethod
 	def init_signature(cls):
@@ -156,7 +160,7 @@ class BaseOperator(object):
 		raise NotImplementedError()
 	
 
-JIT_NOPYTHON = True
+LOOPLIFT_UNJITABLES = True
 UID_START = 1
 TYPE_ALIASES = {
 	"float" : 'f8',
@@ -179,7 +183,7 @@ def compile_forward(op):
 	f_name = op.__name__+"_forward"
 	if(nopython):
 		header = '@jit(nogil=True, fastmath=True, cache=True) \n'
-	elif(JIT_NOPYTHON):
+	elif(LOOPLIFT_UNJITABLES and len(op.muted_exceptions) == 0):
 		header = '@jit(fastmath=True, looplift=True, forceobj=True) \n'
 	else:
 		header = ""
@@ -216,16 +220,29 @@ def compile_forward(op):
 		cond_expr += _*(curr_indent+1) + "out[{}] =  0\n".format(",".join(all_indicies))
 		print("COMMUTES", op.right_commutes)
 
+	# use_try = False
+	try_expr = "{}"
+	if(len(op.muted_exceptions) > 0):
+		# use_try = True
+		try_expr = _*(curr_indent+1) + "try:\n"
+		try_expr += "{}\n"
+		try_expr += _*(curr_indent+1) + "except ({}):\n".format(",".join([x.__name__ for x in op.muted_exceptions]))
+		try_expr += _*(curr_indent+2) + "out[{}] =  0\n".format(",".join(all_indicies))
+		curr_indent += 1
+
 	sel_terms = ["x{}[i{}]".format(op.u_arg_inds[i],i) for i in range(len(op.arg_types))]
 	exec_code =  _*(curr_indent+1) +"v = f({})\n".format(",".join(sel_terms))
 	exec_code += _*(curr_indent+1) +"if(v not in d):\n"
 	exec_code += _*(curr_indent+2) +"d[v] = uid; uid +=1;\n"
 	exec_code += _*(curr_indent+1) +"out[{}] = d[v]".format(",".join(all_indicies))
 
+
+	exec_code = try_expr.format(exec_code)
+
 	cond_expr = cond_expr.format(exec_code)
 	ret_expr = _+"return out, d\n"
 	source = header + func_def + defs +  loops + cond_expr+ret_expr
-	
+	print(source)
 	print("END----------------------")
 	l,g = cache_safe_exec(source,gbls={'f':forward_func,**globals()})
 	print("TIS HERE:",l[f_name])
@@ -239,7 +256,7 @@ def compile_forward(op):
 			f = forward_func
 			return _bf(*args)
 		op.broadcast_forward = bf
-	print(source)
+	
 
 	# print(func_def + defs +  loops + cond_expr)
 
@@ -269,6 +286,7 @@ class Concatenate(BaseOperator):
 
 class StrToFloat(BaseOperator):
 	signature = 'float(string)'
+	muted_exceptions = [ValueError]
 	def forward(x):
 		return float(x)
 
@@ -549,8 +567,8 @@ def forward(kb,ops):
 	
 	for op in ops:
 		typ = op.out_type
-
-		btsr, vmap = op.broadcast_forward(kb.u_vs[typ])
+		args = [kb.u_vs[t] for t in op.u_arg_types]
+		btsr, vmap = op.broadcast_forward(*args)
 		records = insert_record(kb,depth,op,btsr,vmap)
 		new_records[typ] = records
 		
@@ -788,10 +806,10 @@ def how_search(kb,ops,goal,search_depth=1):
 	while(goal not in kb.u_vds[g_typ]):
 		if(kb.curr_infer_depth > search_depth): break
 		forward(kb,ops)
-		# for typ in kb.registered_types:
-		# 	print("MOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOO",kb.curr_infer_depth)
-		# 	print(typ)
-		# 	print(kb.u_vs[typ])
+		for typ in kb.registered_types:
+			print("MOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOO",kb.curr_infer_depth)
+			print(typ)
+			print(kb.u_vs[typ])
 
 
 	if(goal in kb.u_vds[g_typ]):
@@ -823,7 +841,8 @@ def make_S(offset):
 	S = List.empty_list(unicode_type)
 	for x in range(48+offset,48+offset+5):
 	# for x in range(97+offset,97+offset+5):
-		S.append(chr(x))
+		S.append("1"+chr(x))
+	S.append("a")
 	return S#np.array(S)
 S1 = make_S(0)
 S2 = make_S(5)
@@ -864,25 +883,25 @@ print("MID2")
 # forward(kb,[Add,Subtract,Concatenate])
 # forward(kb,[Add,Subtract,Concatenate])
 import time
-start = time.time()
-how_search(kb,[Add,Subtract,Concatenate],21,2)
-end = time.time()
-print("Time elapsed: ",end - start)
+# start = time.time()
+# how_search(kb,[Add,Subtract,Concatenate],21,2)
+# end = time.time()
+# print("Time elapsed: ",end - start)
 
-print(Add.broadcast_forward.stats.cache_hits)
+# print(Add.broadcast_forward.stats.cache_hits)
 
-
-kb = buildKB()
-start = time.time()
-how_search(kb,[Add,Subtract,Concatenate,StrToFloat],"abab",2)
-end = time.time()
-print("Time elapsed: ",end - start)
 
 kb = buildKB()
 start = time.time()
-how_search(kb,[Add,Subtract,Concatenate],"abab",2)
+how_search(kb,[StrToFloat],"abab",1)
 end = time.time()
 print("Time elapsed: ",end - start)
+
+# kb = buildKB()
+# start = time.time()
+# how_search(kb,[Add,Subtract,Concatenate],"abab",2)
+# end = time.time()
+# print("Time elapsed: ",end - start)
 
 # forward(kb,[Add,Subtract,Concatenate])
 # for typ in kb.registered_types:

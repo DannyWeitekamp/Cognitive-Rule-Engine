@@ -5,7 +5,12 @@ from numba import void,b1,u1,u2,u4,u8,i1,i2,i4,i8,f4,f8,c8,c16
 from numba.typed import List, Dict
 from numba.core.types import ListType, unicode_type, float64
 from utils import cache_safe_exec
+from collections import namedtuple
+import numpy as np
 import timeit
+import types as pytypes
+import sys
+import __main__
 
 N=1000
 def time_ms(f):
@@ -13,14 +18,164 @@ def time_ms(f):
 		return " %0.6f ms" % (1000.0*(timeit.timeit(f, number=N)/float(N)))
 
 cast_map = {
-	"String" : str,
-	"Number" : float,
+	"string" : str,
+	"number" : float,
 }
 
 numba_type_map = {
-	"String" : unicode_type,
-	"Number" : float64,	
+	"string" : unicode_type,
+	"number" : float64,	
 }
+
+numba_type_ids = {k:i  for i,k in enumerate(numba_type_map)}
+
+
+@njit(cache=True,fastmath=True,nogil=True)
+def _assert_map(v,enum_map,back_map,count):
+	if(v not in enum_map):
+		enum_map[v] = count.item()
+		back_map[count.item()] = v
+		count += 1
+
+class Numbalizer(object):
+	registered_specs = {}
+	jitstructs = {}
+	string_enums = Dict.empty(unicode_type,i8)
+	number_enums = Dict.empty(f8,i8)
+	string_backmap = Dict.empty(i8,unicode_type)
+	number_backmap = Dict.empty(i8,f8)
+	enum_counter = np.array(0)
+
+	@classmethod	
+	def jitstruct_from_spec(cls,name,spec,ind="   "):
+		arg_str = ind*3 + "string_enums, number_enums,\n"
+		arg_str += ind*3 + "string_backmap,number_backmap,\n"
+		arg_str += ind*3 + "enum_counter"
+
+		header = "@njit(cache=True,fastmath=True,nogil=True)\n"
+		header += "def {}_get_enumerized(self,\n{},assert_maps=True):\n".format(name,arg_str)
+
+		strings = ", ".join(["(self.{},{})".format(k,i) for i,k in enumerate(spec.keys()) if spec[k] == 'string'])
+		numbers = ", ".join(["(self.{},{})".format(k,i) for i,k in enumerate(spec.keys()) if spec[k] == 'number'])
+
+		body = ind + "enumerized = np.empty(({},),np.int64)\n".format(len(spec.keys()))
+		if(strings != ""):
+			body += ind + "for v,i in [{strings}]:\n".format(strings=strings)
+			body += ind*2 + "if(assert_maps): _assert_map(v, string_enums, string_backmap, enum_counter)\n"
+			body += ind*2 + "enumerized[i] = string_enums[v]\n"
+		if(numbers != ""):	
+			body += ind + "for v,i in [{numbers}]:\n".format(numbers=numbers)
+			body += ind*2 + "if(assert_maps): _assert_map(v, number_enums, number_backmap, enum_counter)\n"
+			body += ind*2 + "enumerized[i] = number_enums[v]\n"
+		body += ind + "return enumerized\n\n"
+
+		c = "{} = namedtuple('{}', {}, module=__name__)\n".format(name,name,["%s"%k for k in spec.keys() if k != 'type'])
+
+		source = header + body  +c
+		print(source)
+
+		l,g = cache_safe_exec(source,gbls={**globals(), **{"_assert_map" : _assert_map}})
+		ge_name =  '{}_get_enumerized'.format(name)
+		get_enumerized = l[ge_name]
+		nt = l[name]
+
+		#Do this to make nt picklable (see https://stackoverflow.com/questions/16377215/how-to-pickle-a-namedtuple-instance-correctly)
+		setattr(__main__, nt.__name__, nt)
+		nt.__module__ = "__main__"
+
+		def py_get_enumerized(self,assert_maps=True):
+			return get_enumerized(self,cls.string_enums,
+									   cls.number_enums,
+									   cls.string_backmap,
+									   cls.number_backmap,
+									   cls.enum_counter,
+									   assert_maps=assert_maps)
+		nt.get_enumerized = py_get_enumerized#pytypes.MethodType(_get_enumerized, self) 
+
+		return nt
+
+
+	@classmethod
+	def register_specification(cls, name, spec):
+		spec = {k:v.lower() for k,v in spec.items()}
+		if(name in cls.registered_specs):
+			assert cls.registered_specs[name] == spec, \
+			"Specification redefinition not permitted. Attempted on %r" % name
+		else:
+			cls.registered_specs[name] = spec
+			print("start jit")
+			cls.jitstructs[name] = cls.jitstruct_from_spec(name,spec)
+			print("end jit")
+
+	@classmethod
+	def register_specifications(cls, specs):
+		for name, spec in specs.items():
+			cls.register_specification(name,spec)
+
+
+	@classmethod
+	def object_to_nb_object(cls,name,obj_d):
+		assert 'type' in obj_d, "Object %s missing required attribute 'type'" % name
+		assert obj_d['type'] in object_specifications, \
+				 "Object specification not defined for %s" % obj_d['type']
+		spec = cls.registered_specs[obj_d['type']]
+		o_struct_type = cls.jitstructs[obj_d['type']]
+		args = []
+		for x,t in spec.items():
+			try:
+				args.append(cast_map[t](obj_d[x]))
+			except ValueError as e:
+				raise ValueError("Cannot cast %r to %r in %r of %r" % (obj_d[x],cast_map[t],x,name)) from e
+
+		obj = o_struct_type(*args)
+		return obj
+
+	@classmethod
+	def state_to_nb_objects(cls,state):
+		out = {}
+		for name, obj_d in state.items():
+			out[name] = cls.object_to_nb_object(name,obj_d)
+		return out
+
+	@classmethod
+	def nb_objects_to_enumerized(cls,nb_objects):
+		out = {}#Dict.empty(unicode_type,i8[:])
+		for k,v in nb_objects.items():
+			out[k] = v.get_enumerized()
+		return out
+
+	@classmethod
+	def infer_type(cls,value):
+		if(isinstance(value,str)):
+			return "string"
+		elif(isinstance(value,(float,int))):
+			return "number"
+		else:
+			raise ValueError("Could not infer type of %s" % value)
+
+	@classmethod
+	def enumerize_value(cls,value, typ=None):
+		if(typ is None): typ = cls.infer_type(value)
+		if(typ == 'string'):
+			value = str(value)
+			if(value not in cls.string_enums):
+				cls.string_enums[value] = cls.enum_counter.item()
+				cls.string_backmap[cls.enum_counter.item()] = value
+				cls.enum_counter += 1
+			return cls.string_enums[value]
+		elif(typ == 'number'):
+			value = float(value)
+			if(value not in cls.number_enums):
+				cls.number_enums[value] = cls.enum_counter.item()
+				cls.number_backmap[cls.enum_counter.item()] = value
+				cls.enum_counter += 1
+			return cls.number_enums[value]
+		else:
+			raise ValueError("Unrecognized type %r" % typ)
+
+
+
+
 
 
 object_specifications = {
@@ -33,8 +188,25 @@ object_specifications = {
 		"to_right" : "String",# ["String","Reference"],
 		"x" : "Number",
 		"y" : "Number"
+	},
+	"Trajectory" : {
+		"x" : "Number",
+		"y" : "Number",
+		"z" : "Number",
+		"dx" : "Number",
+		"dy" : "Number",
+		"dz" : "Number",
+		"a_x" : "Number",
+		"a_y" : "Number",
+		"a_z" : "Number",
+		"a_dx" : "Number",
+		"a_dy" : "Number",
+		"a_dz" : "Number",
 	}
+
 }
+
+Numbalizer.register_specifications(object_specifications)
 
 
 state = {
@@ -62,73 +234,55 @@ state = {
 	}
 }
 
+print()
 
-@jitclass([('id', unicode_type),
-		   ('value', unicode_type),
-		   ('above', unicode_type),
-		   ('below', unicode_type),
-		   ('to_left', unicode_type),
-		   ('to_right', unicode_type),
-		   ('x', f8),
-		   ('y', f8),
-		   ])
-class InterfaceElement(object):
-	def __init__(self, _id, _value, _above, _below, _to_left, _to_right, _x, _y):
-		self.id = _id
-		self.value = _value
-		self.above = _above
-		self.to_left = _to_left
-		self.to_right = _to_right
-		self.x = _x
-		self.y = _y
+for k,ie in Numbalizer.state_to_nb_objects(state).items():
+	print(ie)
+	print("ENUM",ie.get_enumerized())
 
 
-def jitclass_from_spec(name,spec,ind="   "):
-	header = "@jitclass([{}])\n"
-	header += "class {}(object):\n".format(name)
-	header += ind + "def __init__(self, {}):\n"
-	args = []
-	body = ""
-	sig_items = ""
-	for i,(k,v) in enumerate(spec.items()):
-		sig_items += (i!=0)*(3*ind) + "('%s', %s),\n"%(k,numba_type_map[v])
-		args.append("_%s" % k)
-		body += ind*2 + "self.{0} = _{0}\n".format(k)
-
-	args = ", ".join(args)
-	header = header.format(sig_items,args)
-	source = header + body
-	print(source)
-	l,g = cache_safe_exec(source,gbls=globals())
-	return l[name]
-
-
-jitclasses = {
-	"InterfaceElement" : InterfaceElement,
+state2 = {
+	"a" : {
+		"type" : "Trajectory",
+		"x" : 1,
+		"y" : 2,
+		"z" : 3,
+		"dx" : 5.5,
+		"dy" : 5.9,
+		"dz" : 0.4,
+		"a_x" : 1,
+		"a_y" : 2,
+		"a_z" : 3,
+		"a_dx" : 5.5,
+		"a_dy" : 5.9,
+		"a_dz" : 0.4,
+	}
 }
 
 
-def stateToObjs(state):
-	for name, obj_d in state.items():
-		assert 'type' in obj_d, "Object %s missing required attribute 'type'" % name
-		assert obj_d['type'] in object_specifications, \
-				 "Object specification not defined for %s" % obj_d['type']
-		spec = object_specifications[obj_d['type']]
-		o_class = jitclasses[obj_d['type']]
-		args = []
-		for x,t in spec.items():
-			try:
-				args.append(cast_map[t](obj_d[x]))
-			except ValueError as e:
-				raise ValueError("Cannot cast %r to %r in %r of %r" % (obj_d[x],cast_map[t],x,name)) from e
+nb_objects = Numbalizer.state_to_nb_objects(state)
+nb_objects2 = Numbalizer.state_to_nb_objects(state2)
+obj1 = nb_objects['i0']
+obj2 = nb_objects2['a']
+	
+def state_to_objs():
+	Numbalizer.state_to_nb_objects(state)
 
-		obj = o_class(*args)
-		# print(obj, obj.value)
+def enumerize_obj():
+	obj1.get_enumerized()
 
-def go():
-	stateToObjs(state)
+def enumerize_obj_nocheck():
+	obj1.get_enumerized(False)
 
-print("stateToObjs",time_ms(go))
-print(jitclass_from_spec("InterfaceElement", object_specifications["InterfaceElement"]))
+def enumerize_obj_justnums():
+	obj2.get_enumerized()
+
+def enumerize_objs():
+	Numbalizer.nb_objects_to_enumerized(nb_objects)
 
 
+print("state_to_objs:",time_ms(state_to_objs))
+print("enumerize_obj:",time_ms(enumerize_obj))
+print("enumerize_obj_nocheck:",time_ms(enumerize_obj_nocheck))
+print("enumerize_obj_justnums:",time_ms(enumerize_obj_justnums))
+print("enumerize_objs:",time_ms(enumerize_objs))

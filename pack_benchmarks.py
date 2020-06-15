@@ -167,6 +167,10 @@ def exp_fixed_width(x,_min=20):
 print(exp_fixed_width(np.array([5,19,40,60,150,300])))
 # raise ValueError()
 
+bloopy_mc_noodler = NB_InterfaceElement_NamedTuple.instance_class
+print(bloopy_mc_noodler)
+raise ValueError()
+
 @njit(parallel=False)
 def pack_from_numpy(inp,mlens):
 	out = Dict.empty(unicode_type,NB_InterfaceElement_NamedTuple)
@@ -181,7 +185,7 @@ def pack_from_numpy(inp,mlens):
 		_to_left = charseq_to_str(x.to_left,mlens[6])
 		_x = float(x.x)
 		_y = float(x.y)
-		out[__name__] = InterfaceElement_NamedTuple(_id,_value,_above,_below,_to_right,_to_left,_x,_y)
+		out[__name__] = bloopy_mc_noodler(_id,_value,_above,_below,_to_right,_to_left,_x,_y)
 	return out
 
 def pack_to_nb_via_numpy(state,spec):

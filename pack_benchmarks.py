@@ -168,17 +168,17 @@ print(exp_fixed_width(np.array([5,19,40,60,150,300])))
 # raise ValueError()
 
 @njit(parallel=False)
-def pack_from_numpy(inp,max_str=100):
+def pack_from_numpy(inp,mlens):
 	out = Dict.empty(unicode_type,NB_InterfaceElement_NamedTuple)
 	for i in prange(inp.shape[0]):
 		x = inp[i]
-		__name__ = charseq_to_str(x.__name__,max_str)
-		_id = charseq_to_str(x.id,max_str)
-		_value = charseq_to_str(x.value,max_str)
-		_above = charseq_to_str(x.above,max_str)
-		_below = charseq_to_str(x.below,max_str)
-		_to_right = charseq_to_str(x.to_right,max_str)
-		_to_left = charseq_to_str(x.to_left,max_str)
+		__name__ = charseq_to_str(x.__name__,mlens[0])
+		_id = charseq_to_str(x.id,mlens[1])
+		_value = charseq_to_str(x.value,mlens[2])
+		_above = charseq_to_str(x.above,mlens[3])
+		_below = charseq_to_str(x.below,mlens[4])
+		_to_right = charseq_to_str(x.to_right,mlens[5])
+		_to_left = charseq_to_str(x.to_left,mlens[6])
 		_x = float(x.x)
 		_y = float(x.y)
 		out[__name__] = InterfaceElement_NamedTuple(_id,_value,_above,_below,_to_right,_to_left,_x,_y)
@@ -196,8 +196,10 @@ def pack_to_nb_via_numpy(state,spec):
 		len_arr_by_spec_type[elm['type']] = len_arrs
 	
 	dtype_by_spec_type = {}
+	mlens_by_spec_type = {}
 	for spec_type,len_arrs in len_arr_by_spec_type.items():
 		mlens = exp_fixed_width(np.max(np.array(len_arrs,dtype=np.float64), axis=0), _min=50)
+		mlens_by_spec_type[spec_type] = mlens
 		# spec = ?
 		dtype = dtype = [('__name__', tm['string']%int(mlens[0]))]
 		for i,(attr, typ) in enumerate(spec.items()):
@@ -217,7 +219,7 @@ def pack_to_nb_via_numpy(state,spec):
 
 	out = {}
 	for typ,data in data_by_type.items():
-		out[typ] = pack_from_numpy(np.array(data,dtype=dtype_by_spec_type[typ]))
+		out[typ] = pack_from_numpy(np.array(data,dtype=dtype_by_spec_type[typ]),mlens_by_spec_type[typ])
 	return out
 
 #https://www.geeksforgeeks.org/smallest-power-of-2-greater-than-or-equal-to-n/
@@ -262,8 +264,10 @@ def pack_to_nb_via_numpy2(state,spec):
 				dtype.append( (attr, tm['string']%int(mlens[i+1])) )
 			else:
 				dtype.append( (attr, tm[spec[attr]]) )
+		# print(np.array(data_by_type[spec_typ],dtype=dtype))
+		# print(dtype)
+		out[typ] = pack_from_numpy(np.array(data_by_type[spec_typ],dtype=dtype),mlens)
 
-		out[typ] = pack_from_numpy(np.array(data_by_type[spec_typ],dtype=dtype))
 	return out	
 
 
@@ -289,14 +293,14 @@ def pack_to_nb_via_append(state):
 # def test_pack_from_args():
 
 
-print(pack_from_numpy(my_data))
+print(pack_from_numpy(my_data,np.array([50]*9)))
 print("EYA",pack_to_nb_via_numpy(state,ie_spec))
 print("EYA2",pack_to_nb_via_numpy2(state,ie_spec))
 
 
 
 def b_pack_from_numpy():
-	pack_from_numpy(my_data)
+	pack_from_numpy(my_data,np.array([50]*9))
 
 
 state_10 = {"ie" + str(i) : _state['i01'] for i in range(10)}
@@ -356,7 +360,7 @@ print("pack_to_nb_via_numpy2",time_ms(b200_pack_to_nb_via_numpy2))
 print("pack_to_nb_via_args",time_ms(b200_pack_to_nb_via_args))
 print("pack_to_nb_via_append",time_ms(b200_pack_to_nb_via_append))
 
-print("Note to self: At the time of writing this for large states packing via numpy2 " +
-		"seems to be the fastest option, it is decently faster than packing " +
-		"by expanding the arguments into an njitted function (a perhaps simpler approach). " +
-		"Performance changes in numba might prompt a different decision." )
+print("Note to self: At the time of writing this for large states packing via_numpy2 " +
+		"seems to be the fastest option, it is decently faster than packing by expanding " +
+		"the arguments into an njitted function (a perhaps simpler approach). Performance changes " +
+		"in later versions of numba (currently 0.50.0) might prompt a different decision." )

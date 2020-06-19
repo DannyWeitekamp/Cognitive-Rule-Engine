@@ -184,6 +184,7 @@ def vectorize_states(enumerized_states,nominal_maps,number_backmap):
 	'''
 	enumerized_states : List<Dict<i8[:]>>
 	'''
+	elm_present = Dict()
 	nominals = Dict()
 	continuous = Dict()
 	n_states = len(enumerized_states)
@@ -191,33 +192,141 @@ def vectorize_states(enumerized_states,nominal_maps,number_backmap):
 		for typ,elms in state.items():
 			nominal_map = nominal_maps[typ]
 			for name,elm in elms.items():
+				if(name not in elm_present):
+					elm_present[name] = np.zeros((n_states,),dtype=np.uint8)
+				elm_present[name][k] = True
+
 				for i,attr in enumerate(elm):
 					if(nominal_map[i]):
 						tn = (name,i,attr)
 						if(tn not in nominals):
-							nominals[tn] = np.zeros((n_states,),dtype=np.uint8)
+							n_arr = np.zeros((n_states,),dtype=np.uint8)
+							# n_arr.fill(255)
+							nominals[tn] = n_arr
 						nominals[tn][k] = True
 					else:
 						tc = (name,i)
 						if(tc not in continuous):
-							arr = np.empty((n_states,),dtype=np.float64)
-							arr.fill(np.nan)
-							continuous[tc] = arr
+							c_arr = np.empty((n_states,),dtype=np.float64)
+							c_arr.fill(np.nan)
+							continuous[tc] = c_arr
 						continuous[tc][k] = number_backmap[attr]
 
 	# Apparently filling it transposed and then transposing gives a fortran ordered array
 	vect_nominals = np.empty((n_states,len(nominals)), dtype=np.uint8)#, order='F')
 	vect_continuous = np.empty((n_states,len(continuous)), dtype=np.float64)#, order='F')
 
-	for i,n_arr in enumerate(nominals.values()):
-		vect_nominals[:,i] = n_arr
+	for i,(tup,n_arr) in enumerate(nominals.items()):
+		name,_,_ = tup
+		# print(elm_present[name], np.where(elm_present[name], n_arr, 255) )
+		vect_nominals[:,i] = np.where(elm_present[name], n_arr, 255) 
 
 	for i,c_arr in enumerate(continuous.values()):
 		vect_continuous[:,i] = c_arr
 
 	return vect_nominals,vect_continuous
-	# print(vect_nominals.T)
-	# print(vect_continuous.T)
+
+attr_map_i_type = DictType(i8,i8)
+attr_map_type = DictType(i8,attr_map_i_type)
+attr_maps_type = DictType(unicode_type,attr_map_type)
+bool_array = u1[:]
+elm_present_type = DictType(unicode_type,bool_array)
+
+
+@njit(cache=True)
+def vectorize_states2(enumerized_states,nominal_maps,number_backmap):
+	
+	# nominals = Dict()
+	# continuous = Dict()
+	n_states = len(enumerized_states)
+
+	#Fill elm_present_by_type, attr_maps, and type_widths_nominal
+	#	elm_present_by_type: Dict<String, Dict<String, bool[:]>> keyed by Type then Elm_name
+	#		and taking value of array of booleans indicating if an element of that type and name
+	#		are present in states [0,...,n_states].
+	#	attr_maps: Dict<String, Dict<Int, Dict<Int,Int>>> keyed by Type, then attr_position,
+	#		then attr_value, and taking value of the offset of that attr_value in a one-hotted encoding
+	#	type_widths_nominal: Dict<String, Int> keyed by Type and valued by length of an elemented of that
+	#		type one-hot encoded 
+	elm_present_by_type = Dict.empty(unicode_type,elm_present_type)
+	attr_maps_by_type = Dict.empty(unicode_type,attr_map_type)
+	type_widths_nominal = Dict.empty(unicode_type,i8)
+	for k,state in enumerate(enumerized_states):
+		for typ,elms in state.items():
+			nominal_map = nominal_maps[typ]
+			type_width_nominal = type_widths_nominal.get(typ,0)
+			if(typ not in elm_present_by_type):
+				elm_present_by_type[typ] = Dict.empty(unicode_type,bool_array)
+			elm_present = elm_present_by_type[typ]
+			if(typ not in attr_maps_by_type):
+				attr_maps_by_type[typ] = Dict.empty(i8,attr_map_i_type)
+			attr_map = attr_maps_by_type[typ]
+			for j,(name,elm) in enumerate(elms.items()):
+				if(j == 0):
+					for i in range(len(elm)):
+						if(nominal_map[i]):
+							if(i not in attr_map):
+								attr_map[i] = Dict.empty(i8,i8)
+				if(name not in elm_present):
+					elm_present[name] = np.zeros((n_states,),dtype=np.uint8)
+				elm_present[name][k] = True
+
+				for i,attr in enumerate(elm):
+					if(nominal_map[i]):
+						attr_map_i = attr_map[i]
+						if(attr not in attr_map_i):
+							attr_map_i[attr] = len(attr_map_i)
+							type_width_nominal += 1
+			type_widths_nominal[typ] = type_width_nominal
+			elm_present_by_type[typ] = elm_present
+
+	#Compute the sizes of the output arrays
+	total_continuous_slots = 0
+	type_widths_continous = Dict.empty(unicode_type,i8)
+	for typ in elm_present_by_type.keys():
+		w = np.sum(nominal_maps[typ]==0)
+		type_widths_continous[typ] = w
+		total_continuous_slots += w*len(elm_present_by_type[typ])
+
+	total_nominal_slots = 0
+	for typ, type_width_nominal in type_widths_nominal.items():
+		total_nominal_slots += type_widths_nominal[typ]*len(elm_present_by_type[typ])
+
+	#Instatiate the output arrays
+	vect_nominals = np.empty((n_states,total_nominal_slots), dtype=np.uint8)#, order='F')
+	vect_continuous = np.empty((n_states,total_continuous_slots), dtype=np.float64)#, order='F')
+	
+
+	#Fill the output arrays
+	for k,state in enumerate(enumerized_states):
+		offset_n,offset_c = 0,0
+		for typ,elms in state.items():
+			nominal_map, type_width_n,type_width_c  = nominal_maps[typ], type_widths_nominal[typ], type_widths_continous[typ]
+			elm_present, attr_map = elm_present_by_type[typ],  attr_maps_by_type[typ]
+			for name, is_present in elm_present.items():
+				if(is_present[k]):
+					vect_nominals[k,offset_n:offset_n+type_width_n] = 0
+					elm_offset_n,elm_offset_c = offset_n, offset_c
+					for i,attr in enumerate(elms[name]):
+						if(nominal_map[i]):
+							attr_map_i = attr_map[i]
+							vect_nominals[k,elm_offset_n+attr_map[i][attr]] = True
+							elm_offset_n += len(attr_map_i)
+						else:
+							vect_continuous[k,elm_offset_c] = number_backmap[attr]
+							elm_offset_c += 1
+				else:
+					vect_nominals[k,offset_n:offset_n+type_width_n] = 255
+					vect_continuous[k,offset_c:offset_c+type_width_c] = np.nan
+				offset_n += type_width_n
+				offset_c += type_width_c
+	return vect_nominals,vect_continuous
+
+
+
+
+
+
 
 
 Dict_Unicode_to_Enums = DictType(unicode_type,i8[:])
@@ -522,7 +631,7 @@ nb_objects_real2 = Numbalizer.state_to_nb_objects(state2)
 enumerized = Numbalizer.nb_objects_to_enumerized(nb_objects_real)
 enumerized_states = List()
 enumerized_states.append(enumerized)
-enumerized_states.append(Numbalizer.nb_objects_to_enumerized(Numbalizer.state_to_nb_objects({"ie" + str(i) : _state['i1'] for i in range(STATE_SIZE)})))
+enumerized_states.append(Numbalizer.nb_objects_to_enumerized(Numbalizer.state_to_nb_objects({"ie" + str(i+3) : _state['i1'] for i in range(STATE_SIZE)})))
 
 
 print("nominal maps")
@@ -532,12 +641,16 @@ print(Numbalizer.number_backmap)
 
 
 nominals, continuous = vectorize_states(enumerized_states,Numbalizer.nominal_maps,Numbalizer.number_backmap)
+nominals, continuous = vectorize_states2(enumerized_states,Numbalizer.nominal_maps,Numbalizer.number_backmap)
+
+np.set_printoptions(threshold=2000)
 print("nominals")
 print(nominals)
 print("continuous")
 print(continuous)
-print(np.isfortran(nominals))
-print(np.isfortran(continuous))
+# raise ValueError()
+# print(np.isfortran(nominals))
+# print(np.isfortran(continuous))
 
 # print(nb_objects_real)
 # print(nb_objects_real.keys())
@@ -562,8 +675,6 @@ def enumerize_value_number():
 def unenumerize_value():
 	Numbalizer.unenumerize_value(2)
 
-def b_vectorize_states():
-	vectorize_states(enumerized_states,Numbalizer.nominal_maps,Numbalizer.number_backmap)
 
 state_10 = {"ie" + str(i) : _state['i0'] for i in range(10)}
 nb_objects_10 = Numbalizer.state_to_nb_objects(state_10)
@@ -588,6 +699,43 @@ def b200_enumerize_objs():
 	Numbalizer.nb_objects_to_enumerized(nb_objects_200)
 
 
+
+
+
+stateA = {"ie" + str(i) : _state['i0'] for i in range(40)}
+stateB = {"ie" + str(i+3) : _state['i1'] for i in range(40)}
+enumerized_A = Numbalizer.nb_objects_to_enumerized(Numbalizer.state_to_nb_objects(stateA))
+enumerized_B = Numbalizer.nb_objects_to_enumerized(Numbalizer.state_to_nb_objects(stateB))
+enumerized_states = List()
+enumerized_states.append(enumerized_A)
+enumerized_states.append(enumerized_B)
+
+def flatten_state(state):
+	flat_state = {}
+	for name,elm in state.items():
+		for attr_name,attr in elm.items():
+			flat_state[str((name,attr_name))] = attr
+	return flat_state
+
+py_states = [flatten_state(stateA),flatten_state(stateB)]
+
+from sklearn.feature_extraction import DictVectorizer
+dv = DictVectorizer(sparse=False, sort=False)
+def b40_py_vectorize_states():
+	py_states = [flatten_state(stateA),flatten_state(stateB)]
+	dv.fit_transform(py_states)
+
+def b40_nb_vectorize_states():
+	vectorize_states(enumerized_states,Numbalizer.nominal_maps,Numbalizer.number_backmap)
+
+def b40_nb_vectorize_states2():
+	vectorize_states2(enumerized_states,Numbalizer.nominal_maps,Numbalizer.number_backmap)
+
+# def b40_py_vectorize_states():
+# 	vectorize_states(enumerized_states,Numbalizer.nominal_maps,Numbalizer.number_backmap)
+
+b40_py_vectorize_states()
+
 print("-----Single Objs------")
 print("enumerize_obj:",time_ms(enumerize_obj))
 print("enumerize_obj_nocheck:",time_ms(enumerize_obj_nocheck))
@@ -605,7 +753,11 @@ print("-----State 200 Objs------")
 print("state_to_objs:",time_ms(b200_state_to_objs))
 print("enumerize_objs:",time_ms(b200_enumerize_objs))
 
+
 print("-----States 2x40 Objs------")
-print("vectorize_states:",time_ms(b_vectorize_states))
+print("nb_vectorize_states2:",time_ms(b40_nb_vectorize_states2))
+print("nb_vectorize_states:", time_ms(b40_nb_vectorize_states))
+print("py_vectorize_states:",time_ms(b40_py_vectorize_states))
+
 
 

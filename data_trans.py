@@ -3,7 +3,7 @@ from numba.experimental import jitclass
 from numba import deferred_type, optional
 from numba import void,b1,u1,u2,u4,u8,i1,i2,i4,i8,f4,f8,c8,c16
 from numba.typed import List, Dict
-from numba.core.types import ListType, unicode_type, float64, NamedTuple, NamedUniTuple 
+from numba.core.types import DictType, ListType, unicode_type, float64, NamedTuple, NamedUniTuple 
 from numba.cpython.unicode import  _set_code_point
 from utils import cache_safe_exec
 from collections import namedtuple
@@ -179,8 +179,48 @@ def enumerize_nb_objs(inp,out,enumerize_f, string_enums, number_enums,
 	for k,v in inp.items():
 		out[k] = enumerize_f(v,string_enums, number_enums,
 					string_backmap,number_backmap,enum_counter)
+@njit(cache=True)
+def vectorize_states(enumerized_states,nominal_maps,number_backmap):
+	'''
+	enumerized_states : List<Dict<i8[:]>>
+	'''
+	nominals = Dict()
+	continuous = Dict()
+	n_states = len(enumerized_states)
+	for k,state in enumerate(enumerized_states):
+		for typ,elms in state.items():
+			nominal_map = nominal_maps[typ]
+			for name,elm in elms.items():
+				for i,attr in enumerate(elm):
+					if(nominal_map[i]):
+						tn = (name,i,attr)
+						if(tn not in nominals):
+							nominals[tn] = np.zeros((n_states,),dtype=np.uint8)
+						nominals[tn][k] = True
+					else:
+						tc = (name,i)
+						if(tc not in continuous):
+							arr = np.empty((n_states,),dtype=np.float64)
+							arr.fill(np.nan)
+							continuous[tc] = arr
+						continuous[tc][k] = number_backmap[attr]
+
+	# Apparently filling it transposed and then transposing gives a fortran ordered array
+	vect_nominals = np.empty((n_states,len(nominals)), dtype=np.uint8)#, order='F')
+	vect_continuous = np.empty((n_states,len(continuous)), dtype=np.float64)#, order='F')
+
+	for i,n_arr in enumerate(nominals.values()):
+		vect_nominals[:,i] = n_arr
+
+	for i,c_arr in enumerate(continuous.values()):
+		vect_continuous[:,i] = c_arr
+
+	return vect_nominals,vect_continuous
+	# print(vect_nominals.T)
+	# print(vect_continuous.T)
 
 
+Dict_Unicode_to_Enums = DictType(unicode_type,i8[:])
 
 class Numbalizer(object):
 	registered_specs = {}
@@ -190,6 +230,7 @@ class Numbalizer(object):
 	string_backmap = Dict.empty(i8,unicode_type)
 	number_backmap = Dict.empty(i8,f8)
 	enum_counter = np.array(0)
+	nominal_maps = Dict.empty(unicode_type,u1[:])
 
 	@classmethod
 	def __init__(cls):
@@ -282,7 +323,6 @@ class Numbalizer(object):
 
 		return nt
 
-
 	@classmethod
 	def register_specification(cls, name, spec):
 		spec = {k:v.lower() for k,v in spec.items()}
@@ -293,6 +333,7 @@ class Numbalizer(object):
 			cls.registered_specs[name] = spec
 			print("start jit")
 			cls.jitstructs[name] = cls.jitstruct_from_spec(name,spec)
+			cls.nominal_maps[name] = np.array([x == "string" for k,x in spec.items() if k != 'type'],dtype=np.uint8)
 			print("end jit")
 
 	@classmethod
@@ -328,11 +369,12 @@ class Numbalizer(object):
 
 	@classmethod
 	def nb_objects_to_enumerized(cls,nb_objects):
-		out = Dict.empty(unicode_type,i8[:])
+		out = Dict.empty(unicode_type,Dict_Unicode_to_Enums)
 		for typ,objs in nb_objects.items():
 			enumerize_nb_objs = cls.jitstructs[typ].enumerize_nb_objs
 
-			enumerize_nb_objs(objs,out, cls.string_enums, cls.number_enums,
+			out_typ = out[typ] = Dict.empty(unicode_type,i8[:])
+			enumerize_nb_objs(objs,out_typ, cls.string_enums, cls.number_enums,
          		cls.string_backmap, cls.number_backmap, cls.enum_counter)
 		return out
 
@@ -475,7 +517,28 @@ obj2 = nb_objects2['Trajectory']['ie0']
 
 nb_objects_real = Numbalizer.state_to_nb_objects(state)
 nb_objects_real2 = Numbalizer.state_to_nb_objects(state2)
-print(Numbalizer.nb_objects_to_enumerized(nb_objects_real))
+
+
+enumerized = Numbalizer.nb_objects_to_enumerized(nb_objects_real)
+enumerized_states = List()
+enumerized_states.append(enumerized)
+enumerized_states.append(Numbalizer.nb_objects_to_enumerized(Numbalizer.state_to_nb_objects({"ie" + str(i) : _state['i1'] for i in range(STATE_SIZE)})))
+
+
+print("nominal maps")
+print(Numbalizer.nominal_maps)
+print("number backmaps")
+print(Numbalizer.number_backmap)
+
+
+nominals, continuous = vectorize_states(enumerized_states,Numbalizer.nominal_maps,Numbalizer.number_backmap)
+print("nominals")
+print(nominals)
+print("continuous")
+print(continuous)
+print(np.isfortran(nominals))
+print(np.isfortran(continuous))
+
 # print(nb_objects_real)
 # print(nb_objects_real.keys())
 # raise ValueError()
@@ -499,6 +562,8 @@ def enumerize_value_number():
 def unenumerize_value():
 	Numbalizer.unenumerize_value(2)
 
+def b_vectorize_states():
+	vectorize_states(enumerized_states,Numbalizer.nominal_maps,Numbalizer.number_backmap)
 
 state_10 = {"ie" + str(i) : _state['i0'] for i in range(10)}
 nb_objects_10 = Numbalizer.state_to_nb_objects(state_10)
@@ -539,3 +604,8 @@ print("enumerize_objs:",time_ms(b40_enumerize_objs))
 print("-----State 200 Objs------")
 print("state_to_objs:",time_ms(b200_state_to_objs))
 print("enumerize_objs:",time_ms(b200_enumerize_objs))
+
+print("-----States 2x40 Objs------")
+print("vectorize_states:",time_ms(b_vectorize_states))
+
+

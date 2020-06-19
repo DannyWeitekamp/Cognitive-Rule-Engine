@@ -9,9 +9,11 @@ from numba.core import sigutils
 import numpy as np
 import re
 from collections.abc import Iterable 
+from collections import deque
 import timeit
 from pprint import pprint
 from utils import cache_safe_exec
+import inspect
 N = 10
 
 print("START")
@@ -27,6 +29,57 @@ def parse_signature(s):
 
 		# [time][op]
 
+class Var(object):
+	def __repr__(self):
+		return "?"
+
+
+
+
+
+class OperatorComposition(object):
+	def __init__(self,tup):
+		self.tup = tup
+		self.template = self._gen_template(tup)
+
+	def _gen_template(self,x):
+		if(isinstance(x,(list,tuple))):
+			rest = [self._gen_template(x[j]) for j in range(1,len(x))]
+			return x[0].template.format(*rest)
+		elif(isinstance(x,Var)):
+			return "{}"
+		else:
+			return x
+
+	def _execute_composition(self,tup,dq_args):
+		L = len(tup)
+		op = tup[0]
+		resolved_args = []
+		for i in range(1,L):
+			t_i = tup[i]
+			if(isinstance(t_i,tuple)):
+				val = execute_composition(t_i,dq_args)
+				resolved_args.append(val)
+			elif(isinstance(t_i,Var)):
+				a_i = dq_args.popleft()
+				resolved_args.append(a_i)
+			else:
+				resolved_args.append(t_i)
+
+		if(hasattr(op,'condition')):
+			if(not op.condition(*resolved_args)):
+				raise ValueError()
+		return op.forward(*resolved_args)
+
+	def __call__(self,*args):
+		value = self._execute_composition(self.tup,deque(args))
+		return value
+
+
+
+
+
+
 class BaseOperator(object):
 	#Static Attributes
 	registered_operators = {}
@@ -37,8 +90,8 @@ class BaseOperator(object):
 	muted_exceptions = []
 
 	@classmethod
-	def init_signature(cls):
-		assert hasattr(cls,'signature'), "Operator must have signature"
+	def _init_signature(cls):
+		assert hasattr(cls,'signature'), "Operator %r missing signature." % cls.__name__
 		out_type, arg_types = parse_signature(cls.signature)
 		out_type = TYPE_ALIASES.get(out_type,out_type)
 		arg_types = [TYPE_ALIASES.get(x,x) for x in arg_types]
@@ -46,6 +99,7 @@ class BaseOperator(object):
 		cls.out_type = out_type
 		cls.arg_types = arg_types
 		cls.signature = "{}({})".format(out_type,",".join(arg_types))
+		cls.cond_signature = "u1({})".format(",".join(arg_types))
 
 		u_types,u_inds = np.unique(arg_types,return_inverse=True)
 		cls.u_arg_types = u_types
@@ -73,9 +127,26 @@ class BaseOperator(object):
 		print(cls.right_commutes)
 		print(cls.arg_types)
 
+	@classmethod
+	def _check_funcs(cls):
+		assert hasattr(cls,'forward'), "Operator %r missing forward() function." % cls.__name__
+
+		args = inspect.getargspec(cls.forward).args
+		assert len(args) == len(cls.arg_types),\
+		 	"%s.forward(%s) has %s arguments but signature %s has %s arguments." \
+		 	%(cls.__name__,",".join(args),len(args),cls.signature,len(cls.arg_types))
+
+		if(hasattr(cls,'condition')):
+			args = inspect.getargspec(cls.condition).args
+			assert len(args) == len(cls.arg_types),\
+		 	"%s.condition(%s) has %s arguments but signature %s has %s arguments." \
+		 	%(cls.__name__,",".join(args),len(args),cls.signature,len(cls.arg_types))
+
+
+
 
 	@classmethod
-	def register(cls):
+	def _register(cls):
 		name = cls.__name__.lower()
 		
 		if(name in cls.registered_operators):
@@ -87,7 +158,7 @@ class BaseOperator(object):
 		cls.registered_operators[name] = cls
 
 	@classmethod
-	def init_template(cls):
+	def _init_template(cls):
 		if(not hasattr(cls,"template")):
 			brks = ["{%i}"%i for i in range(len(cls.arg_types))]
 			cls.template = "{name}("+",".join(brks)+")"
@@ -95,14 +166,17 @@ class BaseOperator(object):
 	
 	def __init_subclass__(cls, **kwargs):
 		super().__init_subclass__(**kwargs)
-		cls.init_signature()
-		cls.register()
-		cls.init_template()
+
+		cls._init_signature()
+		cls._check_funcs()
+		cls._register()
+		cls._init_template()
+
 		compile_forward(cls)
 
-
-	def _assert_cargs(self,args,allow_zero=True):
-		cls = type(self)
+	@classmethod
+	def _assert_cargs(cls,args,allow_zero=True):
+		# cls = type(self)
 		assert (allow_zero and len(args) == 0) or len(cls.arg_types) == len(args), \
 			"incorrect number of arguments for signature: %s" % cls.signature
 		return args if(len(args) != 0) else [None]*len(cls.arg_types)
@@ -113,16 +187,37 @@ class BaseOperator(object):
 		return args if(len(args) != 0) else [None]*len(self.arg_types)
 
 	def __init__(self,*args):
-		self.args, cls = self._assert_cargs(args), type(self)
+		pass
+		
 
+		
+
+	def __new__(cls,*args):
+		raise NotImplemented()
+		print(cls)
+
+		args = cls._assert_cargs(args)
 		arg_types = []
-		for typ, arg in zip(cls.arg_types,self.args):
+		arg_strs = []
+		for typ, arg in zip(cls.arg_types,args):
 			if(isinstance(arg,BaseOperator)):
 				arg_types += arg.arg_types
+				arg_strs.append(arg.__name__)
 			elif(arg is None):
 				arg_types.append(typ)
-		self.arg_types = arg_types
-		self.signature = cls.out_type + "("+",".join(arg_types) +")"
+				arg_strs.append("?")
+			else:
+				arg_strs.append(arg)
+		arg_types = arg_types
+		signature = cls.out_type + "("+",".join(arg_types) +")"
+
+		def f(*args):
+			pass
+
+
+		print(arg_strs)
+		return type("MOOSE",(BaseOperator,),{'signature' : signature, 'forward' : f})
+
 
 	def get_template(self,*args):
 		iargs, cls = self._assert_iargs(args), type(self)
@@ -163,11 +258,29 @@ TYPE_ALIASES = {
 
 def compile_forward(op):
 	_ = "    "
-	forward_func, nopython = njit(op.forward,cache=True), True
+	nopython = True
+	forward_func = njit(op.forward,cache=True)
+	condition_func =  njit(op.condition,cache=True) if(hasattr(op,'condition')) else None
 	try:
 		forward_func.compile(op.signature)
 	except Exception:
-		forward_func, nopython = op.forward, False
+		forward_func = op.forward
+		nopython= False
+
+	if(condition_func != None):
+		try:
+			condition_func.compile(op.cond_signature)
+		except Exception as e:
+			raise e
+			condition_func = op.condition
+			nopython= False
+
+
+	# condition_func, nopython = njit(op.forward,cache=True), True
+	# try:
+	# 	forward_func.compile(op.signature)
+	# except Exception:
+	# 	forward_func, nopython = op.forward, False
 
 	f_name = op.__name__+"_forward"
 	if(nopython):
@@ -196,14 +309,21 @@ def compile_forward(op):
 		l = l.format(i,op.u_arg_inds[i])
 		loops += l
 	
+
 	all_indicies = ["i%s"%i for i in range(len(op.arg_types))]
+	arg_terms = ["x{}[i{}]".format(op.u_arg_inds[i],i) for i in range(len(op.arg_types))]
 	cond_expr = "{}\n"
-	if(len(op.right_commutes) > 0):
+	if(len(op.right_commutes) > 0 or condition_func != None):
 		curr_indent += 1
 		conds = []
-		for i_a, i_bs in op.right_commutes.items():
-			conds.append("i{} >= i{}".format(i_a,i_bs[-1]))
-		cond_expr =  _*curr_indent     + "if({}):\n".format(",".join(conds))
+
+		if(len(op.right_commutes) > 0):
+			for i_a, i_bs in op.right_commutes.items():
+				conds.append("i{} >= i{}".format(i_a,i_bs[-1]))
+		if(condition_func != None):
+			conds.append("c({})".format(",".join(arg_terms)))
+
+		cond_expr =  _*curr_indent     + "if({}):\n".format(" and ".join(conds))
 		cond_expr += "{}\n"#_*(curr_indent+1) + "{}\n"
 		cond_expr += _*(curr_indent)   + "else:\n"
 		cond_expr += _*(curr_indent+1) + "out[{}] =  0\n".format(",".join(all_indicies))
@@ -219,8 +339,8 @@ def compile_forward(op):
 		try_expr += _*(curr_indent+2) + "out[{}] =  0\n".format(",".join(all_indicies))
 		curr_indent += 1
 
-	sel_terms = ["x{}[i{}]".format(op.u_arg_inds[i],i) for i in range(len(op.arg_types))]
-	exec_code =  _*(curr_indent+1) +"v = f({})\n".format(",".join(sel_terms))
+	
+	exec_code =  _*(curr_indent+1) +"v = f({})\n".format(",".join(arg_terms))
 	exec_code += _*(curr_indent+1) +"if(v not in d):\n"
 	exec_code += _*(curr_indent+2) +"d[v] = uid; uid +=1;\n"
 	exec_code += _*(curr_indent+1) +"out[{}] = d[v]".format(",".join(all_indicies))
@@ -233,7 +353,7 @@ def compile_forward(op):
 	source = header + func_def + defs +  loops + cond_expr+ret_expr
 	print(source)
 	print("END----------------------")
-	l,g = cache_safe_exec(source,gbls={'f':forward_func,**globals()})
+	l,g = cache_safe_exec(source,gbls={'f':forward_func,'c': condition_func,**globals()})
 	print("TIS HERE:",l[f_name])
 	if(nopython):
 		op.broadcast_forward = l[f_name]
@@ -254,6 +374,34 @@ def compile_forward(op):
 
 # def normalize_types():
 
+import math
+#from here: https://stackoverflow.com/questions/18833759/python-prime-number-checker
+@njit(cache=True)
+def is_prime(n):
+    if n % 2 == 0 and n > 2: 
+        return False
+    for i in range(3, int(math.sqrt(n)) + 1, 2):
+        if n % i == 0:
+            return False
+    return True
+
+class SquaresOfPrimes(BaseOperator):
+	signature = 'float(float)'
+	def condition(x):
+		return is_prime(x)
+
+	def forward(x):
+		return x**2
+
+class EvenPowersOfPrimes(BaseOperator):
+	signature = 'float(float,float)'
+	def condition(x,y):
+		b = is_prime(x)
+		a = (y % 2 == 0) and (y > 0) and (y == int(y))
+		return a and b
+
+	def forward(x,y):
+		return x**y
 
 class Add(BaseOperator):
 	commutes = True
@@ -281,12 +429,21 @@ class StrToFloat(BaseOperator):
 
 
 
-a = Add(None,Add())
-print(type(a).signature , ":", a.signature )
-print(a.get_template(1,2,None))
+# a = Add(None,Add())
+# print(type(a).signature , ":", a.signature )
+# print(a.get_template(1,2,None))
+
+# print(a.forward)
+# a(1,2,3)
+v = Var()
+t = (Add,v,v)
+oc = OperatorComposition(t)
+print(oc)
+print(oc(1,2))
+
 # Add(None)
 
-# raise ValueError("STOP")
+raise ValueError("STOP")
 # compile_forward(Add)
 # compile_forward(Subtract)
 # compile_forward(Concatenate)
@@ -526,7 +683,7 @@ class NBRT_KnowledgeBase(object):
 # @njit(nogil=True,fastmath=True,parallel=False) 
 
 def insert_record(kb,depth,op, btsr, vmap):
-	print('is')
+	# print('is')
 	typ = op.out_type
 	if(typ not in kb.hist_structs):
 		typ_cls = kb.registered_types[typ]
@@ -539,7 +696,7 @@ def insert_record(kb,depth,op, btsr, vmap):
 	tsd.append(tuple([op.uid,
 					  btsr.reshape(-1), np.array(btsr.shape,np.int64), List(op.arg_types),
 					  vmap]))
-	print('istop')
+	# print('istop')
 	return tsd
 
 # @njit(cache=True):
@@ -549,7 +706,7 @@ def insert_record(kb,depth,op, btsr, vmap):
 # Subtract.broadcast_forward = Subtract_forward
 # Concatenate.broadcast_forward = cat_forward
 def forward(kb,ops):
-	print("F_start")
+	# print("F_start")
 	output_types = set([op.out_type for op in ops])
 	new_records = {typ:[] for typ in output_types}
 	depth = kb.curr_infer_depth = kb.curr_infer_depth+1
@@ -563,16 +720,16 @@ def forward(kb,ops):
 		
 	for typ in output_types:
 		if(typ in new_records):
-			print("A")
+			# print("A")
 			vmaps = List([rec[4] for rec in new_records[typ]])
-			print("_A")
+			# print("_A")
 			kb.u_vds[typ] = join_new_vals(kb.u_vds[typ],vmaps,depth)
 
 			if(typ == TYPE_ALIASES['float']):
 				kb.u_vs[typ] = array_from_dict(kb.u_vds[typ])
 			else:
 				kb.u_vs[typ] = list_from_dict(kb.u_vds[typ])
-	print("F_end")
+	# print("F_end")
 
 HE_deffered = deferred_type()
 @jitclass([('op_uid', i8),
@@ -615,10 +772,10 @@ def retrace_solutions(kb,ops,goal,g_typ):
 	records = kb.hists[g_typ]
 	# goal = kb.registered_types[g_typ](goal)
 	
-	print("RS_S")
+	# print("RS_S")
 	goals = List.empty_list(kb.registered_types[g_typ])
 	goals.append(goal)
-	print("RS_E")
+	# print("RS_E")
 
 	# hist_elems, , new_inds = retrace_one(goals,records)
 	# print(":0")
@@ -631,7 +788,7 @@ def retrace_solutions(kb,ops,goal,g_typ):
 	finished, i = False, 1
 	while(not finished):
 		nxt = {}
-		print("AQUI",[(k,type(v),v) for k,v in arg_inds.items()])
+		# print("AQUI",[(k,type(v),v) for k,v in arg_inds.items()])
 		for typ in arg_inds:
 			records,u_vds = kb.hists[typ], kb.u_vds[typ]
 			hist_elems = HistElmListList()#List.empty_list(ListType(HE))#new_HE_list(len(goals))#List([List.empty_list(HE) for i in range(len(goals))])
@@ -796,9 +953,10 @@ def how_search(kb,ops,goal,search_depth=1):
 		if(kb.curr_infer_depth > search_depth): break
 		forward(kb,ops)
 		for typ in kb.registered_types:
-			print("MOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOO",kb.curr_infer_depth)
-			print(typ)
+			# print("MOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOO",kb.curr_infer_depth)
+			# print(typ)
 			print(kb.u_vs[typ])
+			pass
 
 
 	if(goal in kb.u_vds[g_typ]):
@@ -886,6 +1044,16 @@ how_search(kb,[StrToFloat],"abab",1)
 end = time.time()
 print("Time elapsed: ",end - start)
 
+
+kb = buildKB()
+start = time.time()
+print("MOOSE PIMPLE")
+forward(kb,[SquaresOfPrimes])
+print(kb.u_vs)
+# how_search(kb,[HalfOfEven],100,1)
+end = time.time()
+print("Time elapsed: ",end - start)
+
 # kb = buildKB()
 # start = time.time()
 # how_search(kb,[Add,Subtract,Concatenate],"abab",2)
@@ -936,5 +1104,5 @@ def h1():
 # print("g1", time_ms(g1))
 # print("g2", time_ms(g2))
 # print("s1", time_ms(s1))
-# print("forward", time_ms(f1))
-# print("how_search", time_ms(h1))
+print("forward-depth-5", time_ms(f1))
+print("search-21-depth-2", time_ms(h1))

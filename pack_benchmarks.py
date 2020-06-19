@@ -18,6 +18,12 @@ from numba.cpython.charseq import  _get_code_impl,unicode_charseq_get_code,unico
 o_str =  optional(unicode_type)
 nb_str = unicode_type
 
+# @njit
+# def init_bool():
+# 	np.empty((5,),np.uint8)
+
+# init_bool()
+
 
 N=1000
 def time_ms(f):
@@ -168,8 +174,8 @@ print(exp_fixed_width(np.array([5,19,40,60,150,300])))
 # raise ValueError()
 
 bloopy_mc_noodler = NB_InterfaceElement_NamedTuple.instance_class
-print(bloopy_mc_noodler)
-raise ValueError()
+# print(bloopy_mc_noodler)
+# raise ValueError()
 
 @njit(parallel=False)
 def pack_from_numpy(inp,mlens):
@@ -368,3 +374,4 @@ print("Note to self: At the time of writing this for large states packing via_nu
 		"seems to be the fastest option, it is decently faster than packing by expanding " +
 		"the arguments into an njitted function (a perhaps simpler approach). Performance changes " +
 		"in later versions of numba (currently 0.50.0) might prompt a different decision." )
+

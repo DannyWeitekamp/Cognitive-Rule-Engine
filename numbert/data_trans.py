@@ -5,7 +5,7 @@ from numba import void,b1,u1,u2,u4,u8,i1,i2,i4,i8,f4,f8,c8,c16
 from numba.typed import List, Dict
 from numba.core.types import DictType, ListType, unicode_type, float64, NamedTuple, NamedUniTuple 
 from numba.cpython.unicode import  _set_code_point
-from utils import cache_safe_exec
+from .utils import cache_safe_exec
 from collections import namedtuple
 import numpy as np
 import timeit
@@ -342,7 +342,7 @@ class Numbalizer(object):
 	nominal_maps = Dict.empty(unicode_type,u1[:])
 
 	@classmethod
-	def __init__(self):
+	def __init__(cls):
 		for x in ["<#ANY>",None,'','?sel']:
 			cls.enumerize_value(x)
 

@@ -943,27 +943,19 @@ he_list = ListType(HE)
 def HistElmListList():
 	return List.empty_list(he_list)
 
-def retrace_solutions(kb,ops,goal,g_typ):
-
-	# depth = kb.u_vds[g_typ][goal]
+def retrace_solutions(kb,ops,goal,g_typ,max_solutions=1):
 	u_vds = kb.u_vds[g_typ]
 	records = kb.hists[g_typ]
-	# goal = kb.registered_types[g_typ](goal)
-	
-	# print("RS_S")
+
 	goals = List.empty_list(kb.registered_types[g_typ])
 	goals.append(goal)
-	# print("RS_E")
 
-	# hist_elems, , new_inds = retrace_one(goals,records)
-	# print(":0")
 	hist_elems = HistElmListList()#List.empty_list(ListType(HE))#new_HE_list(1)#List([List.empty_list(HE)],listtype=ListType(HE))
-	arg_inds = retrace_back_one(goals,records,u_vds,hist_elems)
+	arg_inds = retrace_back_one(goals,records,u_vds,hist_elems,max_solutions)
 
 	out = [{g_typ: hist_elems}]
 	all_arg_inds = [arg_inds]
 	
-	# goals = kb.u_vs[g_typ][arg_inds[g_typ]]
 	finished, i = False, 1
 	while(not finished):
 		nxt = {}
@@ -973,7 +965,7 @@ def retrace_solutions(kb,ops,goal,g_typ):
 			hist_elems = HistElmListList()#List.empty_list(ListType(HE))#new_HE_list(len(goals))#List([List.empty_list(HE) for i in range(len(goals))])
 			
 			goals = select_from_collection(kb.u_vs[typ],arg_inds[typ])
-			arg_inds = retrace_back_one(goals,records,u_vds,hist_elems)
+			arg_inds = retrace_back_one(goals,records,u_vds,hist_elems,max_solutions)
 			nxt[typ] = hist_elems
 			if(len(arg_inds) == 0):
 				finished = True
@@ -1011,7 +1003,7 @@ def retrace_solutions(kb,ops,goal,g_typ):
 		tups.append(tups_depth)
 	# pprint(tups[-1][g_typ][0])
 
-	out = [OperatorComposition(t) for t in tups[-1][g_typ][0]]
+	out = [OperatorComposition(t) for t in tups[-1][g_typ][0][:max_solutions]]
 
 	return out
 	# print("------------")
@@ -1078,65 +1070,56 @@ def unravel_indicies(indicies, shape):
 i8_i8_dict = DictType(i8,i8)
 i8_arr = i8[:]
 @njit(nogil=True,fastmath=True,cache=True) 
-def retrace_back_one(goals,records,u_vds,hist_elems,max_results=0):
+def retrace_back_one(goals,records,u_vds,hist_elems,max_solutions=1):
 	unq_arg_inds = Dict.empty(unicode_type, i8_i8_dict)
 	pos_by_typ = Dict.empty(unicode_type, i8)
 
-	# print("records")
-	# print(records)
-	# print("u_vds")
-	# print(u_vds)
-	# for record in records[0]:
-	# 	op_name, _hist, shape, arg_types, vmap = record
-	# 	for typ in arg_types:
-	# 		if(typ not in unq_arg_inds):
-	# 			unq_arg_inds[typ] = Dict.empty(i8,u1)
-	# 			pos_by_typ[typ] = 0
-
+	solution_quota = float(max_solutions-len(goals)) if max_solutions else np.inf
 	#Go through each goal in goals, and find applications of operations 
 	#	which resulted in each subgoal. Add the indicies of args of each 
 	#	goal satisficing operation application to the set of subgoals for 
 	#	the next iteration.
-	# _hist_elems = List.empty_list(ListType(HE))
 	for goal in goals:
+		n_goal_solutions = 0
 		hist_elems_k = List.empty_list(HE)
 		hist_elems.append(hist_elems_k)
 
 
 		#Determine the shallowest infer depth where the goal was encountered
 		shallowest_depth = u_vds[goal]
-		# print(goal,shallowest_depth)
-		# print([x for x in records.keys()],shallowest_depth)
-		# print([x for x in u_vds.keys()])
 
-		#If the goal was declared....
+		#If the goal was declared (i.e. it is present at depth 0) then
+		#	 make a no-op history element for it
 		if(shallowest_depth == 0):
-			
 			_,_,_,_, vmap = records[0][0]
 			if(goal in vmap):
 				arg_ind = np.array([vmap[goal]],dtype=np.int64)
 				hist_elems_k.append(HistElm(0,arg_ind))
-			# hist_elems_k.append(HistElm(0,arg_uids))
 
-		#Otherwise ....
+		#Otherwise the goal was infered from the declared values
 		else:
+			#For every record (i.e. history of an inference with a particular op) 
 			_records = records[shallowest_depth]
 			for record in _records:
+				needs_more_solutions = True
 				op_uid, _hist, shape, arg_types, vmap = record
 
 				#Make a dictionary for each type to collect unique arg values
-				# for _records in records:
-				# 	print(_records)
 				for typ in arg_types:
 					if(typ not in unq_arg_inds):
 						unq_arg_inds[typ] = Dict.empty(i8,i8)
 						pos_by_typ[typ] = 0
 
+				#If the record shows that the goal was produced by the op associated
+				#	with record. 
 				if(goal in vmap):
+					#Then find any set of arguments used to produce it
 					wher = np.where(_hist == vmap[goal])[0]
 					inds = unravel_indicies(wher,shape)
 					
+					#For every such combination of arguments
 					for i in range(inds.shape[0]):
+						#Build a mapping from each argument's index to a unique id
 						arg_uids = np.empty(inds.shape[1],np.int64)
 						for j in range(inds.shape[1]):
 							d = unq_arg_inds[arg_types[j]]
@@ -1146,11 +1129,18 @@ def retrace_back_one(goals,records,u_vds,hist_elems,max_results=0):
 								pos_by_typ[typ] += 1
 							arg_uids[j] = d[v]
 						
-						# print(op_uid,arg_uids)
+						#Store the op_uid and argument unique ids in a HistElm
 						hist_elems_k.append(HistElm(op_uid,arg_uids))
-						# print()
+						n_goal_solutions += 1
+						if(n_goal_solutions >= 1 and solution_quota <= 0):
+							needs_more_solutions = False
+							break
+				if(not needs_more_solutions): break
 
-	#Consolidate the dictionaries of unique arg indicies into arrays
+
+	#Consolidate the dictionaries of unique arg indicies into arrays.
+	#	These will be used with select_from_collection to slice out goals
+	#	for the next iteration.
 	out_arg_inds = Dict.empty(unicode_type,i8_arr)
 	for typ in unq_arg_inds:
 		u_vals = out_arg_inds[typ] = np.empty((len(unq_arg_inds[typ])),np.int64)
@@ -1165,7 +1155,7 @@ def retrace_back_one(goals,records,u_vds,hist_elems,max_results=0):
 
 
 
-def how_search(kb,ops,goal,search_depth=1):
+def how_search(kb,ops,goal,search_depth=1,max_solutions=1):
 	kb._assert_declared_values()
 	if(isinstance(goal, (int,float))):
 		g_typ = TYPE_ALIASES['float']
@@ -1187,7 +1177,7 @@ def how_search(kb,ops,goal,search_depth=1):
 
 
 	if(goal in kb.u_vds[g_typ]):
-		return retrace_solutions(kb,ops,goal,g_typ)
+		return retrace_solutions(kb,ops,goal,g_typ,max_solutions=max_solutions)
 	return None
 	# 	print("FOUND IT ", kb.curr_infer_depth)
 

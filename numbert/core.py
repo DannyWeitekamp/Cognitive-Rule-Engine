@@ -32,7 +32,7 @@ print("START")
 #Monkey Patch Numba so that the builtin functions for List() and Dict() cache between runs 
 def monkey_patch_caching(mod):
 	for name, val in mod.__dict__.items():
-		if(isinstance(val,Dispatcher) and name != "_sort"):
+		if(isinstance(val,Dispatcher) and name not in ["_sort","_getitem"]):
 			val.enable_caching()
 
 #They promised to fix this by 0.51.0, so we'll only run it if an earlier release

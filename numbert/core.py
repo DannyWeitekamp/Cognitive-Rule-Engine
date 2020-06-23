@@ -7,6 +7,10 @@ from numba.core.types import ListType, DictType, unicode_type, Array, Tuple
 from numba.experimental import jitclass
 from numba.core.dispatcher import Dispatcher
 from numba.core import sigutils 
+import numba.typed.typedlist as tl_mod 
+import numba.typed.typeddict as td_mod
+import numba
+from numba.core.dispatcher import Dispatcher
 import numpy as np
 import re
 from collections.abc import Iterable 
@@ -19,9 +23,24 @@ import time
 from numbert.data_trans import infer_type, infer_nb_type
 
 from numbert.caching import _UniqueHashable
+import itertools
 N = 10
 
 print("START")
+
+
+#Monkey Patch Numba so that the builtin functions for List() and Dict() cache between runs 
+def monkey_patch_caching(mod):
+	for name, val in mod.__dict__.items():
+		if(isinstance(val,Dispatcher) and name != "_sort"):
+			val.enable_caching()
+
+#They promised to fix this by 0.51.0, so we'll only run it if an earlier release
+if(tuple([int(x) for x in numba.__version__.split('.')]) < (0,51,0)):
+	monkey_patch_caching(tl_mod)
+	monkey_patch_caching(td_mod)
+
+
 
 def parse_signature(s):
 	fn_match = re.match(r"(?P<out_type>\w+)\s?\((?P<arg_types>(?P<args>\w+(,\s?)?)+)\)", s)
@@ -54,7 +73,6 @@ class OperatorComposition(object):
 	def _gen_template(self,x):
 		if(isinstance(x,(list,tuple))):
 			rest = [self._gen_template(x[j]) for j in range(1,len(x))]
-			print(rest)
 			return x[0].template.format(*rest,name=x[0].__name__)
 		elif(isinstance(x,Var)):
 			return "{}"
@@ -771,6 +789,7 @@ class NBRT_KnowledgeBase(object):
 		
 		self.registered_types ={'f8': f8, 'unicode_type' : unicode_type}
 		self.hist_consistent = True
+		self.declared_consistent = True
 
 	def _assert_record_type(self,typ):
 		if(typ not in self.hist_structs):
@@ -796,6 +815,29 @@ class NBRT_KnowledgeBase(object):
 					   np.empty((0,),dtype=np.int64), tl,vmap]) )
 
 
+	def _assert_declared_values(self):
+		if(not self.declared_consistent):
+			for typ in self.registered_types.keys():
+				self._assert_declare_store(typ)
+				record = self.hists[typ][0][0]
+				_,_,_,_, vmap = record
+
+				typ_cls = self.registered_types[typ]
+				d = self.u_vds[typ] = Dict.empty(typ_cls,i8)
+				for x in vmap:
+					d[x] = 0
+				if(typ == TYPE_ALIASES['float']):
+					self.u_vs[typ] = array_from_dict(d)
+				else:
+					self.u_vs[typ] = list_from_dict(d)
+
+				self.dec_u_vs[typ] = self.u_vs[typ].copy()
+				print(self.u_vs)
+			self.declared_consistent = True
+
+
+
+
 	def declare(self,x,typ=None):
 		if(typ is None): typ = TYPE_ALIASES[infer_type(x)]
 		self._assert_declare_store(typ)
@@ -805,6 +847,7 @@ class NBRT_KnowledgeBase(object):
 		if(x not in vmap):
 			vmap[x] = len(vmap)
 			self.hist_consistent = False
+			self.declared_consistent = False
 
 
 
@@ -835,7 +878,11 @@ def insert_record(kb,depth,op, btsr, vmap):
 # Subtract.broadcast_forward = Subtract_forward
 # Concatenate.broadcast_forward = cat_forward
 def forward(kb,ops):
-	# print("F_start")
+	# print("F_start",kb.curr_infer_depth)
+	# if(kb.curr_infer_depth == 0):
+	kb._assert_declared_values()
+	# 	kb.u_vds = kb.hists[]
+
 	output_types = set([op.out_type for op in ops])
 	new_records = {typ:[] for typ in output_types}
 	depth = kb.curr_infer_depth = kb.curr_infer_depth+1
@@ -913,12 +960,6 @@ def retrace_solutions(kb,ops,goal,g_typ):
 	hist_elems = HistElmListList()#List.empty_list(ListType(HE))#new_HE_list(1)#List([List.empty_list(HE)],listtype=ListType(HE))
 	arg_inds = retrace_back_one(goals,records,u_vds,hist_elems)
 
-
-	print('goals')
-	print(goals)
-	print('arg_inds')
-	print(arg_inds)
-
 	out = [{g_typ: hist_elems}]
 	all_arg_inds = [arg_inds]
 	
@@ -933,10 +974,6 @@ def retrace_solutions(kb,ops,goal,g_typ):
 			
 			goals = select_from_collection(kb.u_vs[typ],arg_inds[typ])
 			arg_inds = retrace_back_one(goals,records,u_vds,hist_elems)
-			print('goals')
-			print(goals)
-			print('arg_inds')
-			print(arg_inds)
 			nxt[typ] = hist_elems
 			if(len(arg_inds) == 0):
 				finished = True
@@ -948,20 +985,36 @@ def retrace_solutions(kb,ops,goal,g_typ):
 
 	# print("out")
 	# print(out)
-	print("------------")
-	for i in range(len(out)-1,-1,-1):
-		print(i)
-		# pprint(out[i])
-		for typ in out[i].keys():
-			print(typ)
+	# print("------------")
+	tups = []
+	for i in range(len(out)):
+		# print(len(out)-i)
+		tups_depth = {}
+		for typ in out[len(out)-i-1].keys():
+			# print(typ)
 			# print(out[i][typ])
-			for j,l in enumerate(out[i][typ]):
-				if(len(l) == 0):
-					pass
-				else:
-					pass
-				print([str(x.op_uid) + ":(" + str(x.args) +")" for x in l ])
-	print("------------")
+			tups_depth_typ = tups_depth[typ] = []
+			for j,l in enumerate(out[len(out)-i-1][typ]):
+				tups_depth_j = []
+				for he in l:
+					if(he.op_uid == 0):
+						# print(kb.dec_u_vs[typ][he.args[0].item()])
+						tups_depth_j.append(kb.dec_u_vs[typ][he.args[0].item()])
+					else:
+						op = BaseOperator.operators_by_uid[he.op_uid]
+						prod_lists = [[op]] +[tups[i-1][typ][he.args[k]] for k,typ in enumerate(op.arg_types)]
+						for t in itertools.product(*prod_lists):
+							# print(t)
+							tups_depth_j.append(t)
+					# print([str(x.op_uid) + ":(" + str(x.args) +")" for x in l ])
+				tups_depth_typ.append(tups_depth_j)
+		tups.append(tups_depth)
+	# pprint(tups[-1][g_typ][0])
+
+	out = [OperatorComposition(t) for t in tups[-1][g_typ][0]]
+
+	return out
+	# print("------------")
 
 		
 
@@ -1025,7 +1078,7 @@ def unravel_indicies(indicies, shape):
 i8_i8_dict = DictType(i8,i8)
 i8_arr = i8[:]
 @njit(nogil=True,fastmath=True,cache=True) 
-def retrace_back_one(goals,records,u_vds,hist_elems):
+def retrace_back_one(goals,records,u_vds,hist_elems,max_results=0):
 	unq_arg_inds = Dict.empty(unicode_type, i8_i8_dict)
 	pos_by_typ = Dict.empty(unicode_type, i8)
 
@@ -1058,7 +1111,11 @@ def retrace_back_one(goals,records,u_vds,hist_elems):
 
 		#If the goal was declared....
 		if(shallowest_depth == 0):
-			pass
+			
+			_,_,_,_, vmap = records[0][0]
+			if(goal in vmap):
+				arg_ind = np.array([vmap[goal]],dtype=np.int64)
+				hist_elems_k.append(HistElm(0,arg_ind))
 			# hist_elems_k.append(HistElm(0,arg_uids))
 
 		#Otherwise ....
@@ -1109,6 +1166,7 @@ def retrace_back_one(goals,records,u_vds,hist_elems):
 
 
 def how_search(kb,ops,goal,search_depth=1):
+	kb._assert_declared_values()
 	if(isinstance(goal, (int,float))):
 		g_typ = TYPE_ALIASES['float']
 	elif(isinstance(goal, (str))):
@@ -1121,14 +1179,16 @@ def how_search(kb,ops,goal,search_depth=1):
 		if(kb.curr_infer_depth > search_depth): break
 		forward(kb,ops)
 		for typ in kb.registered_types:
+			pass
 			# print("MOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOO",kb.curr_infer_depth)
 			# print(typ)
 			# print(kb.u_vs[typ])
-			pass
+			
 
 
 	if(goal in kb.u_vds[g_typ]):
-		retrace_solutions(kb,ops,goal,g_typ)
+		return retrace_solutions(kb,ops,goal,g_typ)
+	return None
 	# 	print("FOUND IT ", kb.curr_infer_depth)
 
 		

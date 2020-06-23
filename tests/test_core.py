@@ -3,6 +3,7 @@ from numba import njit
 from numba import void,b1,u1,u2,u4,u8,i1,i2,i4,i8,f4,f8,c8,c16
 from numba.typed import List, Dict
 from numba.core.types import ListType, DictType, unicode_type, Array, Tuple
+from pprint import pprint
 
 from numbert.core import * #Grumbo_forward1, Grumbo_forward2, BaseOperator,NBRT_KnowledgeBase,\
 	 #Add, Subtract, Concatenate, StrToFloat, \
@@ -19,9 +20,9 @@ def time_ms(f):
 
 
 
-kb = NBRT_KnowledgeBase()
-kb.declare(1)
-kb.declare("1")
+# kb = NBRT_KnowledgeBase()
+# kb.declare(1)
+# kb.declare("1")
 
 
 X = np.array(np.arange(10),np.float32)
@@ -52,11 +53,19 @@ def newVmap(X,typ):
 def buildKB():
 	kb = NBRT_KnowledgeBase()
 
-	kb.u_vs['unicode_type'] = S1
-	kb.u_vs['f8'] = X
+	for s in S1:
+		kb.declare(s)
 
-	kb.u_vds['unicode_type'] = newVmap(S1,unicode_type)
-	kb.u_vds['f8'] = newVmap(X,f8)
+	for n in X:
+		kb.declare(n.item())
+
+
+
+	# kb.u_vs['unicode_type'] = S1
+	# kb.u_vs['f8'] = X
+
+	# kb.u_vds['unicode_type'] = newVmap(S1,unicode_type)
+	# kb.u_vds['f8'] = newVmap(X,f8)
 
 	# for s in S1:
 	# 	kb.u_vds['unicode_type'][s] = 0
@@ -80,8 +89,19 @@ import time
 
 kb = buildKB()
 start = time.time()
-how_search(kb,[Add,Subtract,Concatenate],21,2)
+print("HOW RESULTS")
+results = how_search(kb,[Add,Subtract],37,search_depth=3)
 end = time.time()
+# pprint(results)
+print("Time elapsed: ",end - start)
+
+
+kb = buildKB()
+start = time.time()
+print("HOW RESULTS")
+results = how_search(kb,[Add,Subtract],37,search_depth=3)
+end = time.time()
+pprint(results)
 print("Time elapsed: ",end - start)
 
 # print(Add.broadcast_forward.stats.cache_hits)

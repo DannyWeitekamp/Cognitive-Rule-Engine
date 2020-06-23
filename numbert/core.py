@@ -5,6 +5,7 @@ from numba import void,b1,u1,u2,u4,u8,i1,i2,i4,i8,f4,f8,c8,c16
 from numba.typed import List, Dict
 from numba.core.types import ListType, DictType, unicode_type, Array, Tuple
 from numba.experimental import jitclass
+from numba.core.dispatcher import Dispatcher
 from numba.core import sigutils 
 import numpy as np
 import re
@@ -12,8 +13,12 @@ from collections.abc import Iterable
 from collections import deque
 import timeit
 from pprint import pprint
-from utils import cache_safe_exec
+from numbert.utils import cache_safe_exec
 import inspect
+import time
+from numbert.data_trans import infer_type, infer_nb_type
+
+from numbert.caching import _UniqueHashable
 N = 10
 
 print("START")
@@ -30,8 +35,13 @@ def parse_signature(s):
 		# [time][op]
 
 class Var(object):
+	def __init__(self,binding=None):
+		self.binding = binding
 	def __repr__(self):
-		return "?"
+		if(self.binding is None):
+			return "?"
+		else:
+			return self.binding
 
 
 
@@ -40,12 +50,12 @@ class Var(object):
 class OperatorComposition(object):
 	def __init__(self,tup):
 		self.tup = tup
-		self.template = self._gen_template(tup)
-
+		
 	def _gen_template(self,x):
 		if(isinstance(x,(list,tuple))):
 			rest = [self._gen_template(x[j]) for j in range(1,len(x))]
-			return x[0].template.format(*rest)
+			print(rest)
+			return x[0].template.format(*rest,name=x[0].__name__)
 		elif(isinstance(x,Var)):
 			return "{}"
 		else:
@@ -58,36 +68,73 @@ class OperatorComposition(object):
 		for i in range(1,L):
 			t_i = tup[i]
 			if(isinstance(t_i,tuple)):
-				val = execute_composition(t_i,dq_args)
+				val = self._execute_composition(t_i,dq_args)
 				resolved_args.append(val)
 			elif(isinstance(t_i,Var)):
-				a_i = dq_args.popleft()
+				try:
+					a_i = dq_args.popleft()
+				except IndexError:
+					raise TypeError("Not Enough Arguments For {}".format(self))
+
 				resolved_args.append(a_i)
 			else:
 				resolved_args.append(t_i)
-
+		if(len(dq_args) > 0):
+			raise TypeError("Too Many Arguments For {}".format(self))
 		if(hasattr(op,'condition')):
 			if(not op.condition(*resolved_args)):
 				raise ValueError()
 		return op.forward(*resolved_args)
 
+	@property
+	def template(self):
+		if(not hasattr(self,"_template")):
+			self._template = self._gen_template(self.tup)
+		return self._template
+
+	def _count_args(self,x):
+		if(isinstance(x,(list,tuple))):
+			return sum([self._count_args(y) for y in x])
+		elif(isinstance(x,Var)):
+			return 1
+		else:
+			return 0
+
+	@property
+	def n_args(self):
+		if(not hasattr(self,"_n_args")):
+			self._n_args = self._count_args(self.tup)
+		return self._n_args
+	
+
+	def __repr__(self):
+		return self.template.format(*(["?"]*self.n_args))
+
+
 	def __call__(self,*args):
 		value = self._execute_composition(self.tup,deque(args))
 		return value
 
+class BaseOperatorMeta(type):
+	def __repr__(cls):
+		return cls.template.format(*(['?']*len(cls.arg_types)),name=cls.__name__)
+
+	# def __str__(cls):
+	# 	return cls.template.format(,name=cls.__name__)
 
 
 
-
-
-class BaseOperator(object):
+class BaseOperator(_UniqueHashable, metaclass=BaseOperatorMeta):
+	# __metaclass__ = BaseOperatorMeta
 	#Static Attributes
 	registered_operators = {}
-	operators_by_uid = []
+	operators_by_uid = [None] #Save space for no-op
 
 	#Subclass Attributes
 	commutes = False
 	muted_exceptions = []
+
+	hash_on = set(['commutes','forward','condition','signature','muted_exceptions'])
 
 	@classmethod
 	def _init_signature(cls):
@@ -143,8 +190,6 @@ class BaseOperator(object):
 		 	%(cls.__name__,",".join(args),len(args),cls.signature,len(cls.arg_types))
 
 
-
-
 	@classmethod
 	def _register(cls):
 		name = cls.__name__.lower()
@@ -167,12 +212,17 @@ class BaseOperator(object):
 	def __init_subclass__(cls, **kwargs):
 		super().__init_subclass__(**kwargs)
 
+		t0 = time.clock_gettime_ns(time.CLOCK_BOOTTIME)/float(1e6)
 		cls._init_signature()
 		cls._check_funcs()
 		cls._register()
 		cls._init_template()
+		t1 = time.clock_gettime_ns(time.CLOCK_BOOTTIME)/float(1e6)
+		print("Init Stuff Time %.4f ms" % (t1-t0))
 
 		compile_forward(cls)
+		t2 = time.clock_gettime_ns(time.CLOCK_BOOTTIME)/float(1e6)
+		print("Compile Forward Time %.4f ms" % (t2-t1))
 
 	@classmethod
 	def _assert_cargs(cls,args,allow_zero=True):
@@ -219,6 +269,7 @@ class BaseOperator(object):
 		return type("MOOSE",(BaseOperator,),{'signature' : signature, 'forward' : f})
 
 
+	# @classmethod
 	def get_template(self,*args):
 		iargs, cls = self._assert_iargs(args), type(self)
 
@@ -236,7 +287,12 @@ class BaseOperator(object):
 		print(temp, iarg_strs)
 		return temp.format(*iarg_strs)
 
-	def __str__(self):
+	@classmethod
+	def get_hashable(cls):
+		d = {k: v for k,v in vars(cls).items() if k in cls.hash_on}
+		return d
+
+	def __repr__(self):
 		return self.get_template()
 
 	def __call__(self,*args):
@@ -281,6 +337,8 @@ def compile_forward(op):
 	# 	forward_func.compile(op.signature)
 	# except Exception:
 	# 	forward_func, nopython = op.forward, False
+	time1 = time.clock_gettime_ns(time.CLOCK_BOOTTIME)/float(1e6)
+
 
 	f_name = op.__name__+"_forward"
 	if(nopython):
@@ -351,6 +409,10 @@ def compile_forward(op):
 	cond_expr = cond_expr.format(exec_code)
 	ret_expr = _+"return out, d\n"
 	source = header + func_def + defs +  loops + cond_expr+ret_expr
+
+	time2 = time.clock_gettime_ns(time.CLOCK_BOOTTIME)/float(1e6)
+	print("Gen Source Time %.4f ms" % (time2-time1))
+
 	print(source)
 	print("END----------------------")
 	l,g = cache_safe_exec(source,gbls={'f':forward_func,'c': condition_func,**globals()})
@@ -365,6 +427,8 @@ def compile_forward(op):
 			f = forward_func
 			return _bf(*args)
 		op.broadcast_forward = bf
+	time3 = time.clock_gettime_ns(time.CLOCK_BOOTTIME)/float(1e6)
+	print("Compile Source Time %.4f ms" % (time3-time2))
 	
 
 	# print(func_def + defs +  loops + cond_expr)
@@ -373,7 +437,7 @@ def compile_forward(op):
 				# 'out_func = {}'
 
 # def normalize_types():
-
+t1 = time.clock_gettime_ns(time.CLOCK_BOOTTIME)/float(1e6)
 import math
 #from here: https://stackoverflow.com/questions/18833759/python-prime-number-checker
 @njit(cache=True)
@@ -416,7 +480,6 @@ class Subtract(BaseOperator):
 		return x - y
 
 class Concatenate(BaseOperator):
-	commutes = True
 	signature = 'string(string,string)'
 	def forward(x, y):
 		return x + y
@@ -427,7 +490,8 @@ class StrToFloat(BaseOperator):
 	def forward(x):
 		return float(x)
 
-
+t2 = time.clock_gettime_ns(time.CLOCK_BOOTTIME)/float(1e6)
+print("Init all %.4f ms" % (t2-t1))
 
 # a = Add(None,Add())
 # print(type(a).signature , ":", a.signature )
@@ -435,15 +499,19 @@ class StrToFloat(BaseOperator):
 
 # print(a.forward)
 # a(1,2,3)
+print(repr(Add))
+# print(Add.__metaclass__)
 v = Var()
-t = (Add,v,v)
+t = (Add,v,(Subtract,v,v))
 oc = OperatorComposition(t)
+
 print(oc)
-print(oc(1,2))
+print(oc.template)
+print(oc(1,2,3))
 
 # Add(None)
 
-raise ValueError("STOP")
+# raise ValueError("STOP")
 # compile_forward(Add)
 # compile_forward(Subtract)
 # compile_forward(Concatenate)
@@ -669,7 +737,28 @@ def list_from_dict(d):
 		out.append(v)
 	return out
 	
+
+
+
+
 class NBRT_KnowledgeBase(object):
+	'''
+		hist : dict<str,Dict<int,Record>> stores a compact record of inferences
+		hist_structs : dict<str,Record_Typ>> Stores the numba tuple types for records.
+			keyed by type string valued by a numba tuple representing the tuple type
+		curr_infer_depth: int The deepest inference depth in the knowledge base so far
+		u_vds: dict<str,Dict<Typ,int>> Dictionaries for each type which map values to
+			the deepest depth at which they have been inffered.
+		u_vs: dict<str,Iterable<Typ>> Lists/Arrays for each type which simply hold the
+			values() of their corresponding dictionary in u_vds. The purpose of this is
+			is to make a contiguous copy (Dictionary keys are not gaurenteed to be contiguous)
+
+		dec_u_vs: like dict<str,Iterable<Typ>> u_vs but is only for declared facts (i.e. depth=0)
+
+		registered_types: Maps typ strings to their actual types
+		hist_consistent: whether or not the current history of operation use is consistent
+			with the declared facts.
+	'''
 	def __init__(self):
 		self.hists = {}
 		self.hist_structs = {}
@@ -677,7 +766,46 @@ class NBRT_KnowledgeBase(object):
 		# self.vmaps = {}
 		self.u_vds = {}
 		self.u_vs = {}
+
+		self.dec_u_vs = {}
+		
 		self.registered_types ={'f8': f8, 'unicode_type' : unicode_type}
+		self.hist_consistent = True
+
+	def _assert_record_type(self,typ):
+		if(typ not in self.hist_structs):
+			typ_cls = self.registered_types[typ]
+
+
+			#Type : (op_id, _hist, shape, arg_types, vmap)
+			struct_typ = self.hist_structs[typ] = Tuple([i8,
+										 i8[::1], i8[::1], ListType(unicode_type),
+										 DictType(typ_cls,i8)])
+			self.hists[typ] = self.hists.get(typ,Dict.empty(i8,ListType(struct_typ)))
+		return self.hist_structs[typ]
+	def _assert_declare_store(self,typ):
+		struct_typ = self._assert_record_type(typ)
+		typ_store = self.hists[typ]
+		if(0 not in typ_store):
+			typ_cls = self.registered_types[typ]
+			tsd = typ_store[0] = typ_store.get(0, List.empty_list(struct_typ))
+			tl = List();tl.append(typ);
+			vmap = Dict.empty(typ_cls,i8)
+			#Type : (0 (i.e. no-op), _hist, shape, arg_types, vmap)
+			tsd.append( tuple([0, np.empty((0,),dtype=np.int64),
+					   np.empty((0,),dtype=np.int64), tl,vmap]) )
+
+
+	def declare(self,x,typ=None):
+		if(typ is None): typ = TYPE_ALIASES[infer_type(x)]
+		self._assert_declare_store(typ)
+		record = self.hists[typ][0][0]
+		_,_,_,_, vmap = record
+
+		if(x not in vmap):
+			vmap[x] = len(vmap)
+			self.hist_consistent = False
+
 
 
 # @njit(nogil=True,fastmath=True,parallel=False) 
@@ -685,14 +813,15 @@ class NBRT_KnowledgeBase(object):
 def insert_record(kb,depth,op, btsr, vmap):
 	# print('is')
 	typ = op.out_type
-	if(typ not in kb.hist_structs):
-		typ_cls = kb.registered_types[typ]
-		kb.hist_structs[typ] = Tuple([i8,
-									 i8[::1], i8[::1], ListType(unicode_type),
-									 DictType(typ_cls,i8)])
+	struct_typ = kb._assert_record_type(typ)
+	# if(typ not in kb.hist_structs):
+	# 	typ_cls = kb.registered_types[typ]
+	# 	kb.hist_structs[typ] = Tuple([i8,
+	# 								 i8[::1], i8[::1], ListType(unicode_type),
+	# 								 DictType(typ_cls,i8)])
 
-	typ_store = kb.hists[typ] = kb.hists.get(typ,Dict.empty(i8,ListType(kb.hist_structs[typ])))
-	tsd = typ_store[depth] = typ_store.get(depth, List.empty_list(kb.hist_structs[typ]))
+	typ_store = kb.hists[typ] = kb.hists.get(typ,Dict.empty(i8,ListType(struct_typ)))
+	tsd = typ_store[depth] = typ_store.get(depth, List.empty_list(struct_typ))
 	tsd.append(tuple([op.uid,
 					  btsr.reshape(-1), np.array(btsr.shape,np.int64), List(op.arg_types),
 					  vmap]))
@@ -738,6 +867,8 @@ class HistElm(object):
 	def __init__(self,op_uid,args):
 		self.op_uid = op_uid
 		self.args = args
+	# def __repr__(self):
+	# 	return str(self.op_uid) + ":" + str(self.args) 
 HE = HistElm.class_type.instance_type
 HE_deffered.define(HE)
 
@@ -782,7 +913,14 @@ def retrace_solutions(kb,ops,goal,g_typ):
 	hist_elems = HistElmListList()#List.empty_list(ListType(HE))#new_HE_list(1)#List([List.empty_list(HE)],listtype=ListType(HE))
 	arg_inds = retrace_back_one(goals,records,u_vds,hist_elems)
 
+
+	print('goals')
+	print(goals)
+	print('arg_inds')
+	print(arg_inds)
+
 	out = [{g_typ: hist_elems}]
+	all_arg_inds = [arg_inds]
 	
 	# goals = kb.u_vs[g_typ][arg_inds[g_typ]]
 	finished, i = False, 1
@@ -795,6 +933,10 @@ def retrace_solutions(kb,ops,goal,g_typ):
 			
 			goals = select_from_collection(kb.u_vs[typ],arg_inds[typ])
 			arg_inds = retrace_back_one(goals,records,u_vds,hist_elems)
+			print('goals')
+			print(goals)
+			print('arg_inds')
+			print(arg_inds)
 			nxt[typ] = hist_elems
 			if(len(arg_inds) == 0):
 				finished = True
@@ -804,10 +946,22 @@ def retrace_solutions(kb,ops,goal,g_typ):
 		assert i <= kb.curr_infer_depth, "Retrace has persisted past current infer depth."
 		i += 1
 
-			
-	# for i in range(len(out)):
-	# 	print(i)
-	# 	pprint(out[i])
+	# print("out")
+	# print(out)
+	print("------------")
+	for i in range(len(out)-1,-1,-1):
+		print(i)
+		# pprint(out[i])
+		for typ in out[i].keys():
+			print(typ)
+			# print(out[i][typ])
+			for j,l in enumerate(out[i][typ]):
+				if(len(l) == 0):
+					pass
+				else:
+					pass
+				print([str(x.op_uid) + ":(" + str(x.args) +")" for x in l ])
+	print("------------")
 
 		
 
@@ -875,7 +1029,10 @@ def retrace_back_one(goals,records,u_vds,hist_elems):
 	unq_arg_inds = Dict.empty(unicode_type, i8_i8_dict)
 	pos_by_typ = Dict.empty(unicode_type, i8)
 
-
+	# print("records")
+	# print(records)
+	# print("u_vds")
+	# print(u_vds)
 	# for record in records[0]:
 	# 	op_name, _hist, shape, arg_types, vmap = record
 	# 	for typ in arg_types:
@@ -891,38 +1048,50 @@ def retrace_back_one(goals,records,u_vds,hist_elems):
 	for goal in goals:
 		hist_elems_k = List.empty_list(HE)
 		hist_elems.append(hist_elems_k)
+
+
+		#Determine the shallowest infer depth where the goal was encountered
 		shallowest_depth = u_vds[goal]
+		# print(goal,shallowest_depth)
 		# print([x for x in records.keys()],shallowest_depth)
 		# print([x for x in u_vds.keys()])
-		if(shallowest_depth == 0): continue
-		_records = records[shallowest_depth]
-		for record in _records:
-			op_uid, _hist, shape, arg_types, vmap = record
 
-			#Make a dictionary for each type to collect unique arg values
-			# for _records in records:
-			# 	print(_records)
-			for typ in arg_types:
-				if(typ not in unq_arg_inds):
-					unq_arg_inds[typ] = Dict.empty(i8,i8)
-					pos_by_typ[typ] = 0
+		#If the goal was declared....
+		if(shallowest_depth == 0):
+			pass
+			# hist_elems_k.append(HistElm(0,arg_uids))
 
-			if(goal in vmap):
-				wher = np.where(_hist == vmap[goal])[0]
-				inds = unravel_indicies(wher,shape)
-				
-				for i in range(inds.shape[0]):
-					arg_uids = np.empty(inds.shape[1],np.int64)
-					for j in range(inds.shape[1]):
-						d = unq_arg_inds[arg_types[j]]
-						v = inds[i,j]
-						if(v not in d):
-							d[v] = pos_by_typ[typ]
-							pos_by_typ[typ] += 1
-						arg_uids[j] = d[v]
+		#Otherwise ....
+		else:
+			_records = records[shallowest_depth]
+			for record in _records:
+				op_uid, _hist, shape, arg_types, vmap = record
+
+				#Make a dictionary for each type to collect unique arg values
+				# for _records in records:
+				# 	print(_records)
+				for typ in arg_types:
+					if(typ not in unq_arg_inds):
+						unq_arg_inds[typ] = Dict.empty(i8,i8)
+						pos_by_typ[typ] = 0
+
+				if(goal in vmap):
+					wher = np.where(_hist == vmap[goal])[0]
+					inds = unravel_indicies(wher,shape)
 					
-					# print(arg_uids)
-					hist_elems_k.append(HistElm(op_uid,arg_uids))
+					for i in range(inds.shape[0]):
+						arg_uids = np.empty(inds.shape[1],np.int64)
+						for j in range(inds.shape[1]):
+							d = unq_arg_inds[arg_types[j]]
+							v = inds[i,j]
+							if(v not in d):
+								d[v] = pos_by_typ[typ]
+								pos_by_typ[typ] += 1
+							arg_uids[j] = d[v]
+						
+						# print(op_uid,arg_uids)
+						hist_elems_k.append(HistElm(op_uid,arg_uids))
+						# print()
 
 	#Consolidate the dictionaries of unique arg indicies into arrays
 	out_arg_inds = Dict.empty(unicode_type,i8_arr)
@@ -930,7 +1099,6 @@ def retrace_back_one(goals,records,u_vds,hist_elems):
 		u_vals = out_arg_inds[typ] = np.empty((len(unq_arg_inds[typ])),np.int64)
 		for i, v in enumerate(unq_arg_inds[typ]):
 			u_vals[i] = v
-	# print(out_arg_inds)
 
 	return out_arg_inds
 
@@ -955,7 +1123,7 @@ def how_search(kb,ops,goal,search_depth=1):
 		for typ in kb.registered_types:
 			# print("MOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOO",kb.curr_infer_depth)
 			# print(typ)
-			print(kb.u_vs[typ])
+			# print(kb.u_vs[typ])
 			pass
 
 
@@ -967,142 +1135,3 @@ def how_search(kb,ops,goal,search_depth=1):
 	# else:
 	# 	print("NOT HERE")
 
-
-
-
-def time_ms(f):
-		f() #warm start
-		return " %0.6f ms" % (1000.0*(timeit.timeit(f, number=N)/float(N)))
-
-
-
-
-X = np.array(np.arange(10),np.float32)
-y = 17
-# forward(X,y,[Add,Multiply])
-# print("OUT",Add_forward1(X,X))
-# print(Add_forward2(X,X))
-
-@njit(nogil=True,fastmath=True,cache=True) 
-def make_S(offset):
-	S = List.empty_list(unicode_type)
-	for x in range(48+offset,48+offset+5):
-	# for x in range(97+offset,97+offset+5):
-		S.append("1"+chr(x))
-	S.append("a")
-	return S#np.array(S)
-S1 = make_S(0)
-S2 = make_S(5)
-
-
-@njit(cache=True)
-def newVmap(X,typ):
-	d = Dict.empty(typ,i8)
-	for x in X:
-		d[x] = 0
-	return d
-
-def buildKB():
-	kb = NBRT_KnowledgeBase()
-
-	kb.u_vs['unicode_type'] = S1
-	kb.u_vs['f8'] = X
-
-	kb.u_vds['unicode_type'] = newVmap(S1,unicode_type)
-	kb.u_vds['f8'] = newVmap(X,f8)
-
-	# for s in S1:
-	# 	kb.u_vds['unicode_type'][s] = 0
-	# for x in X:
-	# 	kb.u_vds['f8'][x] = 0
-
-	return kb
-
-print("MID")
-kb = buildKB()
-print("MID2")
-# print("STAAAAART")
-# for op in [Add,Subtract,Concatenate]:
-# 	print(op, op.uid)
-# for op in [Add,Subtract,Concatenate]:
-# 	print(op, op.uid)
-# print(BaseOperator.operators_by_uid)
-# forward(kb,[Add,Subtract,Concatenate])
-# forward(kb,[Add,Subtract,Concatenate])
-import time
-# start = time.time()
-# how_search(kb,[Add,Subtract,Concatenate],21,2)
-# end = time.time()
-# print("Time elapsed: ",end - start)
-
-# print(Add.broadcast_forward.stats.cache_hits)
-
-
-kb = buildKB()
-start = time.time()
-how_search(kb,[StrToFloat],"abab",1)
-end = time.time()
-print("Time elapsed: ",end - start)
-
-
-kb = buildKB()
-start = time.time()
-print("MOOSE PIMPLE")
-forward(kb,[SquaresOfPrimes])
-print(kb.u_vs)
-# how_search(kb,[HalfOfEven],100,1)
-end = time.time()
-print("Time elapsed: ",end - start)
-
-# kb = buildKB()
-# start = time.time()
-# how_search(kb,[Add,Subtract,Concatenate],"abab",2)
-# end = time.time()
-# print("Time elapsed: ",end - start)
-
-# forward(kb,[Add,Subtract,Concatenate])
-# for typ in kb.registered_types:
-# 	print(typ)
-# 	print(kb.u_vs[typ])
-
-# print(cat_forward1(S))
-
-@njit(nogil=True,fastmath=True,cache=True) 
-def g1():
-	# uid = 1; d = Dict.empty(f8,i8)
-	# Add_forward1(uid,d, X,X)	
-	Grumbo_forward1(X,X)	
-
-@njit(nogil=True,fastmath=True,cache=True) 
-def g2():
-	# uid = 1; d = Dict.empty(f8,i8)
-	# Add_forward2(uid,d, X,X)	
-	Grumbo_forward2(X,X)	
-
-# @njit
-def s1():
-	# uid = 1; d = Dict.empty(unicode_type,i8)
-	# cat_forward1(uid,d, S1)	
-	cat_forward(S1)	
-
-def f1():
-	kb = buildKB()
-	forward(kb,[Add,Subtract])
-	forward(kb,[Add,Subtract])
-	forward(kb,[Add,Subtract])
-	forward(kb,[Add,Subtract])
-	forward(kb,[Add,Subtract])
-	forward(kb,[Add,Subtract])
-
-def h1():
-	kb = buildKB()
-	how_search(kb,[Add,Subtract],21,2)
-
-# d  =Dict()
-# d['unicode_type'] = unicode_type
-# d['f8'] = f8
-# print("g1", time_ms(g1))
-# print("g2", time_ms(g2))
-# print("s1", time_ms(s1))
-print("forward-depth-5", time_ms(f1))
-print("search-21-depth-2", time_ms(h1))

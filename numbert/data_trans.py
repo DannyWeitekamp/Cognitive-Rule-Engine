@@ -278,6 +278,16 @@ def enumerized_to_vectorized(enumerized_states,nominal_maps,number_backmap):
 
 
 
+def infer_type(value):
+	if(isinstance(value,str)):
+		return "string"
+	elif(isinstance(value,(float,int))):
+		return "number"
+	else:
+		raise ValueError("Could not infer type of %s" % value)
+
+def infer_nb_type(value):
+	return numba_type_map[infer_type(value)]
 
 
 
@@ -425,13 +435,6 @@ class Numbalizer(object):
          		self.string_backmap, self.number_backmap, self.enum_counter)
 		return out
 
-	def infer_type(self,value):
-		if(isinstance(value,str)):
-			return "string"
-		elif(isinstance(value,(float,int))):
-			return "number"
-		else:
-			raise ValueError("Could not infer type of %s" % value)
 
 	def enumerize(self,value, typ=None):
 		if(isinstance(value,(list,tuple))):
@@ -440,7 +443,7 @@ class Numbalizer(object):
 			return self.enumerize_value(x)
 
 	def enumerize_value(self,value, typ=None):
-		if(typ is None): typ = self.infer_type(value)
+		if(typ is None): typ = infer_type(value)
 		if(typ == 'string'):
 			value = str(value)
 			_assert_map(value,self.string_enums,self.string_backmap,self.enum_counter)
@@ -461,7 +464,7 @@ class Numbalizer(object):
 			raise ValueError("No enum for %r." % value)
 
 	def enumerized_to_vectorized(self,enumerized_state):
-		
+
 		nominal, continuous = enumerized_to_vectorized(enumerized_state,self.nominal_maps,self.number_backmap)
 		out = {'nominal':nominal,'continuous':continuous}
 		return out

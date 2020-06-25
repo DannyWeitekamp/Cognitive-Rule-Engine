@@ -258,6 +258,9 @@ def b40_py_enumerized_to_vectorized():
 def b40_nb_enumerized_to_vectorized():
 	numbalizer.enumerized_to_vectorized(enumerized_states)
 
+def b40_nb_enumerized_to_vectorized_inv():
+	numbalizer.enumerized_to_vectorized(enumerized_states,return_inversion_data=True)
+
 def b40_nb_enumerized_to_vectorized_legacy():
 	enumerized_to_vectorized_legacy(enumerized_states,numbalizer.nominal_maps,numbalizer.number_backmap)
 
@@ -284,4 +287,5 @@ print("enumerize_objs:",time_ms(b200_enumerize_objs))
 print("-----States 2x40 Objs------")
 print("nb_enumerized_to_vectorized_legacy:",time_ms(b40_nb_enumerized_to_vectorized_legacy))
 print("nb_enumerized_to_vectorized:", time_ms(b40_nb_enumerized_to_vectorized))
+print("nb_enumerized_to_vectorized -- include inv_data:", time_ms(b40_nb_enumerized_to_vectorized_inv))
 print("py_enumerized_to_vectorized:",time_ms(b40_py_enumerized_to_vectorized))

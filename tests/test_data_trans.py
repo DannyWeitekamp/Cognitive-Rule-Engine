@@ -1,7 +1,9 @@
 import unittest
-from numbert.data_trans import Numbalizer
+from numbert.data_trans import Numbalizer,decode_vectorized
 from numba.typed import List, Dict
 import numpy as np
+
+
 
 class TestDataTransfer(unittest.TestCase):
 	def setUp(self):
@@ -203,3 +205,36 @@ class TestDataTransfer(unittest.TestCase):
 		# print(vectorized1['nominal'])
 		# print(vectorized1['continuous'])
 		
+class TestDataMapBack(unittest.TestCase):
+	def setUp(self):
+		TestDataTransfer.setUp(self)
+		numbalizer = self.numbalizer
+		self.stateA = {"ie" + str(i) : self._state['i0'] for i in range(10)}
+		self.stateB = {"ie" + str(i+3) : self._state['i1'] for i in range(10)}
+		self.enumerized_A = numbalizer.nb_objects_to_enumerized(numbalizer.state_to_nb_objects(self.stateA))
+		self.enumerized_B = numbalizer.nb_objects_to_enumerized(numbalizer.state_to_nb_objects(self.stateB))
+		inp_offset = List()
+		inp_offset.append(self.enumerized_A)
+		inp_offset.append(self.enumerized_B)
+		self.vectorized_offset = numbalizer.enumerized_to_vectorized(inp_offset)
+
+	def test_decode_vectorized(self):
+		numbalizer = self.numbalizer
+		inp_offset = List()
+		inp_offset.append(self.enumerized_A)
+		inp_offset.append(self.enumerized_B)
+		vectorized_offset = numbalizer.enumerized_to_vectorized(inp_offset,return_inversion_data=True)
+		print(vectorized_offset['inversion_data'])
+
+		L = (len(self.stateA)+3)*10
+		print("LEN",L)
+		out = decode_vectorized(np.arange(L),np.ones(L),vectorized_offset['inversion_data'])
+
+		correct_vals = [(0,'i0'),(0,'i1'),(1,'9'),(1,'7'),(2,''),(2,'i0'),(3,'i1'),(3,''),(4,''),(5,'')]
+		for i,(typ,name,attr,attr_v) in enumerate(out):
+			cv = correct_vals[i%10]
+			attr_v = numbalizer.string_backmap[attr_v]
+			self.assertTupleEqual((typ,name,attr,attr_v),("InterfaceElement",'ie%s'%(str(i//10)), cv[0],cv[1]))
+
+
+

@@ -3,7 +3,7 @@ from numba.experimental import jitclass
 from numba import deferred_type, optional
 from numba import void,b1,u1,u2,u4,u8,i1,i2,i4,i8,f4,f8,c8,c16
 from numba.typed import List, Dict
-from numba.core.types import DictType, ListType, unicode_type, float64, NamedTuple, NamedUniTuple 
+from numba.core.types import DictType, ListType, unicode_type, float64, NamedTuple, NamedUniTuple, UniTuple 
 from numba.cpython.unicode import  _set_code_point
 from numbert.utils import cache_safe_exec
 from collections import namedtuple
@@ -185,8 +185,13 @@ bool_array = u1[:]
 elm_present_type = DictType(unicode_type,bool_array)
 
 
+VectInversionData = namedtuple('VectInversionData',['element_names','slice_nominal','slice_continous','width_nominal','width_continous','attr_records'])
+# NBVectInversionData = NamedTuple([elm_present_type,UniTuple(i8,2),UniTuple(i8,2),i8,i8,attr_map_type],VectInversionData)
+NBVectInversionData = NamedTuple([ListType(unicode_type),i8[::1],i8[::1],i8,i8,i8[:,::1]],VectInversionData)
+# elm_present_by_type, type_slices_nominal, type_slices_continuous, type_widths_nominal, type_widths_continous, attr_maps_by_type):
+
 @njit(cache=True)
-def enumerized_to_vectorized(enumerized_states,nominal_maps,number_backmap):
+def enumerized_to_vectorized(enumerized_states,nominal_maps,number_backmap,return_inversion_data=False):
 	
 	# nominals = Dict()
 	# continuous = Dict()
@@ -235,14 +240,21 @@ def enumerized_to_vectorized(enumerized_states,nominal_maps,number_backmap):
 	#Compute the sizes of the output arrays
 	total_continuous_slots = 0
 	type_widths_continous = Dict.empty(unicode_type,i8)
-	for typ in elm_present_by_type.keys():
+	type_slices_continuous = np.empty(len(elm_present_by_type)+1,dtype=np.int64)
+	type_slices_continuous[0] = 0
+	for i,typ in enumerate(elm_present_by_type.keys()):
 		w = np.sum(nominal_maps[typ]==0)
 		type_widths_continous[typ] = w
 		total_continuous_slots += w*len(elm_present_by_type[typ])
+		type_slices_continuous[i+1] = total_continuous_slots
 
 	total_nominal_slots = 0
-	for typ, type_width_nominal in type_widths_nominal.items():
+
+	type_slices_nominal = np.empty(len(elm_present_by_type)+1,dtype=np.int64)
+	type_slices_nominal[0] = 0
+	for i,(typ, type_width_nominal) in enumerate(type_widths_nominal.items()):
 		total_nominal_slots += type_widths_nominal[typ]*len(elm_present_by_type[typ])
+		type_slices_nominal[i+1] = total_nominal_slots
 
 	#Instatiate the output arrays
 	vect_nominals = np.empty((n_states,total_nominal_slots), dtype=np.uint8)#, order='F')
@@ -272,7 +284,96 @@ def enumerized_to_vectorized(enumerized_states,nominal_maps,number_backmap):
 					vect_continuous[k,offset_c:offset_c+type_width_c] = np.nan
 				offset_n += type_width_n
 				offset_c += type_width_c
-	return vect_nominals,vect_continuous
+
+	if(return_inversion_data):
+		inversion_data = Dict.empty(unicode_type,NBVectInversionData)
+
+		for j,typ in enumerate(elm_present_by_type.keys()):
+			flat_attr_map = np.empty((type_widths_nominal[typ],3),dtype=np.int64)
+			count = 0 
+			for attr_ind in attr_map:
+				attr_map_attr = attr_map[attr_ind]
+				for val_ind,pos in attr_map_attr.items():
+					flat_attr_map[count,0] = attr_ind
+					flat_attr_map[count,1] = val_ind
+					flat_attr_map[count,2] = pos
+					count += 1
+
+			elm_names = List.empty_list(unicode_type)
+			for elm_name in elm_present_by_type[typ].keys():
+				elm_names.append(elm_name)
+
+			inv_dat = VectInversionData(elm_names,
+						np.array([type_slices_nominal[j],type_slices_nominal[j+1]],dtype=np.int64),
+						np.array([type_slices_continuous[j],type_slices_continuous[j+1]],dtype=np.int64),
+						type_widths_nominal[typ],type_widths_continous[typ],
+						flat_attr_map)
+			inversion_data[typ] = inv_dat
+
+		return vect_nominals,vect_continuous,inversion_data #(elm_present_by_type,type_slices_nominal,type_slices_continuous,type_widths_nominal,type_widths_continous,attr_maps_by_type)#elm_present_type#,type_slices_nominal,type_slices_continuous,type_widths_nominal,type_widths_continous, attr_maps_by_type
+	else:
+		return vect_nominals,vect_continuous,None
+
+@njit(cache=True)
+def decode_vectorized(indicies, isnominal, inversion_data):
+	out = List()
+	for i, i_is_nom in zip(indicies,isnominal):
+		j = 0
+		typ = ""
+		offset = 0
+		inv_dat = None
+		for typ, inv_dat in inversion_data.items():
+		# for j,typ in zip(range(1,len(type_slices)),type_widths_nominal.keys()):
+			if(i_is_nom):
+				slc_s, slc_e = inv_dat.slice_nominal[0],inv_dat.slice_nominal[1]
+			else:
+				slc_s, slc_e = inv_dat.slice_continous[0],inv_dat.slice_continous[1]
+			if(i >= slc_s and i < slc_e):
+				offset = slc_s
+				break
+
+		width = inv_dat.width_nominal if(i_is_nom) else inv_dat.width_continous
+		# attr_map = attr_maps_by_type[typ]
+		# print(i)
+		i -= offset
+		# print(i)
+		elm_n = i // width
+		i = i%width
+		# print(i,elm_n)
+
+		elm_name = "UNDEFINED"
+		for e,name in enumerate(inv_dat.element_names):
+			if(e == elm_n):
+				elm_name = name
+				break
+
+		attr_ind = 0
+		val_ind = 0
+		count = 0
+		# okay = True
+		# for attr_record in inv_dat.attr_records:
+		attr_record = inv_dat.attr_records[i]
+		attr_ind = attr_record[0]
+		val_ind = attr_record[1]
+		position = attr_record[2]
+			# if(count == i): break
+		# for attr_ind in attr_map:
+			# attr_map_attr = attr_map[attr_ind]
+			# for val_ind in attr_map_attr:
+				# print(count, "->", attr_ind,val_ind,attr_map_attr[val_ind])
+				# if(count == i):
+				# 	okay = False
+				# count += 1
+				# if(not okay): break
+			# print("COUNT",count)
+			# if(not okay): break
+
+		# print(i,":",typ,elm_name,attr_ind,val_ind)
+		out.append((typ,elm_name,attr_ind,val_ind))
+	return out
+
+
+
 
 
 
@@ -463,10 +564,13 @@ class Numbalizer(object):
 		else:
 			raise ValueError("No enum for %r." % value)
 
-	def enumerized_to_vectorized(self,enumerized_state):
+	def enumerized_to_vectorized(self,enumerized_state,return_inversion_data=False):
 
-		nominal, continuous = enumerized_to_vectorized(enumerized_state,self.nominal_maps,self.number_backmap)
-		out = {'nominal':nominal,'continuous':continuous}
+
+		nominal, continuous, inversion_data = enumerized_to_vectorized(enumerized_state,
+										self.nominal_maps,self.number_backmap,
+										return_inversion_data=return_inversion_data)
+		out = {'nominal':nominal,'continuous':continuous, 'inversion_data': inversion_data}
 		return out
 
 

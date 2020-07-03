@@ -566,12 +566,16 @@ class Numbalizer(object):
 
 	def enumerized_to_vectorized(self,enumerized_state,return_inversion_data=False):
 
-
 		nominal, continuous, inversion_data = enumerized_to_vectorized(enumerized_state,
 										self.nominal_maps,self.number_backmap,
 										return_inversion_data=return_inversion_data)
 		out = {'nominal':nominal,'continuous':continuous, 'inversion_data': inversion_data}
 		return out
+
+	def remap_vectorized(self,vectorized):
+		pass
+
+
 
 
 

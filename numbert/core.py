@@ -112,31 +112,47 @@ class OperatorComposition(object):
 			return x
 
 	def _execute_composition(self,tup,dq_args):
-		L = len(tup)
-		op = tup[0]
-		resolved_args = []
-		for i in range(1,L):
-			t_i = tup[i]
-			if(isinstance(t_i,tuple)):
-				val = self._execute_composition(t_i,dq_args)
-				resolved_args.append(val)
-			elif(isinstance(t_i,Var)):
-				try:
-					a_i = dq_args.popleft()
-				except IndexError:
-					raise TypeError("Not Enough Arguments For {}".format(self))
+		if(isinstance(tup,(tuple,list))):
+			L = len(tup)
+			op = tup[0]
+			resolved_args = []
+			for i in range(1,L):
+				t_i = tup[i]
+				if(isinstance(t_i,tuple)):
+					val = self._execute_composition(t_i,dq_args)
+					resolved_args.append(val)
+				elif(isinstance(t_i,Var)):
+					try:
+						a_i = dq_args.popleft()
+					except IndexError:
+						raise TypeError("Not Enough Arguments For {}".format(self))
 
-				resolved_args.append(a_i)
-			else:
-				resolved_args.append(t_i)
-		if(len(dq_args) > 0):
-			raise TypeError("Too Many Arguments For {}. Resolved: {} Extra: {} ".format(self,resolved_args,list(dq_args)))
-		if(hasattr(op,'condition')):
-			if(not op.condition(*resolved_args)):
-				raise ValueError("Condition Fail.")
-		# if(isinstance(op,OperatorComposition)):
-		# 	print(op.tup)
-		return op.forward(*resolved_args)
+					resolved_args.append(a_i)
+				else:
+					resolved_args.append(t_i)
+			if(len(dq_args) > 0):
+				raise TypeError("Too Many Arguments For {}. Resolved: {} Extra: {} ".format(self,resolved_args,list(dq_args)))
+			if(hasattr(op,'condition')):
+				if(not op.condition(*resolved_args)):
+					raise ValueError("Condition Fail.")
+			# if(isinstance(op,OperatorComposition)):
+			# 	print(op.tup)
+			return op.forward(*resolved_args)
+		elif(isinstance(tup,Var)):
+			try:
+				return dq_args.popleft()
+			except IndexError:
+				raise TypeError("Not Enough Arguments For {}".format(self))			
+		else:
+			return tup
+
+
+	@property
+	def depth(self):
+		if(not hasattr(self,"_depth")):
+			_ = self.args
+		return self._depth
+
 
 	@property
 	def template(self):
@@ -144,16 +160,20 @@ class OperatorComposition(object):
 			self._template = self._gen_template(self.tup)
 		return self._template
 
-	def _accum_args(self,x,arg_arr,typ_arr):
+	def _accum_args(self,x,arg_arr,typ_arr,depth):
 		if(isinstance(x,(list,tuple))):
 			arg_types = x[0].arg_types
+			depth += 1
 			for i, x_i in enumerate(x[1:]):
 				if(isinstance(x_i,Var)):
 					x_i.index = len(arg_arr)
 					arg_arr.append(x_i)
 					typ_arr.append(arg_types[i])
 				else:
-					self._accum_args(x_i,arg_arr,typ_arr)
+					self._accum_args(x_i,arg_arr,typ_arr,depth)
+		elif(isinstance(x,Var)):
+			arg_arr.append(x)
+			typ_arr.append(None)
 	@property
 	def __name__(self):
 		return repr(self)
@@ -163,15 +183,20 @@ class OperatorComposition(object):
 	def args(self):
 		if(not hasattr(self,"_args")):
 			args_arr, type_arr = [],[]
-			self._accum_args(self.tup, args_arr,type_arr)
+			depth_arr = np.zeros(1,np.int64)
+			self._accum_args(self.tup, args_arr,type_arr,depth_arr)
 			self._args = args_arr#self._count_args(self.tup)
 			self._arg_types = type_arr#self._count_args(self.tup)
+			self._depth = depth_arr[0]#self._count_args(self.tup)
 		return self._args
 
 	@property
 	def out_type(self):
 		if(not hasattr(self,"_out_type")):
-			self._out_type = self.tup[0].out_type			
+			if(isinstance(self.tup,(list,tuple))):
+				self._out_type = self.tup[0].out_type			
+			elif(isinstance(self.tup,Var)):
+				self._out_type = None
 		return self._out_type
 
 	@property
@@ -189,11 +214,11 @@ class OperatorComposition(object):
 			name = self.__repr__(as_unbound=True)
 			if(name not in registered_operators):
 				uid = len(operators_by_uid)
-				self._uid = uid
 				operators_by_uid.append(self)
 				registered_operators[name] = self
 			else:
 				uid = registered_operators[name].uid
+			self._uid = uid
 		return self._uid
 	
 	def force_cast(self,type_str):
@@ -613,6 +638,33 @@ class Add(BaseOperator):
 	def forward(x, y):
 		return x + y
 
+class Subtract(BaseOperator):
+	commutes = False
+	signature = 'float(float,float)'
+	def forward(x, y):
+		return x - y
+
+class Multiply(BaseOperator):
+	commutes = True
+	signature = 'float(float,float)'
+	def forward(x, y):
+		return x * y
+
+class Divide(BaseOperator):
+	commutes = False
+	signature = 'float(float,float)'
+	def condition(x, y):
+		return y != 0
+	def forward(x, y):
+		return x / y
+
+class Equals(BaseOperator):
+	commutes = False
+	signature = 'float(float,float)'
+	def forward(x, y):
+		return x == y
+
+
 class Add3(BaseOperator):
 	commutes = True
 	signature = 'float(float,float,float)'
@@ -631,11 +683,7 @@ class Div10(BaseOperator):
 	def forward(x):
 		return x // 10
 
-class Subtract(BaseOperator):
-	commutes = False
-	signature = 'float(float,float)'
-	def forward(x, y):
-		return x - y
+
 
 class Concatenate(BaseOperator):
 	signature = 'string(string,string)'
@@ -982,7 +1030,7 @@ class NBRT_KnowledgeBase(object):
 					self.u_vs[typ] = list_from_dict(d)
 
 				self.dec_u_vs[typ] = self.u_vs[typ].copy()
-				print(self.u_vs)
+				# print(self.u_vs)
 			self.declared_consistent = True
 
 
@@ -1001,6 +1049,12 @@ class NBRT_KnowledgeBase(object):
 
 	def how_search(self,ops,goal,search_depth=1,max_solutions=1):
 		return how_search(self,ops,goal,search_depth=search_depth,max_solutions=max_solutions)
+
+	def unify_op(self,op,goal):
+		return unify_op(self,op,goal)
+
+	def check_produce_goal(self,ops,goal):
+		return check_produce_goal(self,ops,goal)
 
 
 
@@ -1028,17 +1082,15 @@ def insert_record(kb,depth,op, btsr, vmap):
 # def extract_vmaps():
 
 def broadcast_forward_op_comp(kb,op_comp):
-	print(op_comp.arg_types)
+	if(op_comp.out_type == None): raise ValueError("Only typed outputs work with this function.")
 
 	arg_sets = [kb.u_vs.get(t,[]) for t in op_comp.arg_types]
-	print("arg_sets",arg_sets)
 	lengths = tuple([len(x) for x in arg_sets])
 	out = np.empty(lengths,dtype=np.int64)
 	d = Dict.empty(numba_type_map[op_comp.out_type],i8)
 	arg_ind_combinations = itertools.product(*[np.arange(l) for l in lengths])
 	uid = 1
 	for arg_inds in arg_ind_combinations:
-		print("arg_inds",arg_inds)
 		try:
 			v = op_comp(*[arg_set[i] for i,arg_set in zip(arg_inds,arg_sets)])
 			if(v not in d):
@@ -1046,8 +1098,6 @@ def broadcast_forward_op_comp(kb,op_comp):
 			out[tuple(arg_inds)] = d[v]
 		except ValueError:
 			out[tuple(arg_inds)] = 0
-	print(d)
-	print(out)
 	return out, d
 
 
@@ -1058,10 +1108,7 @@ def broadcast_forward_op_comp(kb,op_comp):
 # Subtract.broadcast_forward = Subtract_forward
 # Concatenate.broadcast_forward = cat_forward
 def forward(kb,ops):
-	# print("F_start",kb.curr_infer_depth)
-	# if(kb.curr_infer_depth == 0):
 	kb._assert_declared_values()
-	# 	kb.u_vds = kb.hists[]
 
 	output_types = set()
 	# output_types = set([op.out_type for op in ops])
@@ -1077,16 +1124,13 @@ def forward(kb,ops):
 		elif(isinstance(op,OperatorComposition)):
 			btsr, vmap = broadcast_forward_op_comp(kb,op)
 
-		print("SHWEEE", btsr, vmap,typ)
 		records = insert_record(kb, depth, op, btsr, vmap)
 		new_records[typ] = records
 		output_types.add(op.out_type)
 		
 	for typ in output_types:
 		if(typ in new_records):
-			# print("A")
 			vmaps = List([rec[4] for rec in new_records[typ]])
-			# print("_A")
 			kb.u_vds[typ] = join_new_vals(kb.u_vds[typ],vmaps,depth)
 
 			if(typ == TYPE_ALIASES['float']):
@@ -1198,7 +1242,6 @@ def retrace_solutions(kb,ops,goal,g_typ,max_solutions=1):
 				tups_depth_typ.append(tups_depth_j)
 		tups.append(tups_depth)
 
-	# print(tups[-1])
 	out = [OperatorComposition(t) for t in tups[-1][g_typ][0][:max_solutions]]
 
 	return out
@@ -1309,37 +1352,53 @@ def retrace_back_one(goals, records, u_vds, hist_elems, max_solutions=1):
 
 
 
+def _infer_goal_type(goal):
+	if(isinstance(goal, (int,float))):
+		return TYPE_ALIASES['float']
+	elif(isinstance(goal, (str))):
+		return TYPE_ALIASES['string']
+	else:
+		raise NotImplemented("Object goals not implemented yet")
 
 
+
+def unify_op(kb,op,goal):
+	g_typ = _infer_goal_type(goal)
+	kb._assert_declared_values()
+	#Handle Copy/No-op right up front
+	if(isinstance(op,OperatorComposition) and op.depth == 0):
+		if(g_typ in kb.u_vs and goal in kb.u_vs[g_typ]):
+			return [[goal]]
+		else:
+			return []
+	if(op.out_type != g_typ): return []
+	
+	if(not all([t in kb.u_vs for t in op.arg_types])):return []
+
+	if(isinstance(op,BaseOperatorMeta)):
+		args = [kb.u_vs[t] for t in op.u_arg_types]
+		_hist, vmap = op.broadcast_forward(*args)
+	elif(isinstance(op,OperatorComposition)):
+		_hist, vmap = broadcast_forward_op_comp(kb,op)
+		
+	arg_sets = [kb.u_vs.get(t,[]) for t in op.arg_types]
+	if(goal in vmap):
+		inds = np.stack(np.where(_hist == vmap[goal])).T
+
+		return [[arg_sets[i][j] for i,j in enumerate(ind)] for ind in inds]
+	return []
 
 
 def how_search(kb,ops,goal,search_depth=1,max_solutions=1):
 	kb._assert_declared_values()
-	if(isinstance(goal, (int,float))):
-		g_typ = TYPE_ALIASES['float']
-	elif(isinstance(goal, (str))):
-		g_typ = TYPE_ALIASES['string']
-	else:
-		raise NotImplemented("Object goals not implemented yet")
+	g_typ = _infer_goal_type(goal)
 
-	# depth = 0
 	while((g_typ not in kb.u_vds) or (goal not in kb.u_vds[g_typ])):
 		if(kb.curr_infer_depth > search_depth): break
 		forward(kb,ops)
-		for typ in kb.registered_types:
-			pass
-			# print("MOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOO",kb.curr_infer_depth)
-			# print(typ)
-			# print(kb.u_vs[typ])
-			
-	# print("YEEEEEEE", kb.u_vds[g_typ])
+
 
 	if((g_typ in kb.u_vds) and (goal in kb.u_vds[g_typ])):
 		return retrace_solutions(kb,ops,goal,g_typ,max_solutions=max_solutions)
 	return []
-	# 	print("FOUND IT ", kb.curr_infer_depth)
-
-		
-	# else:
-	# 	print("NOT HERE")
 

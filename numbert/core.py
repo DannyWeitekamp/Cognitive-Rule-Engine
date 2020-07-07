@@ -26,6 +26,7 @@ from collections import namedtuple
 from numbert.caching import _UniqueHashable
 import itertools
 import warnings
+import math
 N = 10
 
 print("START")
@@ -85,22 +86,6 @@ class OperatorComposition(object):
 		#Minimal initialization at instantiation to reduce overhead
 		#	instead most initialization is via @property 
 		self.tup = tup
-
-	# def _assert_tup(self,tup=None):
-	# 	if(tup == None): return self._assert_tup(self.tup)
-	# 	if(isinstance(tup[0],OperatorComposition)):
-	# 		okay = True
-	# 		for i, t_i in enumerate(tup[1:]):
-	# 			if(isinstance(t_i,(list,tuple))):
-
-	# 			else:
-
-
-	# 			self._assert_tup(t_i)
-	# 	else:
-	# 		return True
-
-
 		
 	def _gen_template(self,x):
 		if(isinstance(x,(list,tuple))):
@@ -595,14 +580,6 @@ def compile_forward(op):
 	print("%s: Compile Source Time %.4f ms" % (op.__name__,time3-time2))
 	
 
-	# print(func_def + defs +  loops + cond_expr)
-
-				# '	return {}({}) \n' + \
-				# 'out_func = {}'
-
-# def normalize_types():
-t1 = time.clock_gettime_ns(time.CLOCK_BOOTTIME)/float(1e6)
-import math
 #from here: https://stackoverflow.com/questions/18833759/python-prime-number-checker
 @njit(cache=True)
 def is_prime(n):
@@ -683,8 +660,6 @@ class Div10(BaseOperator):
 	def forward(x):
 		return x // 10
 
-
-
 class Concatenate(BaseOperator):
 	signature = 'string(string,string)'
 	def forward(x, y):
@@ -706,230 +681,8 @@ class FloatToStr(BaseOperator):
 		# 	return str(int(x))
 		return str(x)
 
-t2 = time.clock_gettime_ns(time.CLOCK_BOOTTIME)/float(1e6)
-print("Init all %.4f ms" % (t2-t1))
-
-# a = Add(None,Add())
-# print(type(a).signature , ":", a.signature )
-# print(a.get_template(1,2,None))
-
-# print(a.forward)
-# a(1,2,3)
-print(repr(Add))
-# print(Add.__metaclass__)
-v = Var()
-t = (Add,v,(Subtract,v,v))
-oc = OperatorComposition(t)
-
-print(oc)
-print(oc.template)
-print(oc(1,2,3))
-
-# Add(None)
-
-# raise ValueError("STOP")
-# compile_forward(Add)
-# compile_forward(Subtract)
-# compile_forward(Concatenate)
-
-# def Multiply(x, y):
-# 	return x * y
-
-# def forward(state, goal, operators):
-# 	for op in operators:
-# 		for i in range(len(state)):
-# 			for j in range(len(state)):
-# 				pass
 
 
-
-
-# @njit(nogil=True,fastmath=True,parallel=True) 
-# def Add_forward1(x0,x1): 
-
-#     L0, L1 = len(x0), len(x1)
-#     Total_Len = (L0)*(L0-1)*(L0-2)/(1*2*3) * \
-#     			 L1 
-#     Total_Len = int(Total_Len)    			 
-#     # print(Total_Len)
-#     # Total_Len = L0*L0*L0*L1
-#     # out = np.empty((L0,L0,L1,L0))
-#     out = np.empty((Total_Len,))
-#     ind = 0
-#     for i0 in prange(0,L0):
-#         for i1 in prange(i0+1,L0):
-#             for i2 in prange(0,L1):
-#                 for i3 in prange(i1+1,L0):
-#                 	# ind = i0*L0*L0*L1 + i1*L0*L1 + i2*L0 + i3
-#                 	# out[i0,i1,i2,i3] = x0[i0] + x0[i1] + x0[i3] * x1[i2]
-#                 	out[ind] = x0[i0] + x0[i1] + x0[i3] * x1[i2]
-#                 	ind += 1
-#     return out
-
-bloop_type = ListType(u8[:])
-sloop_type = u8[:]
-@njit(nogil=True,fastmath=True,parallel=True,cache=True) 
-def Grumbo_forward1(x0,x1): 
-	L0, L1 = len(x0), len(x1)
-
-	out = np.empty((L0,L0,L1,L0))
-	da =[]
-	for i0 in range(0,L0):
-		da.append(Dict.empty(f8,i8))
-
-	for i0 in prange(0,L0):
-		d = da[i0]
-		# ind = 0
-		for i1 in range(i0+1,L0):
-			for i2 in range(i1+1,L0):
-				for i3 in range(0,L1):
-					v = x0[i0] + x0[i1] + x0[i2] * x1[i3]
-					if(v not in d):
-						d[v] = 1
-
-					out[i0,i1,i2,i3] = v
-					# beezl = np.array([u4(i0),u4(i1),u4(i2),u4(i3)])
-
-	d_out = Dict.empty(f8,i8)
-	for i0 in range(0,L0):
-		for v in da[i0]:
-			if(v not in d_out):
-				d_out[v] = 1
-
-	u_vs = np.empty(len(d_out))
-	for i,v in enumerate(d_out):
-		u_vs[i] = v
-
-	# sqeep = np.where(out == 1)
-	# out[sqeep[0]] = 7
-	return u_vs
-
-
-# HE_deffered = deferred_type()
-# @jitclass([('op_id', i8),
-#            ('args',  i8[:]),
-#            ('next', optional(HE_deffered))])
-# class HistElm(object):
-#     def __init__(self,op_id,args):
-#         self.op_id = op_id
-#         self.args = args
-#         self.next = None
-# # print(BinElem)
-# HE = HistElm.class_type.instance_type
-# HE_deffered.define(HE)
-
-
-bloop_type = ListType(u8[:])
-sloop_type = u8[:]
-@njit(nogil=True,fastmath=True,parallel=False,cache=True) 
-def Grumbo_forward2(x0,x1): 
-	L0, L1 = len(x0), len(x1)
-
-	out = np.empty((L0,L0,L1,L0))
-	# da =[]
-	# for i0 in range(0,L0):
-	# 	da.append(Dict.empty(f8,i8))
-	d = Dict.empty(f8,i8)
-	uid = 0
-	for i0 in range(0,L0):
-		# d = da[i0]
-		# uid = 0
-		# d = Dict.empty(f8,i8)
-		# for i1 in range(i0+1,L0):
-		# 	for i2 in range(i1+1,L0):
-		for i1 in range(0,L0):
-			for i2 in range(0,L0):
-				for i3 in range(0,L1):
-					if(i1 > i0 and i2 > i1):
-						v = x0[i0] + x0[i1] + x0[i2] * x1[i3]
-						# v = x0[i0] + x0[i1]# + x0[i2] + x0[i3] 
-						if(v not in d):
-							d[v] =uid; uid +=1; 
-						out[i0,i1,i2,i3] = d[v]
-						# HistElm(0,np.array([i0,i1,i2,i3]))
-					else:
-						out[i0,i1,i2,i3] = 0
-					
-	# d_out = d
-	# u_vs = np.empty(len(d_out))
-	# for i,v in enumerate(d_out):
-	# 	u_vs[i] = v
-
-	# sqeep = np.where(out == 1)
-	return out, d
-
-
-@njit(nogil=True,fastmath=True,parallel=False,cache=True) 
-def Add_forward(x0): 
-	L0 = len(x0)
-	out = np.empty((L0,L0),dtype=np.int64)
-	d = Dict.empty(f8,i8)
-	uid = 1
-	for i0 in range(0,L0):
-		for i1 in range(0,L0):
-			if(i1 > i0):
-				v = x0[i0] + x0[i1]
-				if(v not in d):
-					d[v] = uid; uid +=1; 
-				out[i0,i1] = d[v]
-			else:
-				out[i0,i1] = 0
-	return out, d
-
-
-@njit(nogil=True,fastmath=True,parallel=False,cache=True) 
-def Subtract_forward(x0): 
-	L0 = len(x0)
-	out = np.empty((L0,L0),dtype=np.int64)
-	d = Dict.empty(f8,i8)
-	uid = 1
-	for i0 in range(0,L0):
-		for i1 in range(0,L0):
-			if(i1 != i0):
-				v = x0[i0] - x0[i1]
-				if(v not in d):
-					d[v] = uid; uid +=1; 
-				out[i0,i1] = d[v]
-			else:
-				out[i0,i1] = 0
-	return out, d
-
-
-
-@njit(nogil=True,fastmath=True,parallel=False,cache=True) 
-def cat_forward(x0): 
-	L0= len(x0)
-	out = np.empty((L0,L0),dtype=np.int64)
-	d = Dict.empty(unicode_type,i8)
-	uid = 1
-	for i0 in range(0,L0):
-		# d = da[i0]
-		for i1 in range(0,L0):
-			# for i2 in range(i1+1,L0):
-			# 	for i3 in range(0,L0):
-			# if(i1 != i0):
-				v = x0[i0] + x0[i1]# + x0[i2] + x0[i3] 
-				if(v not in d):
-					d[v] = uid; uid +=1; 
-				out[i0,i1] = d[v]
-			# else:
-			# 	out[i0,i1] = 0
-				# d[v] = 1
-			# print(v)
-
-			# out[i0,i1,i2,i3] = v
-
-	# d_out = Dict.empty(unicode_type,i8)
-	# for i0 in range(0,L0):
-	# 	for v in da[i0]:
-	# 		if(v not in d_out):
-	# 			d_out[v] = 1
-	# print(d_out)
-
-	# u_vs = np.empty(len(d_out))
-	# for i,v in enumerate(d_out):
-	# 	u_vs[i] = v
-	return out, d#, uid
 
 @njit(nogil=True,fastmath=True,cache=True) 
 def join_new_vals(vd,new_ds,depth):
@@ -1402,3 +1155,24 @@ def how_search(kb,ops,goal,search_depth=1,max_solutions=1):
 		return retrace_solutions(kb,ops,goal,g_typ,max_solutions=max_solutions)
 	return []
 
+
+
+if __name__ == "__main__":
+	# t2 = time.clock_gettime_ns(time.CLOCK_BOOTTIME)/float(1e6)
+	# print("Init all %.4f ms" % (t2-t1))
+
+	# a = Add(None,Add())
+	# print(type(a).signature , ":", a.signature )
+	# print(a.get_template(1,2,None))
+
+	# print(a.forward)
+	# a(1,2,3)
+	print(repr(Add))
+	# print(Add.__metaclass__)
+	v = Var()
+	t = (Add,v,(Subtract,v,v))
+	oc = OperatorComposition(t)
+
+	print(oc)
+	print(oc.template)
+	print(oc(1,2,3))

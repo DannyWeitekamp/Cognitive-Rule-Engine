@@ -23,7 +23,7 @@ import time
 from numbert.data_trans import infer_type, infer_nb_type
 from collections import namedtuple
 
-from numbert.caching import _UniqueHashable
+# from numbert.caching import _UniqueHashable
 import itertools
 import warnings
 import math
@@ -53,18 +53,12 @@ def str_preserve_ints(x):
 	return str(x)
 
 
-
-
 def parse_signature(s):
 	fn_match = re.match(r"(?P<out_type>\w+)\s?\((?P<arg_types>(?P<args>\w+(,\s?)?)+)\)", s)
 	fn_dict = fn_match.groupdict()
 	arg_types = [arg.strip() for arg in fn_dict['arg_types'].split(',')]
 	return fn_dict['out_type'], arg_types
 
-# def norm_check_types(s):
-
-
-		# [time][op]
 
 class Var(object):
 	def __init__(self,binding=None,type=None):
@@ -242,7 +236,7 @@ class BaseOperatorMeta(type):
 # initial_right_commutes_by_uid.append(Dict.empty(i8,i8[::1]))
 
 
-class BaseOperator(_UniqueHashable, metaclass=BaseOperatorMeta):
+class BaseOperator(metaclass=BaseOperatorMeta):
 	# __metaclass__ = BaseOperatorMeta
 	#Static Attributes
 	registered_operators = {}
@@ -262,7 +256,7 @@ class BaseOperator(_UniqueHashable, metaclass=BaseOperatorMeta):
 		out_type, arg_types = parse_signature(cls.signature)
 		out_type = TYPE_ALIASES.get(out_type,out_type)
 		arg_types = [TYPE_ALIASES.get(x,x) for x in arg_types]
-		print(arg_types)
+		# print(arg_types)
 		cls.out_type = out_type
 		cls.arg_types = arg_types
 		cls.signature = "{}({})".format(out_type,",".join(arg_types))
@@ -562,7 +556,7 @@ def compile_forward(op):
 	time2 = time.clock_gettime_ns(time.CLOCK_BOOTTIME)/float(1e6)
 	print("%s: Gen Source Time %.4f ms" % (op.__name__, time2-time1))
 
-	print(source)
+	# print(source)
 	# print("END----------------------")
 	l,g = cache_safe_exec(source,gbls={'f':forward_func,'c': condition_func,**globals()})
 	# print("TIS HERE:",l[f_name])

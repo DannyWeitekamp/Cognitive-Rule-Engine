@@ -804,6 +804,12 @@ class NBRT_KnowledgeBase(object):
 	def check_produce_goal(self,ops,goal):
 		return check_produce_goal(self,ops,goal)
 
+	def forward(self,ops):
+		forward(self,ops)
+
+	
+		
+
 
 
 # @njit(nogil=True,fastmath=True,parallel=False) 

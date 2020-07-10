@@ -109,8 +109,6 @@ class OperatorComposition(object):
 					resolved_args.append(a_i)
 				else:
 					resolved_args.append(t_i)
-			if(len(dq_args) > 0):
-				raise TypeError("Too Many Arguments For {}. Resolved: {} Extra: {} ".format(self,resolved_args,list(dq_args)))
 			if(hasattr(op,'condition')):
 				if(not op.condition(*resolved_args)):
 					raise ValueError("Condition Fail.")
@@ -217,7 +215,10 @@ class OperatorComposition(object):
 		return self.template.format(*arg_strs)
 
 	def forward(self,*args):
-		value = self._execute_composition(self.tup,deque(args))
+		dq_args = deque(args)
+		value = self._execute_composition(self.tup,dq_args)
+		if(len(dq_args) > 0):
+				raise TypeError("Too Many Arguments For {}. Resolved: {} Extra: {} ".format(self,args[:len(dq_args)],list(dq_args)))
 		if(hasattr(self,'cast_fn')): value = self.cast_fn(value)
 		return value
 

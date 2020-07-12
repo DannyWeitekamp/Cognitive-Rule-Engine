@@ -1,4 +1,4 @@
-from numbert.data_trans import Numbalizer
+from numbert.numbalizer import Numbalizer
 from sklearn.feature_extraction import DictVectorizer
 from numba.typed import List, Dict
 from numba import njit

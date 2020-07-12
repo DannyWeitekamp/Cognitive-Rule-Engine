@@ -448,6 +448,7 @@ class Numbalizer(object):
 		nt._get_enumerized = get_enumerized#pytypes.MethodType(_get_enumerized, self) 
 		nt.pack_from_numpy = pack_from_numpy
 		nt.enumerize_nb_objs = enumerize_nb_objs
+		nt.numba_type = nb_nt
 
 		return nt
 

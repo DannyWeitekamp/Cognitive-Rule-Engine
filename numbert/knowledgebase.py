@@ -23,6 +23,7 @@ import itertools
 
 
 
+
 @njit(nogil=True,fastmath=True,cache=True) 
 def join_new_vals(vd,new_ds,depth):
 	for d in new_ds:
@@ -126,15 +127,24 @@ class NBRT_KnowledgeBase(object):
 
 
 	def declare(self,x,typ=None):
-		if(typ is None): typ = TYPE_ALIASES[infer_type(x)]
-		self._assert_declare_store(typ)
-		record = self.hists[typ][0][0]
-		_,_,_,_, vmap = record
+		'''Takes a whole state conforming to the format output by Numbalizer.state_to_nb_objects()
+		   or individual items
+		'''
+		if(isinstance(x,dict)):
+			for typ, nb_objects_of_type in x.items():
+				assert typ in REGISTERED_TYPES, "Type is not registered %r." % typ
+				self._assert_declare_store(typ)
+				declare_nb_objects(self.hists[typ][0][0],nb_objects_of_type)
+		else:
+			if(typ is None): typ = TYPE_ALIASES[infer_type(x)]
+			self._assert_declare_store(typ)
+			record = self.hists[typ][0][0]
+			_,_,_,_, vmap = record
 
-		if(x not in vmap):
-			vmap[x] = len(vmap)
-			self.hist_consistent = False
-			self.declared_consistent = False
+			if(x not in vmap):
+				vmap[x] = len(vmap)
+		self.hist_consistent = False
+		self.declared_consistent = False
 
 	def how_search(self,ops,goal,search_depth=1,max_solutions=1):
 		return how_search(self,ops,goal,search_depth=search_depth,max_solutions=max_solutions)
@@ -150,6 +160,12 @@ class NBRT_KnowledgeBase(object):
 
 	
 		
+@njit(cache=True)
+def declare_nb_objects(dec_record, nb_objects):
+	_,_,_,_, vmap = dec_record
+	for uid,obj in nb_objects.items():
+		if(obj not in vmap):
+			vmap[obj] = len(vmap)
 
 
 

@@ -386,6 +386,7 @@ class Numbalizer(object):
 		data_by_type = {}
 		mlens_by_type = {}
 		for name, elm in state.items():
+			assert 'type' in elm, "All objects need 'type' attribute to be numbalized."
 			typ = elm['type']
 			spec = self.registered_specs[typ]
 			elm_data = tuple([name] + [v for k,v in elm.items() if k != 'type'])
@@ -399,8 +400,9 @@ class Numbalizer(object):
 			mlens = mlens_by_type[typ]
 
 			for i,(attr, typ) in enumerate(spec.items()):
-				if(spec[attr] == 'string'):
-					L = len(elm[attr])
+				cast_fn = py_type_map[typ]
+				if(typ == 'string'):
+					L = len(cast_fn(elm[attr]))
 					if(L > mlens[i+1]): mlens[i+1] = L
 
 		#Make a fixed bitwidth numpy datatype for the tuples based off of

@@ -332,16 +332,16 @@ class BaseOperator(metaclass=BaseOperatorMeta):
 	def __init_subclass__(cls, **kwargs):
 		super().__init_subclass__(**kwargs)
 
-		t0 = time.clock_gettime_ns(time.CLOCK_BOOTTIME)/float(1e6)
+		t0 = time.time_ns()/float(1e6)
 		cls._init_signature()
 		cls._check_funcs()
 		cls._register()
 		cls._init_template()
-		t1 = time.clock_gettime_ns(time.CLOCK_BOOTTIME)/float(1e6)
+		t1 = time.time_ns()/float(1e6)
 		print("%s: Init Stuff Time %.4f ms" % (cls.__name__, t1-t0))
 
 		compile_forward(cls)
-		# t2 = time.clock_gettime_ns(time.CLOCK_BOOTTIME)/float(1e6)
+		# t2 = time.time_ns()/float(1e6)
 		# print("%s: Compile Forward Time %.4f ms" % (cls.__name__, t2-t1))
 
 	@classmethod
@@ -481,7 +481,7 @@ def compile_forward(op):
 	# 	forward_func.compile(op.signature)
 	# except Exception:
 	# 	forward_func, nopython = op.forward, False
-	time1 = time.clock_gettime_ns(time.CLOCK_BOOTTIME)/float(1e6)
+	time1 = time.time_ns()/float(1e6)
 
 
 	f_name = op.__name__+"_forward"
@@ -554,7 +554,7 @@ def compile_forward(op):
 	ret_expr = _+"return out, d\n"
 	source = header + func_def + defs +  loops + cond_expr+ret_expr
 
-	time2 = time.clock_gettime_ns(time.CLOCK_BOOTTIME)/float(1e6)
+	time2 = time.time_ns()/float(1e6)
 	print("%s: Gen Source Time %.4f ms" % (op.__name__, time2-time1))
 
 	# print(source)
@@ -571,7 +571,7 @@ def compile_forward(op):
 			f = forward_func
 			return _bf(*args)
 		op.broadcast_forward = bf
-	time3 = time.clock_gettime_ns(time.CLOCK_BOOTTIME)/float(1e6)
+	time3 = time.time_ns()/float(1e6)
 	print("%s: Compile Source Time %.4f ms" % (op.__name__,time3-time2))
 	
 
@@ -1179,7 +1179,7 @@ def how_search(kb,ops,goal,search_depth=1,max_solutions=10,min_stop_depth=-1):
 
 
 if __name__ == "__main__":
-	# t2 = time.clock_gettime_ns(time.CLOCK_BOOTTIME)/float(1e6)
+	# t2 = time.time_ns()/float(1e6)
 	# print("Init all %.4f ms" % (t2-t1))
 
 	# a = Add(None,Add())

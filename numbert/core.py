@@ -20,8 +20,7 @@ import numba.typed.typeddict as td_mod
 # 	monkey_patch_caching(tl_mod,['_sort'])
 # 	monkey_patch_caching(td_mod)
 
-
-
+#These will be filled in if the user registers a new type
 TYPE_ALIASES = {
 	"float" : 'f8',
 	"flt" : 'f8',
@@ -30,9 +29,7 @@ TYPE_ALIASES = {
 	"str" : 'unicode_type'
 }
 
-
-#This will be filled in if the user registers a new type
-registered_types = {'f8': f8,
+REGISTERED_TYPES = {'f8': f8,
 					 'unicode_type' : unicode_type}
 
 numba_type_map = {

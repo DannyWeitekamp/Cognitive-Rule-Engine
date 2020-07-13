@@ -6,7 +6,7 @@ from numba.typed import List, Dict
 from numba.core.types import DictType, ListType, unicode_type, float64, NamedTuple, NamedUniTuple, UniTuple 
 from numba.cpython.unicode import  _set_code_point
 from numbert.utils import cache_safe_exec
-from numbert.core import py_type_map, numba_type_map, numpy_type_map
+from numbert.core import TYPE_ALIASES, REGISTERED_TYPES, py_type_map, numba_type_map, numpy_type_map
 from numbert.gensource import gen_source_get_enumerized, gen_source_enumerize_nb_objs, \
 							  gen_source_tuple_defs, gen_source_pack_from_numpy
 from collections import namedtuple
@@ -284,6 +284,9 @@ def infer_type(value):
 		return "string"
 	elif(isinstance(value,(float,int))):
 		return "number"
+	elif(hasattr(value,"_fields") and hasattr(type(value),"__name__")):
+		#Is a namedtuple
+		return type(value).__name__
 	else:
 		raise ValueError("Could not infer type of %s" % value)
 
@@ -295,6 +298,7 @@ def infer_nb_type(value):
 Dict_Unicode_to_Enums = DictType(unicode_type,i8[:])
 
 class Numbalizer(object):
+	#Static Values
 	registered_specs = {}
 	jitstructs = {}
 	string_enums = Dict.empty(unicode_type,i8)
@@ -361,9 +365,13 @@ class Numbalizer(object):
 		else:
 			self.registered_specs[name] = spec
 			print("start jit")
-			self.jitstructs[name] = self.jitstruct_from_spec(name,spec)
+			jitstruct = self.jitstruct_from_spec(name,spec)
+			self.jitstructs[name] = jitstruct
 			self.nominal_maps[name] = np.array([x == "string" for k,x in spec.items() if k != 'type'],dtype=np.uint8)
 			print("end jit")
+
+			REGISTERED_TYPES[name] = jitstruct.numba_type
+			TYPE_ALIASES[name] = jitstruct.__name__
 
 	def register_specifications(self, specs):
 		for name, spec in specs.items():

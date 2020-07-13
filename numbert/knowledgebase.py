@@ -14,7 +14,7 @@ from pprint import pprint
 from numbert.utils import cache_safe_exec
 from numbert.numbalizer import infer_type, infer_nb_type
 from collections import namedtuple
-from numbert.core import TYPE_ALIASES, numba_type_map, py_type_map, registered_types
+from numbert.core import TYPE_ALIASES, numba_type_map, py_type_map, REGISTERED_TYPES
 
 from numbert.operator import BaseOperator, BaseOperatorMeta, Var, OperatorComposition
 import math
@@ -61,7 +61,6 @@ class NBRT_KnowledgeBase(object):
 
 		dec_u_vs: like dict<str,Iterable<Typ>> u_vs but is only for declared facts (i.e. depth=0)
 
-		registered_types: Maps typ strings to their actual types
 		hist_consistent: whether or not the current history of operation use is consistent
 			with the declared facts.
 	'''
@@ -75,13 +74,13 @@ class NBRT_KnowledgeBase(object):
 
 		self.dec_u_vs = {}
 		
-		# self.registered_types ={'f8': f8, 'unicode_type' : unicode_type}
+		# self.REGISTERED_TYPES ={'f8': f8, 'unicode_type' : unicode_type}
 		self.hist_consistent = True
 		self.declared_consistent = True
 
 	def _assert_record_type(self,typ):
 		if(typ not in self.hist_structs):
-			typ_cls = registered_types[typ]
+			typ_cls = REGISTERED_TYPES[typ]
 
 
 			#Type : (op_id, _hist, shape, arg_types, vmap)
@@ -94,7 +93,7 @@ class NBRT_KnowledgeBase(object):
 		struct_typ = self._assert_record_type(typ)
 		typ_store = self.hists[typ]
 		if(0 not in typ_store):
-			typ_cls = registered_types[typ]
+			typ_cls = REGISTERED_TYPES[typ]
 			tsd = typ_store[0] = typ_store.get(0, List.empty_list(struct_typ))
 			tl = List();tl.append(typ);
 			vmap = Dict.empty(typ_cls,i8)
@@ -105,12 +104,12 @@ class NBRT_KnowledgeBase(object):
 
 	def _assert_declared_values(self):
 		if(not self.declared_consistent):
-			for typ in registered_types.keys():
+			for typ in REGISTERED_TYPES.keys():
 				self._assert_declare_store(typ)
 				record = self.hists[typ][0][0]
 				_,_,_,_, vmap = record
 
-				typ_cls = registered_types[typ]
+				typ_cls = REGISTERED_TYPES[typ]
 				d = self.u_vds[typ] = Dict.empty(typ_cls,i8)
 				for x in vmap:
 					d[x] = 0
@@ -161,7 +160,7 @@ def insert_record(kb,depth,op, btsr, vmap):
 	typ = op.out_type
 	struct_typ = kb._assert_record_type(typ)
 	# if(typ not in kb.hist_structs):
-	# 	typ_cls = kb.registered_types[typ]
+	# 	typ_cls = kb.REGISTERED_TYPES[typ]
 	# 	kb.hist_structs[typ] = Tuple([i8,
 	# 								 i8[::1], i8[::1], ListType(unicode_type),
 	# 								 DictType(typ_cls,i8)])
@@ -212,6 +211,7 @@ def forward(kb,ops):
 	depth = kb.curr_infer_depth = kb.curr_infer_depth+1
 	
 	for op in ops:
+		print(op)
 		if(not all([t in kb.u_vs for t in op.arg_types])): continue
 		typ = op.out_type
 		if(isinstance(op,BaseOperatorMeta)):
@@ -275,7 +275,7 @@ def _retrace_goal_history(kb,ops,goal,g_typ, max_solutions):
 	u_vds = kb.u_vds[g_typ]
 	records = kb.hists[g_typ]
 
-	goals = List.empty_list(registered_types[g_typ])
+	goals = List.empty_list(REGISTERED_TYPES[g_typ])
 	goals.append(goal)
 
 	hist_elems = HistElmListList()#List.empty_list(ListType(HE))#new_HE_list(1)#List([List.empty_list(HE)],listtype=ListType(HE))
@@ -462,8 +462,10 @@ def _infer_goal_type(goal):
 		return TYPE_ALIASES['float']
 	elif(isinstance(goal, (str))):
 		return TYPE_ALIASES['string']
+	elif(type(goal).__name__ in REGISTERED_TYPES):
+		return TYPE_ALIASES[type(goal).__name__]
 	else:
-		raise NotImplemented("Object goals not implemented yet")
+		ValueError("Goal type is not registered: %s" % type(goal))
 
 
 

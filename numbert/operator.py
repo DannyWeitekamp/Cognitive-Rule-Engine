@@ -6,7 +6,7 @@ from numba.typed import List, Dict
 from numba.core.types import DictType, ListType, unicode_type, float64, NamedTuple, NamedUniTuple, UniTuple 
 from numba.cpython.unicode import  _set_code_point
 from numbert.utils import cache_safe_exec
-from numbert.core import TYPE_ALIASES ,py_type_map, numba_type_map, numpy_type_map
+from numbert.core import TYPE_ALIASES, REGISTERED_TYPES,py_type_map, numba_type_map
 from numbert.gensource import gen_source_broadcast_forward
 from collections import namedtuple, deque
 import math
@@ -33,7 +33,7 @@ def compile_forward(op):
 		forward_func = njit(op.forward,cache=True)
 		condition_func =  njit(op.condition,cache=True) if(hasattr(op,'condition')) else None
 		try:
-			forward_func.compile(op.signature)
+			forward_func.compile(op.signature_obj)
 		except Exception as e:
 			forward_func = op.forward
 			nopython= False
@@ -43,7 +43,7 @@ def compile_forward(op):
 
 		if(condition_func != None):
 			try:
-				condition_func.compile(op.cond_signature)
+				condition_func.compile(op.cond_signature_obj)
 			except Exception as e:
 				condition_func = op.condition
 				nopython= False
@@ -59,9 +59,9 @@ def compile_forward(op):
 	time2 = time.clock_gettime_ns(time.CLOCK_BOOTTIME)/float(1e6)
 	print("%s: Gen Source Time %.4f ms" % (op.__name__, time2-time1))
 	f_name = op.__name__+"_forward"
-	# print(source)
+	print(source)
 	# print("END----------------------")
-	l,g = cache_safe_exec(source,gbls={'f':forward_func,'c': condition_func,**globals()})
+	l,g = cache_safe_exec(source,gbls={'f':forward_func,'c': condition_func,**REGISTERED_TYPES,**globals()})
 	# print("TIS HERE:",l[f_name])
 	if(nopython):
 		op.broadcast_forward = l[f_name]
@@ -290,8 +290,14 @@ class BaseOperator(metaclass=BaseOperatorMeta):
 		# print(arg_types)
 		cls.out_type = out_type
 		cls.arg_types = arg_types
+
+		resolved_out_type = REGISTERED_TYPES[out_type]
+		resolved_arg_types = [REGISTERED_TYPES[x] for x in arg_types]
+
 		cls.signature = "{}({})".format(out_type,",".join(arg_types))
+		cls.signature_obj = resolved_out_type(*resolved_arg_types)#"{}({})".format(out_type,",".join(arg_types))
 		cls.cond_signature = "u1({})".format(",".join(arg_types))
+		cls.cond_signature_obj = u1(*resolved_arg_types)
 
 		u_types,u_inds = np.unique(arg_types,return_inverse=True)
 		cls.u_arg_types = u_types

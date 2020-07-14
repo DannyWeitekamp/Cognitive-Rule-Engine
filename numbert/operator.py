@@ -1,3 +1,6 @@
+from numbert.caching import _UniqueHashable
+
+
 from numba import types, njit, jit
 from numba.experimental import jitclass
 from numba import deferred_type, optional
@@ -8,7 +11,10 @@ from numba.cpython.unicode import  _set_code_point
 from numbert.utils import cache_safe_exec
 from numbert.core import TYPE_ALIASES, REGISTERED_TYPES,py_type_map, numba_type_map
 from numbert.gensource import gen_source_broadcast_forward
+
+
 from collections import namedtuple, deque
+
 import math
 import numpy as np
 import timeit
@@ -55,7 +61,7 @@ def compile_forward(op):
 		condition_func = op.condition if(hasattr(op,'condition')) else None
 
 	time1 = time.clock_gettime_ns(time.CLOCK_BOOTTIME)/float(1e6)
-	source = gen_source_broadcast_forward(op,condition_func, nopython)
+	source = gen_source_broadcast_forward(op, nopython)
 	time2 = time.clock_gettime_ns(time.CLOCK_BOOTTIME)/float(1e6)
 	print("%s: Gen Source Time %.4f ms" % (op.__name__, time2-time1))
 	f_name = op.__name__+"_forward"
@@ -167,17 +173,20 @@ class OperatorComposition(object):
 			self._template = self._gen_template(self.tup)
 		return self._template
 
-	def _accum_args(self,x,arg_arr,typ_arr,depth):
+	def _accum_args(self,x,arg_arr,typ_arr,depth,maxdepth):
+		
 		if(isinstance(x,(list,tuple))):
 			arg_types = x[0].arg_types
-			depth += 1
+			# depth += 1
+			depth = depth + 1
+			maxdepth[0] = max(maxdepth,depth)
 			for i, x_i in enumerate(x[1:]):
 				if(isinstance(x_i,Var)):
 					x_i.index = len(arg_arr)
 					arg_arr.append(x_i)
 					typ_arr.append(arg_types[i])
 				else:
-					self._accum_args(x_i,arg_arr,typ_arr,depth)
+					self._accum_args(x_i,arg_arr,typ_arr,depth,maxdepth)
 		elif(isinstance(x,Var)):
 			arg_arr.append(x)
 			typ_arr.append(None)
@@ -191,7 +200,7 @@ class OperatorComposition(object):
 		if(not hasattr(self,"_args")):
 			args_arr, type_arr = [],[]
 			depth_arr = np.zeros(1,np.int64)
-			self._accum_args(self.tup, args_arr,type_arr,depth_arr)
+			self._accum_args(self.tup, args_arr,type_arr,0,depth_arr)
 			self._args = args_arr#self._count_args(self.tup)
 			self._arg_types = type_arr#self._count_args(self.tup)
 			self._depth = depth_arr[0]#self._count_args(self.tup)
@@ -255,9 +264,14 @@ class OperatorComposition(object):
 	def __call__(self,*args):
 		return self.forward(*args)
 
-class BaseOperatorMeta(type):
+class BaseOperatorMeta(type, _UniqueHashable):
 	def __repr__(cls):
 		return cls.template.format(*(['?']*len(cls.arg_types)),name=cls.__name__)
+
+	def get_hashable(cls):
+		d = {k: v for k,v in vars(cls).items() if k in cls.hash_on}
+		print("WHEE",d)
+		return d
 
 	# def __str__(cls):
 	# 	return cls.template.format(,name=cls.__name__)

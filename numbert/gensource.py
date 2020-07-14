@@ -5,8 +5,17 @@ LOOPLIFT_UNJITABLES = True
 UID_START = 1
 
 
-def gen_source_get_enumerized(name,spec,ind='   '):
+def gen_source_standard_imports():
+	imports = "import numpy as np\n"
+	imports += "from collections import namedtuple\n"
+	imports += "from numba import jit,njit\n"
+	imports += "from numba import void,b1,u1,u2,u4,u8,i1,i2,i4,i8,f4,f8,c8,c16\n"
+	imports += "from numba.typed import List, Dict\n"
+	imports += "from numba.core.types import DictType, ListType, unicode_type, float64, NamedTuple, NamedUniTuple, UniTuple\n"
+	imports += "from numbert.numbalizer import charseq_to_str, _assert_map\n"
+	return imports
 
+def gen_source_get_enumerized(name,spec,ind='   '):
 	arg_str = ind*3 + "string_enums, number_enums,\n"
 	arg_str += ind*3 + "string_backmap,number_backmap,\n"
 	arg_str += ind*3 + "enum_counter"
@@ -56,7 +65,7 @@ def gen_source_enumerize_nb_objs(name,spec,ind='   '):
 	header += "def {}_enumerize_nb_objs(inp,out,{}):\n".format(name,arg_str)
 	body = ind + 'for k,v in inp.items():\n'
 	body += ind*2 + 'out[k] = {}_get_enumerized(v,{})\n\n'.format(name,arg_str)
-	source = header + body+("\n"*10)
+	source = header + body#+("\n"*10)
 	return source
 
 
@@ -70,7 +79,7 @@ def gen_source_tuple_defs(name,spec,ind='   '):
 		typ_str = ", ".join([str(numba_type_map[x]) for x in spec.values()])
 		tuple_defs += "NB_{}_NamedTuple = NamedTuple(({}),{})\n".format(name,typ_str,name)
 	# tuple_defs += "{} = NB_{}_NamedTuple.instance_class\n".format(name,name)
-	return tuple_defs
+	return tuple_defs + "\n"
 
 
 def gen_source_pack_from_numpy(name,spec,ind='   '):
@@ -94,7 +103,8 @@ def gen_source_pack_from_numpy(name,spec,ind='   '):
 
 
 
-def gen_source_broadcast_forward(op, condition_func, nopython):
+def gen_source_broadcast_forward(op, nopython):
+	has_condition = hasattr(op,'condition')
 	_ = "    "
 	f_name = op.__name__+"_forward"
 	if(nopython):
@@ -127,14 +137,14 @@ def gen_source_broadcast_forward(op, condition_func, nopython):
 	all_indicies = ["i%s"%i for i in range(len(op.arg_types))]
 	arg_terms = ["x{}[i{}]".format(op.u_arg_inds[i],i) for i in range(len(op.arg_types))]
 	cond_expr = "{}\n"
-	if(len(op.right_commutes) > 0 or condition_func != None):
+	if(len(op.right_commutes) > 0 or has_condition):
 		curr_indent += 1
 		conds = []
 
 		if(len(op.right_commutes) > 0):
 			for i_a, i_bs in op.right_commutes.items():
 				conds.append("i{} >= i{}".format(i_a,i_bs[-1]))
-		if(condition_func != None):
+		if(has_condition):
 			conds.append("c({})".format(",".join(arg_terms)))
 
 		cond_expr =  _*curr_indent     + "if({}):\n".format(" and ".join(conds))

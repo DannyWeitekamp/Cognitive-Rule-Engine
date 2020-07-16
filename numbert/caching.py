@@ -20,11 +20,9 @@ sys.path.insert(0, appdirs.user_cache_dir)
 
 
 class _UniqueHashable():
-	# @classmethod
 	def get_hashable(self):
 		raise NotImplemented()
 
-	# @classmethod
 	def get_hashcode(self):
 		return unique_hash(self.get_hashable())
 	

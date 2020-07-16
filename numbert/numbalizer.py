@@ -316,7 +316,9 @@ class Numbalizer(object):
 
 	def jitstruct_from_spec(self,name,spec,ind="   "):
 		
-		#Dynamically generate the named tuple for this spec and a numba wrapper for it	
+		#For the purposes of autogenerating code we need a clean alphanumeric name 
+		name = "".join(x for x in name if x.isalnum())
+
 		hash_code = unique_hash([name,spec])
 		if(not source_in_cache(name,hash_code)):
 			source = gen_source_standard_imports()
@@ -408,10 +410,16 @@ class Numbalizer(object):
 		data_by_type = {}
 		mlens_by_type = {}
 		for name, elm in state.items():
+			# print(elm)
 			assert 'type' in elm, "All objects need 'type' attribute to be numbalized."
 			typ = elm['type']
 			spec = self.registered_specs[typ]
-			elm_data = tuple([name] + [v for k,v in elm.items() if k != 'type'])
+
+			values = [elm[k] for k in spec.keys() if k != 'type']
+			assert len(values) == len(spec), "Dict with keys [{}], cannot be cast to {} [{}]".format(
+				",".join(elm.keys()),name,",",join(spec.keys())) 
+
+			elm_data = tuple([name] + values)
 
 			data = data_by_type.get(typ,[])
 			data.append(elm_data)

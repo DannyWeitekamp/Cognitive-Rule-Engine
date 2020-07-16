@@ -7,9 +7,12 @@ import numpy as np
 
 import numba.typed.typedlist as tl_mod 
 import numba.typed.typeddict as td_mod
+import os
+from numbert.caching import cache_dir
 
+os.environ['NUMBA_CACHE_DIR'] = os.path.join(os.path.split(cache_dir)[0], "numba_cache")
 
-# #Monkey Patch Numba so that the builtin functions for List() and Dict() cache between runs 
+#Monkey Patch Numba so that the builtin functions for List() and Dict() cache between runs 
 # def monkey_patch_caching(mod,exclude=[]):
 # 	for name, val in mod.__dict__.items():
 # 		if(isinstance(val,Dispatcher) and name not in exclude):

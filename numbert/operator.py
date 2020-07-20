@@ -25,9 +25,13 @@ import re
 import types as pytypes
 import sys
 import __main__
+import logging
 N = 10
 
-print("START")
+log = logging.getLogger("numbert-performance")
+# print("START")
+
+
 
 WARN_START = ("-"*26) + "WARNING" + ("-"*26) + "\n"
 WARN_END = ("-"*24) + "END WARNING" + ("-"*24) + "\n"
@@ -63,16 +67,16 @@ def compile_forward(op):
 	time1 = time.clock_gettime_ns(time.CLOCK_BOOTTIME)/float(1e6)
 	source = gen_source_broadcast_forward(op, nopython)
 	time2 = time.clock_gettime_ns(time.CLOCK_BOOTTIME)/float(1e6)
-	print("%s: Gen Source Time %.4f ms" % (op.__name__, time2-time1))
+	log.info("%s: Gen Source Time %.4f ms" % (op.__name__, time2-time1))
 	f_name = op.__name__+"_forward"
-	print(source)
+	# print(source)
 	# print("END----------------------")
 	l,g = cache_safe_exec(source,gbls={'f':forward_func,'c': condition_func,**REGISTERED_TYPES,**globals()})
 	# print("TIS HERE:",l[f_name])
 	if(nopython):
 		op.broadcast_forward = l[f_name]
 	else:
-		print(op.__name__,"NOPYTHON=False")
+		# print(op.__name__,"NOPYTHON=False")
 		_bf = l[f_name]
 		def bf(*args):
 			global f
@@ -80,7 +84,7 @@ def compile_forward(op):
 			return _bf(*args)
 		op.broadcast_forward = bf
 	time3 = time.clock_gettime_ns(time.CLOCK_BOOTTIME)/float(1e6)
-	print("%s: Compile Source Time %.4f ms" % (op.__name__,time3-time2))
+	log.info("%s: Compile Source Time %.4f ms" % (op.__name__,time3-time2))
 
 
 def str_preserve_ints(x):
@@ -388,7 +392,7 @@ class BaseOperator(metaclass=BaseOperatorMeta):
 		cls._register()
 		cls._init_template()
 		t1 = time.clock_gettime_ns(time.CLOCK_BOOTTIME)/float(1e6)
-		print("%s: Init Stuff Time %.4f ms" % (cls.__name__, t1-t0))
+		log.info("%s: Init Stuff Time %.4f ms" % (cls.__name__, t1-t0))
 
 		compile_forward(cls)
 		# t2 = time.clock_gettime_ns(time.CLOCK_BOOTTIME)/float(1e6)

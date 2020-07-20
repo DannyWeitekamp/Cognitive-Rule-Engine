@@ -13,12 +13,12 @@ from numbert.caching import cache_dir
 os.environ['NUMBA_CACHE_DIR'] = os.path.join(os.path.split(cache_dir)[0], "numba_cache")
 
 #Monkey Patch Numba so that the builtin functions for List() and Dict() cache between runs 
-# def monkey_patch_caching(mod,exclude=[]):
-# 	for name, val in mod.__dict__.items():
-# 		if(isinstance(val,Dispatcher) and name not in exclude):
-# 			val.enable_caching()
+def monkey_patch_caching(mod,exclude=[]):
+	for name, val in mod.__dict__.items():
+		if(isinstance(val,Dispatcher) and name not in exclude):
+			val.enable_caching()
 
-# #They promised to fix this by 0.51.0, so we'll only run it if an earlier release
+#They promised to fix this by 0.51.0, so we'll only run it if an earlier release
 # if(tuple([int(x) for x in numba.__version__.split('.')]) < (0,51,0)):
 # 	monkey_patch_caching(tl_mod,['_sort'])
 # 	monkey_patch_caching(td_mod)

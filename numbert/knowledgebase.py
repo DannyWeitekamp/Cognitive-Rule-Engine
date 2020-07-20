@@ -227,7 +227,7 @@ def forward(kb,ops):
 	depth = kb.curr_infer_depth = kb.curr_infer_depth+1
 	
 	for op in ops:
-		print(op)
+		# print(op)
 		if(not all([t in kb.u_vs for t in op.arg_types])): continue
 		typ = op.out_type
 		if(isinstance(op,BaseOperatorMeta)):
@@ -518,7 +518,7 @@ def how_search(kb,ops,goal,search_depth=1,max_solutions=10,min_stop_depth=-1):
 	g_typ = _infer_goal_type(goal)
 	# print(g_typ)
 	for depth in range(1,search_depth+1):
-		print("depth:",depth, "/", search_depth,kb.curr_infer_depth)
+		# print("depth:",depth, "/", search_depth,kb.curr_infer_depth)
 		if(depth < kb.curr_infer_depth): continue
 	# while():
 		

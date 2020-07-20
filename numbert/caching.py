@@ -4,12 +4,16 @@ import hashlib
 import timeit
 from types import FunctionType
 #Snatch AppDirs from numba numba and find the cache dir
+import os
+# from numbert.caching import cache_dir
+
 from numba.misc.appdirs import AppDirs
 
 
 # from numbert.core import Add
 appdirs = AppDirs(appname="numbert", appauthor=False)
 cache_dir = os.path.join(appdirs.user_cache_dir,"numbert_cache")
+os.environ['NUMBA_CACHE_DIR'] = os.path.join(os.path.split(cache_dir)[0], "numba_cache")
 
 if not os.path.exists(cache_dir):
 	os.makedirs(cache_dir)

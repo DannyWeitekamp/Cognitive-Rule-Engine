@@ -58,9 +58,9 @@ def exp_fixed_width(x,_min=20):
 
 # NULL = chr(0)
 
-@njit
-def charseq_to_str(x,max_l=100):
-	return str(x)
+# @njit
+# def charseq_to_str(x,max_l=100):
+# 	return str(x)
 	# l = len(x)
 	# if(l == 0):
 	# 	return ""

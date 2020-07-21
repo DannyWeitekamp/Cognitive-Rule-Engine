@@ -27,5 +27,4 @@ setup(
         ), 
         keywords ='expert system production rules', 
         install_requires = requirements, 
-        zip_safe = False
 ) 

@@ -14,6 +14,7 @@ from numba.misc.appdirs import AppDirs
 appdirs = AppDirs(appname="numbert", appauthor=False)
 cache_dir = os.path.join(appdirs.user_cache_dir,"numbert_cache")
 os.environ['NUMBA_CACHE_DIR'] = os.path.join(os.path.split(cache_dir)[0], "numba_cache")
+print("Numbert Cache Lives Here: ", cache_dir)
 
 if not os.path.exists(cache_dir):
 	os.makedirs(cache_dir)

@@ -6,6 +6,11 @@ from numba.typed import List, Dict
 from numba.core.types import DictType, ListType, unicode_type, float64, NamedTuple, NamedUniTuple, UniTuple 
 from numba.cpython.unicode import  _set_code_point
 from numbert.utils import cache_safe_exec
+from numbert.core import TYPE_ALIASES, REGISTERED_TYPES, py_type_map, numba_type_map, numpy_type_map
+from numbert.gensource import gen_source_standard_imports, gen_source_get_enumerized, \
+							  gen_source_enumerize_nb_objs, \
+							  gen_source_tuple_defs, gen_source_pack_from_numpy
+from numbert.caching import unique_hash, source_to_cache, import_from_cached, source_in_cache
 from collections import namedtuple
 import numpy as np
 import timeit
@@ -14,23 +19,7 @@ import sys
 import __main__
 
 
-
-cast_map = {
-	"string" : str,
-	"number" : float,
-}
-
-numba_type_map = {
-	"string" : unicode_type,
-	"number" : float64,	
-}
-
-numpy_type_map = {
-	"string" : '|S%s',
-	"number" : np.float64,	
-}
-
-numba_type_ids = {k:i  for i,k in enumerate(numba_type_map)}
+# numba_type_ids = {k:i  for i,k in enumerate(numba_type_map)}
 
 
 @njit(cache=True,fastmath=True,nogil=True)
@@ -80,94 +69,7 @@ def charseq_to_str(x,max_l=100):
 			_set_code_point(s,i,x[i])
 		return s[:l]
 
-def gen_source_get_enumerized(name,spec,ind='   '):
 
-	arg_str = ind*3 + "string_enums, number_enums,\n"
-	arg_str += ind*3 + "string_backmap,number_backmap,\n"
-	arg_str += ind*3 + "enum_counter"
-
-	# attr_str = ind*3 + ", ".join(spec.keys()) 
-
-	header = "@njit(cache=True,fastmath=True,nogil=True)\n"
-	# header += "def {}_get_enumerized(\n{},\n{},assert_maps=True):\n".format(name,attr_str,arg_str)
-	header += "def {}_get_enumerized(x,\n{},assert_maps=True):\n".format(name,arg_str)
-
-	strings = ", ".join(["(x.{},{})".format(k,i) for i,k in enumerate(spec.keys()) if spec[k] == 'string'])
-	numbers = ", ".join(["(x.{},{})".format(k,i) for i,k in enumerate(spec.keys()) if spec[k] == 'number'])
-
-	body = ind + "enumerized = np.empty(({},),np.int64)\n".format(len(spec.keys()))
-	# if(strings != ""):
-	# 	body += ind +"if(assert_maps):\n"
-	# 	for i,k in enumerate(spec.keys()):
-	# 		if spec[k] == 'string':
-	# 			body += ind*2 +"_assert_map({}, string_enums, string_backmap, enum_counter)\n".format(k)
-	# 			# body += ind +"enumerized[{}] = string_enums[{}]\n".format(i,k)
-	if(strings != ""):
-	# 	for i,k in enumerate(spec.keys()):
-	# 		if spec[k] == 'string':
-	# 			body += ind +"enumerized[{}] = string_enums[{}]\n".format(i,k)
-		body += ind + "for v,i in [{strings}]:\n".format(strings=strings)
-		body += ind*2 + "if(assert_maps): _assert_map(v, string_enums, string_backmap, enum_counter)\n"
-		body += ind*2 + "enumerized[i] = string_enums[v]\n"
-	if(numbers != ""):	
-		body += ind + "for v,i in [{numbers}]:\n".format(numbers=numbers)
-		body += ind*2 + "if(assert_maps): _assert_map(v, number_enums, number_backmap, enum_counter)\n"
-		body += ind*2 + "enumerized[i] = number_enums[v]\n"
-	body += ind + "return enumerized\n\n"
-
-	
-
-	source = header + body#  +c
-	return source
-
-def gen_source_enumerize_nb_objs(name,spec,ind='   '):
-
-	arg_str = "string_enums, number_enums,\n"
-	arg_str += ind*3 + "string_backmap,number_backmap,\n"
-	arg_str += ind*3 + "enum_counter"
-
-	header = "@njit(cache=True,fastmath=True,nogil=True)\n"
-	# header += "def {}_get_enumerized(\n{},\n{},assert_maps=True):\n".format(name,attr_str,arg_str)
-	header += "def {}_enumerize_nb_objs(inp,out,{}):\n".format(name,arg_str)
-	body = ind + 'for k,v in inp.items():\n'
-	body += ind*2 + 'out[k] = {}_get_enumerized(v,{})\n\n'.format(name,arg_str)
-	source = header + body+("\n"*10)
-	return source
-
-
-
-
-def gen_source_tuple_defs(name,spec,ind='   '):
-	
-	tuple_defs = "{} = namedtuple('{}', {}, module=__name__)\n".format(name,name,["%s"%k for k in spec.keys() if k != 'type'])
-	sv = list(spec.values())
-	if(len(set(sv))==1):
-		tuple_defs += "NB_{}_NamedTuple = NamedUniTuple({},{},{})\n".format(name,str(numba_type_map[sv[0]]),len(sv),name)
-	else:
-		typ_str = ", ".join([str(numba_type_map[x]) for x in spec.values()])
-		tuple_defs += "NB_{}_NamedTuple = NamedTuple(({}),{})\n".format(name,typ_str,name)
-	# tuple_defs += "{} = NB_{}_NamedTuple.instance_class\n".format(name,name)
-	return tuple_defs
-
-
-def gen_source_pack_from_numpy(name,spec,ind='   '):
-	header = "@njit(cache=True,fastmath=True,nogil=True)\n"
-	header += "def {}_pack_from_numpy(inp,mlens):\n".format(name)
-
-	cast_map = {"string":"charseq_to_str(x.{},mlens[{lens}])", 'number': 'float(x.{})'}
-
-	body = ind + "out = Dict.empty(unicode_type,NB_{}_NamedTuple)\n".format(name)
-	# body = ""
-	body += ind + "for i in range(inp.shape[0]):\n"
-	body += ind*2 + "x = inp[i]\n"
-	body += ind*2 + "__name__ = charseq_to_str(x.__name__,mlens[0])\n"
-	for i,(attr, typ) in enumerate(spec.items()):
-		body += ind*2 + ("_{} = " + cast_map[typ]+ "\n").format(attr,attr,lens=i+1)
-	body += ind*2 +"out[__name__] = {}({})\n".format(name,", ".join(["_%s"%x for x in spec.keys()]))
-	body += ind + "return out\n"
-
-	source = header + body #+("\n"*10)
-	return source
 
 
 @njit(cache=False)
@@ -384,6 +286,9 @@ def infer_type(value):
 		return "string"
 	elif(isinstance(value,(float,int))):
 		return "number"
+	elif(hasattr(value,"_fields") and hasattr(type(value),"__name__")):
+		#Is a namedtuple
+		return type(value).__name__
 	else:
 		raise ValueError("Could not infer type of %s" % value)
 
@@ -395,6 +300,7 @@ def infer_nb_type(value):
 Dict_Unicode_to_Enums = DictType(unicode_type,i8[:])
 
 class Numbalizer(object):
+	#Static Values
 	registered_specs = {}
 	jitstructs = {}
 	string_enums = Dict.empty(unicode_type,i8)
@@ -410,31 +316,54 @@ class Numbalizer(object):
 
 	def jitstruct_from_spec(self,name,spec,ind="   "):
 		
-		#Dynamically generate the named tuple for this spec and a numba wrapper for it		
-		tuple_def_source = gen_source_tuple_defs(name,spec,ind)
-		print(tuple_def_source)
-		nb_nt_name = 'NB_{}_NamedTuple'.format(name)
-		l,g = cache_safe_exec(tuple_def_source,gbls=globals())
-		nt = 				l[name]
-		nb_nt = 			l[nb_nt_name]
+		#For the purposes of autogenerating code we need a clean alphanumeric name 
+		name = "".join(x for x in name if x.isalnum())
 
-		#Do this to make the namedtuple picklable (see https://stackoverflow.com/questions/16377215/how-to-pickle-a-namedtuple-instance-correctly)
-		setattr(__main__, nt.__name__, nt)
-		nt.__module__ = "__main__"
+		hash_code = unique_hash([name,spec])
+		if(not source_in_cache(name,hash_code)):
+			source = gen_source_standard_imports()
+			source += gen_source_tuple_defs(name,spec)
+			source += gen_source_get_enumerized(name,spec)
+			source += gen_source_enumerize_nb_objs(name,spec)
+			source += gen_source_pack_from_numpy(name,spec)
+			source_to_cache(name,hash_code,source)
+		# else:
+		# 	source = source_from_cache(name,hash_code)
+		# pack_from_numpy =	l['{}_pack_from_numpy'.format(name)]}
+		out = import_from_cached(name,hash_code,[
+			'{}_get_enumerized'.format(name),
+			'{}_pack_from_numpy'.format(name),
+			name,
+			'NB_{}_NamedTuple'.format(name),
+			'{}_enumerize_nb_objs'.format(name)
+			]).values()
 
-		#Dynamically generate njit functions, pass in the namedtuple and wrapper as globals
-		source = gen_source_get_enumerized(name,spec,ind=ind)
-		source += gen_source_pack_from_numpy(name,spec,ind=ind)
+		get_enumerized, pack_from_numpy, nt, nb_nt, enumerize_nb_objs = tuple(out)
+		# tuple_def_source = gen_source_tuple_defs(name,spec,ind)
+		# print(tuple_def_source)
+		# nb_nt_name = 'NB_{}_NamedTuple'.format(name)
+		# l,g = cache_safe_exec(tuple_def_source,gbls=globals())
+		# nt = 				l[name]
+		# nb_nt = 			l[nb_nt_name]
+
+		# #Do this to make the namedtuple picklable (see https://stackoverflow.com/questions/16377215/how-to-pickle-a-namedtuple-instance-correctly)
+		# print("NAME",nt.__name__)
+		# setattr(__main__, nt.__name__, nt)
+		# nt.__module__ = "__main__"
+
+		# #Dynamically generate njit functions, pass in the namedtuple and wrapper as globals
+		# source = gen_source_get_enumerized(name,spec,ind=ind)
+		# source += gen_source_pack_from_numpy(name,spec,ind=ind)
 		
-		print(source)
-		l,g = cache_safe_exec(source,gbls={**globals(), **{name:nt,nb_nt_name:nb_nt} })
-		get_enumerized = 	l['{}_get_enumerized'.format(name)]
-		pack_from_numpy =	l['{}_pack_from_numpy'.format(name)]
+		# print(source)
+		# l,g = cache_safe_exec(source,gbls={**globals(), **{name:nt,nb_nt_name:nb_nt} })
+		# get_enumerized = 	l['{}_get_enumerized'.format(name)]
+		# pack_from_numpy =	l['{}_pack_from_numpy'.format(name)]
 		
 
-		source = gen_source_enumerize_nb_objs(name,spec,ind=ind)
-		l,g = cache_safe_exec(source,gbls={**globals(), **{'{}_get_enumerized'.format(name):get_enumerized} })
-		enumerize_nb_objs =	l['{}_enumerize_nb_objs'.format(name)]
+		# source = gen_source_enumerize_nb_objs(name,spec,ind=ind)
+		# l,g = cache_safe_exec(source,gbls={**globals(), **{'{}_get_enumerized'.format(name):get_enumerized} })
+		# enumerize_nb_objs =	l['{}_enumerize_nb_objs'.format(name)]
 
 		def py_get_enumerized(_self,assert_maps=True):
 			return get_enumerized(_self,
@@ -460,9 +389,13 @@ class Numbalizer(object):
 		else:
 			self.registered_specs[name] = spec
 			print("start jit")
-			self.jitstructs[name] = self.jitstruct_from_spec(name,spec)
+			jitstruct = self.jitstruct_from_spec(name,spec)
+			self.jitstructs[name] = jitstruct
 			self.nominal_maps[name] = np.array([x == "string" for k,x in spec.items() if k != 'type'],dtype=np.uint8)
 			print("end jit")
+
+			REGISTERED_TYPES[name] = jitstruct.numba_type
+			TYPE_ALIASES[name] = jitstruct.__name__
 
 	def register_specifications(self, specs):
 		for name, spec in specs.items():
@@ -477,9 +410,16 @@ class Numbalizer(object):
 		data_by_type = {}
 		mlens_by_type = {}
 		for name, elm in state.items():
+			# print(elm)
+			assert 'type' in elm, "All objects need 'type' attribute to be numbalized."
 			typ = elm['type']
 			spec = self.registered_specs[typ]
-			elm_data = tuple([name] + [v for k,v in elm.items() if k != 'type'])
+
+			values = [elm[k] for k in spec.keys() if k != 'type']
+			assert len(values) == len(spec), "Dict with keys [{}], cannot be cast to {} [{}]".format(
+				",".join(elm.keys()),name,",",join(spec.keys())) 
+
+			elm_data = tuple([name] + values)
 
 			data = data_by_type.get(typ,[])
 			data.append(elm_data)
@@ -490,8 +430,9 @@ class Numbalizer(object):
 			mlens = mlens_by_type[typ]
 
 			for i,(attr, typ) in enumerate(spec.items()):
-				if(spec[attr] == 'string'):
-					L = len(elm[attr])
+				cast_fn = py_type_map[typ]
+				if(typ == 'string'):
+					L = len(cast_fn(elm[attr]))
 					if(L > mlens[i+1]): mlens[i+1] = L
 
 		#Make a fixed bitwidth numpy datatype for the tuples based off of
@@ -520,9 +461,9 @@ class Numbalizer(object):
 		args = []
 		for x,t in spec.items():
 			try:
-				args.append(cast_map[t](obj_d[x]))
+				args.append(py_type_map[t](obj_d[x]))
 			except ValueError as e:
-				raise ValueError("Cannot cast %r to %r in %r of %r" % (obj_d[x],cast_map[t],x,name)) from e
+				raise ValueError("Cannot cast %r to %r in %r of %r" % (obj_d[x],py_type_map[t],x,name)) from e
 
 		obj = o_struct_type(*args)
 		return obj
@@ -549,6 +490,7 @@ class Numbalizer(object):
 		if(typ == 'string'):
 			value = str(value)
 			_assert_map(value,self.string_enums,self.string_backmap,self.enum_counter)
+			print(value,typ)
 			return self.string_enums[value]
 		elif(typ == 'number'):
 			value = float(value)
@@ -575,241 +517,6 @@ class Numbalizer(object):
 
 	def remap_vectorized(self,vectorized):
 		pass
-
-
-
-
-
-# numbalizer = Numbalizer()
-
-
-# object_specifications = {
-# 	"InterfaceElement" : {
-# 		"id" : "String",
-# 		"value" : "String",
-# 		"above" : "String",#["String","Reference"],
-# 		"below" : "String",#["String","Reference"],
-# 		"to_left" : "String",#["String","Reference"],
-# 		"to_right" : "String",# ["String","Reference"],
-# 		"x" : "Number",
-# 		"y" : "Number"
-# 	},
-# 	"Trajectory" : {
-# 		"x" : "Number",
-# 		"y" : "Number",
-# 		"z" : "Number",
-# 		"dx" : "Number",
-# 		"dy" : "Number",
-# 		"dz" : "Number",
-# 		"a_x" : "Number",
-# 		"a_y" : "Number",
-# 		"a_z" : "Number",
-# 		"a_dx" : "Number",
-# 		"a_dy" : "Number",
-# 		"a_dz" : "Number",
-# 	}
-
-# }
-
-# numbalizer.register_specifications(object_specifications)
-
-# STATE_SIZE = 40
-# _state = {
-# 	"i0" : {
-# 		"type" : "InterfaceElement",
-# 		"id" : "i0",
-# 		"value" : "9",
-# 		"above" : "",
-# 		"below" : "i1",
-# 		"to_left" : "",
-# 		"to_right" : "",
-# 		"x" : 100,
-# 		"y" : 100,
-# 	},
-# 	"i1" : {
-# 		"type" : "InterfaceElement",
-# 		"id" : "i1",
-# 		"value" : "7",
-# 		"above" : "i0",
-# 		"below" : "",
-# 		"to_left" : "",
-# 		"to_right" : "",
-# 		"x" : 100,
-# 		"y" : 200,
-# 	}
-# }
-
-# state = {"ie" + str(i) : _state['i0'] for i in range(STATE_SIZE)}
-
-# print()
-
-# # for k,ie in Numbalizer.state_to_nb_objects(state).items():
-# # 	print(ie)
-# # 	print("ENUM",ie.get_enumerized())
-
-
-# _state2 = {
-# 	"a" : {
-# 		"type" : "Trajectory",
-# 		"x" : 1,
-# 		"y" : 2,
-# 		"z" : 3,
-# 		"dx" : 5.5,
-# 		"dy" : 5.9,
-# 		"dz" : 0.4,
-# 		"a_x" : 1,
-# 		"a_y" : 2,
-# 		"a_z" : 3,
-# 		"a_dx" : 5.5,
-# 		"a_dy" : 5.9,
-# 		"a_dz" : 0.4,
-# 	}
-# }
-
-# state2 = {"ie" + str(i) : _state2['a'] for i in range(STATE_SIZE)}
-
-
-# nb_objects = numbalizer.state_to_nb_objects(state)
-# nb_objects2 = numbalizer.state_to_nb_objects(state2)
-# obj1 = nb_objects['InterfaceElement']['ie0']
-# obj2 = nb_objects2['Trajectory']['ie0']
-	
-
-# nb_objects_real = numbalizer.state_to_nb_objects(state)
-# nb_objects_real2 = numbalizer.state_to_nb_objects(state2)
-
-
-# enumerized = numbalizer.nb_objects_to_enumerized(nb_objects_real)
-# enumerized_states = List()
-# enumerized_states.append(enumerized)
-# enumerized_states.append(numbalizer.nb_objects_to_enumerized(numbalizer.state_to_nb_objects({"ie" + str(i+3) : _state['i1'] for i in range(STATE_SIZE)})))
-
-
-# print("nominal maps")
-# print(Numbalizer.nominal_maps)
-# print("number backmaps")
-# print(Numbalizer.number_backmap)
-
-
-# nominals, continuous = enumerized_to_vectorized_legacy(enumerized_states,Numbalizer.nominal_maps,Numbalizer.number_backmap)
-# nominals, continuous = enumerized_to_vectorized(enumerized_states,Numbalizer.nominal_maps,Numbalizer.number_backmap)
-
-
-# np.set_printoptions(threshold=2000)
-# print("nominals")
-# print(nominals)
-# print("continuous")
-# print(continuous)
-# # raise ValueError()
-# # print(np.isfortran(nominals))
-# # print(np.isfortran(continuous))
-
-# # print(nb_objects_real)
-# # print(nb_objects_real.keys())
-# # raise ValueError()
-
-# def enumerize_obj():
-# 	obj1.get_enumerized()
-
-# def enumerize_obj_nocheck():
-# 	obj1.get_enumerized(False)
-
-# def enumerize_obj_justnums():
-# 	obj2.get_enumerized()
-
-
-# def enumerize_value_string():
-# 	numbalizer.enumerize_value("159")
-
-# def enumerize_value_number():
-# 	numbalizer.enumerize_value(159)
-
-# def unenumerize_value():
-# 	numbalizer.unenumerize_value(2)
-
-
-# state_10 = {"ie" + str(i) : _state['i0'] for i in range(10)}
-# nb_objects_10 = numbalizer.state_to_nb_objects(state_10)
-# def b10_state_to_objs():
-# 	numbalizer.state_to_nb_objects(state_10)
-# def b10_enumerize_objs():
-# 	numbalizer.nb_objects_to_enumerized(nb_objects_10)
-
-
-# state_40 = {"ie" + str(i) : _state['i0'] for i in range(40)}
-# nb_objects_40 = numbalizer.state_to_nb_objects(state_40)
-# def b40_state_to_objs():
-# 	numbalizer.state_to_nb_objects(state_40)
-# def b40_enumerize_objs():
-# 	numbalizer.nb_objects_to_enumerized(nb_objects_40)
-
-# state_200 = {"ie" + str(i) : _state['i0'] for i in range(200)}
-# nb_objects_200 = numbalizer.state_to_nb_objects(state_200)
-# def b200_state_to_objs():
-# 	numbalizer.state_to_nb_objects(state_200)
-# def b200_enumerize_objs():
-# 	numbalizer.nb_objects_to_enumerized(nb_objects_200)
-
-
-
-
-
-# stateA = {"ie" + str(i) : _state['i0'] for i in range(40)}
-# stateB = {"ie" + str(i+3) : _state['i1'] for i in range(40)}
-# enumerized_A = numbalizer.nb_objects_to_enumerized(numbalizer.state_to_nb_objects(stateA))
-# enumerized_B = numbalizer.nb_objects_to_enumerized(numbalizer.state_to_nb_objects(stateB))
-# enumerized_states = List()
-# enumerized_states.append(enumerized_A)
-# enumerized_states.append(enumerized_B)
-
-# def flatten_state(state):
-# 	flat_state = {}
-# 	for name,elm in state.items():
-# 		for attr_name,attr in elm.items():
-# 			flat_state[str((name,attr_name))] = attr
-# 	return flat_state
-
-# py_states = [flatten_state(stateA),flatten_state(stateB)]
-
-# from sklearn.feature_extraction import DictVectorizer
-# dv = DictVectorizer(sparse=False, sort=False)
-# def b40_py_enumerized_to_vectorized():
-# 	py_states = [flatten_state(stateA),flatten_state(stateB)]
-# 	dv.fit_transform(py_states)
-
-# def b40_nb_enumerized_to_vectorized():
-# 	enumerized_to_vectorized(enumerized_states,numbalizer.nominal_maps,numbalizer.number_backmap)
-
-# def b40_nb_enumerized_to_vectorized2():
-# 	enumerized_to_vectorized_legacy(enumerized_states,numbalizer.nominal_maps,numbalizer.number_backmap)
-
-# # def b40_py_enumerized_to_vectorized():
-# # 	enumerized_to_vectorized(enumerized_states,Numbalizer.nominal_maps,Numbalizer.number_backmap)
-
-# # b40_py_enumerized_to_vectorized()
-
-# # print("-----Single Objs------")
-# # print("enumerize_obj:",time_ms(enumerize_obj))
-# # print("enumerize_obj_nocheck:",time_ms(enumerize_obj_nocheck))
-# # print("enumerize_obj_justnums:",time_ms(enumerize_obj_justnums))
-# # print("enumerize_value_string:",time_ms(enumerize_value_string))
-# # print("enumerize_value_number:",time_ms(enumerize_value_number))
-# # print("unenumerize_value:",time_ms(enumerize_value_number))
-# # print("-----State 10 Objs------")
-# # print("state_to_objs:",time_ms(b10_state_to_objs))
-# # print("enumerize_objs:",time_ms(b10_enumerize_objs))
-# # print("-----State 40 Objs------")
-# # print("state_to_objs:",time_ms(b40_state_to_objs))
-# # print("enumerize_objs:",time_ms(b40_enumerize_objs))
-# # print("-----State 200 Objs------")
-# # print("state_to_objs:",time_ms(b200_state_to_objs))
-# # print("enumerize_objs:",time_ms(b200_enumerize_objs))
-
-
-# print("-----States 2x40 Objs------")
-# print("nb_enumerized_to_vectorized2:",time_ms(b40_nb_enumerized_to_vectorized2))
-# print("nb_enumerized_to_vectorized:", time_ms(b40_nb_enumerized_to_vectorized))
-# print("py_enumerized_to_vectorized:",time_ms(b40_py_enumerized_to_vectorized))
 
 
 

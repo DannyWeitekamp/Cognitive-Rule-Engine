@@ -7,7 +7,7 @@ long_description = '...need to add description'
   
 setup( 
         name ='numbert', 
-        version ='0.0.0', 
+        version ='0.1.0', 
         author ='Daniel Weitekamp', 
         author_email ='weitekamp@cmu.edu', 
         url ='https://github.com/DannyWeitekamp/numbert', 
@@ -27,5 +27,4 @@ setup(
         ), 
         keywords ='expert system production rules', 
         install_requires = requirements, 
-        zip_safe = False
 ) 

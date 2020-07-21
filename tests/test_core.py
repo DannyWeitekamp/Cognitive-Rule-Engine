@@ -1,3 +1,5 @@
+from numbert import core
+
 import numpy as np
 from numba import njit
 from numba import void,b1,u1,u2,u4,u8,i1,i2,i4,i8,f4,f8,c8,c16
@@ -5,7 +7,9 @@ from numba.typed import List, Dict
 from numba.core.types import ListType, DictType, unicode_type, Array, Tuple
 from pprint import pprint
 
-from numbert.core import * #Grumbo_forward1, Grumbo_forward2, BaseOperator,NBRT_KnowledgeBase,\
+
+from numbert.knowledgebase import NBRT_KnowledgeBase, how_search, forward
+from numbert.example_ops import * #Grumbo_forward1, Grumbo_forward2, BaseOperator,NBRT_KnowledgeBase,\
 	 #Add, Subtract, Concatenate, StrToFloat, \
 	  #how_search, forward
 

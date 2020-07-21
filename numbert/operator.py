@@ -13,9 +13,11 @@ from numbert.core import TYPE_ALIASES, REGISTERED_TYPES,py_type_map, numba_type_
 from numbert.gensource import gen_source_broadcast_forward
 
 
+
 from collections import namedtuple, deque
 
 import math
+import types
 import numpy as np
 import timeit
 import time
@@ -64,9 +66,9 @@ def compile_forward(op):
 		forward_func = op.forward
 		condition_func = op.condition if(hasattr(op,'condition')) else None
 
-	time1 = time.clock_gettime_ns(time.CLOCK_BOOTTIME)/float(1e6)
+	time1 = time.time_ns()/float(1e6)
 	source = gen_source_broadcast_forward(op, nopython)
-	time2 = time.clock_gettime_ns(time.CLOCK_BOOTTIME)/float(1e6)
+	time2 = time.time_ns()/float(1e6)
 	log.info("%s: Gen Source Time %.4f ms" % (op.__name__, time2-time1))
 	f_name = op.__name__+"_forward"
 	# print(source)
@@ -74,16 +76,16 @@ def compile_forward(op):
 	l,g = cache_safe_exec(source,gbls={'f':forward_func,'c': condition_func,**REGISTERED_TYPES,**globals()})
 	# print("TIS HERE:",l[f_name])
 	if(nopython):
-		op.broadcast_forward = l[f_name]
+		op._broadcast_forward = l[f_name]
 	else:
 		# print(op.__name__,"NOPYTHON=False")
 		_bf = l[f_name]
-		def bf(*args):
-			global f
-			f = forward_func
-			return _bf(*args)
-		op.broadcast_forward = bf
-	time3 = time.clock_gettime_ns(time.CLOCK_BOOTTIME)/float(1e6)
+		# def bf(*args):
+		# 	global f
+		# 	f = forward_func
+		# 	return _bf(*args)
+		op._broadcast_forward = _bf
+	time3 = time.time_ns()/float(1e6)
 	log.info("%s: Compile Source Time %.4f ms" % (op.__name__,time3-time2))
 
 
@@ -277,6 +279,10 @@ class BaseOperatorMeta(type, _UniqueHashable):
 		print("WHEE",d)
 		return d
 
+	# @property
+	
+	
+
 	# def __str__(cls):
 	# 	return cls.template.format(,name=cls.__name__)
 
@@ -386,16 +392,23 @@ class BaseOperator(metaclass=BaseOperatorMeta):
 	def __init_subclass__(cls, **kwargs):
 		super().__init_subclass__(**kwargs)
 
-		t0 = time.clock_gettime_ns(time.CLOCK_BOOTTIME)/float(1e6)
+		t0 = time.time_ns()/float(1e6)
 		cls._init_signature()
 		cls._check_funcs()
 		cls._register()
 		cls._init_template()
-		t1 = time.clock_gettime_ns(time.CLOCK_BOOTTIME)/float(1e6)
+		t1 = time.time_ns()/float(1e6)
 		log.info("%s: Init Stuff Time %.4f ms" % (cls.__name__, t1-t0))
 
-		compile_forward(cls)
-		# t2 = time.clock_gettime_ns(time.CLOCK_BOOTTIME)/float(1e6)
+		def broadcast_forward(cls,*args):
+			if(not hasattr(cls,"_broadcast_forward")):
+				compile_forward(cls)
+			return cls._broadcast_forward(*args)
+
+		cls.broadcast_forward = types.MethodType(broadcast_forward,cls)
+
+		# compile_forward(cls)
+		# t2 = time.time_ns()/float(1e6)
 		# print("%s: Compile Forward Time %.4f ms" % (cls.__name__, t2-t1))
 
 	@classmethod
@@ -473,12 +486,14 @@ class BaseOperator(metaclass=BaseOperatorMeta):
 		self._assert_iargs(args,False)
 		raise NotImplementedError()
 
+	
+
 
 
 
 
 if __name__ == "__main__":
-	# t2 = time.clock_gettime_ns(time.CLOCK_BOOTTIME)/float(1e6)
+	# t2 = time.time_ns()/float(1e6)
 	# print("Init all %.4f ms" % (t2-t1))
 
 	# a = Add(None,Add())

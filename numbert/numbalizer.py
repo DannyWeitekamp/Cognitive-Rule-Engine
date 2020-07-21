@@ -46,28 +46,29 @@ def exp_fixed_width(x,_min=20):
 		out[i] = (1 << count)*_min; 
 	return out
 
-@njit(cache=True)
-def charseq_len(s,max_l=100):
-	i = 0
-	for i in range(max_l):
-		try:
-			v = s[i]
-		except Exception:
-			break
-	return i
+# @njit(cache=True)
+# def charseq_len(s,max_l=100):
+# 	i = 0
+# 	for i in range(max_l):
+# 		try:
+# 			v = s[i]
+# 		except Exception:
+# 			break
+# 	return i
 
-NULL = chr(0)
+# NULL = chr(0)
 
 @njit
 def charseq_to_str(x,max_l=100):
-	l = charseq_len(x)
-	if(l == 0):
-		return ""
-	else:
-		s = NULL*(l+1)
-		for i in range(l):
-			_set_code_point(s,i,x[i])
-		return s[:l]
+	return str(x)
+	# l = len(x)
+	# if(l == 0):
+	# 	return ""
+	# else:
+	# 	s = NULL*(l+1)
+	# 	for i in range(l):
+	# 		_set_code_point(s,i,x[i])
+	# 	return s[:l]
 
 
 
@@ -388,11 +389,11 @@ class Numbalizer(object):
 			"Specification redefinition not permitted. Attempted on %r" % name
 		else:
 			self.registered_specs[name] = spec
-			print("start jit")
+			# print("start jit")
 			jitstruct = self.jitstruct_from_spec(name,spec)
 			self.jitstructs[name] = jitstruct
 			self.nominal_maps[name] = np.array([x == "string" for k,x in spec.items() if k != 'type'],dtype=np.uint8)
-			print("end jit")
+			# print("end jit")
 
 			REGISTERED_TYPES[name] = jitstruct.numba_type
 			TYPE_ALIASES[name] = jitstruct.__name__
@@ -490,7 +491,7 @@ class Numbalizer(object):
 		if(typ == 'string'):
 			value = str(value)
 			_assert_map(value,self.string_enums,self.string_backmap,self.enum_counter)
-			print(value,typ)
+			# print(value,typ)
 			return self.string_enums[value]
 		elif(typ == 'number'):
 			value = float(value)

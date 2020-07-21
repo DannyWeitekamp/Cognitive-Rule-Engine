@@ -51,6 +51,6 @@ py_type_map = {
 }
 
 numpy_type_map = {
-	"string" : '|S%s',
+	"string" : '|U%s',
 	"number" : np.float64,	
 }

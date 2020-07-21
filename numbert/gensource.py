@@ -86,15 +86,15 @@ def gen_source_pack_from_numpy(name,spec,ind='   '):
 	header = "@njit(cache=True,fastmath=True,nogil=True)\n"
 	header += "def {}_pack_from_numpy(inp,mlens):\n".format(name)
 
-	cast_map = {"string":"charseq_to_str(x.{},mlens[{lens}])", 'number': 'float(x.{})'}
+	cast_map = {"string":"str(x.{})", 'number': 'float(x.{})'}
 
 	body = ind + "out = Dict.empty(unicode_type,NB_{}_NamedTuple)\n".format(name)
 	# body = ""
 	body += ind + "for i in range(inp.shape[0]):\n"
 	body += ind*2 + "x = inp[i]\n"
-	body += ind*2 + "__name__ = charseq_to_str(x.__name__,mlens[0])\n"
+	body += ind*2 + "__name__ = str(x.__name__)\n"
 	for i,(attr, typ) in enumerate(spec.items()):
-		body += ind*2 + ("_{} = " + cast_map[typ]+ "\n").format(attr,attr,lens=i+1)
+		body += ind*2 + ("_{} = " + cast_map[typ]+ "\n").format(attr,attr)
 	body += ind*2 +"out[__name__] = {}({})\n".format(name,", ".join(["_%s"%x for x in spec.keys()]))
 	body += ind + "return out\n"
 

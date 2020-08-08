@@ -89,7 +89,10 @@ class TestDataTransfer(unittest.TestCase):
 		numbalizer = Numbalizer()
 		numbalizer.register_specifications(self.object_specifications)
 		self.assertTrue(hasattr(numbalizer,'jitstructs'))
-		self.assertTrue(hasattr(numbalizer,'nominal_maps'))
+		self.assertTrue(hasattr(numbalizer,'spec_flags'))
+		self.assertTrue("nominal" in numbalizer.spec_flags)
+		self.assertTrue((numbalizer.spec_flags['nominal']['InterfaceElement'] == np.array([1,1,1,1,1,1,0,0])).all())
+		self.assertTrue((numbalizer.spec_flags['nominal']['Trajectory'] == np.array([0,0,0,0,0,0,0,0,0,0,0,0])).all())
 
 		self.assertTrue('InterfaceElement' in numbalizer.jitstructs)
 

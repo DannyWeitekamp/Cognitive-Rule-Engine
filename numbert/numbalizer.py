@@ -14,6 +14,7 @@ from numbert.caching import unique_hash, source_to_cache, import_from_cached, so
 from collections import namedtuple
 import numpy as np
 import timeit
+import itertools
 import types as pytypes
 import sys
 import __main__
@@ -71,6 +72,22 @@ def exp_fixed_width(x,_min=20):
 	# 	return s[:l]
 
 
+@njit(cache=True)
+def enumerize_array(inp,enums,backmap,counter):
+	out = np.empty((len(inp),),dtype=np.int64)
+	for i,x in enumerate(inp):
+		_assert_map(x,enums,backmap,counter)
+		out[i] = enums[x]
+	return out
+
+@njit(cache=True)
+def enumerize_str_array(inp,enums,backmap,counter):
+	out = np.empty((len(inp),),dtype=np.int64)
+	for i,x in enumerate(inp):
+		_x = str(x)
+		_assert_map(_x,enums,backmap,counter)
+		out[i] = enums[_x]
+	return out
 
 
 @njit(cache=False)
@@ -278,10 +295,6 @@ def decode_vectorized(indicies, isnominal, inversion_data):
 
 
 
-
-
-
-
 def infer_type(value):
 	if(isinstance(value,str)):
 		return "string"
@@ -299,6 +312,7 @@ def infer_nb_type(value):
 
 
 Dict_Unicode_to_Enums = DictType(unicode_type,i8[:])
+Dict_Unicode_to_Flags = DictType(unicode_type,u1[:])
 
 class Numbalizer(object):
 	#Static Values
@@ -309,7 +323,8 @@ class Numbalizer(object):
 	string_backmap = Dict.empty(i8,unicode_type)
 	number_backmap = Dict.empty(i8,f8)
 	enum_counter = np.array(0)
-	nominal_maps = Dict.empty(unicode_type,u1[:])
+	# nominal_maps = Dict.empty(unicode_type,u1[:])
+	spec_flags = Dict.empty(unicode_type,Dict_Unicode_to_Flags)
 
 	def __init__(self):
 		for x in ["<#ANY>",'','?sel']:
@@ -319,6 +334,9 @@ class Numbalizer(object):
 		
 		#For the purposes of autogenerating code we need a clean alphanumeric name 
 		name = "".join(x for x in name if x.isalnum())
+
+		#Unstandardize to use types only. Probably don't need tags for source gen.
+		spec = {attr:x['type'] for attr,x in spec.items()}
 
 		hash_code = unique_hash([name,spec])
 		if(not source_in_cache(name,hash_code)):
@@ -382,18 +400,49 @@ class Numbalizer(object):
 
 		return nt
 
+	def _standardize_spec(self,spec):
+		out = {}
+		for attr,v in spec.items():
+			if(isinstance(v,str)):
+				typ, flags = v.lower(), []
+			elif(isinstance(v,dict)):
+				assert "type" in v, "Attribute specifications must have 'type' property, got %s." % v
+				typ = v['type'].lower()
+				flags = [x.lower() for x in v.get('flags',[])]
+			else:
+				raise ValueError("Spec attribute %r = %r is not valid type with type %s." % (attr,v,type(v)))
+
+			#Strings are always nominal
+			if(typ == 'string' and ('nominal' not in flags)): flags.append('nominal')
+
+			out[attr] = {"type": typ, "flags" : flags}
+		return out
+
+	def _register_flag(self,flag):
+		d = self.spec_flags[flag] = Dict.empty(unicode_type,u1[:])
+		for name,spec in self.registered_specs.items():
+			d[name] = np.array([flag in x['flags'] for attr,x in spec.items()], dtype=np.uint8)
+
+
+	def _assert_flags(self,name,spec):
+		for flag in itertools.chain(*[x['flags'] for atrr,x in spec.items()]):
+			if flag not in self.spec_flags:
+				self._register_flag(flag)
+		for flag, d in self.spec_flags.items():
+			d[name] = np.array([flag in x['flags'] for attr,x in spec.items()], dtype=np.uint8)
+
+
+
 	def register_specification(self, name, spec):
-		spec = {k:v.lower() for k,v in spec.items()}
+		spec = self._standardize_spec(spec)
 		if(name in self.registered_specs):
 			assert self.registered_specs[name] == spec, \
 			"Specification redefinition not permitted. Attempted on %r" % name
 		else:
 			self.registered_specs[name] = spec
-			# print("start jit")
+			self._assert_flags(name,spec)
 			jitstruct = self.jitstruct_from_spec(name,spec)
 			self.jitstructs[name] = jitstruct
-			self.nominal_maps[name] = np.array([x == "string" for k,x in spec.items() if k != 'type'],dtype=np.uint8)
-			# print("end jit")
 
 			REGISTERED_TYPES[name] = jitstruct.numba_type
 			TYPE_ALIASES[name] = jitstruct.__name__
@@ -414,9 +463,11 @@ class Numbalizer(object):
 			# print(elm)
 			assert 'type' in elm, "All objects need 'type' attribute to be numbalized."
 			typ = elm['type']
+
+
 			spec = self.registered_specs[typ]
 
-			values = [elm[k] for k in spec.keys() if k != 'type']
+			values = [elm.get(k,"" if s_obj['type'] == "string" else np.nan) for k,s_obj in spec.items() if k != 'type']
 			assert len(values) == len(spec), "Dict with keys [{}], cannot be cast to {} [{}]".format(
 				",".join(elm.keys()),name,",",join(spec.keys())) 
 
@@ -430,25 +481,27 @@ class Numbalizer(object):
 				mlens_by_type[typ] = [0]*len(elm_data)
 			mlens = mlens_by_type[typ]
 
-			for i,(attr, typ) in enumerate(spec.items()):
+			for i,(attr, s_obj) in enumerate(spec.items()):
+				typ = s_obj['type']
 				cast_fn = py_type_map[typ]
 				if(typ == 'string'):
-					L = len(cast_fn(elm[attr]))
+					L = len(cast_fn(elm.get(attr,"")))
 					if(L > mlens[i+1]): mlens[i+1] = L
 
 		#Make a fixed bitwidth numpy datatype for the tuples based off of
 		#	the max string lengths per attribute.
 		out = {}
 		for spec_typ,len_arrs in mlens_by_type.items():
-			#Pick string widths that fit into [20,80,320,...] to avoid jit recompiles
+			#Pick string widths that fit into [20,80,320,...] to` avoid jit recompiles
 			spec = self.registered_specs[spec_typ]
 			mlens = exp_fixed_width(np.array(mlens_by_type[spec_typ]),20) 
 			dtype = dtype = [('__name__', tm['string']%int(mlens[0]))]
-			for i,(attr, typ) in enumerate(spec.items()):
+			for i,(attr, s_obj) in enumerate(spec.items()):
+				typ = s_obj['type']
 				if(typ == 'string'):
 					dtype.append( (attr, tm['string']%int(mlens[i+1])) )
 				else:
-					dtype.append( (attr, tm[spec[attr]]) )
+					dtype.append( (attr, tm[typ]) )
 			pack_from_numpy = self.jitstructs[spec_typ].pack_from_numpy
 			out[spec_typ] = pack_from_numpy(np.array(data_by_type[spec_typ],dtype=dtype),mlens)
 		return out	
@@ -460,7 +513,8 @@ class Numbalizer(object):
 		spec = self.registered_specs[obj_d['type']]
 		o_struct_type = self.jitstructs[obj_d['type']]
 		args = []
-		for x,t in spec.items():
+		for x,s_obj in spec.items():
+			t = s_obj['type']
 			try:
 				args.append(py_type_map[t](obj_d[x]))
 			except ValueError as e:
@@ -481,10 +535,19 @@ class Numbalizer(object):
 
 
 	def enumerize(self,value, typ=None):
-		if(isinstance(value,(list,tuple))):
+		if(isinstance(value,np.ndarray)):
+			if(np.issubdtype(value.dtype, np.number)):
+				return enumerize_array(value,self.number_enums,self.number_backmap,self.enum_counter)
+			elif(np.issubdtype(value.dtype, np.str_)):
+				return enumerize_str_array(value,self.string_enums,self.string_backmap,self.enum_counter)
+			else:
+				raise ValueError("Type could not be enumerized %s" % type(value))
+
+
+		elif(isinstance(value,(list,tuple))):
 			return [self.enumerize_value(x) for x in value]
 		else:
-			return self.enumerize_value(x)
+			return self.enumerize_value(value)
 
 	def enumerize_value(self,value, typ=None):
 		if(typ is None): typ = infer_type(value)
@@ -509,9 +572,14 @@ class Numbalizer(object):
 			raise ValueError("No enum for %r." % value)
 
 	def enumerized_to_vectorized(self,enumerized_state,return_inversion_data=False):
+		print(enumerized_state)
+		# print(self.nominal_maps)
+		print(self.number_backmap)
 
+		print("self.spec_flags['nominal']")
+		print(self.spec_flags['nominal'])
 		nominal, continuous, inversion_data = enumerized_to_vectorized(enumerized_state,
-										self.nominal_maps,self.number_backmap,
+										self.spec_flags['nominal'],self.number_backmap,
 										return_inversion_data=return_inversion_data)
 		out = {'nominal':nominal,'continuous':continuous, 'inversion_data': inversion_data}
 		return out

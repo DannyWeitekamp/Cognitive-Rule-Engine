@@ -312,6 +312,7 @@ def infer_nb_type(value):
 
 
 Dict_Unicode_to_Enums = DictType(unicode_type,i8[:])
+Dict_Unicode_to_i8 = DictType(unicode_type,i8)
 Dict_Unicode_to_Flags = DictType(unicode_type,u1[:])
 
 class Numbalizer(object):
@@ -323,6 +324,7 @@ class Numbalizer(object):
 	string_backmap = Dict.empty(i8,unicode_type)
 	number_backmap = Dict.empty(i8,f8)
 	enum_counter = np.array(0)
+	attr_inds_by_type = Dict.empty(unicode_type,Dict_Unicode_to_i8)
 	# nominal_maps = Dict.empty(unicode_type,u1[:])
 	spec_flags = Dict.empty(unicode_type,Dict_Unicode_to_Flags)
 
@@ -402,6 +404,8 @@ class Numbalizer(object):
 
 	def _standardize_spec(self,spec):
 		out = {}
+		print("prestandardize")
+		print(spec)
 		for attr,v in spec.items():
 			if(isinstance(v,str)):
 				typ, flags = v.lower(), []
@@ -416,6 +420,8 @@ class Numbalizer(object):
 			if(typ == 'string' and ('nominal' not in flags)): flags.append('nominal')
 
 			out[attr] = {"type": typ, "flags" : flags}
+		print("poaststandardize")
+		print(out)
 		return out
 
 	def _register_flag(self,flag):
@@ -431,6 +437,11 @@ class Numbalizer(object):
 		for flag, d in self.spec_flags.items():
 			d[name] = np.array([flag in x['flags'] for attr,x in spec.items()], dtype=np.uint8)
 
+	def _update_attr_inds(self,name,spec):
+		d = Dict.empty(unicode_type,i8)
+		for i,attr in enumerate(spec.keys()):
+			d[attr] = i
+		self.attr_inds_by_type[name] = d
 
 
 	def register_specification(self, name, spec):
@@ -441,6 +452,7 @@ class Numbalizer(object):
 		else:
 			self.registered_specs[name] = spec
 			self._assert_flags(name,spec)
+			self._update_attr_inds(name,spec)
 			jitstruct = self.jitstruct_from_spec(name,spec)
 			self.jitstructs[name] = jitstruct
 

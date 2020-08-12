@@ -130,23 +130,25 @@ def test_direct_pattern_assign():
 
 def test_match3():
     config = {
-        "sel": {
-            "type" : "TextField",
-            "pos_pattern" : {
-                "above": "arg1",
-            }
-        },
-        "arg0": {
-            "type" : "TextField",
-            "pos_pattern" : {
-                "below": "arg1",
-            }
-        },
-        "arg1": {
-            "type" : "TextField",
-            "pos_pattern" : {
-                "above": "arg0",
-                "below": "sel",
+        "patterns" : {
+            "sel": {
+                "type" : "TextField",
+                "pos_pattern" : {
+                    "above": "arg1",
+                }
+            },
+            "arg0": {
+                "type" : "TextField",
+                "pos_pattern" : {
+                    "below": "arg1",
+                }
+            },
+            "arg1": {
+                "type" : "TextField",
+                "pos_pattern" : {
+                    "above": "arg0",
+                    "below": "sel",
+                }
             }
         }
     }
@@ -162,23 +164,25 @@ def test_match3():
 
 def test_unbound3():
     config = {
-        "sel": {
-            "type" : "TextField",
-            "pos_pattern" : {
-                "below": "",
-            }
-        },
-        "arg0": {
-            "type" : "TextField",
-            "pos_pattern" : {
-                "below": "arg1",
-                "above": "",
-            }
-        },
-        "arg1": {
-            "type" : "TextField",
-            "pos_pattern" : {
-                "above": "arg0",
+        "patterns" : {
+            "sel": {
+                "type" : "TextField",
+                "pos_pattern" : {
+                    "below": "",
+                }
+            },
+            "arg0": {
+                "type" : "TextField",
+                "pos_pattern" : {
+                    "below": "arg1",
+                    "above": "",
+                }
+            },
+            "arg1": {
+                "type" : "TextField",
+                "pos_pattern" : {
+                    "above": "arg0",
+                }
             }
         }
     }
@@ -211,4 +215,57 @@ def test_unbound3():
     assert matches_equal(matches, ground_truth)
 
     
+def test_condition():
+    config = {
+        "patterns" : {
+            "sel": {
+                "type" : "TextField",
+                "pos_pattern" : {
+                    "above": "arg1",
+                }
+            },
+            "arg0": {
+                "type" : "TextField",
+                "pos_pattern" : {
+                    "below": "arg1",
+                }
+            },
+            "arg1": {
+                "type" : "TextField",
+                "pos_pattern" : {
+                    "above": "arg0",
+                    "below": "sel",
+                }
+            }
+        },
+        "conditions" : {
+            "bindables" : {
+                "sel" : [
+                    ["value"]
+                    ],
+                "arg0" : [
+                    ["value"]
+                    ],
+                "arg1" : [
+                    ["value"]
+                    ]
+            },
+            "relations" : [
+                ["EQUAL", True , 0 ,"1"],
+                ["EQUAL", True , 1 ,"4"],
+                ["EQUAL", True , 2 ,"7"],
+            ],
+            "clause" : [
+                ["AND", 0, 1, 2]
+            ]
+        }
+    }
+    matcher = Matcher(numbalizer,config=config)
+    matches = matcher.get_matches(state1_enumerized)
+    print(matches)
+    assert matches_equal(matches,
+        [['C1', 'A1', 'B1']]
+    )
 
+
+test_condition()

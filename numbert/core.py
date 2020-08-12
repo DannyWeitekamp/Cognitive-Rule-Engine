@@ -54,3 +54,5 @@ numpy_type_map = {
 	"string" : '|U%s',
 	"number" : np.float64,	
 }
+
+STRING_DTYPE = np.dtype("U50")

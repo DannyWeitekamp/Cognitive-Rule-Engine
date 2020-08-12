@@ -224,20 +224,17 @@ def get_matches(enumerized_state, pos_spec_patterns, pattern_names, pattern_type
     
     enumerized_matches = match_iterative(pos_spec_patterns,elems,candidates,elem_names, pattern_names_to_inds)
 
-    # print("BEFORE")
     condition_passing_matches = List()
     for i, e_match in enumerate(enumerized_matches):
-        # print(i, "BEFORE", e_match)
         if(conds_data is not None):
-            if(not conds_apply(e_match, conds_data, \
-                 enumerized_state, string_enums, attr_inds_by_type)):
-                continue
+            applies = conds_apply(e_match, conds_data, \
+                 enumerized_state, string_enums, attr_inds_by_type)
+            if(not applies): continue
+                
+        condition_passing_matches.append(e_match)
 
-            
-            condition_passing_matches.append(e_match)
-    # print("AFTER")
-    out = np.empty((len(enumerized_matches),len(pattern_types)), dtype=pattern_types.dtype)
-    for i,e_match in enumerate(enumerized_matches):
+    out = np.empty((len(condition_passing_matches),len(pattern_types)), dtype=pattern_types.dtype)
+    for i,e_match in enumerate(condition_passing_matches):
         for j,name in enumerate(e_match):
             out[i][j] = string_backmap[name]
     return out

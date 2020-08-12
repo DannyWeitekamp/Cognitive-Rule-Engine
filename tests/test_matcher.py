@@ -251,9 +251,9 @@ def test_condition():
                     ]
             },
             "relations" : [
-                ["EQUAL", True , 0 ,"1"],
-                ["EQUAL", True , 1 ,"4"],
-                ["EQUAL", True , 2 ,"7"],
+                ["EQUAL", True , 0 ,"7"],
+                ["EQUAL", True , 1 ,"1"],
+                ["EQUAL", True , 2 ,"4"],
             ],
             "clause" : [
                 ["AND", 0, 1, 2]

@@ -642,12 +642,12 @@ def resolve_dereferences(match, derefs_by_bindable, elems, elem_names, elem_name
     return out
 
 # print(numbalizer.unenumerize_value(19))
-match = np.array([8,9,10],dtype=np.uint32) #C2
+# match = np.array([8,9,10],dtype=np.uint32) #C2
 # derefs_by_bindable = [[np.array(['to_left','above',"value"]),np.array(['to_right','above',"value"]),np.array(['to_right','below',"value"])]]
 
-def bleh(match,derefs_by_bindable,enumerized_state,numbalizer):
-    elems, elem_names, elem_name_dict, elem_types = get_enumerized_elems(enumerized_state,numbalizer.string_enums)
-    return resolve_dereferences(match,derefs_by_bindable, elems, elem_names, elem_name_dict, elem_types, numbalizer.attr_inds_by_type)
+# def bleh(match,derefs_by_bindable,enumerized_state,numbalizer):
+#     elems, elem_names, elem_name_dict, elem_types = get_enumerized_elems(enumerized_state,numbalizer.string_enums)
+#     return resolve_dereferences(match,derefs_by_bindable, elems, elem_names, elem_name_dict, elem_types, numbalizer.attr_inds_by_type)
 
 # blop = bleh(match,derefs_by_bindable,state1_enumerized,numbalizer)
 # print([numbalizer.unenumerize_value(x) for x in blop[0]])

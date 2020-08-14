@@ -94,6 +94,7 @@ def enumerize_str_array(inp,enums,backmap,counter):
 def enumerize_nb_objs(inp,out,enumerize_f, string_enums, number_enums,
 					string_backmap,number_backmap,enum_counter):
 	for k,v in inp.items():
+		_assert_map(k,string_enums,string_backmap,enum_counter)
 		out[k] = enumerize_f(v,string_enums, number_enums,
 					string_backmap,number_backmap,enum_counter)
 

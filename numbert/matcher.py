@@ -295,9 +295,12 @@ class Matcher(object):
         if(neg_patterns is None): pos_patterns = None; return;
         self.neg_patterns = self._check_patterns(neg_patterns)
 
-    def set_conditions(self,**kwargs):
+    def set_conditions(self,*args,**kwargs):
         if('numbalizer' not in kwargs): kwargs['numbalizer'] = self.numbalizer
-        self.conditions = Conditions(**kwargs)
+        if(len(args) > 0 and isinstance(args[0],Conditions)):
+            self.conditions = args[0]
+        else:    
+            self.conditions = Conditions(*args,**kwargs)
         
     def _unenum_v(self,x,t):
         return self.numbalizer.unenumerize_value(x,t)
@@ -357,7 +360,16 @@ class Matcher(object):
         # print()
         self.set_patterns(names,types,pos_patterns,neg_patterns)        
         if('conditions' in config):
-            self.set_conditions(numbalizer=self.numbalizer,config=config['conditions'])
+            conditions_config = config['conditions']
+            print("conditions_config")
+            print(conditions_config)
+            if(isinstance(conditions_config,dict)):
+                self.set_conditions(numbalizer=self.numbalizer,config=config['conditions'])
+            elif(isinstance(conditions_config,Conditions)):
+                print("SET CONDITIONS")
+                self.set_conditions(conditions_config)
+            else:
+                raise ValueError("Condition should be config or Condition() object, but got %s" % (type(conditions_config)))
 
 
     def get_matches(self,enumerized_state):

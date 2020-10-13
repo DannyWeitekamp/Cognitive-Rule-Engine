@@ -81,6 +81,7 @@ def source_to_cache(name,hsh,source):
 
 def import_from_cached(name,hsh,targets):
 	l = {}
+	print("from numbert_cache.{}._{} import {}".format(name,hsh,",".join(targets)))
 	exec("from numbert_cache.{}._{} import {}".format(name,hsh,",".join(targets)), {}, l)
 	return {k:l[k] for k in targets}
 	# path = get_cache_path(name,hsh)

@@ -227,7 +227,7 @@ def forward(kb,ops):
 	depth = kb.curr_infer_depth = kb.curr_infer_depth+1
 	
 	for op in ops:
-		# print(op)
+		print(op)
 		if(not all([t in kb.u_vs for t in op.arg_types])): continue
 		typ = op.out_type
 		if(isinstance(op,BaseOperatorMeta)):

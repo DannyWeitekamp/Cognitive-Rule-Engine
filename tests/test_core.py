@@ -9,7 +9,7 @@ from pprint import pprint
 
 
 from numbert.knowledgebase import NBRT_KnowledgeBase, how_search, forward
-from numbert.example_ops import * #Grumbo_forward1, Grumbo_forward2, BaseOperator,NBRT_KnowledgeBase,\
+from example_ops import * #Grumbo_forward1, Grumbo_forward2, BaseOperator,NBRT_KnowledgeBase,\
 	 #Add, Subtract, Concatenate, StrToFloat, \
 	  #how_search, forward
 

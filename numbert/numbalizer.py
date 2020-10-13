@@ -405,8 +405,8 @@ class Numbalizer(object):
 
 	def _standardize_spec(self,spec):
 		out = {}
-		print("prestandardize")
-		print(spec)
+		# print("prestandardize")
+		# print(spec)
 		for attr,v in spec.items():
 			if(isinstance(v,str)):
 				typ, flags = v.lower(), []
@@ -421,8 +421,8 @@ class Numbalizer(object):
 			if(typ == 'string' and ('nominal' not in flags)): flags.append('nominal')
 
 			out[attr] = {"type": typ, "flags" : flags}
-		print("poaststandardize")
-		print(out)
+		# print("poaststandardize")
+		# print(out)
 		return out
 
 	def _register_flag(self,flag):

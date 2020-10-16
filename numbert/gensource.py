@@ -11,7 +11,7 @@ def gen_source_standard_imports():
 	imports += "from numba import jit,njit\n"
 	imports += "from numba import void,b1,u1,u2,u4,u8,i1,i2,i4,i8,f4,f8,c8,c16\n"
 	imports += "from numba.typed import List, Dict\n"
-	imports += "from numba.core.types import DictType, ListType, unicode_type, float64, NamedTuple, NamedUniTuple, UniTuple\n"
+	imports += "from numba.core.types import DictType, ListType, unicode_type, float64, NamedTuple, NamedUniTuple, UniTuple, Tuple\n"
 	imports += "from numbert.numbalizer import _assert_map\n"
 	return imports
 

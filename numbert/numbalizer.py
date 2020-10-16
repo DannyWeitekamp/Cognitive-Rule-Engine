@@ -400,6 +400,7 @@ class Numbalizer(object):
 		nt.pack_from_numpy = pack_from_numpy
 		nt.enumerize_nb_objs = enumerize_nb_objs
 		nt.numba_type = nb_nt
+		nt.hash = hash_code
 
 		return nt
 

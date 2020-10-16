@@ -73,16 +73,35 @@ def source_from_cache(name,hsh):
 		out = f.read()
 	return out
 
-def source_to_cache(name,hsh,source):
+def aot_compile(name,hsh):
+	out = import_from_cached(name,hsh,['cc'])	
+	out['cc'].compile()
+
+def source_to_cache(name,hsh,source,is_aot=False):
 	path = get_cache_path(name,hsh)
 	os.makedirs(os.path.dirname(path), exist_ok=True)
 	with open(path,mode='w') as f:
 		f.write(source)
+	if(is_aot): aot_compile(name,hsh)
 
-def import_from_cached(name,hsh,targets):
+
+def gen_import_str(name,hsh,targets,aot_module=None):
+	aot_module = aot_module if aot_module else ''
+	return "from numbert_cache.{}.{}_{} import {}".format(name,aot_module,hsh,", ".join(targets))
+
+def import_from_cached(name,hsh,targets,aot_module=None):
 	l = {}
-	print("from numbert_cache.{}._{} import {}".format(name,hsh,",".join(targets)))
-	exec("from numbert_cache.{}._{} import {}".format(name,hsh,",".join(targets)), {}, l)
+	imp_str = gen_import_str(name,hsh,targets,aot_module)
+	print("imp_str:",imp_str)
+	if(aot_module):
+		try:
+			exec(imp_str, {}, l)
+		except Exception as e:
+			aot_compile(name,hsh)
+			exec(imp_str, {}, l)
+	else:
+		exec(imp_str, {}, l)
+
 	return {k:l[k] for k in targets}
 	# path = get_cache_path(name,hsh)
 

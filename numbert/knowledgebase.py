@@ -32,16 +32,16 @@ def join_new_vals(vd,new_ds,depth):
 				vd[v] = depth
 	return vd
 
-@njit(nogil=True,fastmath=True,cache=True) 
+# @njit(nogil=True,fastmath=True,cache=True) 
 def array_from_dict(d):
 	out = np.empty(len(d))
 	for i,v in enumerate(d):
 		out[i] = v
 	return out
 
-@njit(nogil=True,fastmath=True,cache=True) 
+# @njit(nogil=True,fastmath=True,cache=True) 
 def list_from_dict(d):
-	out = List()
+	out = List.empty_list(d._dict_type.key[0])
 	for i,v in enumerate(d):
 		out.append(v)
 	return out
@@ -91,7 +91,9 @@ class NBRT_KnowledgeBase(object):
 			self.hists[typ] = self.hists.get(typ,Dict.empty(i8,ListType(struct_typ)))
 		return self.hist_structs[typ]
 	def _assert_declare_store(self,typ):
+		print('\t',"%.02f"%(time.time()-start_time),"ROOP1")
 		struct_typ = self._assert_record_type(typ)
+		print('\t',"%.02f"%(time.time()-start_time),"ROOP2")
 		typ_store = self.hists[typ]
 		if(0 not in typ_store):
 			typ_cls = REGISTERED_TYPES[typ]
@@ -101,25 +103,34 @@ class NBRT_KnowledgeBase(object):
 			#Type : (0 (i.e. no-op), _hist, shape, arg_types, vmap)
 			tsd.append( tuple([0, np.empty((0,),dtype=np.int64),
 					   np.empty((0,),dtype=np.int64), tl,vmap]) )
+		print('\t',"%.02f"%(time.time()-start_time),"ROOP3")
 
 
 	def _assert_declared_values(self):
 		if(not self.declared_consistent):
 			for typ in REGISTERED_TYPES.keys():
+				print("%.02f"%(time.time()-start_time),"NOOP1")
 				self._assert_declare_store(typ)
+				print("%.02f"%(time.time()-start_time),"NOOP2.2")
 				record = self.hists[typ][0][0]
+				print("%.02f"%(time.time()-start_time),"NOOP2.3")
 				_,_,_,_, vmap = record
-
+				print("%.02f"%(time.time()-start_time),"NOOP2.5")
 				typ_cls = REGISTERED_TYPES[typ]
+				print("%.02f"%(time.time()-start_time),"NOOP2.6")
 				d = self.u_vds[typ] = Dict.empty(typ_cls,i8)
+				print("%.02f"%(time.time()-start_time),"NOOP2.7")
 				for x in vmap:
 					d[x] = 0
+				print("%.02f"%(time.time()-start_time),"NOOP3")
 				if(typ == TYPE_ALIASES['float']):
 					self.u_vs[typ] = array_from_dict(d)
 				else:
 					self.u_vs[typ] = list_from_dict(d)
+				print("%.02f"%(time.time()-start_time),"NOOP4")
 
 				self.dec_u_vs[typ] = self.u_vs[typ].copy()
+				print("%.02f"%(time.time()-start_time),"NOOP5")
 				# print(self.u_vs)
 			self.declared_consistent = True
 
@@ -218,8 +229,12 @@ def broadcast_forward_op_comp(kb,op_comp):
 # Add.broadcast_forward = Add_forward
 # Subtract.broadcast_forward = Subtract_forward
 # Concatenate.broadcast_forward = cat_forward
+import time
+start_time = time.time()
 def forward(kb,ops):
+	print("%.02f"%(time.time()-start_time),"BEFORE")
 	kb._assert_declared_values()
+	print("%.02f"%(time.time()-start_time),"AFTER")
 
 	output_types = set()
 	# output_types = set([op.out_type for op in ops])
@@ -227,7 +242,7 @@ def forward(kb,ops):
 	depth = kb.curr_infer_depth = kb.curr_infer_depth+1
 	
 	for op in ops:
-		print(op)
+		print("%.02f"%(time.time()-start_time),"SHLOOP1", op)
 		if(not all([t in kb.u_vs for t in op.arg_types])): continue
 		typ = op.out_type
 		if(isinstance(op,BaseOperatorMeta)):
@@ -514,9 +529,12 @@ def unify_op(kb,op,goal):
 
 def how_search(kb,ops,goal,search_depth=1,max_solutions=10,min_stop_depth=-1):
 	if(min_stop_depth == -1): min_stop_depth = search_depth
+	print("%.02f"%(time.time()-start_time),"BOOP1")
 	kb._assert_declared_values()
+	print("%.02f"%(time.time()-start_time),"BOOP2.5")
 	g_typ = _infer_goal_type(goal)
 	# print(g_typ)
+	print("%.02f"%(time.time()-start_time),"BOOP2")
 	for depth in range(1,search_depth+1):
 		# print("depth:",depth, "/", search_depth,kb.curr_infer_depth)
 		if(depth < kb.curr_infer_depth): continue
@@ -526,12 +544,13 @@ def how_search(kb,ops,goal,search_depth=1,max_solutions=10,min_stop_depth=-1):
 			break
 		
 		forward(kb,ops)
+		print("BOOP3")
 		# print(kb.u_vds[g_typ])
 		# print(kb.hists)
 
 
 
 	if((g_typ in kb.u_vds) and (goal in kb.u_vds[g_typ])):
-		# print("RETRACE")
+		print("RETRACE")
 		return retrace_solutions(kb,ops,goal,g_typ,max_solutions=max_solutions)
 	return []

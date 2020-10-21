@@ -95,10 +95,17 @@ def import_from_cached(name,hsh,targets,aot_module=None):
 	print("imp_str:",imp_str)
 	if(aot_module):
 		try:
+			#Try to import the AOT Module
 			exec(imp_str, {}, l)
-		except Exception as e:
-			aot_compile(name,hsh)
-			exec(imp_str, {}, l)
+		except ImportError as e:
+			try:
+				#If couldn't import try to compile the AOT Module
+				aot_compile(name,hsh)
+				exec(imp_str, {}, l)
+			except Exception as e:
+				#If still couldn't import or recompile import as cached
+				imp_str = gen_import_str(name,hsh,targets)
+				exec(imp_str, {}, l)
 	else:
 		exec(imp_str, {}, l)
 

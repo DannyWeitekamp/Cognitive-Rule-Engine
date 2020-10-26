@@ -19,8 +19,9 @@ from numbert.caching import unique_hash, source_to_cache, import_from_cached, so
 from numbert.gensource import gen_source_standard_imports
 
 
-def gen_source_inf_hist_types(typ,hsh,ind='   '):
-	s = "from numba.pycc import CC\n\n"
+def gen_source_inf_hist_types(typ,hsh,d_hsh,ind='   '):
+	s = "from ._{} import NB_{}_NamedTuple as {}\n\n".format(d_hsh,typ,typ) if d_hsh else ''
+	s += "from numba.pycc import CC\n\n"
 	s += "cc = CC('InfHistory_{}')\n\n".format(hsh)
 	s += "record_type = Tuple([i8, i8[::1], i8[::1],\n"
 	s += ind + "ListType(unicode_type),\n"
@@ -150,10 +151,11 @@ class DummyKB():
 		# struct_typ = self._assert_record_type(typ)
 		# typ_store = self.hists[typ]
 		if(typ not in self.inf_histories):
-			hash_code = x.hash if hasattr(x,'hash') else unique_hash([typ])
+			hash_code = unique_hash([x.hash,'boop']) if hasattr(x,'hash') else unique_hash([typ,'boop'])
 			if(not source_in_cache(typ,hash_code) or force_regen):
+				d_hsh = x.hash if hasattr(x,'hash') else None
 				source =  gen_source_standard_imports()
-				source += gen_source_inf_hist_types(typ,hash_code)
+				source += gen_source_inf_hist_types(typ,hash_code,d_hsh)
 				source += gen_source_declare(typ)
 				source += gen_source_process_declared(typ)
 				source += gen_source_empty_inf_history(typ)
@@ -208,21 +210,43 @@ kb = DummyKB()
 for x in [0,1,2,3]:
 	kb.declare(x)
 
-for x in [str(x) for x in range(4)]:
-	kb.declare(x)
-
-
 
 u_vds, u_vs, dec_u_vs, records = kb.inf_histories['f8'].history
 print(u_vs)
 kb.inf_histories['f8'].assert_declared_processed()
 u_vds, u_vs, dec_u_vs, records = kb.inf_histories['f8'].history
+print(u_vs)
+
+print("ELAPSE f8", time.time() - start_time)
+
+
+start_time = time.time()
+
+for x in [str(x) for x in range(4)]:
+	kb.declare(x)
 
 kb.inf_histories['unicode_type'].assert_declared_processed()
-u_vds, u_vs, dec_u_vs, records = kb.inf_histories['f8'].history
+u_vds, u_vs, dec_u_vs, records = kb.inf_histories['unicode_type'].history
 print(u_vs)
 
 # print(kb.inf_histories['f8'].history)
 
-print("ELAPSE", time.time() - start_time)
+print("ELAPSE str", time.time() - start_time)
 # 
+start_time = time.time()
+
+from numbert.numbalizer import Numbalizer
+numbalizer = Numbalizer()
+ie_spec = {
+	"id" : "number",
+	"value" : "number"
+}
+
+numbalizer.register_specification("P",ie_spec)
+# numbalizer.object_to_nb_object({"type": "TF", "id": "moo", "value": "poo",})
+
+for x in range(40):
+	# name = "e"+x
+	kb.declare(numbalizer.object_to_nb_object(str(x),{"type": "P", "id": x, "value": x}))
+
+print("ELAPSE TF", time.time() - start_time)

@@ -522,7 +522,7 @@ class Numbalizer(object):
 
 	def object_to_nb_object(self,name,obj_d):
 		assert 'type' in obj_d, "Object %s missing required attribute 'type'" % name
-		assert obj_d['type'] in object_specifications, \
+		assert obj_d['type'] in self.registered_specs, \
 				 "Object specification not defined for %s" % obj_d['type']
 		spec = self.registered_specs[obj_d['type']]
 		o_struct_type = self.jitstructs[obj_d['type']]

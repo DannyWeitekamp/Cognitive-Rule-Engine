@@ -89,6 +89,9 @@ def gen_import_str(name,hsh,targets,aot_module=None):
 	aot_module = aot_module if aot_module else ''
 	return "from numbert_cache.{}.{}_{} import {}".format(name,aot_module,hsh,", ".join(targets))
 
+
+
+import importlib
 def import_from_cached(name,hsh,targets,aot_module=None):
 	l = {}
 	imp_str = gen_import_str(name,hsh,targets,aot_module)
@@ -96,8 +99,11 @@ def import_from_cached(name,hsh,targets,aot_module=None):
 	if(aot_module):
 		try:
 			#Try to import the AOT Module
-			exec(imp_str, {}, l)
-		except ImportError as e:
+			# exec(imp_str, {}, l)
+			mod = importlib.import_module('numbert_cache.{}.{}_{}'.format(name,aot_module,hsh))
+			l = {x:getattr(mod,x) for x in targets}
+			print(l)
+		except (ImportError,AttributeError) as e:
 			try:
 				#If couldn't import try to compile the AOT Module
 				aot_compile(name,hsh)

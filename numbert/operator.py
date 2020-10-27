@@ -68,6 +68,7 @@ def compile_forward(op):
 
 	time1 = time.time_ns()/float(1e6)
 	source = gen_source_broadcast_forward(op, nopython)
+	print(source)
 	time2 = time.time_ns()/float(1e6)
 	log.info("%s: Gen Source Time %.4f ms" % (op.__name__, time2-time1))
 	f_name = op.__name__+"_forward"

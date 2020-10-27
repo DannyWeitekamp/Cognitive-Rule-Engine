@@ -95,14 +95,14 @@ import importlib
 def import_from_cached(name,hsh,targets,aot_module=None):
 	l = {}
 	imp_str = gen_import_str(name,hsh,targets,aot_module)
-	print("imp_str:",imp_str)
+	# print("imp_str:",imp_str)
 	if(aot_module):
 		try:
 			#Try to import the AOT Module
-			# exec(imp_str, {}, l)
-			mod = importlib.import_module('numbert_cache.{}.{}_{}'.format(name,aot_module,hsh))
-			l = {x:getattr(mod,x) for x in targets}
-			print(l)
+			exec(imp_str, {}, l)
+			# mod = importlib.import_module('numbert_cache.{}.{}_{}'.format(name,aot_module,hsh))
+			# l = {x:getattr(mod,x) for x in targets}
+			# print(l)
 		except (ImportError,AttributeError) as e:
 			try:
 				#If couldn't import try to compile the AOT Module

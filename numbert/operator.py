@@ -374,6 +374,9 @@ class BaseOperator(metaclass=BaseOperatorMeta):
 	@classmethod
 	def _register(cls):
 		name = cls.__name__.lower()
+		print(name)
+		if(name != 'add'):
+			raise ValueError()
 		
 		if(name in cls.registered_operators):
 			raise Warning("Duplicate Operator Definition %s" % name)

@@ -7,11 +7,12 @@ from numba.core.types import DictType, ListType, unicode_type, float64, NamedTup
 from numba.cpython.unicode import  _set_code_point
 from numbert.utils import cache_safe_exec
 from numbert.core import TYPE_ALIASES, REGISTERED_TYPES, py_type_map, numba_type_map, numpy_type_map
-from numbert.gensource import gen_source_standard_imports, gen_source_get_enumerized, \
-							  gen_source_enumerize_nb_objs, \
-							  gen_source_tuple_defs, gen_source_pack_from_numpy, \
-							  gen_source_inf_hist_types, gen_source_empty_inf_history, \
-							  gen_source_insert_record
+from numbert.gensource import assert_gen_source
+							 # gen_source_standard_imports, gen_source_get_enumerized, \
+							 #  gen_source_enumerize_nb_objs, \
+							 #  gen_source_tuple_defs, gen_source_pack_from_numpy, \
+							 #  gen_source_inf_hist_types, gen_source_empty_inf_history, \
+							 #  gen_source_insert_record
 from numbert.caching import unique_hash, source_to_cache, import_from_cached, source_in_cache
 from collections import namedtuple
 import numpy as np
@@ -344,16 +345,7 @@ class Numbalizer(object):
 		spec = {attr:x['type'] for attr,x in spec.items()}
 
 		hash_code = unique_hash([name,spec])
-		if(not source_in_cache(name,hash_code)):
-			source = gen_source_standard_imports()
-			source += gen_source_tuple_defs(name,spec)
-			source += gen_source_inf_hist_types(name,hash_code,custom_type=True)
-			source += gen_source_empty_inf_history(name,custom_type=True)
-			source += gen_source_insert_record(name,custom_type=True)
-			source += gen_source_get_enumerized(name,spec)
-			source += gen_source_enumerize_nb_objs(name,spec)
-			source += gen_source_pack_from_numpy(name,spec)
-			source_to_cache(name,hash_code,source,True)
+		assert_gen_source(name, hash_code, spec=spec, custom_type=True)
 		# else:
 		# 	source = source_from_cache(name,hash_code)
 		# pack_from_numpy =	l['{}_pack_from_numpy'.format(name)]}

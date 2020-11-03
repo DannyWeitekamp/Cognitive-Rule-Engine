@@ -17,8 +17,7 @@ from collections import namedtuple
 from numbert.core import TYPE_ALIASES, numba_type_map, py_type_map, REGISTERED_TYPES
 from numbert.caching import unique_hash, source_to_cache, import_from_cached, \
                              source_in_cache, gen_import_str
-from numbert.gensource import gen_source_standard_imports, gen_source_inf_hist_types, \
-                              gen_source_empty_inf_history, gen_source_insert_record
+from numbert.gensource import assert_gen_source
 
 
 
@@ -48,11 +47,16 @@ class InferenceHistory():
                       declare,
                       make_contiguous,
                       insert_record,
-                      record_type
+                      backtrace_goals,
+                      backtrace_selection,
+                      record_type,
                       ):
         self.history = history
         self._declare = declare
         self._make_contiguous = make_contiguous
+        self._insert_record = insert_record
+        self._backtrace_goals = backtrace_goals
+        self._backtrace_selection = backtrace_selection
         self._insert_record = insert_record
         self.record_type = record_type
         self.declared_processed = True
@@ -74,6 +78,15 @@ class InferenceHistory():
         btsr_shape = np.array(btsr.shape,np.int64)
         self._insert_record(self.history,depth,op.uid,btsr_flat,btsr_shape,op.arg_types,vmap)
 
+    def backtrace_goals(goals, hist_elems, max_depth, max_solutions=1):
+        return self._backtrace_goals(goals, self.history, hist_elems, max_depth, max_solutions=1)
+
+
+    def backtrace_selection():
+        return self._backtrace_selection(sel, self.history, hist_elems, max_depth, max_solutions=1)
+
+
+
 
 
 
@@ -85,27 +98,23 @@ class DummyKB():
         if(typ is None): typ = TYPE_ALIASES[infer_type(x)]
         if(typ not in self.inf_histories):
             hash_code = x.hash if hasattr(x,'hash') else unique_hash([typ])
-            if(not source_in_cache(typ,hash_code) or force_regen):
-                d_hsh = x.hash if hasattr(x,'hash') else None
-                source =  gen_source_standard_imports()
-                source += gen_source_inf_hist_types(typ,hash_code)#,d_hsh)
-                source += gen_source_empty_inf_history(typ)
-                source += gen_source_insert_record(typ)
-                source_to_cache(typ,hash_code,source,True)
-            
-            #Import functions from the aot compiled stuff
+            assert_gen_source(typ,hash_code)
+
             out1 = import_from_cached(typ,hash_code,[
-                'declare', 'make_contiguous', 'empty_inf_history', 'insert_record'
+                'declare', 'make_contiguous', 'empty_inf_history', 'insert_record', 'backtrace_goals', 'backtrace_selection'
                 ],'InfHistory').values()
 
             #Import types from the rest
             out2 = [None]# out2 = import_from_cached(typ,hash_code,['record_type']).values()
-            declare, make_contiguous, empty_inf_history, insert_record, record_type = tuple([*out1,*out2])
+            declare, make_contiguous, empty_inf_history, insert_record, \
+             backtrace_goals, backtrace_selection, record_type  = tuple([*out1,*out2])
             self.inf_histories[typ] = InferenceHistory(
                 empty_inf_history(),
                 declare,
                 make_contiguous,
                 insert_record,
+                backtrace_goals,
+                backtrace_selection,
                 record_type
             )
         return self.inf_histories[typ]
@@ -119,9 +128,6 @@ class DummyKB():
                 inf_hist.assert_declared_processed()
 
     
-
-
-
 
     def declare(self,x,typ=None):
         '''Takes a whole state conforming to the format output by Numbalizer.state_to_nb_objects()
@@ -204,3 +210,32 @@ start_time = time.time()
 h.insert_record(1,op,btsr,vmap)
 print("ELAPSE Insert", time.time() - start_time)
 print(h.history[-1][1])
+
+
+
+# @njit(cache=True)
+# def select_from_list(lst,sel):
+#     out = List()
+#     for s in sel:
+#         out.append(lst[s])
+#     return out
+
+# def select_from_collection(col,sel):
+#     if(isinstance(col,np.ndarray)):
+#         return col[sel]
+#     elif(isinstance(col,List)):
+#         return select_from_list(col,sel)
+
+
+# def backtrace_selection(sel,history,hist_elems,max_depth, max_solutions=1):
+#     '''Same as backtrace_goals except takes a set of indicies into u_vs'''
+#     _,u_vs,_,_ = history
+#     #f8
+#     goals = u_vs[sel]
+#     #other
+#     goals = List()
+#     for s in sel:
+#         goals.append(u_vs[s])
+#     return backtrace_goals(goals,history,hist_elems,max_depth,max_solutions=max_solutions)
+
+

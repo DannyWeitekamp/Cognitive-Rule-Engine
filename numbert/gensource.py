@@ -1,5 +1,6 @@
 
 from numbert.core import numba_type_map
+from numbert.caching import source_in_cache, source_to_cache
 
 LOOPLIFT_UNJITABLES = True
 UID_START = 1
@@ -215,7 +216,36 @@ def gen_source_inf_hist_types(typ,hsh,custom_type=False,ind='   '):
     # s += "from numbert.aot_template_funcs import insert_record\n"
     # s += "insert_record = cc.export('insert_record',(hist_type,i8,i8,ListType(unicode_type),i8[::1],i8[::1],DictType({},i8)))(insert_record)\n\n".format(typ)
 
+    s += "from numbert.aot_template_funcs import backtrace_goals, HE\n"
+    s += "backtrace_goals = cc.export('backtrace_goals',DictType(unicode_type,i8[:])(ListType({}),hist_type,ListType(ListType(HE)),i8,i8))(backtrace_goals)\n\n".format(typ)
+
     return s
+
+
+def gen_source_backtrace_selection(typ, ind='   '):
+    s =  "@cc.export('backtrace_selection',DictType(unicode_type,i8[:])(i8[:],hist_type,ListType(ListType(HE)),i8,i8))\n"
+    s += "def backtrace_selection(sel,history,hist_elems,max_depth, max_solutions=1):\n"    
+    s += ind + "_,u_vs,_,_ = history\n"
+    if(typ == 'f8'):
+        s += ind + "goals = u_vs[sel]\n"
+    else:
+        s += ind + "goals = List()\n"
+        s += ind + "for s in sel:\n"
+        s += ind*2 + "goals.append(u_vs[s])\n"
+    s += ind + "return backtrace_goals(goals,history,hist_elems,max_depth,max_solutions=max_solutions)\n\n"
+    return s
+
+
+# def backtrace_selection(sel,history,hist_elems,max_depth, max_solutions=1):
+#     '''Same as backtrace_goals except takes a set of indicies into u_vs'''
+#     _,u_vs,_,_ = history
+#     #f8
+#     goals = u_vs[sel]
+#     #other
+#     goals = List()
+#     for s in sel:
+#         goals.append(u_vs[s])
+#     return backtrace_goals(goals,history,hist_elems,max_depth,max_solutions=max_solutions)
 
 
 def gen_source_empty_inf_history(typ, custom_type=False, ind='   '):
@@ -259,3 +289,18 @@ def gen_source_insert_record(typ, custom_type=False,ind='   '):
     body += ind + 'r_d.append((op_uid, btsr_flat, btsr_shape, arg_types, vmap))\n'
     body += ind + 'records[depth] = r_d\n\n'
     return header + body
+
+
+def assert_gen_source(typ, hash_code, spec=None, custom_type=False):
+    if(not source_in_cache(typ,hash_code)):
+        source = gen_source_standard_imports()
+        if(custom_type): source += gen_source_tuple_defs(typ,spec)
+        source += gen_source_inf_hist_types(typ,hash_code,custom_type=custom_type)
+        source += gen_source_backtrace_selection(typ)
+        source += gen_source_empty_inf_history(typ,custom_type=custom_type)
+        source += gen_source_insert_record(typ,custom_type=custom_type)
+        if(custom_type):
+            source += gen_source_get_enumerized(typ,spec)
+            source += gen_source_enumerize_nb_objs(typ,spec)
+            source += gen_source_pack_from_numpy(typ,spec)
+        source_to_cache(typ,hash_code,source,True)

@@ -10,15 +10,18 @@ import numba
 from numba.core.dispatcher import Dispatcher
 import numpy as np
 import timeit
+import itertools
+import math
 from pprint import pprint
 from numbert.utils import cache_safe_exec
 from numbert.numbalizer import infer_type, infer_nb_type
 from collections import namedtuple
 from numbert.core import TYPE_ALIASES, numba_type_map, py_type_map, REGISTERED_TYPES
-
+from numbert.caching import unique_hash, source_to_cache, import_from_cached, \
+                             source_in_cache, gen_import_str
+from numbert.gensource import assert_gen_source
 from numbert.operator import BaseOperator, BaseOperatorMeta, Var, OperatorComposition
-import math
-import itertools
+
 
 
 

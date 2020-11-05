@@ -267,37 +267,32 @@ def HistElmListList():
     return List.empty_list(he_list)
 
 def _retrace_goal_history(kb,ops,goal,g_typ, max_solutions):
+    '''Backtraces the operators that produced the intermediate values at each
+      depth leading up to the goal value. Output is a list of dictionaries
+      (one for each timestep). Dictionaries are keyed by type string and have
+      values of type ListType(ListType(HE)) where HE is a History Element signifiying
+      the application of an operator and indicies of it's arguments. Each List in the 
+      outer List corresponds to a unique value for that depth that has it's own List of 
+      HistElements that produced it.
+    '''
     h = kb.get_inf_history(g_typ)
-    # u_vds, u_vs, dec_u_vs, records
     
     goals = List.empty_list(REGISTERED_TYPES[g_typ])
     goals.append(goal)
 
-    hist_elems = HistElmListList()#List.empty_list(ListType(HE))#new_HE_list(1)#List([List.empty_list(HE)],listtype=ListType(HE))
+    hist_elems = HistElmListList()
 
     arg_inds = h.backtrace_goals(goals, hist_elems, max_depth=kb.curr_infer_depth, max_solutions=1)
-    print("AI1",arg_inds,h.u_vs,h.u_vds,hist_elems)
 
-     # retrace_back_one(goals,records,u_vds,hist_elems,kb.curr_infer_depth,max_solutions)
-    # print("arg_inds", arg_inds, hist_elems)
     out = [{g_typ: hist_elems}]
     i = 1
     while(True):
         nxt = {}
         new_arg_inds = None
         for typ in arg_inds:
-            # records,u_vds = kb.hists[typ], kb.u_vds[typ]
-            hist_elems = HistElmListList()#List.empty_list(ListType(HE))#new_HE_list(len(goals))#List([List.empty_list(HE) for i in range(len(goals))])
+            hist_elems = HistElmListList()
             
-            # goals = select_from_collection(kb.u_vs[typ],arg_inds[typ])
-            # print("goals")
-            # print(goals)
             typ_new_inds = h.backtrace_selection(arg_inds[typ],hist_elems, kb.curr_infer_depth-i, max_solutions=max_solutions)
-            print("AI",i,typ_new_inds)
-            # print(typ_new_inds)
-            # typ_new_inds = retrace_back_one(goals,records,u_vds,hist_elems,kb.curr_infer_depth-i,max_solutions)
-            # print("typ_new_inds")
-            # print(typ_new_inds)
             if(new_arg_inds is None):
                 new_arg_inds = typ_new_inds
             else:
@@ -318,6 +313,11 @@ def _retrace_goal_history(kb,ops,goal,g_typ, max_solutions):
     return list(reversed(out))
 
 def retrace_solutions(kb,ops,goal,g_typ,max_solutions=1000):
+    ''' Calls _retrace_goal_history() to get hist elements leading up to the 
+        production of the goal value, then uses these hist elements to compose
+        a set nested tuples that can be used to instantiate an operator composition
+    '''
+
     goal_history = _retrace_goal_history(kb,ops,goal,g_typ,max_solutions)
     pprint(goal_history)
 

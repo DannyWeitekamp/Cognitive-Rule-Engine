@@ -83,7 +83,7 @@ class InferenceHistory():
         declare, declare_nb_objects, make_contiguous, empty_inf_history, insert_record, \
          backtrace_goals, backtrace_selection, record_type  = tuple([*out1,*out2])
 
-        from numbert.aot_template_funcs import backtrace_goals, backtrace_selection
+        # from numbert.aot_template_funcs import backtrace_goals, backtrace_selection
         self.history = empty_inf_history()
         self._declare = declare
         self._declare_nb_objects = declare_nb_objects
@@ -148,9 +148,10 @@ class InferenceHistory():
 
 
 class NBRT_KnowledgeBase(object):
-    inf_histories = {}
-    curr_infer_depth = 0
-    declared_processed = False
+    def __init__(self):
+        self.inf_histories = {}
+        self.curr_infer_depth = 0
+        self.declared_processed = False
 
     def get_inf_history(self,typ=None,x=None,force_regen=False):
         if(typ is None):
@@ -326,7 +327,9 @@ def insert_record(kb,depth,op, btsr, vmap):
 def broadcast_forward_op_comp(kb,op_comp):
     if(op_comp.out_type == None): raise ValueError("Only typed outputs work with this function.")
 
-    arg_sets = [kb.u_vs.get(t,[]) for t in op_comp.arg_types]
+
+    arg_sets = [kb.get_inf_history(t).u_vs if t in kb.inf_histories else [] for t in op_comp.arg_types]
+    # arg_sets = [kb.u_vs.get(t,[]) for t in op_comp.arg_types]
     lengths = tuple([len(x) for x in arg_sets])
     out = np.empty(lengths,dtype=np.int64)
     d = Dict.empty(numba_type_map[op_comp.out_type],i8)
@@ -393,9 +396,13 @@ def forward(kb,ops):
     depth = kb.curr_infer_depth = kb.curr_infer_depth+1
     
     for op in ops:
+        print(op)
         if(not all([t in kb.inf_histories for t in op.arg_types])): continue
         if(isinstance(op,BaseOperatorMeta)):
             args = [kb.inf_histories[t].u_vs for t in op.u_arg_types]
+            if(kb.curr_infer_depth == 1):
+                print(args)
+            print('shape',[x.shape if hasattr(x,'shape') else None for x in args], kb.curr_infer_depth)
             btsr, vmap = op.broadcast_forward(*args)
         elif(isinstance(op,OperatorComposition)):
             btsr, vmap = broadcast_forward_op_comp(kb,op)
@@ -404,8 +411,8 @@ def forward(kb,ops):
     for typ in output_types:
         kb.get_inf_history(typ).make_contiguous(depth)
     # for typ in kb.inf_histories:
-    h = kb.get_inf_history("TF").history[3]
-    print('len(h)',len(h[0][0]))
+    # h = kb.get_inf_history("TF").history[3]
+    # print('len(h)',kb.get_inf_history("TF").history)
     # if(len(h) > 1):
     # print([x for x in h.values()])
     # print(typ,kb.curr_infer_depth)
@@ -459,8 +466,10 @@ def _retrace_goal_history(kb,ops,goal,g_typ, max_solutions):
         for typ in arg_inds:
             hist_elems = HistElmListList()
             
+            # print('ai', arg_inds)
+            h = kb.get_inf_history(typ)
             typ_new_inds = h.backtrace_selection(arg_inds[typ],hist_elems, kb.curr_infer_depth-i, max_solutions=max_solutions)
-            print(typ_new_inds)
+            # print('tni', typ_new_inds)
             if(new_arg_inds is None):
                 new_arg_inds = typ_new_inds
             else:
@@ -485,9 +494,9 @@ def retrace_solutions(kb,ops,goal,g_typ,max_solutions=1000):
         production of the goal value, then uses these hist elements to compose
         a set of nested tuples that can be used to instantiate an operator composition
     '''
-    print("RETRACE", goal)
+    # print("RETRACE", goal)
     goal_history = _retrace_goal_history(kb,ops,goal,g_typ,max_solutions)
-    pprint(goal_history)
+    # pprint(goal_history)
 
     tups = []
     for depth in range(len(goal_history)):
@@ -518,7 +527,7 @@ def retrace_solutions(kb,ops,goal,g_typ,max_solutions=1000):
         tups.append(tups_depth)
 
     out = [OperatorComposition(t) for t in tups[-1][g_typ][0][:max_solutions]]
-    print(out)
+    # print(out)
     return out
 
 
@@ -650,21 +659,23 @@ def unify_op(kb,op,goal):
     kb._assert_declared_processed()
     #Handle Copy/No-op right up front
     if(isinstance(op,OperatorComposition) and op.depth == 0):
-        if(g_typ in kb.u_vs and goal in kb.u_vs[g_typ]):
-            return [[goal]]
+        if(g_typ in kb.inf_histories):
+            h = kb.get_inf_history(g_typ)
+            if(goal in h.u_vds):
+                return [[goal]]
         else:
             return []
     if(op.out_type != g_typ): return []
     
-    if(not all([t in kb.u_vs for t in op.arg_types])):return []
+    if(not all([t in kb.inf_histories for t in op.arg_types])):return []
 
     if(isinstance(op,BaseOperatorMeta)):
-        args = [kb.u_vs[t] for t in op.u_arg_types]
+        args = [kb.get_inf_history(t).u_vs for t in op.u_arg_types]
         _hist, vmap = op.broadcast_forward(*args)
     elif(isinstance(op,OperatorComposition)):
         _hist, vmap = broadcast_forward_op_comp(kb,op)
         
-    arg_sets = [kb.u_vs.get(t,[]) for t in op.arg_types]
+    arg_sets = [kb.get_inf_history(t).u_vs if t in kb.inf_histories else [] for t in op.arg_types]
     if(goal in vmap):
         inds = np.stack(np.where(_hist == vmap[goal])).T
 
@@ -690,8 +701,13 @@ def how_search(kb,ops,goal,search_depth=1,max_solutions=10,min_stop_depth=-1):
             if((goal in h.u_vds)):
                 break
         
+        print("DEPTH",depth)
+        for k,v in kb.inf_histories.items():
+            print(k)
+            print(v.history[1])
+        # print([(k,v.history) for ])
         forward(kb,ops)
-        # print("BOOP3")
+        
         # print(kb.u_vds[g_typ])
         # print(kb.hists)
 

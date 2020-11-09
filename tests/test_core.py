@@ -10,8 +10,8 @@ from pprint import pprint
 
 from numbert.knowledgebase import NBRT_KnowledgeBase, how_search, forward
 from example_ops import * #Grumbo_forward1, Grumbo_forward2, BaseOperator,NBRT_KnowledgeBase,\
-	 #Add, Subtract, Concatenate, StrToFloat, \
-	  #how_search, forward
+     #Add, Subtract, Concatenate, StrToFloat, \
+      #how_search, forward
 
 
 
@@ -19,8 +19,8 @@ from example_ops import * #Grumbo_forward1, Grumbo_forward2, BaseOperator,NBRT_K
 
 
 def time_ms(f):
-		f() #warm start
-		return " %0.6f ms" % (1000.0*(timeit.timeit(f, number=N)/float(N)))
+    f() #warm start
+    return " %0.6f ms" % (1000.0*(timeit.timeit(f, number=N)/float(N)))
 
 
 
@@ -37,55 +37,55 @@ y = 17
 
 @njit(nogil=True,fastmath=True,cache=True) 
 def make_S(offset):
-	S = List.empty_list(unicode_type)
-	for x in range(48+offset,48+offset+5):
-	# for x in range(97+offset,97+offset+5):
-		S.append("1"+chr(x))
-	S.append("a")
-	return S#np.array(S)
+    S = List.empty_list(unicode_type)
+    for x in range(48+offset,48+offset+5):
+    # for x in range(97+offset,97+offset+5):
+        S.append("1"+chr(x))
+    S.append("a")
+    return S#np.array(S)
 S1 = make_S(0)
 S2 = make_S(5)
 
 
 @njit(cache=True)
 def newVmap(X,typ):
-	d = Dict.empty(typ,i8)
-	for x in X:
-		d[x] = 0
-	return d
+    d = Dict.empty(typ,i8)
+    for x in X:
+        d[x] = 0
+    return d
 
 def buildKB():
-	kb = NBRT_KnowledgeBase()
+    kb = NBRT_KnowledgeBase()
 
-	for s in S1:
-		kb.declare(s)
+    for s in S1:
+        kb.declare(s)
 
-	for n in X:
-		kb.declare(n.item())
+    for n in X:
+        kb.declare(n.item())
 
 
 
-	# kb.u_vs['unicode_type'] = S1
-	# kb.u_vs['f8'] = X
+    # kb.u_vs['unicode_type'] = S1
+    # kb.u_vs['f8'] = X
 
-	# kb.u_vds['unicode_type'] = newVmap(S1,unicode_type)
-	# kb.u_vds['f8'] = newVmap(X,f8)
+    # kb.u_vds['unicode_type'] = newVmap(S1,unicode_type)
+    # kb.u_vds['f8'] = newVmap(X,f8)
 
-	# for s in S1:
-	# 	kb.u_vds['unicode_type'][s] = 0
-	# for x in X:
-	# 	kb.u_vds['f8'][x] = 0
+    # for s in S1:
+    #   kb.u_vds['unicode_type'][s] = 0
+    # for x in X:
+    #   kb.u_vds['f8'][x] = 0
 
-	return kb
+    return kb
 
 print("MID")
 kb = buildKB()
 print("MID2")
 # print("STAAAAART")
 # for op in [Add,Subtract,Concatenate]:
-# 	print(op, op.uid)
+#   print(op, op.uid)
 # for op in [Add,Subtract,Concatenate]:
-# 	print(op, op.uid)
+#   print(op, op.uid)
 # print(BaseOperator.operators_by_uid)
 # forward(kb,[Add,Subtract,Concatenate])
 # forward(kb,[Add,Subtract,Concatenate])
@@ -135,41 +135,41 @@ print("Time elapsed: ",end - start)
 
 # forward(kb,[Add,Subtract,Concatenate])
 # for typ in kb.registered_types:
-# 	print(typ)
-# 	print(kb.u_vs[typ])
+#   print(typ)
+#   print(kb.u_vs[typ])
 
 # print(cat_forward1(S))
 
 @njit(nogil=True,fastmath=True,cache=True) 
 def g1():
-	# uid = 1; d = Dict.empty(f8,i8)
-	# Add_forward1(uid,d, X,X)	
-	Grumbo_forward1(X,X)	
+    # uid = 1; d = Dict.empty(f8,i8)
+    # Add_forward1(uid,d, X,X)  
+    Grumbo_forward1(X,X)    
 
 @njit(nogil=True,fastmath=True,cache=True) 
 def g2():
-	# uid = 1; d = Dict.empty(f8,i8)
-	# Add_forward2(uid,d, X,X)	
-	Grumbo_forward2(X,X)	
+    # uid = 1; d = Dict.empty(f8,i8)
+    # Add_forward2(uid,d, X,X)  
+    Grumbo_forward2(X,X)    
 
 # @njit
 def s1():
-	# uid = 1; d = Dict.empty(unicode_type,i8)
-	# cat_forward1(uid,d, S1)	
-	cat_forward(S1)	
+    # uid = 1; d = Dict.empty(unicode_type,i8)
+    # cat_forward1(uid,d, S1)   
+    cat_forward(S1) 
 
 def f1():
-	kb = buildKB()
-	forward(kb,[Add,Subtract])
-	forward(kb,[Add,Subtract])
-	forward(kb,[Add,Subtract])
-	forward(kb,[Add,Subtract])
-	forward(kb,[Add,Subtract])
-	forward(kb,[Add,Subtract])
+    kb = buildKB()
+    forward(kb,[Add,Subtract])
+    forward(kb,[Add,Subtract])
+    forward(kb,[Add,Subtract])
+    forward(kb,[Add,Subtract])
+    forward(kb,[Add,Subtract])
+    forward(kb,[Add,Subtract])
 
 def h1():
-	kb = buildKB()
-	how_search(kb,[Add,Subtract],21,2)
+    kb = buildKB()
+    how_search(kb,[Add,Subtract],21,2)
 
 # d  =Dict()
 # d['unicode_type'] = unicode_type

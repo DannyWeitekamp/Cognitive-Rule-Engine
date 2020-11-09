@@ -22,12 +22,6 @@ from numbert.gensource import assert_gen_source
 from numbert.operator import BaseOperator, BaseOperatorMeta, Var, OperatorComposition
 
 
-
-
-
-d = Dict.empty(unicode_type,i8)
-d['boop'] = 1
-
 class InferenceHistory():
     ''' 
     This class is a wrapper around an inference history tuple of type 'typ':

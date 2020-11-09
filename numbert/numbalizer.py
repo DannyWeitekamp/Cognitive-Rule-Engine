@@ -6,7 +6,7 @@ from numba.typed import List, Dict
 from numba.core.types import DictType, ListType, unicode_type, float64, NamedTuple, NamedUniTuple, UniTuple 
 from numba.cpython.unicode import  _set_code_point
 from numbert.utils import cache_safe_exec
-from numbert.core import TYPE_ALIASES, REGISTERED_TYPES, py_type_map, numba_type_map, numpy_type_map
+from numbert.core import TYPE_ALIASES, REGISTERED_TYPES, JITSTRUCTS, py_type_map, numba_type_map, numpy_type_map
 from numbert.gensource import assert_gen_source
 							 # gen_source_standard_imports, gen_source_get_enumerized, \
 							 #  gen_source_enumerize_nb_objs, \
@@ -297,8 +297,6 @@ def decode_vectorized(indicies, isnominal, inversion_data):
 	return out
 
 
-
-
 def infer_type(value):
 	if(isinstance(value,str)):
 		return "string"
@@ -457,6 +455,7 @@ class Numbalizer(object):
 
 			REGISTERED_TYPES[name] = jitstruct.numba_type
 			TYPE_ALIASES[name] = jitstruct.__name__
+			JITSTRUCTS[name] = jitstruct
 
 	def register_specifications(self, specs):
 		for name, spec in specs.items():

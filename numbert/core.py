@@ -36,6 +36,8 @@ TYPE_ALIASES = {
 REGISTERED_TYPES = {'f8': f8,
 					 'unicode_type' : unicode_type}
 
+JITSTRUCTS = {}					 
+
 numba_type_map = {
 	"f8" : f8,
 	"unicode_type" : unicode_type,

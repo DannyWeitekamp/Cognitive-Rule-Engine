@@ -206,9 +206,14 @@ def gen_source_inf_hist_types(typ,hsh,custom_type=False,ind='   '):
     s += "from numbert.aot_template_funcs import declare\n"
     s += "declare = cc.export('declare',(hist_type,{}))(declare)\n\n".format(typ)
 
+    s += "from numbert.aot_template_funcs import declare_nb_objects\n"
+    s += "declare_nb_objects = cc.export('declare_nb_objects',(hist_type,DictType(unicode_type,{})))(declare_nb_objects)\n\n".format(typ)
+
     if(typ == 'f8'):
         s += "from numbert.aot_template_funcs import make_contiguous_f8\n"
         s += "make_contiguous = cc.export('make_contiguous',hist_type(hist_type,i8))(make_contiguous_f8)\n\n".format(typ)
+
+
     else:
         s += "from numbert.aot_template_funcs import make_contiguous\n"
         s += "make_contiguous = cc.export('make_contiguous',hist_type(hist_type,i8))(make_contiguous)\n\n".format(typ)
@@ -219,21 +224,28 @@ def gen_source_inf_hist_types(typ,hsh,custom_type=False,ind='   '):
     s += "from numbert.aot_template_funcs import backtrace_goals, HE\n"
     s += "backtrace_goals = cc.export('backtrace_goals',DictType(unicode_type,i8[:])(ListType({}),hist_type,ListType(ListType(HE)),i8,i8))(backtrace_goals)\n\n".format(typ)
 
-    return s
-
-
-def gen_source_backtrace_selection(typ, ind='   '):
-    s =  "@cc.export('backtrace_selection',DictType(unicode_type,i8[:])(i8[:],hist_type,ListType(ListType(HE)),i8,i8))\n"
-    s += "def backtrace_selection(sel,history,hist_elems,max_depth, max_solutions=1):\n"    
-    s += ind + "_,u_vs,_,_ = history\n"
     if(typ == 'f8'):
-        s += ind + "goals = u_vs[sel]\n"
+        s += "from numbert.aot_template_funcs import backtrace_selection_f8\n"
+        s +=  "backtrace_selection = cc.export('backtrace_selection',DictType(unicode_type,i8[:])(i8[:],hist_type,ListType(ListType(HE)),i8,i8))(backtrace_selection_f8)\n"
     else:
-        s += ind + "goals = List()\n"
-        s += ind + "for s in sel:\n"
-        s += ind*2 + "goals.append(u_vs[s])\n"
-    s += ind + "return backtrace_goals(goals,history,hist_elems,max_depth,max_solutions=max_solutions)\n\n"
+        s += "from numbert.aot_template_funcs import backtrace_selection\n"
+        s +=  "backtrace_selection = cc.export('backtrace_selection',DictType(unicode_type,i8[:])(i8[:],hist_type,ListType(ListType(HE)),i8,i8))(backtrace_selection)\n"
+
     return s
+
+
+# def gen_source_backtrace_selection(typ, ind='   '):
+#     s =  "@cc.export('backtrace_selection',DictType(unicode_type,i8[:])(i8[:],hist_type,ListType(ListType(HE)),i8,i8))\n"
+#     s += "def backtrace_selection(sel,history,hist_elems,max_depth, max_solutions=1):\n"    
+#     s += ind + "_,u_vs,_,_ = history\n"
+#     if(typ == 'f8'):
+#         s += ind + "goals = u_vs[sel]\n"
+#     else:
+#         s += ind + "goals = List()\n"
+#         s += ind + "for s in sel:\n"
+#         s += ind*2 + "goals.append(u_vs[s])\n"
+#     s += ind + "return backtrace_goals(goals,history,hist_elems,max_depth,max_solutions=max_solutions)\n\n"
+#     return s
 
 
 # def backtrace_selection(sel,history,hist_elems,max_depth, max_solutions=1):
@@ -296,7 +308,7 @@ def assert_gen_source(typ, hash_code, spec=None, custom_type=False):
         source = gen_source_standard_imports()
         if(custom_type): source += gen_source_tuple_defs(typ,spec)
         source += gen_source_inf_hist_types(typ,hash_code,custom_type=custom_type)
-        source += gen_source_backtrace_selection(typ)
+        # source += gen_source_backtrace_selection(typ)
         source += gen_source_empty_inf_history(typ,custom_type=custom_type)
         source += gen_source_insert_record(typ,custom_type=custom_type)
         if(custom_type):

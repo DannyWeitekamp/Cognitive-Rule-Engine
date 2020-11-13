@@ -513,6 +513,7 @@ class Numbalizer(object):
 				else:
 					dtype.append( (attr, tm[typ]) )
 			pack_from_numpy = self.jitstructs[spec_typ].pack_from_numpy
+			# print(data_by_type[spec_typ],dtype)
 			out[spec_typ] = pack_from_numpy(np.array(data_by_type[spec_typ],dtype=dtype),mlens)
 		return out	
 
@@ -582,12 +583,12 @@ class Numbalizer(object):
 			raise ValueError("No enum for %r." % value)
 
 	def enumerized_to_vectorized(self,enumerized_state,return_inversion_data=False):
-		print(enumerized_state)
-		# print(self.nominal_maps)
-		print(self.number_backmap)
+		# print(enumerized_state)
+		# # print(self.nominal_maps)
+		# print(self.number_backmap)
 
-		print("self.spec_flags['nominal']")
-		print(self.spec_flags['nominal'])
+		# print("self.spec_flags['nominal']")
+		# print(self.spec_flags['nominal'])
 		nominal, continuous, inversion_data = enumerized_to_vectorized(enumerized_state,
 										self.spec_flags['nominal'],self.number_backmap,
 										return_inversion_data=return_inversion_data)

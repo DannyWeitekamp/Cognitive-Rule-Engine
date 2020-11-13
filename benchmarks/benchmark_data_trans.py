@@ -163,13 +163,13 @@ enumerized_states.append(enumerized)
 enumerized_states.append(numbalizer.nb_objects_to_enumerized(numbalizer.state_to_nb_objects({"ie" + str(i+3) : _state['i1'] for i in range(STATE_SIZE)})))
 
 
-print("nominal maps")
-print(Numbalizer.nominal_maps)
+# print("nominal maps")
+# print(Numbalizer.nominal_maps)
 print("number backmaps")
 print(Numbalizer.number_backmap)
 
 
-nominals, continuous = enumerized_to_vectorized_legacy(enumerized_states,Numbalizer.nominal_maps,Numbalizer.number_backmap)
+# nominals, continuous = enumerized_to_vectorized_legacy(enumerized_states,Numbalizer.nominal_maps,Numbalizer.number_backmap)
 nc = numbalizer.enumerized_to_vectorized(enumerized_states)
 
 
@@ -261,8 +261,8 @@ def b40_nb_enumerized_to_vectorized():
 def b40_nb_enumerized_to_vectorized_inv():
 	numbalizer.enumerized_to_vectorized(enumerized_states,return_inversion_data=True)
 
-def b40_nb_enumerized_to_vectorized_legacy():
-	enumerized_to_vectorized_legacy(enumerized_states,numbalizer.nominal_maps,numbalizer.number_backmap)
+# def b40_nb_enumerized_to_vectorized_legacy():
+# 	enumerized_to_vectorized_legacy(enumerized_states,numbalizer.nominal_maps,numbalizer.number_backmap)
 
 b40_py_enumerized_to_vectorized()
 
@@ -285,7 +285,7 @@ print("enumerize_objs:",time_ms(b200_enumerize_objs))
 
 
 print("-----States 2x40 Objs------")
-print("nb_enumerized_to_vectorized_legacy:",time_ms(b40_nb_enumerized_to_vectorized_legacy))
+# print("nb_enumerized_to_vectorized_legacy:",time_ms(b40_nb_enumerized_to_vectorized_legacy))
 print("nb_enumerized_to_vectorized:", time_ms(b40_nb_enumerized_to_vectorized))
 print("nb_enumerized_to_vectorized -- include inv_data:", time_ms(b40_nb_enumerized_to_vectorized_inv))
 print("py_enumerized_to_vectorized:",time_ms(b40_py_enumerized_to_vectorized))

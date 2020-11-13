@@ -157,7 +157,7 @@ class NBRT_KnowledgeBase(object):
         if(typ is None):
             if(x is None): raise ValueError("typ and x cannot both be None")
             if(isinstance(x,Dict)): 
-                print("ALOOOHA", repr(x))
+                # print("ALOOOHA", repr(x))
                 #TODO: Need to extract type name from Dict
                 raise NotImplementedError()
             else:
@@ -396,13 +396,13 @@ def forward(kb,ops):
     depth = kb.curr_infer_depth = kb.curr_infer_depth+1
     
     for op in ops:
-        print(op)
+        # print(op)
         if(not all([t in kb.inf_histories for t in op.arg_types])): continue
         if(isinstance(op,BaseOperatorMeta)):
             args = [kb.inf_histories[t].u_vs for t in op.u_arg_types]
-            if(kb.curr_infer_depth == 1):
-                print(args)
-            print('shape',[x.shape if hasattr(x,'shape') else None for x in args], kb.curr_infer_depth)
+            # if(kb.curr_infer_depth == 1):
+                # print(args)
+            # print('shape',[x.shape if hasattr(x,'shape') else None for x in args], kb.curr_infer_depth)
             btsr, vmap = op.broadcast_forward(*args)
         elif(isinstance(op,OperatorComposition)):
             btsr, vmap = broadcast_forward_op_comp(kb,op)
@@ -701,10 +701,10 @@ def how_search(kb,ops,goal,search_depth=1,max_solutions=10,min_stop_depth=-1):
             if((goal in h.u_vds)):
                 break
         
-        print("DEPTH",depth)
-        for k,v in kb.inf_histories.items():
-            print(k)
-            print(v.history[1])
+        # print("DEPTH",depth)
+        # for k,v in kb.inf_histories.items():
+        #     print(k)
+        #     print(v.history[1])
         # print([(k,v.history) for ])
         forward(kb,ops)
         
@@ -715,7 +715,7 @@ def how_search(kb,ops,goal,search_depth=1,max_solutions=10,min_stop_depth=-1):
 
     if(g_typ in kb.inf_histories):
         h = kb.get_inf_history(g_typ)
-        print(goal, h.u_vds)
+        # print(goal, h.u_vds)
         if(goal in h.u_vds):
             return retrace_solutions(kb,ops,goal,g_typ,max_solutions=max_solutions)
     return []

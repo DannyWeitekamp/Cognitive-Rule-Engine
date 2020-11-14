@@ -74,10 +74,10 @@ class InferenceHistory():
         assert_gen_source(typ,hash_code)
 
         out1 = import_from_cached(typ,hash_code,[
-            'declare', 'declare_nb_objects', 'make_contiguous', 
+            'inf_declare', 'inf_declare_nb_objects', 'make_contiguous', 
             'empty_inf_history', 'insert_record', 'backtrace_goals',
             'backtrace_selection'
-            ],'InfHistory').values()
+            ],typ).values()
 
         out2 = [None]# out2 = import_from_cached(typ,hash_code,['record_type']).values()
         declare, declare_nb_objects, make_contiguous, empty_inf_history, insert_record, \

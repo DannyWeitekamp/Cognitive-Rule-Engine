@@ -3,7 +3,7 @@ from numba.experimental import jitclass
 from numba import deferred_type, optional
 from numba import void,b1,u1,u2,u4,u8,i1,i2,i4,i8,f4,f8,c8,c16
 from numba.typed import List, Dict
-from numba.core.types import DictType, ListType, unicode_type, float64, NamedTuple, NamedUniTuple, UniTuple 
+from numba.core.types import DictType, ListType, unicode_type, float64, NamedTuple, NamedUniTuple, UniTuple, Tuple
 from numba.cpython.unicode import  _set_code_point
 from numbert.utils import cache_safe_exec
 from numbert.core import TYPE_ALIASES, REGISTERED_TYPES, JITSTRUCTS, py_type_map, numba_type_map, numpy_type_map
@@ -17,81 +17,79 @@ import types as pytypes
 import sys
 import __main__
 
-from numbert.experimental.context import _BaseContextful
+from numbert.experimental.context import _BaseContextful, register_specification
 from numbert.experimental.transform import infer_type
 
 
 
 
+   
 
 @njit(cache=True)
 def init_store_data(
-		typ # Template attr
+		NB_Type # Template attr
 	):
-	data = Dict.empty(unicode_type,typ)
+	data = Dict.empty(unicode_type,NB_Type)
 	return data
-
-@njit(cache=True)
-def signal_inconsistent(
-		consistency_listeners,
-		name,
-		n_attrs # Template attr
-	):
-	for cm in consistency_listeners:
-		cm[(name,"*")] = True
-
-@njit(cache=True)
-def signal_inconsistent_attr(consistency_listeners, name, attr):
-	for cm in consistency_listeners:
-		cm[(name,attr)] = True
 
 @njit(cache=True)
 def declare(store_data, kb_data, name, obj):
 	_,_, consistency_listeners,_,_ = kb_data
 	store_data[name] = obj
-	signal_inconsistent(consistency_listeners,name)
+	print(consistency_listeners)
+	# signal_inconsistent(consistency_listeners,name,"*")
 
 @njit(cache=True)
 def declare_unnamed(store_data, kb_data, obj):
-	_,_, consistency_listeners,_,_ = kb_data
+	_,_, consistency_listeners,_,unnamed_counter = kb_data
 	name = "%" + str(unnamed_counter[0])
 	unnamed_counter[0] += 1
 	store_data[name] = obj
-	signal_inconsistent(consistency_listeners,name)
+	# signal_inconsistent(consistency_listeners,name,"*")
 
 
 @njit(cache=True)
-def modify_attr(store, name, attr, value):
-	data, _,_, consistency_listeners,_,_ = store
-	if(name in data):
+def modify_attr(store_data, kb_data, name, attr, value):
+	_,_, consistency_listeners,_,_ = kb_data
+	if(name in store_data):
 		#This probably requires mutable types
 		raise NotImplemented()
 		# data[name].attr = value
 	else:
 		raise ValueError()
 
-	signal_inconsistent_attr(consistency_listeners,name,attr)
+	# signal_inconsistent_attr(consistency_listeners,name,attr)
 
 @njit(cache=True)
-def retract(store, name):
-	data, _,_, consistency_listeners,_,_ = store
-	del data[name]
-	signal_inconsistent(consistency_listeners,name)	
+def retract(store_data, kb_data, name):
+	_,_, consistency_listeners,_,_ = kb_data
+	del store_data[name]
+	# signal_inconsistent(consistency_listeners,name,"")	
 
 
-@njit(cache=True)
-def add_consistency_map(store, c_map):
-	'''Adds a new consitency map, returns it's index in the knowledgebase'''
-	data, _,_, consistency_listeners, consistency_map_counter = store
-	consistency_map_counter[0] += 1
-	consistency_listeners[consistency_map_counter[0]] = c_map
-	return consistency_map_counter[0]
+def gen_knowledge_store_aot_funcs(cc,typ,NB_Type):
+   store_data_type = DictType(unicode_type, NB_Type)
+   kb_data_type = Tuple((
+   		DictType(unicode_type,i8_arr),
+   		DictType(two_str,u1),
+   		DictType(i8, two_str_set),
+   		i8[:],
+   		i8[:],
+   	))
 
-@njit(cache=True)
-def remove_consistency_map(store, index):
-	'''Adds a new consitency map, returns it's index in the knowledgebase'''
-	_, _,_, consistency_listeners, _ = store
-	del consistency_listeners[index]
+   @cc.export('init_store_data',store_data_type())
+   @njit(nogil=True, fastmath=True, cache=True)
+   def _init_store_data():
+      return init_store_data(NB_Type)
+
+   cc.export('declare',(store_data_type, kb_data_type, unicode_type, NB_Type))(declare)
+   cc.export('declare_unnamed',(store_data_type, kb_data_type, NB_Type))(declare_unnamed)
+   # cc.export('modify_attr',?(??))(modify_attr)
+   cc.export('retract',(store_data_type, kb_data_type, unicode_type))(retract)
+   
+
+
+
 
 		
 class KnowledgeStore(_BaseContextful):
@@ -99,23 +97,37 @@ class KnowledgeStore(_BaseContextful):
 	def __init__(self, typ, kb, context=None):
 		super().__init__(context)
 
-		self.store_data = init_store_data(typ)
+		
 		self.kb = kb
 		self.kb_data = kb.kb_data
 		self.enum_data, self.enum_consistency, self.consistency_listeners, \
 		self.consistency_map_counter, self.unnamed_counter = self.kb_data
+		print(self.kb_data)
+
+		# spec = self.context.registered_specs[typ]
+		print(self.context.jitstructs)
+		struct = self.context.jitstructs[typ]
+		out = import_from_cached(typ,struct.hash,[
+            'init_store_data', 'declare', 'declare_unnamed', 
+            'retract'
+            ],typ).values()
+		self._init_store_data, self._declare, self._declare_unnamed, self._retract = out 
+
+		self.store_data = self._init_store_data()
+
 
 	def declare(self,*args):
 		if(len(args) == 2):
-			declare(self.store_data,self.kb_data,args[0],args[1])
+			print(self.kb_data)
+			self._declare(self.store_data,self.kb_data,args[0],args[1])
 		else:
-			declare_unnamed(self.store_data,self.kb_data,args[0])
+			self._declare_unnamed(self.store_data,self.kb_data,args[0])
 
 	def modify(self,name,obj):
 		raise NotImplemented()
 
 	def retract(self,name):
-		retract(name)
+		self._retract(name)
 
 
 i8_arr = i8[:]
@@ -141,6 +153,26 @@ def init_kb_data():
 	return enum_data, enum_consistency, consistency_listeners, consistency_map_counter, unnamed_counter
 
 
+@njit(cache=True)
+def signal_inconsistent(consistency_listeners, name, attr):
+	for _,cm in consistency_listeners.items():
+		cm[(name,attr)] = True
+
+
+@njit(cache=True)
+def add_consistency_map(kb_data, c_map):
+	'''Adds a new consitency map, returns it's index in the knowledgebase'''
+	_,_, consistency_listeners, consistency_map_counter = kb_data
+	consistency_map_counter[0] += 1
+	consistency_listeners[consistency_map_counter[0]] = c_map
+	return consistency_map_counter[0]
+
+@njit(cache=True)
+def remove_consistency_map(kb_data, index):
+	'''Adds a new consitency map, returns it's index in the knowledgebase'''
+	_, _,_, consistency_listeners, _ = kb_data
+	del consistency_listeners[index]
+
 class KnowledgeBase(_BaseContextful):
 	''' '''
 	def __init__(self, context=None):
@@ -161,14 +193,9 @@ class KnowledgeBase(_BaseContextful):
 	def retract():
 		raise NotImplemented()
 
+# print(ks.enum_consistency)
 
-kb = KnowledgeBase()
 
-ks = KnowledgeStore(unicode_type,kb)
-ks.declare("A","A")
-print(ks.enum_consistency)
-
-	
 # @overload_method(KnowledgeBase.declare)
 # def typeddict_empty(self, x):
 

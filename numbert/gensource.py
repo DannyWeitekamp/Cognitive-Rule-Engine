@@ -14,6 +14,7 @@ def gen_source_standard_imports():
     imports += "from numba.typed import List, Dict\n"
     imports += "from numba.core.types import DictType, ListType, unicode_type, float64, NamedTuple, NamedUniTuple, UniTuple, Tuple\n"
     imports += "from numbert.numbalizer import _assert_map\n"
+    imports += "from numba.pycc import CC\n\n"
     return imports
 
 def gen_source_get_enumerized(name,spec,ind='   '):
@@ -180,58 +181,68 @@ def gen_source_broadcast_forward(op, nopython):
 
     return source   
 
-def gen_source_inf_hist_types(typ,hsh,custom_type=False,ind='   '):
-    if(custom_type): typ = "NB_"+typ
-    # s = "from ._{} import NB_{}_NamedTuple as {}\n\n".format(d_hsh,typ,typ) if d_hsh else ''
-    s = "from numba.pycc import CC\n\n"
-    s += "cc = CC('InfHistory_{}')\n\n".format(hsh)
-    s += "record_type = Tuple([i8, i8[::1], i8[::1],\n"
-    s += ind + "ListType(unicode_type),\n"
-    s += ind +  "DictType({},i8)])\n".format(typ)
-    s += "record_list_type = ListType(record_type)\n"
-    # s += "nt = {}_InfHistory = namedtuple('{}_InfHistory',\n".format(typ,typ)
-    # s += ind + "['u_vds','u_vs','dec_u_vs','records'])\n".format(typ)
-    s += "hist_type  = Tuple((\n"
-    s += ind + "DictType({},i8),\n".format(typ)
-    if(typ == 'f8'):
-        s += ind + "f8[::1],\n"
-        s += ind + "f8[::1],\n"
-    else:
-        s += ind + "ListType({}),\n".format(typ)
-        s += ind + "ListType({}),\n".format(typ)
-    s += ind + "DictType(i8,record_list_type)\n"
-    # s += "],nt)\n"
-    s += "))\n\n"
+# def gen_source_inf_hist_types(typ,hsh,custom_type=False,ind='   '):
+#     if(custom_type): typ = "NB_"+typ
+#     # s = "from ._{} import NB_{}_NamedTuple as {}\n\n".format(d_hsh,typ,typ) if d_hsh else ''
+#     s = "from numba.pycc import CC\n\n"
+#     s += "cc = CC('InfHistory_{}')\n\n".format(hsh)
+#     s += "record_type = Tuple([i8, i8[::1], i8[::1],\n"
+#     s += ind + "ListType(unicode_type),\n"
+#     s += ind +  "DictType({},i8)])\n".format(typ)
+#     s += "record_list_type = ListType(record_type)\n"
+#     # s += "nt = {}_InfHistory = namedtuple('{}_InfHistory',\n".format(typ,typ)
+#     # s += ind + "['u_vds','u_vs','dec_u_vs','records'])\n".format(typ)
+#     s += "hist_type  = Tuple((\n"
+#     s += ind + "DictType({},i8),\n".format(typ)
+#     if(typ == 'f8'):
+#         s += ind + "f8[::1],\n"
+#         s += ind + "f8[::1],\n"
+#     else:
+#         s += ind + "ListType({}),\n".format(typ)
+#         s += ind + "ListType({}),\n".format(typ)
+#     s += ind + "DictType(i8,record_list_type)\n"
+#     # s += "],nt)\n"
+#     s += "))\n\n"
 
-    s += "from numbert.aot_template_funcs import declare\n"
-    s += "declare = cc.export('declare',(hist_type,{}))(declare)\n\n".format(typ)
+#     s += "from numbert.aot_template_funcs import declare\n"
+#     s += "declare = cc.export('declare',(hist_type,{}))(declare)\n\n".format(typ)
 
-    s += "from numbert.aot_template_funcs import declare_nb_objects\n"
-    s += "declare_nb_objects = cc.export('declare_nb_objects',(hist_type,DictType(unicode_type,{})))(declare_nb_objects)\n\n".format(typ)
+#     s += "from numbert.aot_template_funcs import declare_nb_objects\n"
+#     s += "declare_nb_objects = cc.export('declare_nb_objects',(hist_type,DictType(unicode_type,{})))(declare_nb_objects)\n\n".format(typ)
 
-    if(typ == 'f8'):
-        s += "from numbert.aot_template_funcs import make_contiguous_f8\n"
-        s += "make_contiguous = cc.export('make_contiguous',hist_type(hist_type,i8))(make_contiguous_f8)\n\n".format(typ)
+#     if(typ == 'f8'):
+#         s += "from numbert.aot_template_funcs import make_contiguous_f8\n"
+#         s += "make_contiguous = cc.export('make_contiguous',hist_type(hist_type,i8))(make_contiguous_f8)\n\n".format(typ)
 
 
-    else:
-        s += "from numbert.aot_template_funcs import make_contiguous\n"
-        s += "make_contiguous = cc.export('make_contiguous',hist_type(hist_type,i8))(make_contiguous)\n\n".format(typ)
+#     else:
+#         s += "from numbert.aot_template_funcs import make_contiguous\n"
+#         s += "make_contiguous = cc.export('make_contiguous',hist_type(hist_type,i8))(make_contiguous)\n\n".format(typ)
 
-    # s += "from numbert.aot_template_funcs import insert_record\n"
-    # s += "insert_record = cc.export('insert_record',(hist_type,i8,i8,ListType(unicode_type),i8[::1],i8[::1],DictType({},i8)))(insert_record)\n\n".format(typ)
+#     # s += "from numbert.aot_template_funcs import insert_record\n"
+#     # s += "insert_record = cc.export('insert_record',(hist_type,i8,i8,ListType(unicode_type),i8[::1],i8[::1],DictType({},i8)))(insert_record)\n\n".format(typ)
 
-    s += "from numbert.aot_template_funcs import backtrace_goals, HE\n"
-    s += "backtrace_goals = cc.export('backtrace_goals',DictType(unicode_type,i8[:])(ListType({}),hist_type,ListType(ListType(HE)),i8,i8))(backtrace_goals)\n\n".format(typ)
+#     s += "from numbert.aot_template_funcs import backtrace_goals, HE\n"
+#     s += "backtrace_goals = cc.export('backtrace_goals',DictType(unicode_type,i8[:])(ListType({}),hist_type,ListType(ListType(HE)),i8,i8))(backtrace_goals)\n\n".format(typ)
 
-    if(typ == 'f8'):
-        s += "from numbert.aot_template_funcs import backtrace_selection_f8\n"
-        s +=  "backtrace_selection = cc.export('backtrace_selection',DictType(unicode_type,i8[:])(i8[:],hist_type,ListType(ListType(HE)),i8,i8))(backtrace_selection_f8)\n"
-    else:
-        s += "from numbert.aot_template_funcs import backtrace_selection\n"
-        s +=  "backtrace_selection = cc.export('backtrace_selection',DictType(unicode_type,i8[:])(i8[:],hist_type,ListType(ListType(HE)),i8,i8))(backtrace_selection)\n"
+#     if(typ == 'f8'):
+#         s += "from numbert.aot_template_funcs import backtrace_selection_f8\n"
+#         s +=  "backtrace_selection = cc.export('backtrace_selection',DictType(unicode_type,i8[:])(i8[:],hist_type,ListType(ListType(HE)),i8,i8))(backtrace_selection_f8)\n\n"
+#     else:
+#         s += "from numbert.aot_template_funcs import backtrace_selection\n"
+#         s +=  "backtrace_selection = cc.export('backtrace_selection',DictType(unicode_type,i8[:])(i8[:],hist_type,ListType(ListType(HE)),i8,i8))(backtrace_selection)\n\n"
 
-    return s
+#     # typ_v = "NB_"+typ if custom_type else typ
+#     t_types = "i8, i8[::1], i8[::1], ListType(unicode_type), DictType({},i8)".format(typ)
+#     s += "import numbert.aot_template_funcs\n"
+#     s += "@cc.export('insert_record',(hist_type,i8,{}))\n".format(t_types)
+#     s += "@jit(nogil=True, fastmath=True, cache=True)\n"
+#     s += 'def insert_record(history, depth, op_uid, btsr_flat, btsr_shape, arg_types, vmap):\n'
+#     s += ind + "return numbert.aot_template_funcs.insert_record(record_type, history, depth, op_uid, btsr_flat, btsr_shape, arg_types, vmap)\n\n"
+
+
+
+#     return s
 
 
 # def gen_source_backtrace_selection(typ, ind='   '):
@@ -260,57 +271,74 @@ def gen_source_inf_hist_types(typ,hsh,custom_type=False,ind='   '):
 #     return backtrace_goals(goals,history,hist_elems,max_depth,max_solutions=max_solutions)
 
 
-def gen_source_empty_inf_history(typ, custom_type=False, ind='   '):
-    typ_v = "NB_"+typ if custom_type else typ
-    header = "@cc.export('empty_inf_history',hist_type())\n"
-    header += "@njit(cache=True,fastmath=True,nogil=True)\n"
-    header += "def empty_inf_history():\n"
+# def gen_source_empty_inf_history(typ, custom_type=False, ind='   '):
+#     typ_v = "NB_"+typ if custom_type else typ
+#     header = "@cc.export('empty_inf_history',hist_type())\n"
+#     header += "@njit(cache=True,fastmath=True,nogil=True)\n"
+#     header += "def empty_inf_history():\n"
 
-    body =  ind + "records = Dict.empty(i8,record_list_type)\n"
-    body += ind + "records[0] = List.empty_list(record_type)\n"
-    body += ind + "tl = List.empty_list(unicode_type);tl.append('{}');\n".format(typ)
-    body += ind + "vmap = Dict.empty({},i8)\n".format(typ_v)
-    #Type : (0 (i.e. no-op), _hist, shape, arg_types, vmap)
-    body += ind + "records[0].append(\n" 
-    body += ind*2 + "(0, np.empty((0,),dtype=np.int64),\n"
-    body += ind*2 + "np.empty((0,),dtype=np.int64),\n"
-    body += ind*2 + "tl,vmap))\n"
+#     body =  ind + "records = Dict.empty(i8,record_list_type)\n"
+#     body += ind + "records[0] = List.empty_list(record_type)\n"
+#     body += ind + "tl = List.empty_list(unicode_type);tl.append('{}');\n".format(typ)
+#     body += ind + "vmap = Dict.empty({},i8)\n".format(typ_v)
+#     #Type : (0 (i.e. no-op), _hist, shape, arg_types, vmap)
+#     body += ind + "records[0].append(\n" 
+#     body += ind*2 + "(0, np.empty((0,),dtype=np.int64),\n"
+#     body += ind*2 + "np.empty((0,),dtype=np.int64),\n"
+#     body += ind*2 + "tl,vmap))\n"
         
-    body += ind + "u_vds = Dict.empty({},i8)\n".format(typ_v)
-    if(typ == 'f8'):
-        body += ind + "u_vs = np.empty(0)\n"
-        body += ind + "dec_u_vs = np.empty(0)\n"
-    else:
-        body += ind + "u_vs = List.empty_list({})\n".format(typ_v)
-        body += ind + "dec_u_vs = List.empty_list({})\n".format(typ_v)
-    body += ind + "return (u_vds,u_vs,dec_u_vs,records)\n\n"
-    return header + body
+#     body += ind + "u_vds = Dict.empty({},i8)\n".format(typ_v)
+#     if(typ == 'f8'):
+#         body += ind + "u_vs = np.empty(0)\n"
+#         body += ind + "dec_u_vs = np.empty(0)\n"
+#     else:
+#         body += ind + "u_vs = List.empty_list({})\n".format(typ_v)
+#         body += ind + "dec_u_vs = List.empty_list({})\n".format(typ_v)
+#     body += ind + "return (u_vds,u_vs,dec_u_vs,records)\n\n"
+#     return header + body
 
-def gen_source_insert_record(typ, custom_type=False,ind='   '):
+# def gen_source_insert_record(typ, custom_type=False,ind='   '):
+#     typ_v = "NB_"+typ if custom_type else typ
+#     t_types = "i8, i8[::1], i8[::1], ListType(unicode_type), DictType({},i8)".format(typ_v)
+
+#     header = "@cc.export('insert_record',(hist_type,i8,{}))\n".format(t_types)
+#     header += "@jit(nogil=True, fastmath=True, cache=True)\n"
+#     header += 'def insert_record(history, depth, op_uid, btsr_flat, btsr_shape, arg_types, vmap):\n'
+#     body = ind + '_,_,_,records = history\n'
+#     # body += ind + 'btsr_flat = btsr.reshape(-1)\n'
+#     # body += ind + 'btsr_shape = np.array(btsr.shape,np.int64)\n'
+#     # body += ind + 'arg_types = List([{}])\n'.format(["'{}'".format(x) for x in op.arg_types])
+#     body += ind + 'r_d = records.get(depth, List.empty_list(record_type))\n'
+#     body += ind + 'r_d.append((op_uid, btsr_flat, btsr_shape, arg_types, vmap))\n'
+#     body += ind + 'records[depth] = r_d\n\n'
+#     return header + body
+
+def gen_apply_inf_history_aot_funcs(typ,hsh,custom_type=False,ind='   '):
     typ_v = "NB_"+typ if custom_type else typ
-    t_types = "i8, i8[::1], i8[::1], ListType(unicode_type), DictType({},i8)".format(typ_v)
+    s = "from numbert.aot_template_funcs import gen_inf_history_aot_funcs\n"
+    s += "gen_inf_history_aot_funcs(cc, '{}', {})\n\n".format(typ, typ_v)
+    return s
 
-    header = "@cc.export('insert_record',(hist_type,i8,{}))\n".format(t_types)
-    header += "@jit(nogil=True, fastmath=True, cache=True)\n"
-    header += 'def insert_record(history, depth, op_uid, btsr_flat, btsr_shape, arg_types, vmap):\n'
-    body = ind + '_,_,_,records = history\n'
-    # body += ind + 'btsr_flat = btsr.reshape(-1)\n'
-    # body += ind + 'btsr_shape = np.array(btsr.shape,np.int64)\n'
-    # body += ind + 'arg_types = List([{}])\n'.format(["'{}'".format(x) for x in op.arg_types])
-    body += ind + 'r_d = records.get(depth, List.empty_list(record_type))\n'
-    body += ind + 'r_d.append((op_uid, btsr_flat, btsr_shape, arg_types, vmap))\n'
-    body += ind + 'records[depth] = r_d\n\n'
-    return header + body
+def gen_apply_knowledge_store_aot_funcs(typ,hsh,custom_type=False,ind='   '):
+    typ_v = "NB_"+typ if custom_type else typ    
+    s = "from numbert.experimental.kb import gen_knowledge_store_aot_funcs\n"
+    s += "gen_knowledge_store_aot_funcs(cc, '{}', {})\n\n".format(typ,typ_v)
+    return s
 
 
 def assert_gen_source(typ, hash_code, spec=None, custom_type=False):
     if(not source_in_cache(typ,hash_code)):
         source = gen_source_standard_imports()
         if(custom_type): source += gen_source_tuple_defs(typ,spec)
-        source += gen_source_inf_hist_types(typ,hash_code,custom_type=custom_type)
+
+        source += "cc = CC('{}_{}')\n\n".format(typ,hash_code)
+        source += gen_apply_inf_history_aot_funcs(typ,hash_code,custom_type)
+        source += gen_apply_knowledge_store_aot_funcs(typ,hash_code,custom_type)
+
+        # source += gen_source_inf_hist_types(typ,hash_code,custom_type=custom_type)
         # source += gen_source_backtrace_selection(typ)
-        source += gen_source_empty_inf_history(typ,custom_type=custom_type)
-        source += gen_source_insert_record(typ,custom_type=custom_type)
+        # source += gen_source_empty_inf_history(typ,custom_type=custom_type)
+        # source += gen_source_insert_record(typ,custom_type=custom_type)
         if(custom_type):
             source += gen_source_get_enumerized(typ,spec)
             source += gen_source_enumerize_nb_objs(typ,spec)

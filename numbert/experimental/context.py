@@ -42,32 +42,38 @@ def new_kb_context():
 
 class KnowledgeBaseContext(object):
 	_contexts = {}
-	
-	@classproperty
-	def default_context():
+
+	@classmethod
+	def get_default_context(cls):
 		df_c = os.environ.get("NUMBERT_DEFAULT_CONTEXT")
-		return df_c if df_c else "numbert"
+		df_c = df_c if df_c else "numbert"
+		return cls.get_context(df_c)
 
 	@classmethod
 	def init(cls, name):
-		if(not name in cls._contexts):
-			cls._contexts[name] = cls()
+		print("INIT" ,name)
+		if(name not in cls._contexts):
+			cls._contexts[name] = cls(name)
 
 	@classmethod
 	def get_context(cls, name=None):
-		if(name is None): return cls.default_context
+		if(name is None): return cls.get_default_context()
 		if(isinstance(name,KnowledgeBaseContext)): return name
 		if(name not in cls._contexts): cls.init(name)
 		return cls._contexts[name]
 
 	@classmethod
-	def set_default(cls, name):
-		_default_context = cls.get_context(name)
+	def set_default_context(cls, name):
+		os.environ["NUMBERT_DEFAULT_CONTEXT"] = cls.get_context(name)
 
-	def __init__(self):
+	def __init__(self,name):
+		self.name = name
 		self.registered_specs = {}
 		self.jitstructs = {}
-		self.nb_data = new_kb_context()
+		self.context_data = new_kb_context()
+
+		self.string_enums, self.number_enums, self.string_backmap, self.number_backmap, \
+		self.enum_counter, self.attr_inds_by_type, self.spec_flags = self.context_data
 
 		# for x in ["<#ANY>",'','?sel']:
 		# 	self.enumerize_value(x)
@@ -87,6 +93,7 @@ class KnowledgeBaseContext(object):
 			REGISTERED_TYPES[name] = jitstruct.numba_type
 			TYPE_ALIASES[name] = jitstruct.__name__
 			JITSTRUCTS[name] = jitstruct
+		return self.jitstructs[name]
 	def jitstruct_from_spec(self,name,spec,ind="   "):
 		
 		#For the purposes of autogenerating code we need a clean alphanumeric name 
@@ -98,6 +105,7 @@ class KnowledgeBaseContext(object):
 		hash_code = unique_hash([name,spec])
 		assert_gen_source(name, hash_code, spec=spec, custom_type=True)
 
+		print("HEY!")
 		out = import_from_cached(name,hash_code,[
 			'{}_get_enumerized'.format(name),
 			'{}_pack_from_numpy'.format(name),
@@ -105,7 +113,7 @@ class KnowledgeBaseContext(object):
 			'NB_{}'.format(name),
 			'{}_enumerize_nb_objs'.format(name)
 			]).values()
-
+		print("HEY")
 		get_enumerized, pack_from_numpy, nt, nb_nt, enumerize_nb_objs = tuple(out)
 
 		def py_get_enumerized(_self,assert_maps=True):
@@ -166,10 +174,9 @@ class KnowledgeBaseContext(object):
 			d[attr] = i
 		self.attr_inds_by_type[name] = d
 
-KnowledgeBaseContext._default_context = KnowledgeBaseContext.get_context('numbert')
 
 def register_specification(name, spec, context=None):
-	KnowledgeBaseContext.get_context(context).register_specification(name,spec)
+	return KnowledgeBaseContext.get_context(context).register_specification(name,spec)
 
 def register_specifications(self, specs, context=None):
 	for name, spec in specs.items():
@@ -182,4 +189,4 @@ class _BaseContextful(object):
 		#Context stuff
 		self.context = KnowledgeBaseContext.get_context(context)
 		self.string_enums, self.number_enums, self.string_backmap, self.number_backmap, \
-		self.enum_counter, self.attr_inds_by_type, self.spec_flags = self.context.nb_data
+		self.enum_counter, self.attr_inds_by_type, self.spec_flags = self.context.context_data

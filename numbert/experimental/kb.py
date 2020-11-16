@@ -5,6 +5,7 @@ from numba import void,b1,u1,u2,u4,u8,i1,i2,i4,i8,f4,f8,c8,c16
 from numba.typed import List, Dict
 from numba.core.types import DictType, ListType, unicode_type, float64, NamedTuple, NamedUniTuple, UniTuple, Tuple, Array
 from numba.cpython.unicode import  _set_code_point
+from numba.experimental import structref
 from numbert.utils import cache_safe_exec
 from numbert.core import TYPE_ALIASES, REGISTERED_TYPES, JITSTRUCTS, py_type_map, numba_type_map, numpy_type_map
 from numbert.gensource import assert_gen_source
@@ -185,16 +186,24 @@ def remove_consistency_map(kb_data, index):
     _, _,_, consistency_listeners, _ = kb_data
     del consistency_listeners[index]
 
-class KnowledgeBase(_BaseContextful):
+class KnowledgeBase(structref.StructRefProxy):
     ''' '''
-    def __init__(self, context=None):
-        super().__init__(context)
+    # class KnowledgeBaseData(structref.StructRefProxy):
+    def __new__(cls, context=None):
+        self = structref.StructRefProxy.__new__(cls)
+        # self.super().__init__(context)
+        _BaseContextful.__init__(self,context)
         self.stores = {}
 
+
         self.kb_data = init_kb_data()
-        # self.enum_data = self.enum_data, self.enum_consistency, self.consistency_listeners, \
-        # self.consistency_map_counter, self.unnamed_counter = self.kb_data
-        # self.
+
+        return self
+    # def __init__(self, context=None):
+        
+    #     # self.enum_data = self.enum_data, self.enum_consistency, self.consistency_listeners, \
+    #     # self.consistency_map_counter, self.unnamed_counter = self.kb_data
+    #     # self.
 
     def _get_fact_type(self,x):
         x_t = type(x)
@@ -215,16 +224,36 @@ class KnowledgeBase(_BaseContextful):
 
         raise NotImplemented()
 
+
+@structref.register
+class KnowledgeBaseTypeTemplate(types.StructRef):
+    pass
+    
+
+structref.define_proxy(KnowledgeBase, KnowledgeBaseTypeTemplate, [])
+KnowledgeBaseType = KnowledgeBaseTypeTemplate(fields=[])
+
+
+def _get_fact_type(x):
+    x_t = type(x)
+    assert hasattr(x_t, 'name'), "Can only declare namedtuples built w/ numbert.define_fact()"
+    return x_t.name
+
 # print(ks.enum_consistency)
 
+from numba.extending import overload_method
+@overload_method(KnowledgeBaseTypeTemplate, "declare")
+def kb_declare(self, name, x):
+    print("HERE", x, name)
+    typ = _get_fact_type(x)
+    print("HERE", x, typ, name)
+    if(typ not in self.stores):
+        self.stores[typ] = KnowledgeStore(typ,self)
+    store_data = self.stores[typ].store_data
+    def impl(self, name,x):
+        return declare(store_data, name, x)
+    return impl
 
-# @overload_method(KnowledgeBase.declare)
-# def typeddict_empty(self, x):
-
-#     def impl(cls, key_type, value_type):
-#         return dictobject.new_dict(key_type, value_type)
-
-#     return impl
 
 
 

@@ -23,7 +23,7 @@ ks = kb.stores['TextField']
 print("DONE")
 print(ks.store_data)
 print(type(kb))
-
+print(kb.__dict__)
 # @njit(locals={"kb" : KnowledgeBaseType})
 # def foo(kb):
 #     kb.declare("Q",TextField("A","B","C","D","E"))

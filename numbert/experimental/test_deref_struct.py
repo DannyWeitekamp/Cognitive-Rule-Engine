@@ -116,6 +116,12 @@ def box_untyped_structref(typ, val, c):
 import sys, os
 # os.environ['NUMBA_DUMP_IR'] = "1"
 
+
+#Assuming an typed structref MyStruct w/ A: i8 and B: unicode_type
+from numba.extending import intrinsic
+from numba.core import types, cgutils
+from numba import njit
+
 @intrinsic
 def _struct_from_meminfo(typingctx, struct_type, meminfo):
     inst_type = struct_type.instance_type
@@ -134,7 +140,6 @@ def _struct_from_meminfo(typingctx, struct_type, meminfo):
 
 from numba.typed import Dict
 
-
 @njit
 def foo(d):
     meminfo = d[0]
@@ -142,23 +147,13 @@ def foo(d):
     print(struct.A, struct.B)
     struct.A += 1
 
-# print(MyStructTypeTemplate.instance_type)
 s = MyStruct(1,"IT EXISTS")
 
 d = Dict.empty(i8,types.MemInfoPointer(types.voidptr))
 d[0] = s._meminfo
-# s = UntypedStructRef(MyStructTypeTemplate,s._meminfo)
-# foo(s)
-# print(s._meminfo)
-
 
 print(s.A)
-# print(s._meminfo.data)
 foo(d)
-# print(s._meminfo.data)
-# print(s2.A)
-# print(foo.overloads.keys())
 print(s.A, s.B)
-
 foo(d)
-# foo(s._meminfo)
+

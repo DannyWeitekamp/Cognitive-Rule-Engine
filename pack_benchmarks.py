@@ -1,12 +1,12 @@
 
 from numba import types, njit, guvectorize,vectorize,prange
-from numba.experimental import jitclass
+from numba.experimental import jitclass, structref
 from numba import deferred_type, optional
 from numba.core.extending import overload
 from numba import void,b1,u1,u2,u4,u8,i1,i2,i4,i8,f4,f8,c8,c16
 from numba.typed import List, Dict
 from numba.core.types import ListType, unicode_type, float64, Tuple, NamedTuple
-from utils import cache_safe_exec
+# from utils import cache_safe_exec
 from collections import namedtuple
 import numpy as np
 import timeit
@@ -300,6 +300,40 @@ def pack_to_nb_via_append(state):
 						float(elm['x']),float(elm['y']))
 
 
+
+@structref.register
+class MyStructTypeTemplate(types.StructRef):
+    def preprocess_fields(self, fields):
+        return tuple((name, types.unliteral(typ)) for name, typ in fields)
+
+class MyStruct(structref.StructRefProxy):
+    def __new__(cls, *args):
+        return structref.StructRefProxy.__new__(cls, *args)
+
+
+data_fields = [
+    # ("type" , unicode_type),
+    ("id" , unicode_type),
+    ("value" , unicode_type),
+    ("above" , unicode_type),
+    ("below" , unicode_type),
+    ("to_left" , unicode_type),
+    ("to_right" , unicode_type),
+    ("x" , f8),
+    ("y" , f8),
+]
+
+structref.define_proxy(MyStruct, MyStructTypeTemplate, ['id', 'value', 'above', 'below', 'to_left', 'to_right', 'x', 'y'])
+MyStructType = MyStructTypeTemplate(fields=data_fields)
+
+def pack_to_nb_via_structref(state):
+	out = Dict.empty(unicode_type,MyStructType)
+	for _name, elm in state.items():
+		out[_name] = MyStruct(elm['id'],elm['value'],
+						elm['above'],elm['below'],elm['to_right'],elm['to_left'],
+						float(elm['x']),float(elm['y']))
+
+
 # def test_pack_from_args():
 
 
@@ -324,6 +358,9 @@ def b10_pack_to_nb_via_args():
 def b10_pack_to_nb_via_append():
 	pack_to_nb_via_append(state_10)
 
+def b10_pack_to_nb_via_structref():
+	pack_to_nb_via_structref(state_10)
+
 
 state_40 = {"ie" + str(i) : _state['i01'] for i in range(40)}
 def b40_pack_to_nb_via_numpy():
@@ -337,6 +374,9 @@ def b40_pack_to_nb_via_args():
 def b40_pack_to_nb_via_append():
 	pack_to_nb_via_append(state_40)
 
+def b40_pack_to_nb_via_structref():
+	pack_to_nb_via_structref(state_40)
+
 state_200 = {"ie" + str(i) : _state['i01'] for i in range(200)}
 def b200_pack_to_nb_via_numpy():
 	pack_to_nb_via_numpy(state_200,ie_spec)
@@ -349,6 +389,8 @@ def b200_pack_to_nb_via_args():
 def b200_pack_to_nb_via_append():
 	pack_to_nb_via_append(state_200)
 
+def b200_pack_to_nb_via_structref():
+	pack_to_nb_via_structref(state_200)
 
 print("pack_from_numpy",time_ms(b_pack_from_numpy))
 
@@ -357,18 +399,21 @@ print("pack_to_nb_via_numpy",time_ms(b10_pack_to_nb_via_numpy))
 print("pack_to_nb_via_numpy2",time_ms(b10_pack_to_nb_via_numpy2))
 print("pack_to_nb_via_args",time_ms(b10_pack_to_nb_via_args))
 print("pack_to_nb_via_append",time_ms(b10_pack_to_nb_via_append))
+print("pack_to_nb_via_structref",time_ms(b10_pack_to_nb_via_structref))
 
 print("40 items:")
 print("pack_to_nb_via_numpy",time_ms(b40_pack_to_nb_via_numpy))
 print("pack_to_nb_via_numpy2",time_ms(b40_pack_to_nb_via_numpy2))
 print("pack_to_nb_via_args",time_ms(b40_pack_to_nb_via_args))
 print("pack_to_nb_via_append",time_ms(b40_pack_to_nb_via_append))
+print("pack_to_nb_via_structref",time_ms(b40_pack_to_nb_via_structref))
 
 print("200 items:")
 print("pack_to_nb_via_numpy",time_ms(b200_pack_to_nb_via_numpy))
 print("pack_to_nb_via_numpy2",time_ms(b200_pack_to_nb_via_numpy2))
 print("pack_to_nb_via_args",time_ms(b200_pack_to_nb_via_args))
 print("pack_to_nb_via_append",time_ms(b200_pack_to_nb_via_append))
+print("pack_to_nb_via_structref",time_ms(b200_pack_to_nb_via_structref))
 
 print("Note to self: At the time of writing this for large states packing via_numpy2 " +
 		"seems to be the fastest option, it is decently faster than packing by expanding " +

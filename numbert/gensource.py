@@ -319,11 +319,11 @@ def gen_apply_inf_history_aot_funcs(typ,hsh,custom_type=False,ind='   '):
     s += "gen_inf_history_aot_funcs(cc, '{}', {})\n\n".format(typ, typ_v)
     return s
 
-def gen_apply_knowledge_store_aot_funcs(typ,hsh,custom_type=False,ind='   '):
-    typ_v = "NB_"+typ if custom_type else typ    
-    s = "from numbert.experimental.kb import gen_knowledge_store_aot_funcs\n"
-    s += "gen_knowledge_store_aot_funcs(cc, '{}', {})\n\n".format(typ,typ_v)
-    return s
+# def gen_apply_knowledge_store_aot_funcs(typ,hsh,custom_type=False,ind='   '):
+#     typ_v = "NB_"+typ if custom_type else typ    
+#     s = "from numbert.experimental.kb import gen_knowledge_store_aot_funcs\n"
+#     s += "gen_knowledge_store_aot_funcs(cc, '{}', {})\n\n".format(typ,typ_v)
+#     return s
 
 
 def assert_gen_source(typ, hash_code, spec=None, custom_type=False):
@@ -333,7 +333,7 @@ def assert_gen_source(typ, hash_code, spec=None, custom_type=False):
 
         source += "cc = CC('{}_{}')\n\n".format(typ,hash_code)
         source += gen_apply_inf_history_aot_funcs(typ,hash_code,custom_type)
-        source += gen_apply_knowledge_store_aot_funcs(typ,hash_code,custom_type)
+        # source += gen_apply_knowledge_store_aot_funcs(typ,hash_code,custom_type)
 
         # source += gen_source_inf_hist_types(typ,hash_code,custom_type=custom_type)
         # source += gen_source_backtrace_selection(typ)

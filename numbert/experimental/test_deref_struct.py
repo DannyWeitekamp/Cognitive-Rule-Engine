@@ -131,6 +131,8 @@ def _struct_from_meminfo(typingctx, struct_type, meminfo):
 
         st = cgutils.create_struct_proxy(inst_type)(context, builder)
         st.meminfo = meminfo
+        #NOTE: Fixes sefault but not sure about it's lifecycle (i.e. watch out for memleaks)
+        context.nrt.incref(builder, types.MemInfoPointer(types.voidptr), meminfo)
 
         return st._getvalue()
 
@@ -141,19 +143,21 @@ def _struct_from_meminfo(typingctx, struct_type, meminfo):
 from numba.typed import Dict
 
 @njit
-def foo(d):
-    meminfo = d[0]
+def foo(meminfo):
+    # meminfo = d[0]
     struct = _struct_from_meminfo(MyStructType,meminfo)
     print(struct.A, struct.B)
     struct.A += 1
+    struct.B = struct.B[:len(struct.B)-1]
 
 s = MyStruct(1,"IT EXISTS")
 
-d = Dict.empty(i8,types.MemInfoPointer(types.voidptr))
-d[0] = s._meminfo
+# d = Dict.empty(i8,types.MemInfoPointer(types.voidptr))
+# d[0] = s._meminfo
 
 print(s.A)
-foo(d)
+foo(s._meminfo)
 print(s.A, s.B)
-foo(d)
+foo(s._meminfo)
+print(s.A, s.B)
 

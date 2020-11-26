@@ -58,7 +58,8 @@ def new_kb_context():
     attr_inds_by_type = Dict.empty(unicode_type,Dict_Unicode_to_i8)
     # nominal_maps = Dict.empty(unicode_type,u1[:])
     spec_flags = Dict.empty(unicode_type,Dict_Unicode_to_Flags)
-    return (string_enums, number_enums, string_backmap, number_backmap,
+    return KnowledgeBaseContextData(string_enums, number_enums,
+        string_backmap, number_backmap,
         enum_counter, attr_inds_by_type, spec_flags)
 
 
@@ -92,10 +93,15 @@ class KnowledgeBaseContext(object):
         self.name = name
         self.registered_specs = {}
         self.jitstructs = {}
-        self.context_data = new_kb_context()
+        self.context_data = cd = new_kb_context()
 
-        self.string_enums, self.number_enums, self.string_backmap, self.number_backmap, \
-        self.enum_counter, self.attr_inds_by_type, self.spec_flags = self.context_data
+        self.string_enums = cd.string_enums
+        self.number_enums = cd.number_enums
+        self.string_backmap = cd.string_backmap
+        self.number_backmap = cd.number_backmap
+        self.enum_counter = cd.enum_counter
+        self.attr_inds_by_type = cd.attr_inds_by_type
+        self.spec_flags = cd.spec_flags
 
         # for x in ["<#ANY>",'','?sel']:
         #   self.enumerize_value(x)
@@ -212,5 +218,13 @@ class _BaseContextful(object):
 
         #Context stuff
         self.context = KnowledgeBaseContext.get_context(context)
-        self.string_enums, self.number_enums, self.string_backmap, self.number_backmap, \
-        self.enum_counter, self.attr_inds_by_type, self.spec_flags = self.context.context_data
+        cd = self.context.context_data
+        self.string_enums = cd.string_enums
+        self.number_enums = cd.number_enums
+        self.string_backmap = cd.string_backmap
+        self.number_backmap = cd.number_backmap
+        self.enum_counter = cd.enum_counter
+        self.attr_inds_by_type = cd.attr_inds_by_type
+        self.spec_flags = cd.spec_flags
+        
+        

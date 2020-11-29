@@ -86,7 +86,7 @@ def _struct_from_meminfo(typingctx, struct_type, meminfo):
         st = cgutils.create_struct_proxy(inst_type)(context, builder)
         st.meminfo = meminfo
         #NOTE: Fixes sefault but not sure about it's lifecycle (i.e. watch out for memleaks)
-        context.nrt.incref(builder, types.MemInfoPointer(types.voidptr), meminfo)
+        # context.nrt.incref(builder, types.MemInfoPointer(types.voidptr), meminfo)
 
         return st._getvalue()
 
@@ -108,8 +108,10 @@ def _meminfo_from_struct(typingctx, val):
 
         ctor = cgutils.create_struct_proxy(td)
         dstruct = ctor(context, builder, value=d)
+        meminfo = dstruct.meminfo
+        context.nrt.incref(builder, types.MemInfoPointer(types.voidptr), meminfo)
         # Returns the plain MemInfo
-        return dstruct.meminfo
+        return meminfo
         # struct_ref = cgutils.create_struct_proxy(struct_type)(
         #     context, builder, value=val)
 
@@ -288,18 +290,22 @@ class KnowledgeBase(structref.StructRefProxy):
         return x_t.name
 
     def declare(self,name,x):
-        typ = self._get_fact_type(x)
-        # if(typ not in self.stores):
-        #     self.stores[typ] = KnowledgeStore(typ,self)
-        # self.stores[typ].declare(name,x)
+        return declare(self,name,x)
+
+    def retract(self,name):
+        return retract(self,name)
+    #     typ = self._get_fact_type(x)
+    #     # if(typ not in self.stores):
+    #     #     self.stores[typ] = KnowledgeStore(typ,self)
+    #     # self.stores[typ].declare(name,x)
 
     def modify():
 
         raise NotImplemented()
 
-    def retract(self,name):
+    # def retract(self,name):
 
-        raise NotImplemented()
+    #     raise NotImplemented()
 
 
 @structref.register
@@ -323,7 +329,7 @@ def _get_fact_type(x):
 
 @njit
 def make_f_id_empty(kb_data, t_id, f_id):
-    '''Adds adds tracking infro for an empty f_id for when a fact is retracted'''
+    '''Adds adds tracking info for an empty f_id for when a fact is retracted'''
     es_s = kb_data.empty_f_id_stacks[t_id]
     es_h = kb_data.empty_f_id_heads[t_id]
     if(es_h < len(es_s)):
@@ -362,15 +368,20 @@ def kb_declare(self, name, fact):
 
     return impl
 
+@njit(cache=True)
+def declare(kb,name,fact):
+    return kb.declare(name,fact)
 
+
+# @njit
 @overload_method(KnowledgeBaseTypeTemplate, "retract")
 def kb_retract(self, name):
     t_id = 0
     def impl(self, name):
         names_to_idrecs = self.kb_data.names_to_idrecs
-        # if(name not in names_to_idrecs):
+        if(name not in names_to_idrecs):
         #     # pass
-        #     raise KeyError("Fact not found.")
+            raise KeyError("Fact not found.")
         #     return
         t_id, f_id, a_id = decode_idrec(names_to_idrecs[name])
         make_f_id_empty(self.kb_data,i8(t_id), i8(f_id))
@@ -379,6 +390,9 @@ def kb_retract(self, name):
 
     return impl
 
+@njit(cache=True)
+def retract(kb,name):
+    return kb.retract(name)
 
 
 # @overload_method(TypeRef, 'empty')

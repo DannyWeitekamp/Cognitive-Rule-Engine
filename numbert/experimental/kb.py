@@ -390,6 +390,14 @@ def kb_retract(self, name):
 
     return impl
 
+@overload_method(KnowledgeBaseTypeTemplate, "all_facts_of_type")
+def kb_all_facts_of_type(self, name):
+    t_id = 0
+    def impl(self, name):
+        pass
+
+    return impl
+
 @njit(cache=True)
 def retract(kb,name):
     return kb.retract(name)

@@ -1,11 +1,12 @@
 from numbert.experimental.context import define_fact
 from numbert.experimental.kb import KnowledgeBase, KnowledgeBaseType, decode_idrec, encode_idrec, next_empty_f_id, make_f_id_empty
 from numba import njit
-from numba.types import unicode_type
+from numba.types import unicode_type, NamedTuple
 from numbert.experimental.struct_gen import gen_struct_code
 import logging
 import numpy as np
 import pytest
+from collections import namedtuple
 
 # main_logger = logging.getLogger('numba.core')
 # main_logger.setLevel(logging.DEBUG)
@@ -28,25 +29,26 @@ tf_data_fields = [
 from numba.experimental import structref
 from numba.core import types
 from numba import njit
-@njit
+@njit(cache=True)
 def TextField_get_value(self):
     return self.value
 
-@njit
+@njit(cache=True)
 def TextField_get_above(self):
     return self.above
 
-@njit
+@njit(cache=True)
 def TextField_get_below(self):
     return self.below
 
-@njit
+@njit(cache=True)
 def TextField_get_to_left(self):
     return self.to_left
 
-@njit
+@njit(cache=True)
 def TextField_get_to_right(self):
     return self.to_right
+
 
 @structref.register
 class TextFieldTypeTemplate(types.StructRef):
@@ -76,10 +78,21 @@ class TextField(structref.StructRefProxy):
     @property
     def to_right(self):
         return TextField_get_to_right(self)
-    
+
+    def __hash__(self):
+        return self.__hash__()
+
+TextField_NT = namedtuple("TextField_NT",["value","above", "below", "to_left","to_right"])
+TextField_NB_NT = NamedTuple([unicode_type,unicode_type,unicode_type,unicode_type,unicode_type], TextField_NT)
 
 structref.define_proxy(TextField, TextFieldTypeTemplate, ['value','above','below','to_left','to_right'])
 TextFieldType = TextFieldTypeTemplate(fields=tf_data_fields)
+
+from numba.extending import overload_method
+@overload_method(TextFieldTypeTemplate, 'as_named_tuple')
+def TextField_as_named_tuple(self):
+    return TextField_NT(self.value,self.above,self.below,self.to_left,self.to_right)
+
 
 ##### test_encode_decode #####
 
@@ -91,7 +104,7 @@ def test_encode_decode():
 
 ##### test_declare_retract #####
 
-@njit
+@njit(cache=True)
 def declare_retract(kb):
     for i in range(100):
         i_s = "A" + str(i)
@@ -103,7 +116,7 @@ def declare_retract(kb):
 
     return kb.kb_data.empty_f_id_heads[0]
 
-@njit
+@njit(cache=True)
 def declare_again(kb):
     for i in range(0,100,10):
         i_s = "B" + str(i)

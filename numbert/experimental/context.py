@@ -9,7 +9,8 @@ from numbert.utils import cache_safe_exec
 from numbert.core import TYPE_ALIASES, REGISTERED_TYPES, JITSTRUCTS, py_type_map, numba_type_map, numpy_type_map
 from numbert.gensource import assert_gen_source
 from numbert.caching import unique_hash, source_to_cache, import_from_cached, source_in_cache
-from numbert.experimental.struct_gen import gen_struct_code
+# from numbert.experimental.struct_gen import gen_struct_code
+from numbert.experimental.structref import define_structref
 from collections import namedtuple
 import numpy as np
 import timeit
@@ -18,6 +19,9 @@ import types as pytypes
 import sys
 import __main__
 import os
+import contextvars
+
+
 
 
 # numba_type_ids = {k:i  for i,k in enumerate(numba_type_map)}
@@ -38,14 +42,16 @@ context_data_fields = [
     ("spec_flags" , DictType(unicode_type,Dict_Unicode_to_Flags)),
 ]
 
-if(not source_in_cache("KnowledgeBaseContextData",'KnowledgeBaseContextData')):
-    source = gen_struct_code("KnowledgeBaseContextData",context_data_fields)
-    source_to_cache("KnowledgeBaseContextData",'KnowledgeBaseContextData',source)
-    
-KnowledgeBaseContextData, KnowledgeBaseContextDataTypeTemplate = import_from_cached("KnowledgeBaseContextData",
-    "KnowledgeBaseContextData",["KnowledgeBaseContextData","KnowledgeBaseContextDataTypeTemplate"]).values()
+KnowledgeBaseContextData, KnowledgeBaseContextDataType = define_structref("KnowledgeBaseContextData",context_data_fields)
 
-KnowledgeBaseContextDataType = KnowledgeBaseContextDataTypeTemplate(fields=context_data_fields)
+# if(not source_in_cache("KnowledgeBaseContextData",'KnowledgeBaseContextData')):
+#     source = gen_struct_code("KnowledgeBaseContextData",context_data_fields)
+#     source_to_cache("KnowledgeBaseContextData",'KnowledgeBaseContextData',source)
+    
+# KnowledgeBaseContextData, KnowledgeBaseContextDataTypeTemplate = import_from_cached("KnowledgeBaseContextData",
+#     "KnowledgeBaseContextData",["KnowledgeBaseContextData","KnowledgeBaseContextDataTypeTemplate"]).values()
+
+# KnowledgeBaseContextDataType = KnowledgeBaseContextDataTypeTemplate(fields=context_data_fields)
 
 
 @njit(cache=True)
@@ -80,7 +86,7 @@ class KnowledgeBaseContext(object):
 
     @classmethod
     def get_context(cls, name=None):
-        if(name is None): return cls.get_default_context()
+        if(name is None): return kb_context_ctxvar.get()
         if(isinstance(name,KnowledgeBaseContext)): return name
         if(name not in cls._contexts): cls.init(name)
         return cls._contexts[name]
@@ -91,10 +97,14 @@ class KnowledgeBaseContext(object):
 
     def __init__(self,name):
         self.name = name
-        self.registered_specs = {}
-        self.jitstructs = {}
+        self.fact_ctors = {}
+        self.fact_types = {}
+        self.fact_to_t_id = {}
+        self.parents_of = {}
+        self.children_of = {}
+        # self.jitstructs = {}
+        
         self.context_data = cd = new_kb_context()
-
         self.string_enums = cd.string_enums
         self.number_enums = cd.number_enums
         self.string_backmap = cd.string_backmap
@@ -105,8 +115,64 @@ class KnowledgeBaseContext(object):
 
         # for x in ["<#ANY>",'','?sel']:
         #   self.enumerize_value(x)
-    def register_fact_type(self,name,spec,fact_ctor,fact_type):
-        pass
+    def _register_fact_type(self, name, spec,
+                            fact_ctor, fact_type, inherit_from=None):
+        #Add attributes to the ctor and type objects
+        # fact_ctor.type = fact_type
+        # fact_type.ctor = fact_ctor
+        
+        # fact_ctor.context = fact_type.context = self
+        self.fact_ctors[name] = fact_ctor
+        self.fact_types[name] = fact_type
+
+        #Map to t_ids
+        t_id = len(self.fact_types)
+        self.fact_to_t_id[name] = t_id 
+        self.fact_to_t_id[fact_ctor] = t_id 
+        self.fact_to_t_id[fact_type] = t_id 
+
+        #Track in heritence structure
+        i_name = inherit_from.name if inherit_from else None
+        self.parents_of[name] = self.parents_of[i_name] + [i_name] if i_name else []
+        if(i_name):
+            for p in self.parents_of[name]:
+                self.children_of[p] = self.children_of.get(p,[]) + [name]
+        self.children_of[name] = []
+        
+
+
+    def _register_flag(self,flag):
+        d = self.spec_flags[flag] = Dict.empty(unicode_type,u1[:])
+        for name, fact_type in self.fact_types.items():
+            spec = fact_type.spec
+            d[name] = np.array([flag in x['flags'] for attr,x in spec.items()], dtype=np.uint8)
+
+
+    def _assert_flags(self,name,spec):
+        for flag in itertools.chain(*[x['flags'] for atrr,x in spec.items()]):
+            if flag not in self.spec_flags:
+                self._register_flag(flag)
+        for flag, d in self.spec_flags.items():
+            d[name] = np.array([flag in x['flags'] for attr,x in spec.items()], dtype=np.uint8)
+
+    def _update_attr_inds(self,name,spec):
+        d = Dict.empty(unicode_type,i8)
+        for i,attr in enumerate(spec.keys()):
+            d[attr] = i
+        self.attr_inds_by_type[name] = d
+
+    def __str__(self):
+        return f"KnowledgeBaseContext({self.name})"
+
+    def __enter__(self):
+        self.token_prev_context = kb_context_ctxvar.set(self.name)
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        kb_context_ctxvar.reset(self.token_prev_context)
+        self.token_prev_context = None
+        return self
+
 
     # def define_fact(self, name, spec):
     #     spec = self._standardize_spec(spec)
@@ -124,45 +190,45 @@ class KnowledgeBaseContext(object):
     #         TYPE_ALIASES[name] = jitstruct.__name__
     #         JITSTRUCTS[name] = jitstruct
     #     return self.jitstructs[name]
-    def jitstruct_from_spec(self,name,spec,ind="   "):
+    # def jitstruct_from_spec(self,name,spec,ind="   "):
         
-        #For the purposes of autogenerating code we need a clean alphanumeric name 
-        name = "".join(x for x in name if x.isalnum())
+    #     #For the purposes of autogenerating code we need a clean alphanumeric name 
+    #     name = "".join(x for x in name if x.isalnum())
 
-        #Unstandardize to use types only. Probably don't need tags for source gen.
-        spec = {attr:x['type'] for attr,x in spec.items()}
+    #     #Unstandardize to use types only. Probably don't need tags for source gen.
+    #     spec = {attr:x['type'] for attr,x in spec.items()}
 
-        hash_code = unique_hash([name,spec])
-        assert_gen_source(name, hash_code, spec=spec, custom_type=True)
+    #     hash_code = unique_hash([name,spec])
+    #     assert_gen_source(name, hash_code, spec=spec, custom_type=True)
 
-        print("HEY!")
-        out = import_from_cached(name,hash_code,[
-            '{}_get_enumerized'.format(name),
-            '{}_pack_from_numpy'.format(name),
-            '{}'.format(name),
-            'NB_{}'.format(name),
-            '{}_enumerize_nb_objs'.format(name)
-            ]).values()
-        print("HEY")
-        get_enumerized, pack_from_numpy, nt, nb_nt, enumerize_nb_objs = tuple(out)
+    #     print("HEY!")
+    #     out = import_from_cached(name,hash_code,[
+    #         '{}_get_enumerized'.format(name),
+    #         '{}_pack_from_numpy'.format(name),
+    #         '{}'.format(name),
+    #         'NB_{}'.format(name),
+    #         '{}_enumerize_nb_objs'.format(name)
+    #         ]).values()
+    #     print("HEY")
+    #     get_enumerized, pack_from_numpy, nt, nb_nt, enumerize_nb_objs = tuple(out)
 
-        def py_get_enumerized(_self,assert_maps=True):
-            return get_enumerized(_self,
-                                   string_enums=self.string_enums,
-                                   number_enums=self.number_enums,
-                                   string_backmap=self.string_backmap,
-                                   number_backmap=self.number_backmap,
-                                   enum_counter=self.enum_counter,
-                                   assert_maps=assert_maps)
-        nt.get_enumerized = py_get_enumerized#pytypes.MethodType(_get_enumerized, self) 
-        nt._get_enumerized = get_enumerized#pytypes.MethodType(_get_enumerized, self) 
-        nt.pack_from_numpy = pack_from_numpy
-        nt.enumerize_nb_objs = enumerize_nb_objs
-        nt.numba_type = nb_nt
-        nt.hash = hash_code
-        nt.name = name
+    #     def py_get_enumerized(_self,assert_maps=True):
+    #         return get_enumerized(_self,
+    #                                string_enums=self.string_enums,
+    #                                number_enums=self.number_enums,
+    #                                string_backmap=self.string_backmap,
+    #                                number_backmap=self.number_backmap,
+    #                                enum_counter=self.enum_counter,
+    #                                assert_maps=assert_maps)
+    #     nt.get_enumerized = py_get_enumerized#pytypes.MethodType(_get_enumerized, self) 
+    #     nt._get_enumerized = get_enumerized#pytypes.MethodType(_get_enumerized, self) 
+    #     nt.pack_from_numpy = pack_from_numpy
+    #     nt.enumerize_nb_objs = enumerize_nb_objs
+    #     nt.numba_type = nb_nt
+    #     nt.hash = hash_code
+    #     nt.name = name
 
-        return nt
+    #     return nt
 
     # def _standardize_spec(self,spec):
     #     out = {}
@@ -186,28 +252,14 @@ class KnowledgeBaseContext(object):
     #     # print(out)
     #     return out
 
-    def _register_flag(self,flag):
-        d = self.spec_flags[flag] = Dict.empty(unicode_type,u1[:])
-        for name,spec in self.registered_specs.items():
-            d[name] = np.array([flag in x['flags'] for attr,x in spec.items()], dtype=np.uint8)
 
 
-    def _assert_flags(self,name,spec):
-        for flag in itertools.chain(*[x['flags'] for atrr,x in spec.items()]):
-            if flag not in self.spec_flags:
-                self._register_flag(flag)
-        for flag, d in self.spec_flags.items():
-            d[name] = np.array([flag in x['flags'] for attr,x in spec.items()], dtype=np.uint8)
-
-    def _update_attr_inds(self,name,spec):
-        d = Dict.empty(unicode_type,i8)
-        for i,attr in enumerate(spec.keys()):
-            d[attr] = i
-        self.attr_inds_by_type[name] = d
-
+    
+def kb_context(context=None):
+    return KnowledgeBaseContext.get_context(context)
 
 def define_fact(name : str, spec : dict, context=None):
-    return KnowledgeBaseContext.get_context(context).define_fact(name,spec)
+    return kb_context(context).define_fact(name,spec)
 
 def define_facts(specs, #: list[dict[str,dict]],
                  context=None):
@@ -230,3 +282,5 @@ class _BaseContextful(object):
         self.spec_flags = cd.spec_flags
         
         
+kb_context_ctxvar = contextvars.ContextVar("kb_context",
+        default=KnowledgeBaseContext.get_default_context()) 

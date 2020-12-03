@@ -105,23 +105,25 @@ class KnowledgeBaseContext(object):
 
         # for x in ["<#ANY>",'','?sel']:
         #   self.enumerize_value(x)
+    def register_fact_type(self,name,spec,fact_ctor,fact_type):
+        pass
 
-    def define_fact(self, name, spec):
-        spec = self._standardize_spec(spec)
-        if(name in self.registered_specs):
-            assert self.registered_specs[name] == spec, \
-            "Specification redefinition not permitted. Attempted on %r" % name
-        else:
-            self.registered_specs[name] = spec
-            self._assert_flags(name,spec)
-            self._update_attr_inds(name,spec)
-            jitstruct = self.jitstruct_from_spec(name,spec)
-            self.jitstructs[name] = jitstruct
+    # def define_fact(self, name, spec):
+    #     spec = self._standardize_spec(spec)
+    #     if(name in self.registered_specs):
+    #         assert self.registered_specs[name] == spec, \
+    #         "Specification redefinition not permitted. Attempted on %r" % name
+    #     else:
+    #         self.registered_specs[name] = spec
+    #         self._assert_flags(name,spec)
+    #         self._update_attr_inds(name,spec)
+    #         jitstruct = self.jitstruct_from_spec(name,spec)
+    #         self.jitstructs[name] = jitstruct
 
-            REGISTERED_TYPES[name] = jitstruct.numba_type
-            TYPE_ALIASES[name] = jitstruct.__name__
-            JITSTRUCTS[name] = jitstruct
-        return self.jitstructs[name]
+    #         REGISTERED_TYPES[name] = jitstruct.numba_type
+    #         TYPE_ALIASES[name] = jitstruct.__name__
+    #         JITSTRUCTS[name] = jitstruct
+    #     return self.jitstructs[name]
     def jitstruct_from_spec(self,name,spec,ind="   "):
         
         #For the purposes of autogenerating code we need a clean alphanumeric name 
@@ -162,27 +164,27 @@ class KnowledgeBaseContext(object):
 
         return nt
 
-    def _standardize_spec(self,spec):
-        out = {}
-        # print("prestandardize")
-        # print(spec)
-        for attr,v in spec.items():
-            if(isinstance(v,str)):
-                typ, flags = v.lower(), []
-            elif(isinstance(v,dict)):
-                assert "type" in v, "Attribute specifications must have 'type' property, got %s." % v
-                typ = v['type'].lower()
-                flags = [x.lower() for x in v.get('flags',[])]
-            else:
-                raise ValueError("Spec attribute %r = %r is not valid type with type %s." % (attr,v,type(v)))
+    # def _standardize_spec(self,spec):
+    #     out = {}
+    #     # print("prestandardize")
+    #     # print(spec)
+    #     for attr,v in spec.items():
+    #         if(isinstance(v,str)):
+    #             typ, flags = v.lower(), []
+    #         elif(isinstance(v,dict)):
+    #             assert "type" in v, "Attribute specifications must have 'type' property, got %s." % v
+    #             typ = v['type'].lower()
+    #             flags = [x.lower() for x in v.get('flags',[])]
+    #         else:
+    #             raise ValueError("Spec attribute %r = %r is not valid type with type %s." % (attr,v,type(v)))
 
-            #Strings are always nominal
-            if(typ == 'string' and ('nominal' not in flags)): flags.append('nominal')
+    #         #Strings are always nominal
+    #         if(typ == 'string' and ('nominal' not in flags)): flags.append('nominal')
 
-            out[attr] = {"type": typ, "flags" : flags}
-        # print("poaststandardize")
-        # print(out)
-        return out
+    #         out[attr] = {"type": typ, "flags" : flags}
+    #     # print("poaststandardize")
+    #     # print(out)
+    #     return out
 
     def _register_flag(self,flag):
         d = self.spec_flags[flag] = Dict.empty(unicode_type,u1[:])

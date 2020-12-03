@@ -1,7 +1,7 @@
 #From here: https://github.com/znerol/py-fnvhash/blob/master/fnvhash/__init__.py
 import numba
 from numba import void,b1,u1,u2,u4,u8,i1,i2,i4,i8,f4,f8,c8,c16
-from numba.core.types import unicode_type
+from numba.core.types import unicode_type, float64
 from numba.core.dispatcher import Dispatcher
 import numpy as np
 
@@ -26,27 +26,29 @@ monkey_patch_caching(td_mod)
 
 #These will be filled in if the user registers a new type
 TYPE_ALIASES = {
-	"float" : 'f8',
-	"flt" : 'f8',
-	"number" : 'f8',
+	"float" : 'float64',
+	"flt" : 'float64',
+	"number" : 'float64',
 	"string" : 'unicode_type',
-	"str" : 'unicode_type'
+	"str" : 'unicode_type',
+	'unicode_type' : 'unicode_type',
+	'float64' : 'float64',
 }
 
-REGISTERED_TYPES = {'f8': f8,
+REGISTERED_TYPES = {'float64': float64,
 					 'unicode_type' : unicode_type}
 
 JITSTRUCTS = {}					 
 
 numba_type_map = {
-	"f8" : f8,
+	"float64" : float64,
 	"unicode_type" : unicode_type,
 	"string" : unicode_type,
-	"number" : f8,	
+	"number" : float64,	
 }
 
 py_type_map = {
-	"f8" : float,
+	"float64" : float,
 	"unicode_type" : str,
 	"string" : str,
 	"number" : float,	

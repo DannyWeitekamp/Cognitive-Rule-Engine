@@ -126,7 +126,8 @@ def test_cast_fact():
             bad_cast.py_func(b3)
 
 
-
+def test_protected_mutability():
+    pass
 
 
 

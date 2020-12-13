@@ -2,6 +2,7 @@
 from numba.types import DictType
 from numba import i8
 from numbert.caching import unique_hash, source_in_cache, import_from_cached, source_to_cache
+from numba.experimental import structref
 
 def _gen_getter_jit(typ,attr):
     return f'''@njit
@@ -15,17 +16,20 @@ def _gen_getter(typ,attr):
         return {typ}_get_{attr}(self)
     '''
 
-def gen_struct_code(typ,fields):
+def gen_structref_code(typ,fields,
+    extra_imports="from numba.experimental import structref",
+    register_decorator="@structref.register"
+    ):
     getters = "\n".join([_gen_getter(typ,attr) for attr,t in fields])
     getter_jits = "\n".join([_gen_getter_jit(typ,attr) for attr,t in fields])
     attr_list = ",".join(["'%s'"%attr for attr,t in fields])
     code = \
 f'''
-from numba.experimental import structref
 from numba.core import types
 from numba import njit
+{extra_imports}
 {getter_jits}
-@structref.register
+{register_decorator}
 class {typ}TypeTemplate(types.StructRef):
     def preprocess_fields(self, fields):
         return tuple((name, types.unliteral(typ)) for name, typ in fields)
@@ -41,30 +45,30 @@ structref.define_proxy({typ}, {typ}TypeTemplate, [{attr_list}])
 '''
     return code
 
-def gen_struct(typ,fields):
-    code = gen_struct_code(typ,fields)
-    print(code)
-    l = {}
-    exec(code,{},l)
-    print(l[f"{typ}TypeTemplate"])
-    return l[f"{typ}TypeTemplate"](fields=fields)
+# def gen_struct(typ,fields):
+#     code = gen_structref_code(typ,fields)
+#     print(code)
+#     l = {}
+#     exec(code,{},l)
+#     print(l[f"{typ}TypeTemplate"])
+#     return l[f"{typ}TypeTemplate"](fields=fields)
 
 
 def define_structref(name, fields):
     hash_code = unique_hash([name,fields])
     if(not source_in_cache(name,hash_code)):
-        source = gen_struct_code(name,fields)
+        source = gen_structref_code(name,fields)
         source_to_cache(name,hash_code,source)
         
-    ctor, template = import_from_cached(name,hash_code,[name,"{name}TypeTemplate"]).values()
+    ctor, template = import_from_cached(name,hash_code,[name,f"{name}TypeTemplate"]).values()
 
     fact_type = template(fields=fields)
-    return ctor, template
+    return ctor, fact_type
 
 
 # print(DictType(i8,i8))
 # print(fields)
-# print(gen_struct_code("BOOP",fields))
+# print(gen_structref_code("BOOP",fields))
 
 
 # fields = [('dict', DictType(i8,i8)),

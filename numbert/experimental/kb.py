@@ -25,7 +25,7 @@ from numbert.experimental.context import _BaseContextful, KnowledgeBaseContextDa
 from numbert.experimental.transform import infer_type
 
 
-from numbert.experimental.struct_gen import gen_struct_code
+from numbert.experimental.structref import define_structref
 from numbert.caching import import_from_cached, source_in_cache, source_to_cache
 
    
@@ -50,19 +50,22 @@ kb_data_fields = [
     ("enum_consistency" , DictType(two_str,u1)),
     ("consistency_listeners" , DictType(i8, two_str_set)),
     ("consistency_listener_counter" , Array(i8, 0, "C")),
-    ("unnamed_counter" , Array(i8, 0, "C")),
-    
+    ("unnamed_counter" , Array(i8, 0, "C")),    
 ]
+# for x,t in kb_data_fields:
 
-if(not source_in_cache("KnowledgeBaseData",'KnowledgeBaseData')):
-    source = gen_struct_code("KnowledgeBaseData",kb_data_fields)
-    source_to_cache("KnowledgeBaseData",'KnowledgeBaseData',source)
+print(kb_data_fields)
+
+# if(not source_in_cache("KnowledgeBaseData",'KnowledgeBaseData')):
+#     source = gen_struct_code("KnowledgeBaseData",kb_data_fields)
+#     source_to_cache("KnowledgeBaseData",'KnowledgeBaseData',source)
     
-KnowledgeBaseData, KnowledgeBaseDataTypeTemplate = import_from_cached("KnowledgeBaseData",
-    "KnowledgeBaseData",["KnowledgeBaseData","KnowledgeBaseDataTypeTemplate"]).values()
-print(KnowledgeBaseData, KnowledgeBaseDataTypeTemplate)
+# KnowledgeBaseData, KnowledgeBaseDataTypeTemplate = import_from_cached("KnowledgeBaseData",
+#     "KnowledgeBaseData",["KnowledgeBaseData","KnowledgeBaseDataTypeTemplate"]).values()
+# print(KnowledgeBaseData, KnowledgeBaseDataTypeTemplate)
 
-KnowledgeBaseDataType = KnowledgeBaseDataTypeTemplate(fields=kb_data_fields)
+# KnowledgeBaseDataType = KnowledgeBaseDataTypeTemplate(fields=kb_data_fields)
+KnowledgeBaseData, KnowledgeBaseDataType = define_structref("KnowledgeBaseData",kb_data_fields)
 
 @njit(Tuple([u2,u8,u1])(u8),cache=True)
 def decode_idrec(idrec):

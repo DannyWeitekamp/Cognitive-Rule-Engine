@@ -39,6 +39,7 @@ def _get_entry_type_flags(attr, v):
     return typ, flags
 
 def _merge_spec_inheritance(spec : dict, context):
+    '''Expands a spec with attributes from its 'inherit_from' type'''
     if("inherit_from" not in spec): return spec, None
     inherit_from = spec["inherit_from"]
 
@@ -75,11 +76,25 @@ def _standardize_spec(spec : dict):
 
 ###### Fact Definition #######
 
+def define_attributes(fact_type):
+    # ///???
+    pass
+
+
+from numba.core.datamodel import default_manager
+def _register(fact_type):
+    if fact_type is types.StructRef:
+        raise ValueError(f"cannot register {types.StructRef}")
+    default_manager.register(fact_type, models.StructRefModel)
+    define_attributes(fact_type)
+    return fact_type
+
+
 def _fact_from_spec(name, spec, context=None):
     # assert parent_fact_type
     fields = [(k,numba_type_map[v['type']]) for k, v in spec.items()]
 
-    hash_code = unique_hash(fields)
+    hash_code = unique_hash([name,fields])
     if(not source_in_cache(name,hash_code)):
         source = gen_structref_code(name,fields)
         source_to_cache(name, hash_code, source)
@@ -90,6 +105,7 @@ def _fact_from_spec(name, spec, context=None):
     return fact_ctor, fact_type
 
 def define_fact(name : str, spec : dict, context=None):
+    '''Defines a new fact.'''
     context = kb_context(context)
 
     if(name in context.fact_types):
@@ -113,6 +129,7 @@ def define_fact(name : str, spec : dict, context=None):
 
 def define_facts(specs, #: list[dict[str,dict]],
                  context=None):
+    '''Defines several facts at once.'''
     for name, spec in specs.items():
         define_fact(name,spec,context=context)
 
@@ -144,6 +161,7 @@ def _cast_structref(typingctx, cast_type_ref, inst_type):
 
 @generated_jit
 def cast_fact(typ, val):
+    '''Casts a fact to a new type of fact if possible'''
     context = kb_context()
     print("CONTEXT", context)
     inst_type = typ.instance_type
@@ -152,6 +170,7 @@ def cast_fact(typ, val):
     if(inst_type.name not in context.children_of[name] or 
        inst_type.name not in context.parents_of[name]):
         error_message = f"Cannot cast fact of type '{val.name}' to '{inst_type.name}.'"
+        #If it shouldn't be possible then throw an error
         def error(typ,val):
             raise TypeError(error_message)
         return error

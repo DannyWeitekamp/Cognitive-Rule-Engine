@@ -2,23 +2,11 @@ from numbert.experimental.context import define_fact
 from numbert.experimental.kb import KnowledgeBase, KnowledgeBaseType, decode_idrec, encode_idrec, next_empty_f_id, make_f_id_empty
 from numba import njit
 from numba.types import unicode_type, NamedTuple
-from numbert.experimental.struct_gen import gen_struct_code
 import logging
 import numpy as np
 import pytest
 from collections import namedtuple
 
-# main_logger = logging.getLogger('numba.core')
-# main_logger.setLevel(logging.DEBUG)
-
-
-# TextField = define_fact("TextField",{
-#     "value" : "string",
-#     "above" : {"type" : "string", "flags" : ["reference"]},
-#     "below" : {"type" : "string", "flags" : ["reference"]},
-#     "to_left" : {"type" : "string", "flags" : ["reference"]},
-#     "to_right" : {"type" : "string", "flags" : ["reference"]},
-# })
 tf_data_fields = [
     ("value" , unicode_type),
     ("above" , unicode_type),

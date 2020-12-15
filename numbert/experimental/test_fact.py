@@ -25,17 +25,17 @@ def test__merge_spec_inheritance():
     #Should be able to inherit from ctor, type or type string
     spec2 = {"inherit_from" : BOOP, "C" : "number"}
     spec_out, inherit_from = _merge_spec_inheritance(spec2,context)
-    assert inherit_from.name == "BOOP"
+    assert inherit_from._fact_name == "BOOP"
     assert "inherit_from" not in spec_out
 
     spec2 = {"inherit_from" : BOOPType, "C" : "number"}
     spec_out, inherit_from = _merge_spec_inheritance(spec2,context)
-    assert inherit_from.name == "BOOP"
+    assert inherit_from._fact_name == "BOOP"
     assert "inherit_from" not in spec_out
 
     spec2 = {"inherit_from" : "BOOP", "C" : "number"}
     spec_out, inherit_from = _merge_spec_inheritance(spec2,context)
-    assert inherit_from.name == "BOOP"
+    assert inherit_from._fact_name == "BOOP"
     assert "inherit_from" not in spec_out
 
     assert "A" in spec_out
@@ -128,7 +128,7 @@ def test_cast_fact():
         #Bad cast
         @njit
         def bad_cast(b):
-            return cast_fact(FLOOP,b) 
+            return cast_fact(FLOOPType,b) 
 
         with pytest.raises(TypeError):
             bad_cast(b3)
@@ -161,7 +161,7 @@ def test_protected_mutability():
     with kb_context("test_protected_mutability") as context:
         print("RUNTIME1.2")
         spec = {"A" : "string", "B" : "number"}
-        BOOP, BOOP1Type = define_fact("BOOP", spec,context="test_protected_mutability")
+        BOOP, BOOPType = define_fact("BOOP", spec,context="test_protected_mutability")
         print("RUNTIME1.3")
         kb = KnowledgeBase(context="test_protected_mutability")
         print("RUNTIME1")
@@ -170,27 +170,38 @@ def test_protected_mutability():
         print("RUNTIME1")
         @njit
         def edit_it(b):
-            b.B = b.B + 1
+            print("idrec", b.idrec)
+            b.B += 1
 
         edit_it(b1)
-        edit_it.py_func(b2)
+        edit_it(b2)
+        # edit_it.py_func(b2)
 
         @njit
-        def declare_it(kb,b):
-            kb.declare(b)
-        declare_it(kb,b1)
-        declare_it.py_func(kb,b2)
+        def declare_it(kb,b,name):
+            kb.declare(name,b)
+        declare_it(kb,b1,"b1")
+        declare_it.py_func(kb,b2,"b2")
 
         print("RUNTIMEz")
 
-        with pytest.raises(RuntimeError):
+        with pytest.raises(Exception):
+            print("RUNTIME_PY")
+            edit_it.py_func(b1)
+
+        with pytest.raises(Exception):
+            print("RUNTIME_PY")
+            edit_it.py_func(b2)
+
+        with pytest.raises(Exception):
+            print("RUNTIME_NB", b1.B)
             edit_it(b1)
 
-        with pytest.raises(RuntimeError):
-            print("RUNTIME!")
-            edit_it.py_func(b2)
-        with pytest.raises(RuntimeError):
-            print("RUNTIME?")
+        with pytest.raises(Exception):
+            print("RUNTIME_NB", b1.B)
+            edit_it(b1)
+
+        
 
         
 

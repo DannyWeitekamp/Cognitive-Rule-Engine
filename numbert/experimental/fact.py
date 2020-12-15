@@ -22,14 +22,7 @@ from numbert.caching import unique_hash, source_to_cache, import_from_cached, so
 from numbert.experimental.structref import gen_structref_code, define_structref
 from numbert.experimental.context import kb_context
 
-###### Base #####
 
-base_fact_fields = [
-    ("idrec", u8),
-    # ("kb", kb)
-]
-
-BaseFact, BaseFactType = define_structref("BaseFact", base_fact_fields)
 
 SPECIAL_ATTRIBUTES = ["inherit_from"]
 
@@ -59,7 +52,15 @@ def _merge_spec_inheritance(spec : dict, context):
     inherit_from = spec["inherit_from"]
 
     if(isinstance(inherit_from, str)):
+        temp = inherit_from
         inherit_from = context.fact_types[inherit_from]
+        # print(context.fact_types)
+        # print("RESOLVE", temp, type(temp), inherit_from,type(inherit_from),)
+        # print()
+    # print("INHERIT_FROMM",inherit_from)
+    if(not isinstance(inherit_from,types.StructRef)):
+        inherit_from = context.fact_types[inherit_from._fact_name]
+        
         
     if(not hasattr(inherit_from, 'spec')):
         raise ValueError(f"Invalid inherit_from : {inherit_from}")
@@ -90,6 +91,43 @@ def _standardize_spec(spec : dict):
     return out
 
 ###### Fact Definition #######
+class FactProxy:
+    '''Essentially the same as numba.experimental.structref.StructRefProxy 0.51.2
+        except that __new__ is not defined to statically define the constructor.
+    '''
+    __slots__ = ('_type', '_meminfo')
+
+    @classmethod
+    def _numba_box_(cls, ty, mi):
+        """Called by boxing logic, the conversion of Numba internal
+        representation into a PyObject.
+
+        Parameters
+        ----------
+        ty :
+            a Numba type instance.
+        mi :
+            a wrapped MemInfoPointer.
+
+        Returns
+        -------
+        instance :
+             a FactProxy instance.
+        """
+        instance = super().__new__(cls)
+        instance._type = ty
+        instance._meminfo = mi
+        return instance
+
+    @property
+    def _numba_type_(self):
+        """Returns the Numba type instance for this structref instance.
+
+        Subclasses should NOT override.
+        """
+        return self._type
+
+
 from .structref import _gen_getter, _gen_getter_jit
 def gen_fact_code(typ, fields, ind='    '):
     all_fields = base_fact_fields+fields
@@ -99,72 +137,68 @@ def gen_fact_code(typ, fields, ind='    '):
     param_list = ",".join([attr for attr,t in fields])
     base_list = ",".join([f"'{k}'" for k,v in base_fact_fields])
     base_type_list = ",".join([str(v) for k,v in base_fact_fields])
+    field_type_list = ",".join([str(v) for k,v in fields])
 
-    init_fields = f'\n{ind*2}'.join([f"st.{k} = {k}" for k,v in fields])
-    print("FEILD LIST", field_list)
+    init_fields = f'\n{ind}'.join([f"st.{k} = {k}" for k,v in fields])
+
+    str_temp = ", ".join([f'{k}={{self.{k}}}' for k,v in fields])
+    # print("FEILD LIST", field_list)
     code = \
 f'''
 from numba.core import types
 from numba import njit
-from numba.types import *
+from numba.core.types import *
+from numba.core.types import unicode_type
 from numba.experimental import structref
 from numba.experimental.structref import new, define_boxing
 from numba.core.extending import overload
-from numbert.experimental.fact import _register_fact_structref
+from numbert.experimental.fact import _register_fact_structref, FactProxy
 
 {getter_jits}
 
 @_register_fact_structref
 class {typ}TypeTemplate(types.StructRef):
+    def __init__(self,*args,**kwargs):
+        super().__init__(*args,**kwargs)
+        self._fact_name = '{typ}'
+
     def preprocess_fields(self, fields):
         return tuple((name, types.unliteral(typ)) for name, typ in fields)
 
-class {typ}(structref.StructRefProxy):
+{typ}Type = {typ}TypeTemplate(list(zip([{base_list},{field_list}], [{base_type_list},{field_type_list}])))
+
+@njit(cache=True)
+def ctor({param_list}):
+    st = new({typ}Type)
+    {init_fields}
+    return st
+
+class {typ}(FactProxy):
+    __numba_ctor = ctor
+    _fact_type = {typ}Type
+    _fact_name = '{typ}'
+
     def __new__(cls, *args):
         return structref.StructRefProxy.__new__(cls, *args)
+
+    def __str__(self):
+        return f'{typ}({str_temp})'
 
 {getters}
 
 #structref.define_proxy({typ}, {typ}TypeTemplate, [{param_list}])
 
 @overload({typ})
-def ctor({param_list}):
-    struct_type = {typ}TypeTemplate(list(zip([{base_list},{field_list}], [{base_type_list},{param_list}])))
-    def impl({param_list}):
-        st = new(struct_type)
-        {init_fields}
-        return st
+def _ctor(*args):
+    def impl(*args):
+        return ctor(*args)
     return impl
 
 
 define_boxing({typ}TypeTemplate,{typ})
 '''
+    # print(code)
     return code
-
-
-def _gen_fact_ctor(name,base_fields, fields, ):
-    print(base_fields, fields)
-    field_names = [x[0] for x in fields]
-    base_field_names = [x[0] for x in base_fields]
-    all_names = base_field_names + field_names
-
-    params = ', '.join(field_names)
-    indent = ' ' * 8
-    init_fields_buf = []
-    for k in field_names:
-        init_fields_buf.append(f"st.{k} = {k}")
-    init_fields = f'\n{indent}'.join(init_fields_buf)
-
-    source = f"""
-def ctor({params}):
-    struct_type = {name}TemplateType(list(zip({all_names}, [{params}])))
-    def impl({params}):
-        st = new(struct_type)
-        {init_fields}
-        return st
-    return impl
-"""
-    return source
 
     
 
@@ -202,11 +236,29 @@ def define_attributes(struct_typeclass):
 
         pyapi = context.get_python_api(builder)
 
+        
+
+        # zero = a_value.type(0)
+
+        # with builder.if_then(builder.icmp_signed("!=", a_value, zero)):
+        #     c.pyapi.err_format("PyExc_ValueError", "exception!")
+        #     builder.store(cgutils.true_bit, errorptr)
+        #     builder.ret(c.pyapi.get_null_object())
+
         #If the idrec is not 0 then it should be treated as immutable
+
+        errorptr = cgutils.alloca_once_value(builder, cgutils.false_bit)
         idrec_zero = cgutils.is_scalar_zero(builder,getattr(dataval, "idrec"))
         with cgutils.ifnot(builder,idrec_zero):
-            pyapi.err_set_string("PyExc_RuntimeError",
-                "Facts objects are immutable once defined. Use kb.modify instead.")
+            pyapi.err_format("PyExc_AttributeError",
+             "Facts objects are immutable once defined. Use kb.modify instead.")
+            builder.store(cgutils.true_bit, errorptr)
+            # builder.ret(sig.ret(0))
+            # pyapi.err_set_string("PyExc_AttributeError", 
+            #     "Facts objects are immutable once defined. Use kb.modify instead.")
+            #     )
+            # builder.ret()
+            # builder.ret(pyapi.get_null_object())
             
         # read old
         old_value = getattr(dataval, attr)
@@ -228,21 +280,24 @@ def _register_fact_structref(fact_type):
     define_attributes(fact_type)
     return fact_type
 
-
-def _fact_from_spec(name, spec, context=None):
-    # assert parent_fact_type
-    fields = [(k,numba_type_map[v['type']]) for k, v in spec.items()]
-
+def _fact_from_fields(name, fields, context=None):
     hash_code = unique_hash([name,fields])
     if(not source_in_cache(name,hash_code)):
         source = gen_fact_code(name,fields)
         source_to_cache(name, hash_code, source)
         
-    fact_ctor, fact_type_template = import_from_cached(name, hash_code,[name,name+"TypeTemplate"]).values()
-    fact_type = fact_type_template(fields=fields)
-    print("fact_type",fact_type)
+    fact_ctor, fact_type = import_from_cached(name, hash_code,[name,name+"Type"]).values()
+    # fact_type = fact_type_template(fields=fields)
+    # print("fact_type",fact_type)
 
     return fact_ctor, fact_type
+
+def _fact_from_spec(name, spec, context=None):
+    # assert parent_fact_type
+    fields = [(k,numba_type_map[v['type']]) for k, v in spec.items()]
+    return _fact_from_fields(name,fields)
+
+    
 
 def define_fact(name : str, spec : dict, context=None):
     '''Defines a new fact.'''
@@ -256,9 +311,10 @@ def define_fact(name : str, spec : dict, context=None):
     spec, inherit_from = _merge_spec_inheritance(spec,context)
     fact_ctor, fact_type = _fact_from_spec(name, spec, context=context)
     context._assert_flags(name,spec)
+    # print("PASSING IN", inherit_from)
     context._register_fact_type(name,spec,fact_ctor,fact_type,inherit_from=inherit_from)
 
-    fact_ctor.name = fact_type.name = name
+    # fact_ctor.name = fact_type.name = name
     fact_ctor.spec = fact_type.spec = spec
 
     return fact_ctor, fact_type
@@ -269,6 +325,15 @@ def define_facts(specs, #: list[dict[str,dict]],
     '''Defines several facts at once.'''
     for name, spec in specs.items():
         define_fact(name,spec,context=context)
+
+###### Base #####
+
+base_fact_fields = [
+    ("idrec", u8),
+    # ("kb", kb)
+]
+
+BaseFact, BaseFactType = _fact_from_fields("BaseFact", base_fact_fields)
 
 
 ###### Fact Casting #######
@@ -297,21 +362,19 @@ def _cast_structref(typingctx, cast_type_ref, inst_type):
 
 
 @generated_jit
-def cast_fact(typ, valty):
+def cast_fact(typ, val):
     '''Casts a fact to a new type of fact if possible'''
-    context = kb_context()
-    print("CCC", context)
-    
+    context = kb_context()    
     inst_type = typ.instance_type
-    print("CAST", valty, "to", inst_type, BaseFactType)
-    print("->",valty.__dict__, "to", inst_type.name)
+    # print("CAST", val._fact_name, "to", inst_type._fact_name)
 
     #Check if the fact_type can be casted 
-    if((inst_type.name not in context.children_of[valty.name] or 
-       inst_type.name not in context.parents_of[valty.name]) and
-       not(inst_type is BaseFactType or valty is BaseFactType)
+    if(inst_type._fact_name != "BaseFact" and val._fact_name != "BaseFact" and
+       inst_type._fact_name not in context.children_of[val._fact_name] and 
+       inst_type._fact_name not in context.parents_of[val._fact_name]
+       
     ):
-        error_message = f"Cannot cast fact of type '{valty.name}' to '{inst_type.name}.'"
+        error_message = f"Cannot cast fact of type '{val._fact_name}' to '{inst_type._fact_name}.'"
         #If it shouldn't be possible then throw an error
         def error(typ,val):
             raise TypeError(error_message)

@@ -122,7 +122,6 @@ class KnowledgeBaseContext(object):
         # fact_ctor.type = fact_type
         # fact_type.ctor = fact_ctor
         
-        # fact_ctor.context = fact_type.context = self
         self.fact_ctors[name] = fact_ctor
         self.fact_types[name] = fact_type
 
@@ -132,9 +131,11 @@ class KnowledgeBaseContext(object):
         self.fact_to_t_id[fact_ctor] = t_id 
         self.fact_to_t_id[fact_type] = t_id 
 
+        ft_str = str(fact_type)
+        if_str = str(inherit_from)
         #Track in heritence structure
-        i_name = inherit_from.name if inherit_from else None
-        self.parents_of[name] = self.parents_of[i_name] + [i_name] if i_name else []
+        i_name = inherit_from._fact_name if inherit_from else None
+        self.parents_of[name] = self.parents_of.get(i_name,[]) + [i_name] if i_name else []
         if(i_name):
             for p in self.parents_of[name]:
                 self.children_of[p] = self.children_of.get(p,[]) + [name]

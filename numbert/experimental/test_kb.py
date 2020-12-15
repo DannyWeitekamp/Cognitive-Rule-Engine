@@ -1,4 +1,5 @@
-from numbert.experimental.context import define_fact
+from numbert.experimental.context import kb_context
+from numbert.experimental.fact import define_fact
 from numbert.experimental.kb import KnowledgeBase, KnowledgeBaseType, decode_idrec, encode_idrec, next_empty_f_id, make_f_id_empty
 from numba import njit
 from numba.types import unicode_type, NamedTuple
@@ -7,79 +8,24 @@ import numpy as np
 import pytest
 from collections import namedtuple
 
-tf_data_fields = [
-    ("value" , unicode_type),
-    ("above" , unicode_type),
-    ("below" , unicode_type),
-    ("to_left" , unicode_type),
-    ("to_right" , unicode_type),
-]
-from numba.experimental import structref
-from numba.core import types
-from numba import njit
-@njit(cache=True)
-def TextField_get_value(self):
-    return self.value
 
-@njit(cache=True)
-def TextField_get_above(self):
-    return self.above
-
-@njit(cache=True)
-def TextField_get_below(self):
-    return self.below
-
-@njit(cache=True)
-def TextField_get_to_left(self):
-    return self.to_left
-
-@njit(cache=True)
-def TextField_get_to_right(self):
-    return self.to_right
+spec = {"value" : "string",
+        "above" : "string",
+        "below" : "string",
+        "to_left" : "string",
+        "to_right" : "string",
+        }
 
 
-@structref.register
-class TextFieldTypeTemplate(types.StructRef):
-    def preprocess_fields(self, fields):
-        return tuple((name, types.unliteral(typ)) for name, typ in fields)
+# with kb_context("test_kb") as context:
+TextField, TextFieldType = define_fact("TextField",spec)
 
-class TextField(structref.StructRefProxy):
-    def __new__(cls, *args):
-        return structref.StructRefProxy.__new__(cls, *args)
 
-    @property
-    def value(self):
-        return TextField_get_value(self)
-    
-    @property
-    def above(self):
-        return TextField_get_above(self)
-    
-    @property
-    def below(self):
-        return TextField_get_below(self)
-    
-    @property
-    def to_left(self):
-        return TextField_get_to_left(self)
-    
-    @property
-    def to_right(self):
-        return TextField_get_to_right(self)
 
-    def __hash__(self):
-        return self.__hash__()
-
-TextField_NT = namedtuple("TextField_NT",["value","above", "below", "to_left","to_right"])
-TextField_NB_NT = NamedTuple([unicode_type,unicode_type,unicode_type,unicode_type,unicode_type], TextField_NT)
-
-structref.define_proxy(TextField, TextFieldTypeTemplate, ['value','above','below','to_left','to_right'])
-TextFieldType = TextFieldTypeTemplate(fields=tf_data_fields)
-
-from numba.extending import overload_method
-@overload_method(TextFieldTypeTemplate, 'as_named_tuple')
-def TextField_as_named_tuple(self):
-    return TextField_NT(self.value,self.above,self.below,self.to_left,self.to_right)
+# from numba.extending import overload_method
+# @overload_method(TextFieldTypeTemplate, 'as_named_tuple')
+# def TextField_as_named_tuple(self):
+#     return TextField_NT(self.value,self.above,self.below,self.to_left,self.to_right)
 
 
 ##### test_encode_decode #####
@@ -102,6 +48,8 @@ def declare_retract(kb):
         i_s = "A" + str(i)
         kb.retract(i_s)
 
+    print(kb.kb_data.empty_f_id_heads)
+
     return kb.kb_data.empty_f_id_heads[0]
 
 @njit(cache=True)
@@ -109,6 +57,8 @@ def declare_again(kb):
     for i in range(0,100,10):
         i_s = "B" + str(i)
         kb.declare(i_s,TextField(i_s,i_s,i_s,i_s,i_s))
+
+    print(kb.kb_data.empty_f_id_heads)
 
     return kb.kb_data.empty_f_id_heads[0]
 
@@ -143,3 +93,12 @@ def test_retract_keyerror():
     with pytest.raises(KeyError):
         retract_keyerror.py_func(kb)
 
+
+
+
+
+
+if __name__ == "__main__":
+    test_encode_decode()
+    test_declare_retract()
+    test_retract_keyerror()

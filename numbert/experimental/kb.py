@@ -26,6 +26,7 @@ from numbert.experimental.transform import infer_type
 
 
 from numbert.experimental.structref import define_structref
+from numbert.experimental.fact import BaseFact,BaseFactType
 from numbert.caching import import_from_cached, source_in_cache, source_to_cache
 
    
@@ -89,7 +90,7 @@ def _struct_from_meminfo(typingctx, struct_type, meminfo):
         st = cgutils.create_struct_proxy(inst_type)(context, builder)
         st.meminfo = meminfo
         #NOTE: Fixes sefault but not sure about it's lifecycle (i.e. watch out for memleaks)
-        # context.nrt.incref(builder, types.MemInfoPointer(types.voidptr), meminfo)
+        context.nrt.incref(builder, types.MemInfoPointer(types.voidptr), meminfo)
 
         return st._getvalue()
 
@@ -367,7 +368,11 @@ def kb_declare(self, name, fact):
             meminfos[f_id] = meminfo
         else:
             meminfos.append(meminfo)
-        self.kb_data.names_to_idrecs[name] = encode_idrec(t_id,f_id,0)
+        idrec = encode_idrec(t_id,f_id,0)
+        self.kb_data.names_to_idrecs[name] = idrec
+        b_fact = _struct_from_meminfo(BaseFactType,meminfo)
+        b_fact.idrec = idrec
+
 
     return impl
 
@@ -385,7 +390,7 @@ def kb_retract(self, name):
         if(name not in names_to_idrecs):
         #     # pass
             raise KeyError("Fact not found.")
-        #     return
+            # return
         t_id, f_id, a_id = decode_idrec(names_to_idrecs[name])
         make_f_id_empty(self.kb_data,i8(t_id), i8(f_id))
         # self.kb_data.fact_meminfos[t_id] = meminfo_type(0)

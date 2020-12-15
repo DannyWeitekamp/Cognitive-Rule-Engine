@@ -1,5 +1,5 @@
 from numbert.experimental.fact import _fact_from_spec, _standardize_spec, _merge_spec_inheritance, \
-    define_fact, cast_fact, _cast_structref
+    define_fact, cast_fact, _cast_structref, BaseFact, BaseFactType
 from numbert.experimental.context import kb_context
 from numba import njit
 import pytest
@@ -64,20 +64,32 @@ def test_define_fact():
 
 
 def test_inheritence():
-    context = kb_context("test_inheritence")
-    spec1 = {"A" : "string", "B" : "number"}
-    BOOP1, BOOP1Type = define_fact("BOOP1", spec1, context="test_inheritence")
-    spec2 = {"inherit_from" : BOOP1, "C" : "number"}
-    BOOP2, BOOP2Type = define_fact("BOOP2", spec2, context="test_inheritence")
-    spec3 = {"inherit_from" : BOOP2, "D" : "number"}
-    BOOP3, BOOP3Type = define_fact("BOOP3", spec3, context="test_inheritence")
+    print("HAPPEBED?")
+    with kb_context("test_inheritence") as context:
+        print("HAPPEBED")
+        spec1 = {"A" : "string", "B" : "number"}
+        BOOP1, BOOP1Type = define_fact("BOOP1", spec1, context="test_inheritence")
+        spec2 = {"inherit_from" : BOOP1, "C" : "number"}
+        BOOP2, BOOP2Type = define_fact("BOOP2", spec2, context="test_inheritence")
+        spec3 = {"inherit_from" : BOOP2, "D" : "number"}
+        BOOP3, BOOP3Type = define_fact("BOOP3", spec3, context="test_inheritence")
 
-    assert context.parents_of["BOOP3"] == ["BOOP1","BOOP2"]
-    assert context.children_of["BOOP3"] == []
-    assert context.parents_of["BOOP2"] == ["BOOP1"]
-    assert context.children_of["BOOP2"] == ["BOOP3"]
-    assert context.parents_of["BOOP1"] == []
-    assert context.children_of["BOOP1"] == ["BOOP2","BOOP3"]
+        assert context.parents_of["BOOP3"] == ["BOOP1","BOOP2"]
+        assert context.children_of["BOOP3"] == []
+        assert context.parents_of["BOOP2"] == ["BOOP1"]
+        assert context.children_of["BOOP2"] == ["BOOP3"]
+        assert context.parents_of["BOOP1"] == []
+        assert context.children_of["BOOP1"] == ["BOOP2","BOOP3"]
+        print("HAPPEBED")
+
+        b1 = BOOP1("A",7)
+        print("HAPPEBED5")
+        @njit
+        def check_has_base(b):
+            return b.idrec
+
+        print("IDREC")
+        print("BOOP",check_has_base(b1))
 
 
 def test_cast_fact():
@@ -92,6 +104,7 @@ def test_cast_fact():
 
         b1 = BOOP1("A",7)
         b3 = BOOP3("A",1,2,3)
+        bs = BaseFact()
 
         #Downcast
         @njit
@@ -124,6 +137,25 @@ def test_cast_fact():
 
         with pytest.raises(TypeError):
             bad_cast.py_func(b3)
+
+        #Always allow casting to and from BaseFact
+        @njit
+        def base_down_cast(b):
+            return cast_fact(BaseFactType,b)    
+        _bs = base_down_cast(_b1)
+        assert type(bs) == type(_bs)
+        _bs = base_down_cast.py_func(_b1)    
+        assert type(bs) == type(_bs)    
+
+        @njit
+        def base_up_cast(b):
+            return cast_fact(BOOP1Type,b)    
+        _b1 = base_up_cast(_bs)
+        assert type(b1) == type(_b1)
+        _b1 = base_up_cast.py_func(_bs)    
+        assert type(b1) == type(_b1)    
+
+
 
 
 def test_protected_mutability():

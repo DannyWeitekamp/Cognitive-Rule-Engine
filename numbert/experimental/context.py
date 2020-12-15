@@ -86,7 +86,8 @@ class KnowledgeBaseContext(object):
 
     @classmethod
     def get_context(cls, name=None):
-        if(name is None): return kb_context_ctxvar.get()
+        if(name is None):
+            return cls.get_context(kb_context_ctxvar.get(cls.get_default_context()))
         if(isinstance(name,KnowledgeBaseContext)): return name
         if(name not in cls._contexts): cls.init(name)
         return cls._contexts[name]
@@ -171,6 +172,8 @@ class KnowledgeBaseContext(object):
     def __exit__(self, exc_type, exc_val, exc_tb):
         kb_context_ctxvar.reset(self.token_prev_context)
         self.token_prev_context = None
+        if(exc_val): raise exc_val.with_traceback(exc_tb)
+
         return self
 
 

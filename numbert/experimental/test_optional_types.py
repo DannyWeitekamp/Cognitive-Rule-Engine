@@ -14,11 +14,11 @@ def foo(b):
 
 foo(b)
 
-from numbert.experimental.fact import _gen_fact_ctor
+from numbert.experimental.fact import _gen_fact_ctor, gen_fact_code
 
 
 fields = [
     ("X", u8),
     ("Y", u8),
 ]
-print(_gen_fact_ctor(base_fact_fields, fields))
+print( gen_fact_code("BLOB",fields) )

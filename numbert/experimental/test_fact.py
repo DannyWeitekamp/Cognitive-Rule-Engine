@@ -1,6 +1,7 @@
 from numbert.experimental.fact import _fact_from_spec, _standardize_spec, _merge_spec_inheritance, \
     define_fact, cast_fact, _cast_structref, BaseFact, BaseFactType
 from numbert.experimental.context import kb_context
+from numbert.experimental.kb import KnowledgeBase
 from numba import njit
 import pytest
 
@@ -64,9 +65,7 @@ def test_define_fact():
 
 
 def test_inheritence():
-    print("HAPPEBED?")
     with kb_context("test_inheritence") as context:
-        print("HAPPEBED")
         spec1 = {"A" : "string", "B" : "number"}
         BOOP1, BOOP1Type = define_fact("BOOP1", spec1, context="test_inheritence")
         spec2 = {"inherit_from" : BOOP1, "C" : "number"}
@@ -80,16 +79,15 @@ def test_inheritence():
         assert context.children_of["BOOP2"] == ["BOOP3"]
         assert context.parents_of["BOOP1"] == []
         assert context.children_of["BOOP1"] == ["BOOP2","BOOP3"]
-        print("HAPPEBED")
 
         b1 = BOOP1("A",7)
-        print("HAPPEBED5")
         @njit
         def check_has_base(b):
             return b.idrec
 
-        print("IDREC")
-        print("BOOP",check_has_base(b1))
+        assert check_has_base(b1) == 0
+        assert check_has_base.py_func(b1) == 0
+
 
 
 def test_cast_fact():
@@ -104,7 +102,7 @@ def test_cast_fact():
 
         b1 = BOOP1("A",7)
         b3 = BOOP3("A",1,2,3)
-        bs = BaseFact()
+        bs = BaseFact(0)
 
         #Downcast
         @njit
@@ -159,7 +157,44 @@ def test_cast_fact():
 
 
 def test_protected_mutability():
-    pass
+    print("RUNTIME1.")
+    with kb_context("test_protected_mutability") as context:
+        print("RUNTIME1.2")
+        spec = {"A" : "string", "B" : "number"}
+        BOOP, BOOP1Type = define_fact("BOOP", spec,context="test_protected_mutability")
+        print("RUNTIME1.3")
+        kb = KnowledgeBase(context="test_protected_mutability")
+        print("RUNTIME1")
+        b1 = BOOP("A",0)
+        b2 = BOOP("B",0)
+        print("RUNTIME1")
+        @njit
+        def edit_it(b):
+            b.B = b.B + 1
+
+        edit_it(b1)
+        edit_it.py_func(b2)
+
+        @njit
+        def declare_it(kb,b):
+            kb.declare(b)
+        declare_it(kb,b1)
+        declare_it.py_func(kb,b2)
+
+        print("RUNTIMEz")
+
+        with pytest.raises(RuntimeError):
+            edit_it(b1)
+
+        with pytest.raises(RuntimeError):
+            print("RUNTIME!")
+            edit_it.py_func(b2)
+        with pytest.raises(RuntimeError):
+            print("RUNTIME?")
+
+        
+
+
 
 
 
@@ -169,3 +204,4 @@ if __name__ == "__main__":
     test_define_fact()
     test_inheritence()
     test_cast_fact()
+    test_protected_mutability()

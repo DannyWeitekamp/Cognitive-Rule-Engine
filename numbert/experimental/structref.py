@@ -35,12 +35,14 @@ class {typ}TypeTemplate(types.StructRef):
         return tuple((name, types.unliteral(typ)) for name, typ in fields)
 
 class {typ}(structref.StructRefProxy):
-    def __new__(cls, d, v):
-        return structref.StructRefProxy.__new__(cls, d, v)
+    def __new__(cls, *args):
+        return structref.StructRefProxy.__new__(cls, *args)
 
 {getters}
 
 structref.define_proxy({typ}, {typ}TypeTemplate, [{attr_list}])
+
+
 
 '''
     return code

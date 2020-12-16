@@ -225,17 +225,19 @@ def _meminfo_from_struct(typingctx, val):
 #     def retract(self,name):
 #         self._retract(name)
 
+@njit(cache=True)
+def expand_kb_data_types(kb_data,n):
+    for i in range(n):
+        kb_data.facts.append(List.empty_list(BaseFactType))
+        kb_data.empty_f_id_stacks.append(List.empty_list(i8))
+        kb_data.empty_f_id_heads.append(0)
 
 @njit(cache=True)
 def init_kb_data(context_data):
     facts = List.empty_list(basefact_list)
     empty_f_id_stacks = List.empty_list(i8_list)
     empty_f_id_heads = List.empty_list(i8)
-    L = max(len(context_data.attr_inds_by_type),1)
-    for i in range(L):
-        facts.append(List.empty_list(BaseFactType))
-        empty_f_id_stacks.append(List.empty_list(i8))
-        empty_f_id_heads.append(0)
+    
 
     names_to_idrecs = Dict.empty(unicode_type,u8)
 
@@ -249,11 +251,13 @@ def init_kb_data(context_data):
     consistency_listener_counter += 1
     
     unnamed_counter = np.zeros(1,dtype=np.int64)
-
-    return KnowledgeBaseData(facts, empty_f_id_stacks, empty_f_id_heads, names_to_idrecs,
+    kb_data = KnowledgeBaseData(facts, empty_f_id_stacks, empty_f_id_heads, names_to_idrecs,
                             enum_data, enum_consistency, consistency_listeners,
                              consistency_listener_counter, unnamed_counter
                              )
+    L = max(len(context_data.attr_inds_by_type),1)
+    expand_kb_data_types(kb_data,L)
+    return kb_data
 
 
 @njit(cache=True)
@@ -355,12 +359,23 @@ def next_empty_f_id(kb_data,t_id):
     kb_data.empty_f_id_heads[t_id] = es_h = es_h - 1
     return es_s[es_h] # a recycled f_id
 
+@overload_method(KnowledgeBaseTypeTemplate, "resolve_t_id")
+def kb_resolve_t_id(self,fact):
+    fact_type_name = fact._fact_name
+    def impl(self,fact):
+        t_id = self.context_data.fact_to_t_id[fact_type_name]
+        L = len(self.kb_data.facts)
+        if(t_id >= L):
+            expand_kb_data_types(self.kb_data, 1+L-t_id)
+        return  t_id
+    return impl
     
 
 @overload_method(KnowledgeBaseTypeTemplate, "declare")
 def kb_declare(self, name, fact):
-    t_id = 0
     def impl(self, name, fact):
+        t_id = self.resolve_t_id(fact)
+        # print("TID", t_id)
         f_id = next_empty_f_id(self.kb_data,t_id)
         b_fact = cast_fact(BaseFactType,fact)
         # meminfo = _meminfo_from_struct(fact)
@@ -385,7 +400,6 @@ def declare(kb,name,fact):
 # @njit
 @overload_method(KnowledgeBaseTypeTemplate, "retract")
 def kb_retract(self, name):
-    t_id = 0
     def impl(self, name):
         names_to_idrecs = self.kb_data.names_to_idrecs
         if(name not in names_to_idrecs):
@@ -399,8 +413,8 @@ def kb_retract(self, name):
 
     return impl
 
-@overload_method(KnowledgeBaseTypeTemplate, "all_facts_of_type")
-def kb_all_facts_of_type(self, name):
+@overload_method(KnowledgeBaseTypeTemplate, "facts_of_type")
+def kb_facts_of_type(self, name):
     t_id = 0
     def impl(self, name):
         pass

@@ -40,6 +40,7 @@ context_data_fields = [
     ("enum_counter" , Array(i8, 0, "C")),
     ("attr_inds_by_type" , DictType(unicode_type,Dict_Unicode_to_i8)),
     ("spec_flags" , DictType(unicode_type,Dict_Unicode_to_Flags)),
+    ("fact_to_t_id" , DictType(unicode_type,i8)),
 ]
 
 KnowledgeBaseContextData, KnowledgeBaseContextDataType = define_structref("KnowledgeBaseContextData",context_data_fields)
@@ -64,9 +65,10 @@ def new_kb_context():
     attr_inds_by_type = Dict.empty(unicode_type,Dict_Unicode_to_i8)
     # nominal_maps = Dict.empty(unicode_type,u1[:])
     spec_flags = Dict.empty(unicode_type,Dict_Unicode_to_Flags)
+    fact_to_t_id = Dict.empty(unicode_type,i8)
     return KnowledgeBaseContextData(string_enums, number_enums,
         string_backmap, number_backmap,
-        enum_counter, attr_inds_by_type, spec_flags)
+        enum_counter, attr_inds_by_type, spec_flags, fact_to_t_id)
 
 
 class KnowledgeBaseContext(object):
@@ -100,7 +102,7 @@ class KnowledgeBaseContext(object):
         self.name = name
         self.fact_ctors = {}
         self.fact_types = {}
-        self.fact_to_t_id = {}
+        
         self.parents_of = {}
         self.children_of = {}
         # self.jitstructs = {}
@@ -113,6 +115,7 @@ class KnowledgeBaseContext(object):
         self.enum_counter = cd.enum_counter
         self.attr_inds_by_type = cd.attr_inds_by_type
         self.spec_flags = cd.spec_flags
+        self.fact_to_t_id = cd.fact_to_t_id
 
         # for x in ["<#ANY>",'','?sel']:
         #   self.enumerize_value(x)
@@ -128,8 +131,8 @@ class KnowledgeBaseContext(object):
         #Map to t_ids
         t_id = len(self.fact_types)
         self.fact_to_t_id[name] = t_id 
-        self.fact_to_t_id[fact_ctor] = t_id 
-        self.fact_to_t_id[fact_type] = t_id 
+        # self.fact_to_t_id[fact_ctor] = t_id 
+        # self.fact_to_t_id[fact_type] = t_id 
 
         ft_str = str(fact_type)
         if_str = str(inherit_from)

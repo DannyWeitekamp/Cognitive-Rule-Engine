@@ -26,7 +26,7 @@ from numbert.experimental.transform import infer_type
 
 
 from numbert.experimental.structref import define_structref
-from numbert.experimental.fact import BaseFact,BaseFactType
+from numbert.experimental.fact import BaseFact,BaseFactType,cast_fact
 from numbert.caching import import_from_cached, source_in_cache, source_to_cache
 
    
@@ -42,10 +42,10 @@ i8_list = ListType(i8)
 
 
 kb_data_fields = [
-    ("fact_meminfos" , ListType(meminfo_list)),
-    ("empty_f_id_stacks" , ListType(i8_list)),
-    ("empty_f_id_heads" , ListType(i8)),
-    ("names_to_idrecs" , DictType(unicode_type,u8)),
+    ("facts" , ListType(BaseFactType)),
+    ("empty_f_id_stack" , i8_list),
+    ("empty_f_id_head" , i8),
+    ("names_to_f_id" , DictType(unicode_type,i8)),
 
     ("enum_data" , DictType(unicode_type,i8_arr)),
     ("enum_consistency" , DictType(two_str,u1)),
@@ -228,16 +228,19 @@ def _meminfo_from_struct(typingctx, val):
 
 @njit(cache=True)
 def init_kb_data(context_data):
-    fact_meminfos = List.empty_list(meminfo_list)
-    empty_f_id_stacks = List.empty_list(i8_list)
-    empty_f_id_heads = List.empty_list(i8)
-    L = max(len(context_data.attr_inds_by_type),1)
-    for i in range(L):
-        fact_meminfos.append(List.empty_list(meminfo_type))
-        empty_f_id_stacks.append(List.empty_list(i8))
-        empty_f_id_heads.append(0)
+    facts = List.empty_list(BaseFactType)
+    # fact_meminfos = List.empty_list(meminfo_list)
+    empty_f_id_stack = List.empty_list(i8)
+    empty_f_id_head = 0
 
-    names_to_idrecs = Dict.empty(unicode_type,u8)
+    
+    # L = max(len(context_data.attr_inds_by_type),1)
+    # for i in range(L):
+    #     fact_meminfos.append(List.empty_list(meminfo_type))
+    #     empty_f_id_stacks.append(List.empty_list(i8))
+    #     empty_f_id_heads.append(0)
+
+    names_to_f_id = Dict.empty(unicode_type,i8)
 
     enum_data = Dict.empty(unicode_type,i8_arr)
 
@@ -250,7 +253,7 @@ def init_kb_data(context_data):
     
     unnamed_counter = np.zeros(1,dtype=np.int64)
 
-    return KnowledgeBaseData(fact_meminfos, empty_f_id_stacks, empty_f_id_heads, names_to_idrecs,
+    return KnowledgeBaseData(facts, empty_f_id_stack, empty_f_id_head, names_to_f_id,
                             enum_data, enum_consistency, consistency_listeners,
                              consistency_listener_counter, unnamed_counter
                              )
@@ -332,27 +335,27 @@ def _get_fact_type(x):
     return x_t.name
 
 @njit
-def make_f_id_empty(kb_data, t_id, f_id):
+def make_f_id_empty(kb_data, f_id):
     '''Adds adds tracking info for an empty f_id for when a fact is retracted'''
-    es_s = kb_data.empty_f_id_stacks[t_id]
-    es_h = kb_data.empty_f_id_heads[t_id]
+    es_s = kb_data.empty_f_id_stack
+    es_h = kb_data.empty_f_id_head
     if(es_h < len(es_s)):
         es_s[es_h] = f_id
     else:
         es_s.append(f_id)
-    kb_data.empty_f_id_heads[t_id] += 1
+    kb_data.empty_f_id_head += 1
 
 
 @njit
-def next_empty_f_id(kb_data,t_id):
+def next_empty_f_id(kb_data):
     '''Gets the next dead f_id from retracting facts otherwise returns 
         a fresh one pointing to the end of the meminfo list'''
-    es_s = kb_data.empty_f_id_stacks[t_id]
-    es_h = kb_data.empty_f_id_heads[t_id]
+    es_s = kb_data.empty_f_id_stack
+    es_h = kb_data.empty_f_id_head
     if(es_h <= 0):
-        return len(kb_data.fact_meminfos[t_id])# a fresh f_id
+        return len(kb_data.facts)# a fresh f_id
 
-    kb_data.empty_f_id_heads[t_id] = es_h = es_h - 1
+    kb_data.empty_f_id_head = es_h = es_h - 1
     return es_s[es_h] # a recycled f_id
 
     
@@ -361,17 +364,18 @@ def next_empty_f_id(kb_data,t_id):
 def kb_declare(self, name, fact):
     t_id = 0
     def impl(self, name, fact):
-        f_id = next_empty_f_id(self.kb_data,t_id)
-        meminfo = _meminfo_from_struct(fact)
-        meminfos = self.kb_data.fact_meminfos[t_id]
-        if(f_id < len(meminfos)):
-            meminfos[f_id] = meminfo
+        f_id = next_empty_f_id(self.kb_data)
+        b_fact = cast_fact(BaseFactType,fact)
+        # meminfo = _meminfo_from_struct(fact)
+        # meminfos = self.kb_data.fact_meminfos[t_id]
+        if(f_id < len(self.kb_data.facts)):
+            self.kb_data.facts[f_id] = b_fact
         else:
-            meminfos.append(meminfo)
-        idrec = encode_idrec(t_id,f_id,0)
-        self.kb_data.names_to_idrecs[name] = idrec
-        b_fact = _struct_from_meminfo(BaseFactType,meminfo)
-        b_fact.idrec = idrec
+            self.kb_data.facts.append(b_fact)
+        # idrec = encode_idrec(t_id,f_id,0)
+        self.kb_data.names_to_f_id[name] = f_id
+        # b_fact = _struct_from_meminfo(BaseFactType,meminfo)
+        b_fact.f_id = f_id
 
 
     return impl
@@ -386,15 +390,15 @@ def declare(kb,name,fact):
 def kb_retract(self, name):
     t_id = 0
     def impl(self, name):
-        names_to_idrecs = self.kb_data.names_to_idrecs
-        if(name not in names_to_idrecs):
+        names_to_f_id = self.kb_data.names_to_f_id
+        if(name not in names_to_f_id):
         #     # pass
             raise KeyError("Fact not found.")
             # return
-        t_id, f_id, a_id = decode_idrec(names_to_idrecs[name])
-        make_f_id_empty(self.kb_data,i8(t_id), i8(f_id))
+        # t_id, f_id, a_id = decode_idrec(names_to_idrecs[name])
+        make_f_id_empty(self.kb_data,names_to_f_id[name])
         # self.kb_data.fact_meminfos[t_id] = meminfo_type(0)
-        del names_to_idrecs[name]
+        del names_to_f_id[name]
 
     return impl
 

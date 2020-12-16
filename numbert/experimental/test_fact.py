@@ -83,7 +83,7 @@ def test_inheritence():
         b1 = BOOP1("A",7)
         @njit
         def check_has_base(b):
-            return b.idrec
+            return b.f_id
 
         assert check_has_base(b1) == 0
         assert check_has_base.py_func(b1) == 0
@@ -170,7 +170,6 @@ def test_protected_mutability():
         print("RUNTIME1")
         @njit
         def edit_it(b):
-            print("idrec", b.idrec)
             b.B += 1
 
         edit_it(b1)

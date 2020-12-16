@@ -42,7 +42,7 @@ def test_encode_decode():
 def declare_retract(kb):
     for i in range(100):
         i_s = "A" + str(i)
-        kb.declare(i_s,TextField(i_s,i_s,i_s,i_s,i_s))
+        kb.declare(TextField(i_s,i_s,i_s,i_s,i_s),i_s)
 
     for i in range(0,100,10):
         i_s = "A" + str(i)
@@ -56,7 +56,7 @@ def declare_retract(kb):
 def declare_again(kb):
     for i in range(0,100,10):
         i_s = "B" + str(i)
-        kb.declare(i_s,TextField(i_s,i_s,i_s,i_s,i_s))
+        kb.declare(TextField(i_s,i_s,i_s,i_s,i_s),i_s)
 
 
     t_id = kb.context_data.fact_to_t_id["TextField"]
@@ -73,12 +73,24 @@ def test_declare_retract():
     assert declare_retract.py_func(kb) == 10
     assert declare_again.py_func(kb) == 0
 
+##### test_declare_overloading #####
+@njit(cache=True)
+def declare_unnamed(kb):
+    return kb.declare(TextField("A","B","C","D","E"))
+
+def test_declare_overloading():
+    kb = KnowledgeBase()
+    idrec1 = declare_unnamed(kb)
+    idrec2 = declare_unnamed.py_func(kb)
+    assert idrec1 != idrec2
+
+
 
 ##### test_retract_keyerror #####
 
 @njit(cache=True)
 def retract_keyerror(kb):
-    kb.declare("A",TextField("A","B","C","D","E"))
+    kb.declare(TextField("A","B","C","D","E"),"A")
     kb.retract("A")
     kb.retract("A")
 
@@ -97,16 +109,17 @@ def test_retract_keyerror():
 
 @njit(cache=True)
 def all_of_type(kb):
-    kb.declare("A",TextField("A","B","C","D","E"))
-    kb.retract("A")
-    kb.retract("A")
+    return kb.all_facts_of_type(TextFieldType)
 
 def test_all_facts_of_type():
     #NRT version
     kb = KnowledgeBase()
     declare_retract(kb)
-    all_tf = kb.all_facts_of_type(TextFieldType)
-    print(type(all_tf[0]))
+    all_tf = all_of_type(kb)
+    assert isinstance(all_tf[0],TextField)
+    assert len(all_tf) == 90
+
+    all_tf = all_of_type.py_func(kb)
     assert isinstance(all_tf[0],TextField)
     assert len(all_tf) == 90
     

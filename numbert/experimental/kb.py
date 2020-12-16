@@ -299,11 +299,21 @@ class KnowledgeBase(structref.StructRefProxy):
         assert hasattr(x_t, 'name'), "Can only declare namedtuples built w/ numbert.define_fact()"
         return x_t.name
 
-    def declare(self,name,x):
-        return declare(self,name,x)
+    def declare(self,fact,name=None):
+        if(name is None):
+            return declare_fact(self,fact)
+        else:
+            return declare_fact_name(self,fact,name)
+        
 
-    def retract(self,name):
-        return retract(self,name)
+
+    def retract(self,identifier):
+        if(isinstance(identifier,int)):
+            return retract_by_idrec(self,identifier)
+        elif(isinstance(identifier,str)):
+            return retract_by_name(self,identifier)
+        else:
+            return retract_by_idrec(self,identifier.idrec)
 
     def all_facts_of_type(self,typ):
         return all_facts_of_type(self,typ)
@@ -380,7 +390,7 @@ def resolve_t_id(kb, fact):
     
 
 @njit(cache=True)
-def declare(kb,name,fact):
+def declare_fact(kb,fact):
     t_id = resolve_t_id(kb,fact)
     # print("TID", t_id)
     f_id = next_empty_f_id(kb.kb_data,t_id)
@@ -392,21 +402,54 @@ def declare(kb,name,fact):
     else:
         facts.append(b_fact)
     idrec = encode_idrec(t_id,f_id,0)
-    kb.kb_data.names_to_idrecs[name] = idrec
-    # b_fact = _struct_from_meminfo(BaseFactType,meminfo)
+    
     b_fact.idrec = idrec
+    return idrec
+
+@njit(cache=True)
+def declare_name(kb,name,idrec):
+    kb.kb_data.names_to_idrecs[name] = idrec
+
+@njit(cache=True)
+def declare_fact_name(kb,fact,name):
+    idrec = declare_fact(kb,fact)        
+    declare_name(kb,name,idrec)
+    return idrec
 
 
 @njit(cache=True)
-def retract(kb,name):
+def name_to_idrec(kb,name):
     names_to_idrecs = kb.kb_data.names_to_idrecs
     if(name not in names_to_idrecs):
         raise KeyError("Fact not found.")
-        # return
-    t_id, f_id, a_id = decode_idrec(names_to_idrecs[name])
+    return names_to_idrecs[name]
+
+@njit(cache=True)
+def retract_by_idrec(kb,idrec):
+    t_id, f_id, a_id = decode_idrec(idrec)
     make_f_id_empty(kb.kb_data,i8(t_id), i8(f_id))
-    # self.kb_data.fact_meminfos[t_id] = meminfo_type(0)
-    del names_to_idrecs[name]
+
+@njit(cache=True)
+def retract_by_name(kb,name):
+    idrec = name_to_idrec(kb,name)
+    retract_by_idrec(kb,idrec)
+    del kb.kb_data.names_to_idrecs[name]
+
+
+# @njit(cache=True)
+
+
+
+# @njit(cache=True)
+# def modify(kb,name):
+#     names_to_idrecs = kb.kb_data.names_to_idrecs
+#     if(name not in names_to_idrecs):
+#         raise KeyError("Fact not found.")
+#         # return
+#     t_id, f_id, a_id = decode_idrec(names_to_idrecs[name])
+#     make_f_id_empty(kb.kb_data,i8(t_id), i8(f_id))
+#     # self.kb_data.fact_meminfos[t_id] = meminfo_type(0)
+#     del names_to_idrecs[name]
 
 
 @njit(cache=True)
@@ -419,23 +462,50 @@ def all_facts_of_type(kb,typ):
     return out
 
 
+# @overload_method(KnowledgeBaseTypeTemplate, "declare")
+# def kb_declare(self, name, fact):
+#     def impl(self, name, fact):
+#         idrec = declare_fact(self,fact)        
+#         declare_name(self,name,idrec)
+#         return idrec
+#     return impl
+
+# @overload_method(KnowledgeBaseTypeTemplate, "declare")
+# def kb_declare(self, fact):
+#     def impl(self, fact):
+#         return declare_fact(self,fact)
+
+#     return impl
 @overload_method(KnowledgeBaseTypeTemplate, "declare")
-def kb_declare(self, name, fact):
-    def impl(self, name, fact):
-        return declare(self,name,fact)        
+def kb_declare(self, fact, name=None):
+    print("HERE",fact, name,type(name))
+    if(not name or isinstance(name, (types.NoneType,types.Omitted))):
+        def impl(self, fact, name=None):
+            return declare_fact(self,fact)
+    else:
+        def impl(self, fact, name=None):
+            return declare_fact_name(self,fact,name)
     return impl
 
 @overload_method(KnowledgeBaseTypeTemplate, "retract")
-def kb_retract(self, name):
-    def impl(self, name):
-        return retract(self,name)
+def kb_retract(self, identifier):
+    print("HERE",identifier,identifier in (str,unicode_type))
+    if(identifier in (str,unicode_type)):
+        def impl(self, identifier):
+            return retract_by_name(self,identifier)
+    elif(identifier == int):
+        def impl(self, identifier):
+            return retract_by_idrec(self,identifier)
+    else:
+        def impl(self, identifier):
+            return retract_by_idrec(self,identifier.idrec)
     return impl
 
 
 @overload_method(KnowledgeBaseTypeTemplate, "all_facts_of_type")
 def kb_all_facts_of_type(self, typ):
     def impl(self, typ):
-        return all_facts_of_type(kb,typ)
+        return all_facts_of_type(self,typ)
 
     return impl
 
@@ -460,7 +530,7 @@ def kb_all_facts_of_type(self, typ):
 #######Pseudo Code for KB#######
 
 '''
-#Note all fact types are going to need id_rec
+#Note all fact types are going to need idrec
 #Context will need typ name->id map
 
 

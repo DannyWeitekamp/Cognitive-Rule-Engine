@@ -85,8 +85,8 @@ def test_inheritence():
         def check_has_base(b):
             return b.f_id
 
-        assert check_has_base(b1) == 0
-        assert check_has_base.py_func(b1) == 0
+        assert check_has_base(b1) == -1
+        assert check_has_base.py_func(b1) == -1
 
 
 
@@ -102,7 +102,7 @@ def test_cast_fact():
 
         b1 = BOOP1("A",7)
         b3 = BOOP3("A",1,2,3)
-        bs = BaseFact(0)
+        bs = BaseFact()
 
         #Downcast
         @njit
@@ -184,19 +184,19 @@ def test_protected_mutability():
 
         print("RUNTIMEz")
 
-        with pytest.raises(Exception):
+        with pytest.raises(AttributeError):
             print("RUNTIME_PY")
             edit_it.py_func(b1)
 
-        with pytest.raises(Exception):
+        with pytest.raises(AttributeError):
             print("RUNTIME_PY")
             edit_it.py_func(b2)
 
-        with pytest.raises(Exception):
+        with pytest.raises(AttributeError):
             print("RUNTIME_NB", b1.B)
             edit_it(b1)
 
-        with pytest.raises(Exception):
+        with pytest.raises(AttributeError):
             print("RUNTIME_NB", b1.B)
             edit_it(b1)
 

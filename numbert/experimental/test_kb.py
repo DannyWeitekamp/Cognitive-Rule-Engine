@@ -48,7 +48,9 @@ def declare_retract(kb):
         i_s = "A" + str(i)
         kb.retract(i_s)
 
-    return kb.kb_data.empty_f_id_head
+    print(kb.kb_data.empty_f_id_heads)
+
+    return kb.kb_data.empty_f_id_heads[0]
 
 @njit(cache=True)
 def declare_again(kb):
@@ -56,7 +58,9 @@ def declare_again(kb):
         i_s = "B" + str(i)
         kb.declare(i_s,TextField(i_s,i_s,i_s,i_s,i_s))
 
-    return kb.kb_data.empty_f_id_head
+    print(kb.kb_data.empty_f_id_heads)
+
+    return kb.kb_data.empty_f_id_heads[0]
 
 def test_declare_retract():
     #NRT version

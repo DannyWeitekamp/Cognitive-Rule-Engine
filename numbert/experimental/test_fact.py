@@ -2,7 +2,7 @@ from numbert.experimental.fact import _fact_from_spec, _standardize_spec, _merge
     define_fact, cast_fact, _cast_structref, BaseFact, BaseFactType
 from numbert.experimental.context import kb_context
 from numbert.experimental.kb import KnowledgeBase
-from numba import njit
+from numba import njit, u8
 import pytest
 
 def test__standardize_spec():
@@ -83,10 +83,10 @@ def test_inheritence():
         b1 = BOOP1("A",7)
         @njit
         def check_has_base(b):
-            return b.f_id
+            return b.idrec
 
-        assert check_has_base(b1) == -1
-        assert check_has_base.py_func(b1) == -1
+        assert check_has_base(b1) == u8(-1)
+        assert check_has_base.py_func(b1) == u8(-1)
 
 
 

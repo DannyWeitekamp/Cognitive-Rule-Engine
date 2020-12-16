@@ -170,7 +170,7 @@ class {typ}TypeTemplate(types.StructRef):
 @njit(cache=True)
 def ctor({param_list}):
     st = new({typ}Type)
-    st.f_id = -1
+    st.idrec = -1
     {init_fields}
     return st
 
@@ -246,16 +246,16 @@ def define_attributes(struct_typeclass):
         #     builder.store(cgutils.true_bit, errorptr)
         #     builder.ret(c.pyapi.get_null_object())
 
-        #If the f_id is not 0 then it should be treated as immutable
+        #If the idrec is not 0 then it should be treated as immutable
 
         # errorptr = cgutils.alloca_once_value(builder, cgutils.false_bit)
-        if(attr != "f_id"):
-            f_id = getattr(dataval, "f_id")
-            f_id_set = builder.icmp_signed('!=', f_id, f_id.type(-1))
-            with builder.if_then(f_id_set):
+        if(attr != "idrec"):
+            idrec = getattr(dataval, "idrec")
+            idrec_set = builder.icmp_signed('!=', idrec, idrec.type(-1))
+            with builder.if_then(idrec_set):
                 msg =("Facts objects are immutable once defined. Use kb.modify instead.",)
                 context.call_conv.return_user_exc(builder, AttributeError, msg)
-        # with builder.if_then(builder.icmp_signed("!=", f_id, neg)):
+        # with builder.if_then(builder.icmp_signed("!=", idrec, neg)):
             # pyapi.err_set_string("PyExc_AttributeError",
             #  "Facts objects are immutable once defined. Use kb.modify instead.")
             # builder.store(cgutils.true_bit, errorptr)
@@ -336,7 +336,7 @@ def define_facts(specs, #: list[dict[str,dict]],
 ###### Base #####
 
 base_fact_fields = [
-    ("f_id", i8),
+    ("idrec", u8),
     # ("kb", kb)
 ]
 

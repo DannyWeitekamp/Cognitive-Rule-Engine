@@ -248,15 +248,17 @@ def define_attributes(struct_typeclass):
 
         #If the f_id is not 0 then it should be treated as immutable
 
-        errorptr = cgutils.alloca_once_value(builder, cgutils.false_bit)
+        # errorptr = cgutils.alloca_once_value(builder, cgutils.false_bit)
         f_id = getattr(dataval, "f_id")
         # neg = f_id.type(-1) 
-        f_id_zero = cgutils.is_scalar_zero(builder,f_id)
+        # f_id_zero = cgutils.is_scalar_neg(builder,f_id)
+        f_id_zero = builder.icmp_signed('==', f_id, f_id.type(0))
         with cgutils.ifnot(builder,f_id_zero):
         # with builder.if_then(builder.icmp_signed("!=", f_id, neg)):
             pyapi.err_format("PyExc_AttributeError",
              "Facts objects are immutable once defined. Use kb.modify instead.")
-            builder.store(cgutils.true_bit, errorptr)
+            # builder.store(cgutils.true_bit, errorptr)
+
             # builder.ret(sig.ret(0))
             # pyapi.err_set_string("PyExc_AttributeError", 
             #     "Facts objects are immutable once defined. Use kb.modify instead.")
@@ -333,7 +335,7 @@ def define_facts(specs, #: list[dict[str,dict]],
 ###### Base #####
 
 base_fact_fields = [
-    ("f_id", u8),
+    ("f_id", i8),
     # ("kb", kb)
 ]
 

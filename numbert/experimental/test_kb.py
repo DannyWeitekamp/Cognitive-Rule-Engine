@@ -58,7 +58,7 @@ def declare_again(kb):
         i_s = "B" + str(i)
         kb.declare(i_s,TextField(i_s,i_s,i_s,i_s,i_s))
 
-        
+
     t_id = kb.context_data.fact_to_t_id["TextField"]
     return kb.kb_data.empty_f_id_heads[t_id]
 
@@ -93,6 +93,23 @@ def test_retract_keyerror():
     with pytest.raises(KeyError):
         retract_keyerror.py_func(kb)
 
+##### test_all_facts_of_type #####
+
+@njit(cache=True)
+def all_of_type(kb):
+    kb.declare("A",TextField("A","B","C","D","E"))
+    kb.retract("A")
+    kb.retract("A")
+
+def test_all_facts_of_type():
+    #NRT version
+    kb = KnowledgeBase()
+    declare_retract(kb)
+    all_tf = kb.all_facts_of_type(TextFieldType)
+    print(type(all_tf[0]))
+    assert isinstance(all_tf[0],TextField)
+    assert len(all_tf) == 90
+    
 
 
 

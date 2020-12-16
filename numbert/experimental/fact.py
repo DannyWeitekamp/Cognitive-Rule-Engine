@@ -342,7 +342,6 @@ base_fact_fields = [
 
 BaseFact, BaseFactType = _fact_from_fields("BaseFact", [])
 
-
 ###### Fact Casting #######
 
 @intrinsic

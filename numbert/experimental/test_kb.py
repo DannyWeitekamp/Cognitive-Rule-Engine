@@ -3,6 +3,7 @@ from numbert.experimental.fact import define_fact
 from numbert.experimental.kb import KnowledgeBase, KnowledgeBaseType, decode_idrec, encode_idrec, next_empty_f_id, make_f_id_empty
 from numba import njit
 from numba.types import unicode_type, NamedTuple
+from numba.core.errors import TypingError
 import logging
 import numpy as np
 import pytest
@@ -62,6 +63,14 @@ def declare_again(kb):
     t_id = kb.context_data.fact_to_t_id["TextField"]
     return kb.kb_data.empty_f_id_heads[t_id]
 
+@njit(cache=True)
+def bad_declare_type(kb):
+    kb.declare("Bad")
+
+@njit(cache=True)
+def bad_retract_type(kb):
+    kb.retract({"A",1})
+
 def test_declare_retract():
     #NRT version
     kb = KnowledgeBase()
@@ -73,10 +82,26 @@ def test_declare_retract():
     assert declare_retract.py_func(kb) == 10
     assert declare_again.py_func(kb) == 0
 
+    with pytest.raises(TypingError):
+        bad_declare_type(kb)
+
+    with pytest.raises(TypingError):
+        bad_declare_type.py_func(kb)
+
+    with pytest.raises(TypingError):
+        bad_retract_type(kb)
+
+    with pytest.raises(TypingError):
+        bad_retract_type.py_func(kb)
+
 ##### test_modify #####
 @njit(cache=True)
 def modify_right(kb,fact,v):
     kb.modify(fact,"to_right",v)
+
+@njit(cache=True)
+def bad_modify_type(kb):
+    kb.modify("???","to_right","???")
     
 
 def test_modify():
@@ -88,6 +113,12 @@ def test_modify():
 
     modify_right.py_func(kb,fact,"py")
     assert fact.to_right == "py"
+
+    with pytest.raises(TypingError):
+        bad_modify_type(kb)
+
+    with pytest.raises(TypingError):
+        bad_modify_type.py_func(kb)
     
 
 
@@ -150,6 +181,6 @@ def test_all_facts_of_type():
 
 if __name__ == "__main__":
     test_modify()
-    # test_encode_decode()
-    # test_declare_retract()
-    # test_retract_keyerror()
+    test_encode_decode()
+    test_declare_retract()
+    test_retract_keyerror()

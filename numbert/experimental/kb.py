@@ -1,4 +1,4 @@
-from numba import types, njit, guvectorize,vectorize,prange, generated_jit
+from numba import types, njit, guvectorize,vectorize,prange, generated_jit, literally
 from numba.experimental import jitclass
 from numba import deferred_type, optional
 from numba import void,b1,u1,u2,u4,u8,i1,i2,i4,i8,f4,f8,c8,c16
@@ -322,9 +322,8 @@ class KnowledgeBase(structref.StructRefProxy):
     #     #     self.stores[typ] = KnowledgeStore(typ,self)
     #     # self.stores[typ].declare(name,x)
 
-    def modify():
-
-        raise NotImplemented()
+    def modify(self, fact, attr, val):
+        return modify(fact, attr, val)
 
     # def retract(self,name):
 
@@ -349,6 +348,8 @@ def _get_fact_type(x):
     x_t = type(x)
     assert hasattr(x_t, 'name'), "Can only declare namedtuples built w/ numbert.define_fact()"
     return x_t.name
+
+#### Helper Functions ####
 
 @njit(cache=True)
 def make_f_id_empty(kb_data, t_id, f_id):
@@ -387,7 +388,16 @@ def resolve_t_id(kb, fact):
             expand_kb_data_types(kb.kb_data, 1+L-t_id)
         return  t_id
     return impl
-    
+
+@njit(cache=True)
+def name_to_idrec(kb,name):
+    names_to_idrecs = kb.kb_data.names_to_idrecs
+    if(name not in names_to_idrecs):
+        raise KeyError("Fact not found.")
+    return names_to_idrecs[name]
+
+
+##### declare #####
 
 @njit(cache=True)
 def declare_fact(kb,fact):
@@ -416,13 +426,7 @@ def declare_fact_name(kb,fact,name):
     declare_name(kb,name,idrec)
     return idrec
 
-
-@njit(cache=True)
-def name_to_idrec(kb,name):
-    names_to_idrecs = kb.kb_data.names_to_idrecs
-    if(name not in names_to_idrecs):
-        raise KeyError("Fact not found.")
-    return names_to_idrecs[name]
+##### retract #####
 
 @njit(cache=True)
 def retract_by_idrec(kb,idrec):
@@ -436,21 +440,65 @@ def retract_by_name(kb,name):
     del kb.kb_data.names_to_idrecs[name]
 
 
+##### modify #####
+from numba.experimental.structref import _Utils, imputils
+@intrinsic
+def intrinsic_modify(typingctx, inst_type, attr_type, val_type):
+    print("1",inst_type)
+    print("2",attr_type)
+    print("3",val_type)
+    if isinstance(attr_type, types.Literal):
+        
+        attr = attr_type.literal_value
+        print("INTRINSIC", attr_type)
+        print(">>", attr_type.literal_value)
+        def codegen(context, builder, sig, args):
+            # [inst_type, attr_type, val_type] = sig.args
+
+            [instance, attr_v, val] = args
+            
+            # attr = attr_type.literal_value
+            # attr = types.literal(attr_v).literal_value
+            # print("->",attr,type(attr))
+
+            utils = _Utils(context, builder, inst_type)
+            dataval = utils.get_data_struct(instance)
+            # cast val to the correct type
+            field_type = inst_type.field_dict[attr]
+            casted = context.cast(builder, val, val_type, field_type)
+
+            # read old
+            old_value = getattr(dataval, attr)
+            # incref new value
+            context.nrt.incref(builder, val_type, casted)
+            # decref old value (must be last in case new value is old value)
+            context.nrt.decref(builder, val_type, old_value)
+            # write new
+            setattr(dataval, attr, casted)
+        sig = void(inst_type, types.literal(attr), val_type)
+        return sig, codegen
+
+@njit(cache=True)
+def modify(fact,attr,val):
+    intrinsic_modify(fact,literally(attr),val)
+
+
+
+
 # @njit(cache=True)
+# def modify(kb,fact,attr,value):
+#     intrinsic_setattr(fact,types.literal("to_right"),value)
+    # idrec = fact.idrec
+    # t_id, f_id, a_id = decode_idrec(idrec)
+    # new_fact = copy(fact)
+    # fact.idrec = u8(-1)
 
-
-
-# @njit(cache=True)
-# def modify(kb,name):
-#     names_to_idrecs = kb.kb_data.names_to_idrecs
-#     if(name not in names_to_idrecs):
-#         raise KeyError("Fact not found.")
-#         # return
-#     t_id, f_id, a_id = decode_idrec(names_to_idrecs[name])
-#     make_f_id_empty(kb.kb_data,i8(t_id), i8(f_id))
-#     # self.kb_data.fact_meminfos[t_id] = meminfo_type(0)
-#     del names_to_idrecs[name]
-
+    # setattr(fact, attr, value)
+    # fact.__setattr__(attr, value)
+    # fact.idrec = idrec
+# 
+    
+##### all_facts_of_type #####
 
 @njit(cache=True)
 def all_facts_of_type(kb,typ):
@@ -500,6 +548,18 @@ def kb_retract(self, identifier):
         def impl(self, identifier):
             return retract_by_idrec(self,identifier.idrec)
     return impl
+
+@overload_method(KnowledgeBaseTypeTemplate, "modify", prefer_literal=True)
+def kb_modify(self, fact, attr, val):
+    # literal_attr = types.literal(attr)
+    
+    # if(isinstance(attr,types.Literal)):
+    # literal_attr = attr.literal_value
+    def impl(self, fact, attr, val):
+        # return intrinsic_modify(fact, literal_attr, val)
+        return modify(fact, attr, val)
+    return impl
+    # return None
 
 
 @overload_method(KnowledgeBaseTypeTemplate, "all_facts_of_type")

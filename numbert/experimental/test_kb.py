@@ -73,6 +73,26 @@ def test_declare_retract():
     assert declare_retract.py_func(kb) == 10
     assert declare_again.py_func(kb) == 0
 
+##### test_modify #####
+@njit(cache=True)
+def modify_right(kb,fact,v):
+    kb.modify(fact,"to_right",v)
+    
+
+def test_modify():
+    kb = KnowledgeBase()
+    fact = TextField("A","B","C","D","E")
+
+    modify_right(kb,fact,"nb")
+    assert fact.to_right == "nb"
+
+    modify_right.py_func(kb,fact,"py")
+    assert fact.to_right == "py"
+    
+
+
+    
+
 ##### test_declare_overloading #####
 @njit(cache=True)
 def declare_unnamed(kb):
@@ -129,6 +149,7 @@ def test_all_facts_of_type():
 
 
 if __name__ == "__main__":
-    test_encode_decode()
-    test_declare_retract()
-    test_retract_keyerror()
+    test_modify()
+    # test_encode_decode()
+    # test_declare_retract()
+    # test_retract_keyerror()

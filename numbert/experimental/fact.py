@@ -237,35 +237,12 @@ def define_attributes(struct_typeclass):
 
         pyapi = context.get_python_api(builder)
 
-        
-
-        # zero = a_value.type(0)
-
-        # with builder.if_then(builder.icmp_signed("!=", a_value, zero)):
-        #     c.pyapi.err_format("PyExc_ValueError", "exception!")
-        #     builder.store(cgutils.true_bit, errorptr)
-        #     builder.ret(c.pyapi.get_null_object())
-
-        #If the idrec is not 0 then it should be treated as immutable
-
-        # errorptr = cgutils.alloca_once_value(builder, cgutils.false_bit)
         if(attr != "idrec"):
             idrec = getattr(dataval, "idrec")
             idrec_set = builder.icmp_signed('!=', idrec, idrec.type(-1))
             with builder.if_then(idrec_set):
                 msg =("Facts objects are immutable once defined. Use kb.modify instead.",)
                 context.call_conv.return_user_exc(builder, AttributeError, msg)
-        # with builder.if_then(builder.icmp_signed("!=", idrec, neg)):
-            # pyapi.err_set_string("PyExc_AttributeError",
-            #  "Facts objects are immutable once defined. Use kb.modify instead.")
-            # builder.store(cgutils.true_bit, errorptr)
-
-            # builder.ret(sig.ret(0))
-            # pyapi.err_set_string("PyExc_AttributeError", 
-            #     "Facts objects are immutable once defined. Use kb.modify instead.")
-            #     )
-            # builder.ret()
-            # builder.ret(pyapi.get_null_object())
             
         # read old
         old_value = getattr(dataval, attr)
@@ -275,7 +252,6 @@ def define_attributes(struct_typeclass):
         context.nrt.decref(builder, val_type, old_value)
         # write new
         setattr(dataval, attr, casted)
-
 
 
 

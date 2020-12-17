@@ -178,7 +178,7 @@ def test_protected_mutability():
 
         @njit
         def declare_it(kb,b,name):
-            kb.declare(name,b)
+            kb.declare(b,name)
         declare_it(kb,b1,"b1")
         declare_it.py_func(kb,b2,"b2")
 

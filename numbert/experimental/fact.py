@@ -21,6 +21,7 @@ from numbert.gensource import assert_gen_source
 from numbert.caching import unique_hash, source_to_cache, import_from_cached, source_in_cache
 from numbert.experimental.structref import gen_structref_code, define_structref
 from numbert.experimental.context import kb_context
+from numbert.experimental.utils import _cast_structref
 
 
 
@@ -187,8 +188,6 @@ class {typ}(FactProxy):
 
 {getters}
 
-#structref.define_proxy({typ}, {typ}TypeTemplate, [{param_list}])
-
 @overload({typ})
 def _ctor(*args):
     def impl(*args):
@@ -198,7 +197,6 @@ def _ctor(*args):
 
 define_boxing({typ}TypeTemplate,{typ})
 '''
-    # print(code)
     return code
 
     
@@ -320,27 +318,7 @@ BaseFact, BaseFactType = _fact_from_fields("BaseFact", [])
 
 ###### Fact Casting #######
 
-@intrinsic
-def _cast_structref(typingctx, cast_type_ref, inst_type):
-    # inst_type = struct_type.instance_type
-    cast_type = cast_type_ref.instance_type
-    def codegen(context, builder, sig, args):
-        # [td] = sig.args
-        _,d = args
 
-        ctor = cgutils.create_struct_proxy(inst_type)
-        dstruct = ctor(context, builder, value=d)
-        meminfo = dstruct.meminfo
-        context.nrt.incref(builder, types.MemInfoPointer(types.voidptr), meminfo)
-
-        st = cgutils.create_struct_proxy(cast_type)(context, builder)
-        st.meminfo = meminfo
-        #NOTE: Fixes sefault but not sure about it's lifecycle (i.e. watch out for memleaks)
-        # context.nrt.incref(builder, types.MemInfoPointer(types.voidptr), meminfo)
-
-        return st._getvalue()
-    sig = cast_type(cast_type_ref, inst_type)
-    return sig, codegen
 
 
 @generated_jit

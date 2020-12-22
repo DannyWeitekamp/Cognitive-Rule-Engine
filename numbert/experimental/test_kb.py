@@ -4,10 +4,13 @@ from numbert.experimental.kb import KnowledgeBase, KnowledgeBaseType, decode_idr
 from numba import njit
 from numba.types import unicode_type, NamedTuple
 from numba.core.errors import TypingError
+from numba.experimental.structref import new
 import logging
 import numpy as np
 import pytest
 from collections import namedtuple
+from numbert.experimental.subscriber import BaseSubscriberType, init_base_subscriber
+from numbert.experimental.utils import _struct_from_meminfo
 
 
 spec = {"value" : "string",
@@ -69,7 +72,7 @@ def bad_declare_type(kb):
 
 @njit(cache=True)
 def bad_retract_type(kb):
-    kb.retract({"A",1})
+    kb.retract(["A",1])
 
 def test_declare_retract():
     #NRT version
@@ -173,6 +176,35 @@ def test_all_facts_of_type():
     all_tf = all_of_type.py_func(kb)
     assert isinstance(all_tf[0],TextField)
     assert len(all_tf) == 90
+
+
+##### test_subscriber #####
+
+
+
+@njit(cache=True)
+def dummy_subscriber_ctor(kb_meminfo):
+    st = new(BaseSubscriberType)
+    init_base_subscriber(st,_struct_from_meminfo(KnowledgeBaseType,kb_meminfo) )
+
+    return st
+
+def test_subscriber():
+    #NRT version
+    kb = KnowledgeBase()
+    dummy_subscriber = dummy_subscriber_ctor(kb._meminfo) 
+    kb.add_subscriber(dummy_subscriber)
+
+    idrec = declare_unnamed(kb)
+
+    assert kb.kb_data.subscribers[0].grow_queue[0] == idrec
+
+    kb.retract(idrec)
+
+    assert kb.kb_data.subscribers[0].change_queue[0] == idrec
+
+
+
     
 
 
@@ -184,3 +216,4 @@ if __name__ == "__main__":
     test_encode_decode()
     test_declare_retract()
     test_retract_keyerror()
+    test_subscriber()

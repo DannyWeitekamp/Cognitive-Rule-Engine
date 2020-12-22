@@ -7,6 +7,7 @@ from numba.typed import List, Dict
 from numba.core.types import DictType, ListType, unicode_type, float64, NamedTuple, NamedUniTuple, UniTuple, Tuple, Array, optional
 from numba.cpython.unicode import  _set_code_point
 from numba.experimental import structref
+from numba.experimental.structref import new
 from numba.extending import overload_method, intrinsic
 from numbert.utils import cache_safe_exec
 from numbert.core import TYPE_ALIASES, REGISTERED_TYPES, JITSTRUCTS, py_type_map, numba_type_map, numpy_type_map
@@ -27,6 +28,7 @@ from numbert.experimental.context import _BaseContextful, KnowledgeBaseContextDa
 from numbert.experimental.transform import infer_type
 
 
+from numbert.experimental.subscriber import BaseSubscriberType
 from numbert.experimental.structref import define_structref
 from numbert.experimental.fact import BaseFact,BaseFactType, cast_fact
 from numbert.experimental.utils import lower_setattr
@@ -54,9 +56,11 @@ kb_data_fields = [
 
     ("enum_data" , DictType(unicode_type,i8_arr)),
     ("enum_consistency" , DictType(two_str,u1)),
-    ("consistency_listeners" , DictType(i8, two_str_set)),
-    ("consistency_listener_counter" , Array(i8, 0, "C")),
-    ("unnamed_counter" , Array(i8, 0, "C")),    
+    ("subscribers" , ListType(BaseSubscriberType)), 
+
+    # ("consistency_listeners" , DictType(i8, two_str_set)),
+    # ("consistency_listener_counter" , Array(i8, 0, "C")),
+    # ("unnamed_counter" , Array(i8, 0, "C")),    
     ("NULL_FACT", BaseFactType)
 ]
 
@@ -72,27 +76,30 @@ def expand_kb_data_types(kb_data,n):
 
 @njit(cache=True)
 def init_kb_data(context_data):
-    facts = List.empty_list(basefact_list)
-    empty_f_id_stacks = List.empty_list(i8_list)
-    empty_f_id_heads = List.empty_list(i8)
+    kb_data = new(KnowledgeBaseDataType)
+    kb_data.facts = List.empty_list(basefact_list)
+    kb_data.empty_f_id_stacks = List.empty_list(i8_list)
+    kb_data.empty_f_id_heads = List.empty_list(i8)
     
 
-    names_to_idrecs = Dict.empty(unicode_type,u8)
+    kb_data.names_to_idrecs = Dict.empty(unicode_type,u8)
 
-    enum_data = Dict.empty(unicode_type,i8_arr)
+    kb_data.enum_data = Dict.empty(unicode_type,i8_arr)
 
-    consistency_listeners = Dict.empty(i8, two_str_set)
+    # kb_data.consistency_listeners = Dict.empty(i8, two_str_set)
 
-    enum_consistency = Dict.empty(two_str,u1)
-    consistency_listener_counter = np.zeros(1,dtype=np.int64) 
-    consistency_listeners[0] = enum_consistency
-    consistency_listener_counter += 1
+    kb_data.enum_consistency = Dict.empty(two_str,u1)
+    # consistency_listener_counter = np.zeros(1,dtype=np.int64) 
+    # consistency_listeners[0] = enum_consistency
+    # consistency_listener_counter += 1
+    kb_data.subscribers = List.empty_list(BaseSubscriberType) #FUTURE: Replace w/ resolved type
     
-    unnamed_counter = np.zeros(1,dtype=np.int64)
-    kb_data = KnowledgeBaseData(facts, empty_f_id_stacks, empty_f_id_heads, names_to_idrecs,
-                            enum_data, enum_consistency, consistency_listeners,
-                             consistency_listener_counter, unnamed_counter, BaseFact()
-                             )
+    # kb_data.unnamed_counter = np.zeros(1,dtype=np.int64)
+    kb_data.NULL_FACT = BaseFact()
+    # kb_data = KnowledgeBaseData(facts, empty_f_id_stacks, empty_f_id_heads, names_to_idrecs,
+    #                         enum_data, enum_consistency, subscribers,
+    #                         unnamed_counter, BaseFact() #Empty BaseFact is NULL_FACT
+    #                          )
     L = max(len(context_data.attr_inds_by_type),1)
     expand_kb_data_types(kb_data,L)
     return kb_data
@@ -123,7 +130,6 @@ def remove_consistency_map(kb_data, index):
 
 class KnowledgeBase(structref.StructRefProxy):
     ''' '''
-    # class KnowledgeBaseData(structref.StructRefProxy):
     def __new__(cls, context=None):
         context_data = KnowledgeBaseContext.get_context(context).context_data
         kb_data = init_kb_data(context_data)
@@ -133,6 +139,9 @@ class KnowledgeBase(structref.StructRefProxy):
         self.context_data = context_data
         return self
     
+    def add_subscriber(self,subscriber):
+        return add_subscriber(self,subscriber)
+
     def declare(self,fact,name=None):
         return declare(self,fact,name)
 
@@ -219,22 +228,45 @@ def name_to_idrec(kb,name):
         raise KeyError("Fact not found.")
     return names_to_idrecs[name]
 
+##### add_subscriber #####
+
+@njit(cache=True)
+def add_subscriber(kb, subscriber):
+    l = len(kb.kb_data.subscribers)
+    kb.kb_data.subscribers.append(subscriber)
+    return l
+
+##### subscriber signalling ####
+
+@njit(cache=True)
+def signal_subscribers_grow(kb, idrec):
+    for sub in kb.kb_data.subscribers:
+        sub.grow_queue.append(idrec)
+
+@njit(cache=True)
+def signal_subscribers_change(kb, idrec):
+    for sub in kb.kb_data.subscribers:
+        sub.change_queue.append(idrec)
+
 
 ##### declare #####
 
 @njit(cache=True)
 def declare_fact(kb,fact):
     t_id = resolve_t_id(kb,fact)
-    # print("TID", t_id)
     f_id = next_empty_f_id(kb.kb_data,t_id)
     b_fact = cast_fact(BaseFactType,fact)
-    # meminfo = _meminfo_from_struct(fact)
     facts = kb.kb_data.facts[t_id]
+
+    idrec = encode_idrec(t_id,f_id,0)
+
     if(f_id < len(facts)):
         facts[f_id] = b_fact
+        signal_subscribers_change(kb, idrec)
     else:
         facts.append(b_fact)
-    idrec = encode_idrec(t_id,f_id,0)
+        signal_subscribers_grow(kb, idrec)
+    
     
     b_fact.idrec = idrec
     return idrec
@@ -259,6 +291,7 @@ def declare(kb,fact,name):
 def retract_by_idrec(kb,idrec):
     t_id, f_id, a_id = decode_idrec(idrec)
     make_f_id_empty(kb.kb_data,i8(t_id), i8(f_id))
+    signal_subscribers_change(kb, idrec)
 
 @njit(cache=True)
 def retract_by_name(kb,name):
@@ -275,6 +308,7 @@ def retract(kb,identifier):
 @njit(cache=True)
 def _modify(fact,attr,val):
     lower_setattr(fact,literally(attr),val)
+    #TODO signal_subscribers w/ idrec w/ attr_ind
 
 @njit(cache=True)
 def modify(kb,fact,attr,val):
@@ -294,6 +328,15 @@ def all_facts_of_type(kb,typ):
 
 #### KnowledgeBase Overloading #####
 
+@overload_method(KnowledgeBaseTypeTemplate, "add_subscriber")
+def kb_declare(self, subscriber):
+    if(not isinstance(subscriber,types.StructRef)): 
+        raise TypingError(f"Cannot add subscriber of type '{type(fact)}'.")
+    def impl(self, subscriber):
+        return add_subscriber(self,subscriber)
+    return impl
+
+
 @overload_method(KnowledgeBaseTypeTemplate, "declare")
 def kb_declare(self, fact, name=None):
     if(not isinstance(fact,types.StructRef)): 
@@ -311,9 +354,9 @@ def kb_retract(self, identifier):
     if(identifier in (str,unicode_type)):
         def impl(self, identifier):
             return retract_by_name(self,identifier)
-    elif(identifier == int):
+    elif(isinstance(identifier,types.Integer)):
         def impl(self, identifier):
-            return retract_by_idrec(self,identifier)
+            return retract_by_idrec(self,u8(identifier))
     elif(isinstance(identifier,types.StructRef)):
         def impl(self, identifier):
             return retract_by_idrec(self,identifier.idrec)
@@ -336,46 +379,3 @@ def kb_all_facts_of_type(self, typ):
         return all_facts_of_type(self,typ)
 
     return impl
-
-
-
-
-# @overload_method(TypeRef, 'empty')
-# def typeddict_empty(cls, key_type, value_type):
-#     if cls.instance_type is not DictType:
-#         return
-
-#     def impl(cls, key_type, value_type):
-#         return dictobject.new_dict(key_type, value_type)
-
-#     return impl
-
-
-
-
-
-
-#######Pseudo Code for KB#######
-
-'''
-#Note all fact types are going to need idrec
-#Context will need typ name->id map
-
-
-
-class KB
-   init()
-      self.fact_meminfos = List(List(meminfos)), by t_id f_id -> 
-      self.empty_f_ids_queue = List(List(i8)) t_id, f_id -> 
-      self.names_to_idrecs = Dict()
-
-      self.consistency_listeners 
-      self.consistency_counter
-      self.enum
-
-
-   
-'''
-         
-
-

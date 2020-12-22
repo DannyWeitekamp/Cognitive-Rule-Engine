@@ -20,9 +20,10 @@ def gen_structref_code(typ,fields,
     extra_imports="from numba.experimental import structref",
     register_decorator="@structref.register"
     ):
-    getters = "\n".join([_gen_getter(typ,attr) for attr,t in fields])
-    getter_jits = "\n".join([_gen_getter_jit(typ,attr) for attr,t in fields])
-    attr_list = ",".join(["'%s'"%attr for attr,t in fields])
+    attrs = [x[0] if isinstance(x,tuple) else x for x in fields]
+    getters = "\n".join([_gen_getter(typ,attr) for attr in attrs])
+    getter_jits = "\n".join([_gen_getter_jit(typ,attr) for attr in attrs])
+    attr_list = ",".join(["'%s'"%attr for attr in attrs])
     code = \
 f'''
 from numba.core import types
@@ -55,15 +56,18 @@ structref.define_proxy({typ}, {typ}TypeTemplate, [{attr_list}])
 #     print(l[f"{typ}TypeTemplate"])
 #     return l[f"{typ}TypeTemplate"](fields=fields)
 
-
-def define_structref(name, fields):
+def define_structref_template(name, fields):
+    if(isinstance(fields,dict)): [(k,v) for k,v in fields.items()]
     hash_code = unique_hash([name,fields])
     if(not source_in_cache(name,hash_code)):
         source = gen_structref_code(name,fields)
         source_to_cache(name,hash_code,source)
         
     ctor, template = import_from_cached(name,hash_code,[name,f"{name}TypeTemplate"]).values()
+    return ctor,template
 
+def define_structref(name, fields):
+    ctor, template = define_structref_template(name,fields)
     fact_type = template(fields=fields)
     return ctor, fact_type
 

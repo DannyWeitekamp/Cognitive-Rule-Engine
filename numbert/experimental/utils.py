@@ -1,8 +1,23 @@
-from numba import types
+from numba import types, njit, u1,u2,u4,u8
+from numba.types import Tuple
 from numba.experimental.structref import _Utils, imputils
 from numba.extending import intrinsic
 from numba.core import cgutils
 
+
+#### idrec encoding ####
+
+@njit(Tuple([u2,u8,u1])(u8),cache=True)
+def decode_idrec(idrec):
+    t_id = idrec >> 48
+    f_id = (idrec >> 8) & 0x000FFFFF
+    a_id = idrec & 0xF
+    return (t_id, f_id, a_id)
+
+
+@njit(u8(u2,u8,u1),cache=True)
+def encode_idrec(t_id, f_id, a_id):
+    return (t_id << 48) | (f_id << 8) | a_id
 
 meminfo_type = types.MemInfoPointer(types.voidptr)
 
@@ -30,6 +45,26 @@ def lower_setattr(typingctx, inst_type, attr_type, val_type):
             # write new
             setattr(dataval, attr, casted)
         sig = types.void(inst_type, types.literal(attr), val_type)
+        return sig, codegen
+
+
+@intrinsic
+def lower_getattr(typingctx, inst_type, attr_type):
+    if (isinstance(attr_type, types.Literal) and 
+        isinstance(inst_type, types.StructRef)):
+        
+        attr = attr_type.literal_value
+        fieldtype = inst_type.field_dict[attr]
+        def codegen(context, builder, sig, args):
+            [instance, attr_v] = args
+
+            utils = _Utils(context, builder, inst_type)
+            dataval = utils.get_data_struct(instance)
+            ret = getattr(dataval, attr)
+            return imputils.impl_ret_borrowed(context, builder, fieldtype, ret)
+
+
+        sig = fieldtype(inst_type, types.literal(attr))
         return sig, codegen
 
 

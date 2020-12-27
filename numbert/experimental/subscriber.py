@@ -15,7 +15,7 @@ meminfo_type = types.MemInfoPointer(types.voidptr)
 
 base_subscriber_fields = [
     #Meminfo for the knowledgebase to which this subscribes
-    ("kb", meminfo_type),
+    ("kb_meminfo", types.optional(meminfo_type)),
     #upstream BaseSubscribers' meminfos that need to be updated before this can be.
     ("upstream", ListType(meminfo_type)), 
     #The subscribers immediately downstream of this one.
@@ -27,14 +27,16 @@ base_subscriber_fields = [
     ("grow_queue", ListType(u8)),
     #An update function that updates state of the subscriber and pushes changes to all children.
     ("update_func", types.FunctionType(void(meminfo_type))), 
+    # #The t_id corresponding to the type to which this subscriber subscribes
+    # ("t_id", i8)
     #
 ]
 
 BaseSubscriber, BaseSubscriberType = define_structref("BaseSubscriber", base_subscriber_fields)
 
 @njit(cache=True)
-def init_base_subscriber(bs,kb):
-    bs.kb = _meminfo_from_struct(kb)
+def init_base_subscriber(bs):
+    bs.kb_meminfo = None#_meminfo_from_struct(kb)
     bs.upstream = List.empty_list(meminfo_type)
     bs.children = List.empty_list(meminfo_type)
     bs.change_queue = List.empty_list(u8)
@@ -46,6 +48,8 @@ def link_downstream(parent, child):
     child_meminfo = _meminfo_from_struct(child)
     parent_meminfo = _meminfo_from_struct(parent)
 
+    child.kb_meminfo = parent.kb_meminfo
+
     parent.children.append(child_meminfo)
     upstream = parent.upstream.copy()
     upstream.append(parent_meminfo)
@@ -56,6 +60,8 @@ def link_downstream(parent, child):
 def link_downstream_of_kb(kb, child):
     child_meminfo = _meminfo_from_struct(child)
     kb_meminfo = _meminfo_from_struct(kb)
+
+    child.kb_meminfo = kb_meminfo
 
     parent.children.append(child_meminfo)
     upstream = parent.upstream.copy()

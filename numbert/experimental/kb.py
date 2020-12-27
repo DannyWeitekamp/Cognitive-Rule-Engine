@@ -31,7 +31,7 @@ from numbert.experimental.transform import infer_type
 from numbert.experimental.subscriber import BaseSubscriberType
 from numbert.experimental.structref import define_structref
 from numbert.experimental.fact import BaseFact,BaseFactType, cast_fact
-from numbert.experimental.utils import lower_setattr
+from numbert.experimental.utils import lower_setattr, _cast_structref, _meminfo_from_struct, decode_idrec, encode_idrec
 from numbert.caching import import_from_cached, source_in_cache, source_to_cache
 
    
@@ -167,19 +167,7 @@ KnowledgeBaseType = KnowledgeBaseTypeTemplate(fields=[
     ("context_data" , KnowledgeBaseContextDataType)])
 
 
-#### idrec encoding ####
 
-@njit(Tuple([u2,u8,u1])(u8),cache=True)
-def decode_idrec(idrec):
-    t_id = idrec >> 48
-    f_id = (idrec >> 8) & 0x000FFFFF
-    a_id = idrec & 0xF
-    return (t_id, f_id, a_id)
-
-
-@njit(u8(u2,u8,u1),cache=True)
-def encode_idrec(t_id, f_id, a_id):
-    return (t_id << 48) | (f_id << 8) | a_id
 
 #### Helper Functions ####
 
@@ -203,7 +191,7 @@ def next_empty_f_id(kb_data,t_id):
     es_s = kb_data.empty_f_id_stacks[t_id]
     es_h = kb_data.empty_f_id_heads[t_id]
     if(es_h <= 0):
-        return len(kb_data.facts[t_id])# a fresh f_id
+        return len(kb_data.facts[t_id]) # a fresh f_id
 
     kb_data.empty_f_id_heads[t_id] = es_h = es_h - 1
     return es_s[es_h] # a recycled f_id
@@ -233,7 +221,13 @@ def name_to_idrec(kb,name):
 @njit(cache=True)
 def add_subscriber(kb, subscriber):
     l = len(kb.kb_data.subscribers)
-    kb.kb_data.subscribers.append(subscriber)
+    base_subscriber = _cast_structref(BaseSubscriberType,subscriber)
+    kb.kb_data.subscribers.append(base_subscriber)
+    if(subscriber.kb_meminfo is None):
+        subscriber.kb_meminfo = _meminfo_from_struct(kb)
+    else:
+        raise RuntimeError("Subscriber can only be linked to one KnowledgeBase.")
+
     return l
 
 ##### subscriber signalling ####
@@ -259,6 +253,7 @@ def declare_fact(kb,fact):
     facts = kb.kb_data.facts[t_id]
 
     idrec = encode_idrec(t_id,f_id,0)
+    b_fact.idrec = idrec
 
     if(f_id < len(facts)):
         facts[f_id] = b_fact
@@ -267,8 +262,6 @@ def declare_fact(kb,fact):
         facts.append(b_fact)
         signal_subscribers_grow(kb, idrec)
     
-    
-    b_fact.idrec = idrec
     return idrec
 
 @njit(cache=True)
@@ -306,8 +299,16 @@ def retract(kb,identifier):
 ##### modify #####
 
 @njit(cache=True)
-def _modify(fact,attr,val):
+def modify_by_fact(kb,fact,attr,val):
     lower_setattr(fact,literally(attr),val)
+    #TODO signal_subscribers w/ idrec w/ attr_ind
+    signal_subscribers_change(kb, fact.idrec)
+
+@njit(cache=True)
+def modify_by_idrec(kb,fact,attr,val):
+
+    raise NotImplemented()
+    #lower_setattr(fact,literally(attr),val)
     #TODO signal_subscribers w/ idrec w/ attr_ind
 
 @njit(cache=True)
@@ -370,7 +371,7 @@ def kb_modify(self, fact, attr, val):
     if(not isinstance(fact,types.StructRef)): 
         raise TypingError(f"Modify requires a fact instance, got instance of'{type(fact)}'.")
     def impl(self, fact, attr, val):
-        return _modify(fact, attr, val)
+        return modify_by_fact(self, fact, attr, val)
     return impl
 
 @overload_method(KnowledgeBaseTypeTemplate, "all_facts_of_type")

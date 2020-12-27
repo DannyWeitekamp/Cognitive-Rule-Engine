@@ -139,7 +139,6 @@ def test_declare_overloading():
     assert idrec1 != idrec2
 
 
-
 ##### test_retract_keyerror #####
 
 @njit(cache=True)
@@ -183,16 +182,16 @@ def test_all_facts_of_type():
 
 
 @njit(cache=True)
-def dummy_subscriber_ctor(kb_meminfo):
+def dummy_subscriber_ctor():
     st = new(BaseSubscriberType)
-    init_base_subscriber(st,_struct_from_meminfo(KnowledgeBaseType,kb_meminfo) )
+    init_base_subscriber(st)
 
     return st
 
 def test_subscriber():
     #NRT version
     kb = KnowledgeBase()
-    dummy_subscriber = dummy_subscriber_ctor(kb._meminfo) 
+    dummy_subscriber = dummy_subscriber_ctor() 
     kb.add_subscriber(dummy_subscriber)
 
     idrec = declare_unnamed(kb)
@@ -205,7 +204,37 @@ def test_subscriber():
 
 
 
-    
+###################### BENCHMARKS ########################
+
+
+
+
+#### b_encode_idrec ####
+
+def gen_rand_nums():
+    return (np.random.randint(1000,size=(10000,3)),), {}
+
+@njit(cache=True)
+def _b_encode_idrec(rand_nums):
+    for x in rand_nums:
+        encode_idrec(x[0],x[1],x[2])
+
+def test_b_encode_idrec(benchmark):
+    benchmark.pedantic(_b_encode_idrec,setup=gen_rand_nums, warmup_rounds=1)
+
+
+#### b_decode_idrec ####
+
+def gen_rand_idrecs():
+    return (np.random.randint(0xFFFFFFFF,size=(10000,)),), {}
+
+@njit(cache=True)
+def _b_decode_idrec(rand_idrecs):
+    for x in rand_idrecs:
+        decode_idrec(x)
+
+def test_b_decode_idrec(benchmark):
+    benchmark.pedantic(_b_decode_idrec,setup=gen_rand_idrecs, warmup_rounds=1)
 
 
 

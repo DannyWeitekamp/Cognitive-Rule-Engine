@@ -4,9 +4,10 @@ from numba.typed import List
 from numba.types import ListType, unicode_type, void
 from numba.experimental.structref import new
 from numba.extending import overload_method, intrinsic
+from numbert.experimental.context import kb_context
 from numbert.experimental.structref import define_structref, define_structref_template
 from numbert.experimental.kb import KnowledgeBaseType, KnowledgeBase
-from numbert.experimental.fact import define_fact
+from numbert.experimental.fact import define_fact, BaseFactType
 from numbert.experimental.utils import _struct_from_meminfo, _meminfo_from_struct, _cast_structref, decode_idrec, lower_getattr
 from numbert.experimental.subscriber import base_subscriber_fields, BaseSubscriber, BaseSubscriberType, init_base_subscriber, link_downstream
 from copy import copy
@@ -65,9 +66,11 @@ def resolve_predicate_op(op):
 predicate_node_field_dict = {
     "truth_values" : u1[:],
     "ndim" : u1,
+    "t_id" : i8,
     "left_type" : types.Any,
     "left_attr" : types.Any,
     "op_str" : types.Any,
+
     "right_type" : types.Any,
     "right_attr" : types.Any,
     "right_val" : types.Any,
@@ -78,6 +81,10 @@ PredicateNode, PredicateNodeTemplate = define_structref_template("PredicateNode"
 
 
 def define_alpha_predicate_node(typ, attr, op, literal_val):
+    context = kb_context()    
+    t_id = context.fact_to_t_id[typ._fact_name]
+
+
     field_dict = copy(predicate_node_field_dict)
     field_dict["left_type"] = types.TypeRef(typ)
     field_dict["left_attr"] = types.literal(attr)
@@ -89,8 +96,8 @@ def define_alpha_predicate_node(typ, attr, op, literal_val):
     pnode_type = PredicateNodeTemplate(fields=fields)
 
     @njit(cache=True)
-    def eval_truth(kb,t_id,f_id):
-        inst = _cast_structref(typ, kb.kb_data.facts[i8(t_id)][i8(f_id)])
+    def eval_truth(kb,facts,f_id):
+        inst = _cast_structref(typ, facts[i8(f_id)])
         if(inst.idrec != u8(-1)):
             val = lower_getattr(inst, attr)
             return exec_op(op,val,literal_val)
@@ -117,10 +124,13 @@ def define_alpha_predicate_node(typ, attr, op, literal_val):
         else:
             new_truth_values = pred_node.truth_values
 
+        facts = kb.kb_data.facts[i8(pred_node.t_id)]
+
         if(len(pred_node.grow_queue) > 0):
             for idrec in pred_node.grow_queue:
-                t_id,f_id,_ = decode_idrec(idrec)
-                new_truth_values[f_id] = eval_truth(kb,t_id,f_id)
+                t_id, f_id,_ = decode_idrec(idrec)
+                truth = eval_truth(kb,facts,f_id)
+                new_truth_values[f_id] = truth
 
                 for child_meminfo in pred_node.children:
                     child = _struct_from_meminfo(BaseSubscriberType,child_meminfo)
@@ -130,8 +140,8 @@ def define_alpha_predicate_node(typ, attr, op, literal_val):
 
         if(len(pred_node.change_queue) > 0):
             for idrec in pred_node.change_queue:
-                t_id,f_id,_ = decode_idrec(idrec)
-                truth = eval_truth(kb,t_id,f_id)
+                t_id, f_id,_ = decode_idrec(idrec)
+                truth = eval_truth(kb,facts,f_id)
                 new_truth_values[f_id] = truth
                 if(truth != pred_node.truth_values[f_id]):
                     for child_meminfo in pred_node.children:
@@ -149,6 +159,7 @@ def define_alpha_predicate_node(typ, attr, op, literal_val):
 
         st.truth_values = np.empty((0,),dtype=np.uint8)
         st.ndim = 1
+        st.t_id = t_id
         st.left_type = typ
         st.left_attr = attr
         st.op_str = op

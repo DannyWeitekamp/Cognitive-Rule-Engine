@@ -34,6 +34,8 @@ from numbert.experimental.fact import BaseFact,BaseFactType, cast_fact
 from numbert.experimental.utils import lower_setattr, _cast_structref, _meminfo_from_struct, decode_idrec, encode_idrec
 from numbert.caching import import_from_cached, source_in_cache, source_to_cache
 
+BASE_T_ID_STACK_SIZE = 16
+BASE_F_ID_STACK_SIZE = 64
    
 #### KB Data Definition ####
 
@@ -45,13 +47,14 @@ two_str_set = DictType(two_str,u1)
 
 meminfo_type = types.MemInfoPointer(types.voidptr)
 basefact_list = ListType(BaseFactType)
-i8_list = ListType(i8)
+i8_arr = i8[:]
 
 
 kb_data_fields = [
     ("facts" , ListType(basefact_list)),
-    ("empty_f_id_stacks" , ListType(i8_list)),
-    ("empty_f_id_heads" , ListType(i8)),
+    ("empty_f_id_stacks" , ListType(i8[:])),
+    ("empty_f_id_heads" , i8[:]),
+    ("n_types" , i8),
     ("names_to_idrecs" , DictType(unicode_type,u8)),
 
     ("enum_data" , DictType(unicode_type,i8_arr)),
@@ -69,17 +72,30 @@ KnowledgeBaseData, KnowledgeBaseDataType = define_structref("KnowledgeBaseData",
 
 @njit(cache=True)
 def expand_kb_data_types(kb_data,n):
+    old_n = kb_data.n_types
+    kb_data.n_types += n
+
+    #If the head buffer is too small double it
+    if(kb_data.n_types > len(kb_data.empty_f_id_heads)):
+        temp = kb_data.empty_f_id_heads
+        kb_data.empty_f_id_heads = np.empty((len(temp)*2,),dtype=np.int64)
+        kb_data.empty_f_id_heads[:len(temp)] = temp
+        kb_data.empty_f_id_heads[len(temp):] = 0
+
     for i in range(n):
         kb_data.facts.append(List.empty_list(BaseFactType))
-        kb_data.empty_f_id_stacks.append(List.empty_list(i8))
-        kb_data.empty_f_id_heads.append(0)
+        kb_data.empty_f_id_stacks.append(np.empty((BASE_F_ID_STACK_SIZE,),dtype=np.int64))
+
+    # print("EXPAND!",kb_data.empty_f_id_heads,kb_data.empty_f_id_stacks)
+        
 
 @njit(cache=True)
 def init_kb_data(context_data):
     kb_data = new(KnowledgeBaseDataType)
     kb_data.facts = List.empty_list(basefact_list)
-    kb_data.empty_f_id_stacks = List.empty_list(i8_list)
-    kb_data.empty_f_id_heads = List.empty_list(i8)
+    kb_data.empty_f_id_stacks = List.empty_list(i8_arr)
+    kb_data.empty_f_id_heads = np.zeros((BASE_T_ID_STACK_SIZE,),dtype=np.int64)
+    kb_data.n_types = 0
     
 
     kb_data.names_to_idrecs = Dict.empty(unicode_type,u8)
@@ -176,22 +192,27 @@ def make_f_id_empty(kb_data, t_id, f_id):
     '''Adds adds tracking info for an empty f_id for when a fact is retracted'''
     es_s = kb_data.empty_f_id_stacks[t_id]
     es_h = kb_data.empty_f_id_heads[t_id]
-    if(es_h < len(es_s)):
-        es_s[es_h] = f_id
-    else:
-        es_s.append(f_id)
+
+    #If too small double the size of the f_id stack for this t_id
+    if(es_h >= len(es_s)):
+        # print("GROW!",len(es_s),"->", len(es_s)*2)
+        n_es_s = kb_data.empty_f_id_stacks[t_id] = np.empty((len(es_s)*2,),dtype=np.int64)
+        n_es_s[:len(es_s)] = es_s
+        es_s = n_es_s 
+
+    es_s[es_h] = f_id
     kb_data.empty_f_id_heads[t_id] += 1
     kb_data.facts[t_id][f_id] = kb_data.NULL_FACT
 
 
 @njit(cache=True)
-def next_empty_f_id(kb_data,t_id):
+def next_empty_f_id(kb_data,facts,t_id):
     '''Gets the next dead f_id from retracting facts otherwise returns 
         a fresh one pointing to the end of the meminfo list'''
     es_s = kb_data.empty_f_id_stacks[t_id]
     es_h = kb_data.empty_f_id_heads[t_id]
     if(es_h <= 0):
-        return len(kb_data.facts[t_id]) # a fresh f_id
+        return len(facts) # a fresh f_id
 
     kb_data.empty_f_id_heads[t_id] = es_h = es_h - 1
     return es_s[es_h] # a recycled f_id
@@ -247,15 +268,16 @@ def signal_subscribers_change(kb, idrec):
 
 @njit(cache=True)
 def declare_fact(kb,fact):
-    t_id = resolve_t_id(kb,fact)
-    f_id = next_empty_f_id(kb.kb_data,t_id)
-    b_fact = cast_fact(BaseFactType,fact)
-    facts = kb.kb_data.facts[t_id]
+    t_id = resolve_t_id(kb,fact) #2.2ms / 10000
+    facts = kb.kb_data.facts[t_id] # .45ms / 10000
+    f_id = next_empty_f_id(kb.kb_data,facts,t_id) # 1.6ms / 10000
+    b_fact = cast_fact(BaseFactType,fact) #negligable
+    
 
-    idrec = encode_idrec(t_id,f_id,0)
-    b_fact.idrec = idrec
+    idrec = encode_idrec(t_id,f_id,0) #negligable
+    b_fact.idrec = idrec #negligable
 
-    if(f_id < len(facts)):
+    if(f_id < len(facts)): # .6ms / 10000
         facts[f_id] = b_fact
         signal_subscribers_change(kb, idrec)
     else:
@@ -263,6 +285,7 @@ def declare_fact(kb,fact):
         signal_subscribers_grow(kb, idrec)
     
     return idrec
+    # return 0
 
 @njit(cache=True)
 def declare_name(kb,name,idrec):
@@ -282,9 +305,9 @@ def declare(kb,fact,name):
 
 @njit(cache=True)
 def retract_by_idrec(kb,idrec):
-    t_id, f_id, a_id = decode_idrec(idrec)
-    make_f_id_empty(kb.kb_data,i8(t_id), i8(f_id))
-    signal_subscribers_change(kb, idrec)
+    t_id, f_id, a_id = decode_idrec(idrec) #negligible
+    make_f_id_empty(kb.kb_data,i8(t_id), i8(f_id)) #3.6ms
+    signal_subscribers_change(kb, idrec) #.8ms
 
 @njit(cache=True)
 def retract_by_name(kb,name):

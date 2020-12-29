@@ -268,6 +268,8 @@ def _fact_from_fields(name, fields, context=None):
         source_to_cache(name, hash_code, source)
         
     fact_ctor, fact_type = import_from_cached(name, hash_code,[name,name+"Type"]).values()
+    fact_ctor._hash_code = hash_code
+    fact_type._hash_code = hash_code
     # fact_type = fact_type_template(fields=fields)
     # print("fact_type",fact_type)
 

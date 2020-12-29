@@ -32,8 +32,9 @@ from numba import njit
 {getter_jits}
 {register_decorator}
 class {typ}TypeTemplate(types.StructRef):
-    def preprocess_fields(self, fields):
-        return tuple((name, types.unliteral(typ)) for name, typ in fields)
+    pass
+    # def preprocess_fields(self, fields):
+    #     return tuple((name, types.unliteral(typ)) for name, typ in fields)
 
 class {typ}(structref.StructRefProxy):
     def __new__(cls, *args):
@@ -64,12 +65,14 @@ def define_structref_template(name, fields):
         source_to_cache(name,hash_code,source)
         
     ctor, template = import_from_cached(name,hash_code,[name,f"{name}TypeTemplate"]).values()
+    ctor._hash_code = hash_code
     return ctor,template
 
 def define_structref(name, fields):
     ctor, template = define_structref_template(name,fields)
-    fact_type = template(fields=fields)
-    return ctor, fact_type
+    struct_type = template(fields=fields)
+    struct_type._hash_code = ctor._hash_code
+    return ctor, struct_type
 
 
 # print(DictType(i8,i8))

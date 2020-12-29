@@ -268,9 +268,9 @@ def signal_subscribers_change(kb, idrec):
 
 @njit(cache=True)
 def declare_fact(kb,fact):
-    t_id = resolve_t_id(kb,fact) #2.2ms / 10000
-    facts = kb.kb_data.facts[t_id] # .45ms / 10000
-    f_id = next_empty_f_id(kb.kb_data,facts,t_id) # 1.6ms / 10000
+    t_id = resolve_t_id(kb,fact) #1.1ms / 10000
+    facts = kb.kb_data.facts[t_id] # .5ms / 10000
+    f_id = next_empty_f_id(kb.kb_data,facts,t_id) # .8ms / 10000
     b_fact = cast_fact(BaseFactType,fact) #negligable
     
 

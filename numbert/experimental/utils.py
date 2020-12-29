@@ -124,3 +124,47 @@ def _cast_structref(typingctx, cast_type_ref, inst_type):
         return st._getvalue()
     sig = cast_type(cast_type_ref, inst_type)
     return sig, codegen
+
+
+@intrinsic
+def _struct_from_pointer(typingctx, struct_type, raw_ptr):
+    inst_type = struct_type.instance_type
+
+    def codegen(context, builder, sig, args):
+        _, raw_ptr = args
+        _, raw_ptr_ty = sig.args
+
+        meminfo = builder.inttoptr(raw_ptr, cgutils.voidptr_t)
+
+        st = cgutils.create_struct_proxy(inst_type)(context, builder)
+        st.meminfo = meminfo
+        #NOTE: Fixes sefault but not sure about it's lifecycle (i.e. watch out for memleaks)
+        # context.nrt.incref(builder, types.MemInfoPointer(types.voidptr), meminfo)
+
+        return st._getvalue()
+
+    sig = inst_type(struct_type, raw_ptr)
+    return sig, codegen
+
+@intrinsic
+def _pointer_from_struct(typingctx, val):
+    def codegen(context, builder, sig, args):
+        [td] = sig.args
+        [d] = args
+
+        model = context.data_model_manager[td.get_data_type()]
+        alloc_type = model.get_value_type()
+
+        ctor = cgutils.create_struct_proxy(td)
+        dstruct = ctor(context, builder, value=d)
+        meminfo = dstruct.meminfo
+
+        #NOTE: Fixes sefault but not sure about it's lifecycle (i.e. watch out for memleaks)
+        context.nrt.incref(builder, types.MemInfoPointer(types.voidptr), meminfo)
+
+        res = builder.ptrtoint(dstruct.meminfo, cgutils.intp_t)
+
+        return res
+        
+    sig = i8(val,)
+    return sig, codegen

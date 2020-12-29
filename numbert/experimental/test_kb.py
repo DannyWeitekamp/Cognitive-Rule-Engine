@@ -236,6 +236,48 @@ def _b_decode_idrec(rand_idrecs):
 def test_b_decode_idrec(benchmark):
     benchmark.pedantic(_b_decode_idrec,setup=gen_rand_idrecs, warmup_rounds=1)
 
+#### helper funcs #####
+
+with kb_context("test_kb"):
+    BOOP, BOOPType = define_fact("BOOP",{"A": "string", "B" : "number"})
+
+
+def _benchmark_setup():
+    with kb_context("test_kb"):
+        kb = KnowledgeBase()
+    return (kb,), {}
+
+#### declare_10000 ####
+
+
+
+@njit(cache=True)
+def _delcare_10000(kb):
+    out = np.empty((10000,),dtype=np.uint64)
+    for i in range(10000):
+        out[i] = kb.declare(BOOP("?",i))
+    return out
+
+def test_b_declare10000(benchmark):
+    benchmark.pedantic(_delcare_10000,setup=_benchmark_setup, warmup_rounds=1)
+
+#### retract_10000 ####
+
+def _retract_setup():
+    (kb,),_ = _benchmark_setup()
+    idrecs = _delcare_10000(kb)
+    return (kb,idrecs), {}
+
+@njit(cache=True)
+def _retract_10000(kb,idrecs):
+    for idrec in idrecs:
+        kb.retract(idrec)
+
+def test_b_retract10000(benchmark):
+    benchmark.pedantic(_retract_10000,setup=_retract_setup, warmup_rounds=1)
+
+
+
 
 
 

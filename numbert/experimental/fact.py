@@ -9,20 +9,23 @@ from numba.core.extending import (
     lower_getattr_generic,
     lower_setattr_generic,
     overload_method,
-    intrinsic
+    intrinsic,
+    overload
 )
 from numba.core.datamodel import default_manager, models
 from numba.core.typing.templates import AttributeTemplate
 from numba.core import types, cgutils
+# from numba.core.extending import overload
 
 from numbert.utils import cache_safe_exec
 from numbert.core import TYPE_ALIASES, REGISTERED_TYPES, JITSTRUCTS, py_type_map, numba_type_map, numpy_type_map
 from numbert.gensource import assert_gen_source
-from numbert.caching import unique_hash, source_to_cache, import_from_cached, source_in_cache
+from numbert.caching import unique_hash, source_to_cache, import_from_cached, source_in_cache, get_cache_path
 from numbert.experimental.structref import gen_structref_code, define_structref
 from numbert.experimental.context import kb_context
 from numbert.experimental.utils import _cast_structref
 
+import numpy as np
 
 
 SPECIAL_ATTRIBUTES = ["inherit_from"]
@@ -130,7 +133,7 @@ class FactProxy:
 
 
 from .structref import _gen_getter, _gen_getter_jit
-def gen_fact_code(typ, fields, ind='    '):
+def gen_fact_code(typ, fields, fact_num, ind='    '):
     all_fields = base_fact_fields+fields
     getters = "\n".join([_gen_getter(typ,attr) for attr,t in all_fields])
     getter_jits = "\n".join([_gen_getter_jit(typ,attr) for attr,t in all_fields])
@@ -143,6 +146,8 @@ def gen_fact_code(typ, fields, ind='    '):
     init_fields = f'\n{ind}'.join([f"st.{k} = {k}" for k,v in fields])
 
     str_temp = ", ".join([f'{k}={{self.{k}}}' for k,v in fields])
+
+    # t_id = lines_in_fact_registry()
     # print("FEILD LIST", field_list)
     code = \
 f'''
@@ -162,6 +167,7 @@ class {typ}TypeTemplate(types.StructRef):
     def __init__(self,*args,**kwargs):
         super().__init__(*args,**kwargs)
         self._fact_name = '{typ}'
+        self._fact_num = {fact_num}
 
     def preprocess_fields(self, fields):
         return tuple((name, types.unliteral(typ)) for name, typ in fields)
@@ -172,6 +178,7 @@ class {typ}TypeTemplate(types.StructRef):
 def ctor({param_list}):
     st = new({typ}Type)
     st.idrec = -1
+    st.fact_num = {fact_num}
     {init_fields}
     return st
 
@@ -179,6 +186,7 @@ class {typ}(FactProxy):
     __numba_ctor = ctor
     _fact_type = {typ}Type
     _fact_name = '{typ}'
+    _fact_num = {fact_num}
 
     def __new__(cls, *args):
         return structref.StructRefProxy.__new__(cls, *args)
@@ -193,7 +201,6 @@ def _ctor(*args):
     def impl(*args):
         return ctor(*args)
     return impl
-
 
 define_boxing({typ}TypeTemplate,{typ})
 '''
@@ -235,7 +242,9 @@ def define_attributes(struct_typeclass):
 
         pyapi = context.get_python_api(builder)
 
-        if(attr != "idrec"):
+        # print("BBB", attr,[x[0] for x in base_fact_fields], attr in [x[0] for x in base_fact_fields])
+
+        if(attr not in [x[0] for x in base_fact_fields]):
             idrec = getattr(dataval, "idrec")
             idrec_set = builder.icmp_signed('!=', idrec, idrec.type(-1))
             with builder.if_then(idrec_set):
@@ -252,6 +261,22 @@ def define_attributes(struct_typeclass):
         setattr(dataval, attr, casted)
 
 
+def lines_in_fact_registry():
+    global GLOBAL_FACT_COUNT
+    if(GLOBAL_FACT_COUNT == -1):
+        try:
+            with open(get_cache_path("fact_registry"),'r') as f:
+                GLOBAL_FACT_COUNT = len([1 for line in f])
+        except FileNotFoundError:
+            GLOBAL_FACT_COUNT = 0
+    return GLOBAL_FACT_COUNT
+
+def add_to_fact_registry(name,hash_code):
+    global GLOBAL_FACT_COUNT
+    if(GLOBAL_FACT_COUNT == -1): lines_in_fact_registry()
+    with open(get_cache_path("fact_registry"),'a') as f:
+        f.write(f"{name} {hash_code} \n")
+    GLOBAL_FACT_COUNT += 1
 
 
 def _register_fact_structref(fact_type):
@@ -262,10 +287,13 @@ def _register_fact_structref(fact_type):
     return fact_type
 
 def _fact_from_fields(name, fields, context=None):
+    context = kb_context(context)
     hash_code = unique_hash([name,fields])
     if(not source_in_cache(name,hash_code)):
-        source = gen_fact_code(name,fields)
+        fact_num = lines_in_fact_registry()
+        source = gen_fact_code(name,fields,fact_num)
         source_to_cache(name, hash_code, source)
+        add_to_fact_registry(name, hash_code)
         
     fact_ctor, fact_type = import_from_cached(name, hash_code,[name,name+"Type"]).values()
     fact_ctor._hash_code = hash_code
@@ -313,6 +341,7 @@ def define_facts(specs, #: list[dict[str,dict]],
 
 base_fact_fields = [
     ("idrec", u8),
+    ("fact_num", i8)
     # ("kb", kb)
 ]
 

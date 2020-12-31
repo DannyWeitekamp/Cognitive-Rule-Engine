@@ -41,6 +41,7 @@ context_data_fields = [
     ("attr_inds_by_type" , DictType(unicode_type,Dict_Unicode_to_i8)),
     ("spec_flags" , DictType(unicode_type,Dict_Unicode_to_Flags)),
     ("fact_to_t_id" , DictType(unicode_type,i8)),
+    ("fact_num_to_t_id" , i8[:]),#DictType(i8,i8)),
 ]
 
 KnowledgeBaseContextData, KnowledgeBaseContextDataType = define_structref("KnowledgeBaseContextData",context_data_fields)
@@ -66,10 +67,18 @@ def new_kb_context():
     # nominal_maps = Dict.empty(unicode_type,u1[:])
     spec_flags = Dict.empty(unicode_type,Dict_Unicode_to_Flags)
     fact_to_t_id = Dict.empty(unicode_type,i8)
+    fact_num_to_t_id = np.empty(2,dtype=np.int64)#Dict.empty(i8,i8)
     return KnowledgeBaseContextData(string_enums, number_enums,
         string_backmap, number_backmap,
-        enum_counter, attr_inds_by_type, spec_flags, fact_to_t_id)
+        enum_counter, attr_inds_by_type, spec_flags, fact_to_t_id,
+        fact_num_to_t_id)
 
+@njit(cache=True)
+def grow_fact_num_to_t_id(cd, new_size):
+    new_fact_num_to_t_id = np.empty(new_size,dtype=np.int64)
+    new_fact_num_to_t_id[:len(cd.fact_num_to_t_id)] = cd.fact_num_to_t_id
+    cd.fact_num_to_t_id = new_fact_num_to_t_id
+    return new_fact_num_to_t_id
 
 class KnowledgeBaseContext(object):
     _contexts = {}
@@ -116,6 +125,7 @@ class KnowledgeBaseContext(object):
         self.attr_inds_by_type = cd.attr_inds_by_type
         self.spec_flags = cd.spec_flags
         self.fact_to_t_id = cd.fact_to_t_id
+        self.fact_num_to_t_id = cd.fact_num_to_t_id
 
         # for x in ["<#ANY>",'','?sel']:
         #   self.enumerize_value(x)
@@ -131,6 +141,11 @@ class KnowledgeBaseContext(object):
         #Map to t_ids
         t_id = len(self.fact_types)
         self.fact_to_t_id[name] = t_id 
+        if(fact_type._fact_num >= len(self.fact_num_to_t_id)):
+            self.fact_num_to_t_id = grow_fact_num_to_t_id(self.context_data, fact_type._fact_num*2)
+        self.fact_num_to_t_id[fact_type._fact_num] = t_id 
+        # fact_type._t_id = t_id
+
         # self.fact_to_t_id[fact_ctor] = t_id 
         # self.fact_to_t_id[fact_type] = t_id 
 

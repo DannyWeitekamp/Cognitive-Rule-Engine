@@ -1,4 +1,4 @@
-from numba import types, njit, u1,u2,u4,u8
+from numba import types, njit, u1,u2,u4,u8, i8
 from numba.types import Tuple
 from numba.experimental.structref import _Utils, imputils
 from numba.extending import intrinsic
@@ -139,7 +139,7 @@ def _struct_from_pointer(typingctx, struct_type, raw_ptr):
         st = cgutils.create_struct_proxy(inst_type)(context, builder)
         st.meminfo = meminfo
         #NOTE: Fixes sefault but not sure about it's lifecycle (i.e. watch out for memleaks)
-        # context.nrt.incref(builder, types.MemInfoPointer(types.voidptr), meminfo)
+        context.nrt.incref(builder, types.MemInfoPointer(types.voidptr), meminfo)
 
         return st._getvalue()
 
@@ -151,9 +151,6 @@ def _pointer_from_struct(typingctx, val):
     def codegen(context, builder, sig, args):
         [td] = sig.args
         [d] = args
-
-        model = context.data_model_manager[td.get_data_type()]
-        alloc_type = model.get_value_type()
 
         ctor = cgutils.create_struct_proxy(td)
         dstruct = ctor(context, builder, value=d)

@@ -172,14 +172,19 @@ def test_protected_mutability():
         def edit_it(b):
             b.B += 1
 
+        print("RUNTIME2")
+
         edit_it(b1)
         edit_it(b2)
         # edit_it.py_func(b2)
-
+        print("RUNTIME3")
         @njit
         def declare_it(kb,b,name):
             kb.declare(b,name)
+
+        print("RUNTIME3.1",b1.fact_num)
         declare_it(kb,b1,"b1")
+        print("RUNTIME3.2")
         declare_it.py_func(kb,b2,"b2")
 
         print("RUNTIMEz")

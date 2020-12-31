@@ -7,13 +7,13 @@ from numba.extending import overload_method, intrinsic
 from numbert.caching import gen_import_str, unique_hash,import_from_cached, source_to_cache, source_in_cache
 from numbert.experimental.context import kb_context
 from numbert.experimental.structref import define_structref, define_structref_template
-from numbert.experimental.kb import KnowledgeBaseType, KnowledgeBase
+from numbert.experimental.kb import KnowledgeBaseType, KnowledgeBase, facts_for_t_id, fact_at_f_id
 # <<<<<<< Updated upstream
 # from numbert.experimental.fact import define_fact, BaseFactType
 # =======
 from numbert.experimental.fact import define_fact, BaseFactType, cast_fact
 # >>>>>>> Stashed changes
-from numbert.experimental.utils import _struct_from_meminfo, _meminfo_from_struct, _cast_structref, decode_idrec, lower_getattr
+from numbert.experimental.utils import _struct_from_meminfo, _meminfo_from_struct, _cast_structref, decode_idrec, lower_getattr, _struct_from_pointer
 from numbert.experimental.subscriber import base_subscriber_fields, BaseSubscriber, BaseSubscriberType, init_base_subscriber, link_downstream
 from copy import copy
 
@@ -99,8 +99,12 @@ def init_alpha(st,t_id, op_str,literal_val):
 
 @njit(cache=True)
 def alpha_eval_truth(kb,facts,f_id, pred_node):
-    inst = _cast_structref(pred_node.left_type, facts[i8(f_id)])
-    if(inst.idrec != u8(-1)):
+    # fact_ptr = facts.data[i8(f_id)]
+    inst_ptr = facts.data[i8(f_id)]
+    # inst = fact_at_f_id(pred_node.left_type,facts,i8(f_id))
+    # inst = _cast_structref(pred_node.left_type, facts[i8(f_id)])
+    if(inst_ptr != 0):
+        inst = _struct_from_pointer(pred_node.left_type,inst_ptr)
         val = lower_getattr(inst, pred_node.left_attr)
         return exec_op(pred_node.op_str, val, pred_node.right_val)
     else:
@@ -125,7 +129,7 @@ def alpha_update(pred_meminfo,pnode_type):
     else:
         new_truth_values = pred_node.truth_values
 
-    facts = kb.kb_data.facts[i8(pred_node.left_t_id)]
+    facts = facts_for_t_id(kb.kb_data,i8(pred_node.left_t_id))
 
     if(len(pred_node.grow_queue) > 0):
         for idrec in pred_node.grow_queue:

@@ -1,6 +1,6 @@
 from numbert.experimental.context import kb_context
 from numbert.experimental.fact import define_fact
-from numbert.experimental.kb import KnowledgeBase, KnowledgeBaseType, decode_idrec, encode_idrec, next_empty_f_id, make_f_id_empty
+from numbert.experimental.kb import KnowledgeBase, KnowledgeBaseType, decode_idrec, encode_idrec, next_empty_f_id, make_f_id_empty, retracted_f_ids_for_t_id
 from numba import njit
 from numba.types import unicode_type, NamedTuple
 from numba.core.errors import TypingError
@@ -54,7 +54,7 @@ def declare_retract(kb):
 
     # print(kb.kb_data.empty_f_id_heads)
     t_id = kb.context_data.fact_to_t_id["TextField"]
-    return kb.kb_data.empty_f_id_heads[t_id]
+    return retracted_f_ids_for_t_id(kb.kb_data,t_id).head
 
 @njit(cache=True)
 def declare_again(kb):
@@ -64,7 +64,7 @@ def declare_again(kb):
 
 
     t_id = kb.context_data.fact_to_t_id["TextField"]
-    return kb.kb_data.empty_f_id_heads[t_id]
+    return retracted_f_ids_for_t_id(kb.kb_data,t_id).head#kb.kb_data.empty_f_id_heads[t_id]
 
 @njit(cache=True)
 def bad_declare_type(kb):
@@ -288,3 +288,4 @@ if __name__ == "__main__":
     test_declare_retract()
     test_retract_keyerror()
     test_subscriber()
+    test_all_facts_of_type()

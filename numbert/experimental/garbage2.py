@@ -11,6 +11,11 @@ import numpy as np
 spec1 = {"A" : "string", "B" : "number"}
 BOOP, BOOPType = define_fact("BOOP", spec1, context="test__merge_spec_inheritance")
 
+import timeit
+N=100
+def time_ms(f):
+    f() #warm start
+    return " %0.6f ms" % (1000.0*(timeit.timeit(f, number=N)/float(N)))
 
 
 @intrinsic
@@ -172,8 +177,8 @@ def gen_facts():
             for j in range(5):
                 b = BOOP("A",j)
                 fact_ptr_arr[j] = _pointer_from_struct(b)
-                c = _struct_from_pointer(BOOPType,fact_ptr_arr[j])
-                print(fact_ptr_arr[j], c.B)
+                # c = _struct_from_pointer(BOOPType,fact_ptr_arr[j])
+                # print(fact_ptr_arr[j], c.B)
                 # keep_around_list.append(c)
 
 
@@ -234,3 +239,69 @@ print("----------")
 
 
 doo()
+
+
+boop_list = types.ListType(BOOPType)
+@njit
+def setup_list():
+    facts = List.empty_list(boop_list)
+    for i in range(8):
+        facts.append(List.empty_list(BOOPType))
+    print(len(facts))
+
+    return facts
+
+list_facts = setup_list()
+
+@njit
+def declare_list(facts):
+    t_f = facts[1]
+    fact = BOOP("A",7)
+    for i in range(10000):
+        t_f.append(fact)
+
+def d_list():
+    declare_list(list_facts)
+
+
+@njit
+def setup_arr():
+    l = List()
+    facts = np.empty((8,2),dtype=np.int64)
+    for i in range(8):
+        fact_ptrs = np.empty(10000,dtype=np.int64)
+        facts[i] = _arr_to_data(fact_ptrs)
+        l.append(fact_ptrs)
+        # facts.append(List.empty_list(BOOPType))
+    # print(len(facts))
+
+    return facts
+
+@njit
+def dec_ij(facts,t_id,f_id, fact):
+    # print(_arr_from_data(facts[t_id]))
+     _arr_from_data(facts[t_id])[f_id] = _pointer_from_struct(fact)
+    # print("ptr",ptr)
+    # return _struct_from_pointer(BOOPType,ptr)
+
+
+@njit
+def declare_arr(facts):
+    fact = BOOP("A",7)
+    for i in range(10000):
+        # _arr_from_data(facts[1])[i] = _pointer_from_struct(fact)
+        dec_ij(facts,1,i,fact)
+
+
+arr_facts = setup_arr()
+
+def d_arr():
+    declare_arr(arr_facts)
+
+
+
+
+
+print("declare_list: ", time_ms(d_list)) 
+print("declare_arr: ", time_ms(d_arr)) 
+

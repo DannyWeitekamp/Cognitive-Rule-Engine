@@ -31,11 +31,13 @@ from numbert.experimental.transform import infer_type
 from numbert.experimental.subscriber import BaseSubscriberType
 from numbert.experimental.structref import define_structref
 from numbert.experimental.fact import BaseFact,BaseFactType, cast_fact
-from numbert.experimental.utils import lower_setattr, _cast_structref, _meminfo_from_struct, decode_idrec, encode_idrec
+from numbert.experimental.utils import lower_setattr, _cast_structref, _meminfo_from_struct, decode_idrec, encode_idrec, _pointer_from_struct, _struct_from_pointer
+from numbert.experimental.vector import new_vector, VectorType
 from numbert.caching import import_from_cached, source_in_cache, source_to_cache
 
 BASE_T_ID_STACK_SIZE = 16
 BASE_F_ID_STACK_SIZE = 64
+BASE_FACT_SET_SIZE = 64
    
 #### KB Data Definition ####
 
@@ -51,9 +53,11 @@ i8_arr = i8[:]
 
 
 kb_data_fields = [
-    ("facts" , ListType(basefact_list)),
-    ("empty_f_id_stacks" , ListType(i8[:])),
-    ("empty_f_id_heads" , i8[:]),
+    #Vector<*Vector<*BaseFact>> i.e. 2D vector that holds pointers to facts
+    ("facts" , VectorType), #<- will be arr of pointers to vectors
+    #Vector<*Vector<i8>> i.e. 2D vector that holds retracted f_ids
+    ("retracted_f_ids" , VectorType), 
+    # ("empty_f_id_heads" , i8[:]),
     ("n_types" , i8),
     ("names_to_idrecs" , DictType(unicode_type,u8)),
 
@@ -70,31 +74,41 @@ kb_data_fields = [
 KnowledgeBaseData, KnowledgeBaseDataType = define_structref("KnowledgeBaseData",kb_data_fields)
 
 
+# @njit(cache=True)
+# def 
+
+
 @njit(cache=True)
 def expand_kb_data_types(kb_data,n):
     old_n = kb_data.n_types
     kb_data.n_types += n
 
     #If the head buffer is too small double it
-    if(kb_data.n_types > len(kb_data.empty_f_id_heads)):
-        temp = kb_data.empty_f_id_heads
-        kb_data.empty_f_id_heads = np.empty((len(temp)*2,),dtype=np.int64)
-        kb_data.empty_f_id_heads[:len(temp)] = temp
-        kb_data.empty_f_id_heads[len(temp):] = 0
+    # if(kb_data.n_types > len(kb_data.empty_f_id_heads)):
+    # temp = kb_data.empty_f_id_heads
 
     for i in range(n):
-        kb_data.facts.append(List.empty_list(BaseFactType))
-        kb_data.empty_f_id_stacks.append(np.empty((BASE_F_ID_STACK_SIZE,),dtype=np.int64))
+        v = new_vector(BASE_F_ID_STACK_SIZE)    
+        v_ptr =_pointer_from_struct(v)
+        kb_data.retracted_f_ids.add(v_ptr)
+
+        v = new_vector(BASE_FACT_SET_SIZE)    
+        v_ptr =_pointer_from_struct(v)
+        kb_data.facts.add(v_ptr)
+        
+        # kb_data.facts.append(List.empty_list(BaseFactType))
 
     # print("EXPAND!",kb_data.empty_f_id_heads,kb_data.empty_f_id_stacks)
+    # return v
         
 
 @njit(cache=True)
 def init_kb_data(context_data):
     kb_data = new(KnowledgeBaseDataType)
-    kb_data.facts = List.empty_list(basefact_list)
-    kb_data.empty_f_id_stacks = List.empty_list(i8_arr)
-    kb_data.empty_f_id_heads = np.zeros((BASE_T_ID_STACK_SIZE,),dtype=np.int64)
+    kb_data.facts = new_vector(BASE_T_ID_STACK_SIZE)#List.empty_list(basefact_list)
+    kb_data.retracted_f_ids = new_vector(BASE_T_ID_STACK_SIZE)
+    # kb_data.empty_f_id_stacks = List.empty_list(i8_arr)
+    # kb_data.empty_f_id_heads = np.zeros((BASE_T_ID_STACK_SIZE,),dtype=np.int64)
     kb_data.n_types = 0
     
 
@@ -183,51 +197,79 @@ KnowledgeBaseType = KnowledgeBaseTypeTemplate(fields=[
     ("context_data" , KnowledgeBaseContextDataType)])
 
 
+@njit(cache=True)
+def facts_for_t_id(kb_data,t_id):
+    return _struct_from_pointer(VectorType, kb_data.facts[t_id])
 
+@njit(cache=True)
+def fact_at_f_id(typ, t_id_facts,f_id):
+    ptr = t_id_facts.data[f_id]
+    if(ptr != 0):
+        return _struct_from_pointer(typ, ptr)
+    else:
+        return None
+
+@njit(cache=True)
+def retracted_f_ids_for_t_id(kb_data,t_id):
+    return _struct_from_pointer(VectorType, kb_data.retracted_f_ids[t_id])
 
 #### Helper Functions ####
 
 @njit(cache=True)
 def make_f_id_empty(kb_data, t_id, f_id):
     '''Adds adds tracking info for an empty f_id for when a fact is retracted'''
-    es_s = kb_data.empty_f_id_stacks[t_id]
-    es_h = kb_data.empty_f_id_heads[t_id]
+    # es_s = kb_data.empty_f_id_stacks[t_id]
+    # es_h = kb_data.empty_f_id_heads[t_id]
 
-    #If too small double the size of the f_id stack for this t_id
-    if(es_h >= len(es_s)):
-        # print("GROW!",len(es_s),"->", len(es_s)*2)
-        n_es_s = kb_data.empty_f_id_stacks[t_id] = np.empty((len(es_s)*2,),dtype=np.int64)
-        n_es_s[:len(es_s)] = es_s
-        es_s = n_es_s 
+    # #If too small double the size of the f_id stack for this t_id
+    # if(es_h >= len(es_s)):
+    #     # print("GROW!",len(es_s),"->", len(es_s)*2)
+    #     n_es_s = kb_data.empty_f_id_stacks[t_id] = np.empty((len(es_s)*2,),dtype=np.int64)
+    #     n_es_s[:len(es_s)] = es_s
+    #     es_s = n_es_s 
 
-    es_s[es_h] = f_id
-    kb_data.empty_f_id_heads[t_id] += 1
-    kb_data.facts[t_id][f_id] = kb_data.NULL_FACT
+    # es_s[es_h] = f_id
+    retracted_f_ids_for_t_id(kb_data,t_id).add(f_id)
+    #_struct_from_pointer(VectorType, kb_data.retracted_f_ids[t_id]).add(f_id)
+    # kb_data.empty_f_id_heads[t_id] += 1
+    facts_for_t_id(kb_data,t_id)[f_id] = 0#_pointer_from_struct(kb_data.NULL_FACT)
+    # kb_data.facts[t_id][f_id] = _pointer_from_struct(kb_data.NULL_FACT)
 
 
 @njit(cache=True)
 def next_empty_f_id(kb_data,facts,t_id):
     '''Gets the next dead f_id from retracting facts otherwise returns 
         a fresh one pointing to the end of the meminfo list'''
-    es_s = kb_data.empty_f_id_stacks[t_id]
-    es_h = kb_data.empty_f_id_heads[t_id]
-    if(es_h <= 0):
+    # print("BEEP",kb_data.retracted_f_ids[t_id])
+    f_id_vec = retracted_f_ids_for_t_id(kb_data,t_id)
+    # print("HEAD",f_id_vec.head,f_id_vec.data)
+    # es_s = kb_data.empty_f_id_stacks[t_id]
+    # es_h = kb_data.empty_f_id_heads[t_id]
+    if(f_id_vec.head <= 0):
         return len(facts) # a fresh f_id
 
-    kb_data.empty_f_id_heads[t_id] = es_h = es_h - 1
-    return es_s[es_h] # a recycled f_id
+    # kb_data.empty_f_id_heads[t_id] = es_h = es_h - 1
+    return f_id_vec.pop()#es_s[es_h] # a recycled f_id
+
+# @njit(cache=True,inline='never')
+# def _expand_for_new_t_id(kb_data,t_id):
+#     L = len(kb_data.facts)
+#     if(t_id >= L):
+#         expand_kb_data_types(kb_data, 1+L-t_id)
 
 @generated_jit(cache=True)
 def resolve_t_id(kb, fact):
     if(isinstance(fact,types.TypeRef)):
         fact = fact.instance_type
-    fact_type_name = fact._fact_name
+
+    fact_num = fact._fact_num
     def impl(kb, fact):
-        t_id = kb.context_data.fact_to_t_id[fact_type_name]
+        t_id = kb.context_data.fact_num_to_t_id[fact_num]
         L = len(kb.kb_data.facts)
         if(t_id >= L):
             expand_kb_data_types(kb.kb_data, 1+L-t_id)
-        return  t_id
+        return t_id
+        
     return impl
 
 @njit(cache=True)
@@ -236,6 +278,11 @@ def name_to_idrec(kb,name):
     if(name not in names_to_idrecs):
         raise KeyError("Fact not found.")
     return names_to_idrecs[name]
+
+
+
+
+
 
 ##### add_subscriber #####
 
@@ -268,24 +315,22 @@ def signal_subscribers_change(kb, idrec):
 
 @njit(cache=True)
 def declare_fact(kb,fact):
-    t_id = resolve_t_id(kb,fact) #1.1ms / 10000
-    facts = kb.kb_data.facts[t_id] # .5ms / 10000
-    f_id = next_empty_f_id(kb.kb_data,facts,t_id) # .8ms / 10000
-    b_fact = cast_fact(BaseFactType,fact) #negligable
-    
+    fact_ptr = _pointer_from_struct(fact) #.4ms / 10000
+    t_id = resolve_t_id(kb,fact)  #.1ms / 10000
+    facts = facts_for_t_id(kb.kb_data,t_id) #negligible
+    f_id = next_empty_f_id(kb.kb_data,facts,t_id) # .5ms / 10000
 
     idrec = encode_idrec(t_id,f_id,0) #negligable
-    b_fact.idrec = idrec #negligable
+    fact.idrec = idrec #negligable
 
-    if(f_id < len(facts)): # .6ms / 10000
-        facts[f_id] = b_fact
+    if(f_id < len(facts)): # .2ms / 10000
+        facts.data[f_id] = fact_ptr
         signal_subscribers_change(kb, idrec)
     else:
-        facts.append(b_fact)
+        facts.add(fact_ptr)
         signal_subscribers_grow(kb, idrec)
     
     return idrec
-    # return 0
 
 @njit(cache=True)
 def declare_name(kb,name,idrec):
@@ -344,10 +389,13 @@ def modify(kb,fact,attr,val):
 @njit(cache=True)
 def all_facts_of_type(kb,typ):
     t_id = resolve_t_id(kb,typ)
-    out = List()
-    for b_fact in kb.kb_data.facts[t_id]:
-        if(b_fact.idrec != u8(-1)):
-            out.append(cast_fact(typ,b_fact))
+    out = List.empty_list(typ)
+    facts = facts_for_t_id(kb.kb_data,t_id)
+    for i in range(facts.head):
+        fact_ptr = facts.data[i]
+        if(fact_ptr != 0):#u8(-1)):
+            # out.append(cast_fact(typ,b_fact))
+            out.append(_struct_from_pointer(typ,fact_ptr))
     return out
 
 #### KnowledgeBase Overloading #####

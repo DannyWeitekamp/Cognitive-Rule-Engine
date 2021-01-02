@@ -303,12 +303,12 @@ def add_subscriber(kb, subscriber):
 @njit(cache=True)
 def signal_subscribers_grow(kb, idrec):
     for sub in kb.kb_data.subscribers:
-        sub.grow_queue.append(idrec)
+        sub.grow_queue.add(idrec)
 
 @njit(cache=True)
 def signal_subscribers_change(kb, idrec):
     for sub in kb.kb_data.subscribers:
-        sub.change_queue.append(idrec)
+        sub.change_queue.add(idrec)
 
 
 ##### declare #####

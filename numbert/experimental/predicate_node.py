@@ -79,13 +79,13 @@ base_predicate_node_field_dict = {
 basepredicate_node_fields = [(k,v) for k,v, in base_predicate_node_field_dict.items()]
 BasePredicateNode, BasePredicateNodeType = define_structref("BasePredicateNode", base_subscriber_fields + basepredicate_node_fields)
 
-predicate_node_field_dict = {
+alpha_predicate_node_field_dict = {
     **base_predicate_node_field_dict,
     "signature" : types.Any,
     "right_val" : types.Any,
     # "update_func" : types.FunctionType(void(types.Any,meminfo_type))
 }
-predicate_node_fields = [(k,v) for k,v, in predicate_node_field_dict.items()]
+alpha_predicate_node_fields = [(k,v) for k,v, in alpha_predicate_node_field_dict.items()]
 PredicateNode, PredicateNodeTemplate = define_structref_template("PredicateNode", base_subscriber_fields + predicate_node_fields)
 
 @njit(cache=True)
@@ -120,7 +120,7 @@ def alpha_update(pred_meminfo,pnode_type):
 
     new_size = 0
     if len(grw_s) > 0:
-        new_size = max([decode_idrec(idrec)[1] for idrec in grw_s])+1
+        new_size = max([decode_idrec(grw_s[i])[1] for i in range(grw_s.head)])+1
 
     if(new_size > 0):
         new_truth_values = np.empty((new_size,),dtype=np.uint8)
@@ -131,20 +131,23 @@ def alpha_update(pred_meminfo,pnode_type):
 
     facts = facts_for_t_id(kb.kb_data,i8(pred_node.left_t_id))
 
-    if(len(pred_node.grow_queue) > 0):
-        for idrec in pred_node.grow_queue:
+    if(len(grw_s) > 0):
+        for _ in range(len(grw_s)):
+        # for idrec in pred_node.grow_queue:
+            idrec = grw_s.pop()
             t_id, f_id,_ = decode_idrec(idrec)
             truth = alpha_eval_truth(kb,facts,f_id, pred_node)
             new_truth_values[f_id] = truth
 
             for child_meminfo in pred_node.children:
                 child = _struct_from_meminfo(BaseSubscriberType,child_meminfo)
-                child.grow_queue.append(idrec)
-        pred_node.grow_queue = List.empty_list(u8)
+                child.grow_queue.add(idrec)
+        # pred_node.grow_queue = List.empty_list(u8)
         pred_node.truth_values = new_truth_values
 
-    if(len(pred_node.change_queue) > 0):
-        for idrec in pred_node.change_queue:
+    if(len(chg_s) > 0):
+        for _ in range(len(chg_s)):
+            idrec = chg_s.pop()
             t_id, f_id,_ = decode_idrec(idrec)
             truth = alpha_eval_truth(kb,facts,f_id, pred_node)
 
@@ -152,8 +155,8 @@ def alpha_update(pred_meminfo,pnode_type):
             if(truth != pred_node.truth_values[f_id]):
                 for child_meminfo in pred_node.children:
                     child = _struct_from_meminfo(BaseSubscriberType, child_meminfo)
-                    child.change_queue.append(idrec)
-        pred_node.change_queue = List.empty_list(u8)
+                    child.change_queue.add(idrec)
+        # pred_node.change_queue = List.empty_list(u8)
         pred_node.truth_values = new_truth_values
 
 

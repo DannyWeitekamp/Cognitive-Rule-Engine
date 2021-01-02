@@ -27,7 +27,7 @@ from numbert.experimental.utils import _cast_structref
 
 import numpy as np
 
-
+GLOBAL_FACT_COUNT = -1
 SPECIAL_ATTRIBUTES = ["inherit_from"]
 
 ###### Fact Specification Preprocessing #######

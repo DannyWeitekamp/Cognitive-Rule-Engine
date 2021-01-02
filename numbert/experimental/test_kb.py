@@ -196,11 +196,11 @@ def test_subscriber():
 
     idrec = declare_unnamed(kb)
 
-    assert kb.kb_data.subscribers[0].grow_queue[0] == idrec
+    assert kb.kb_data.subscribers[0].grow_queue.data[0] == idrec
 
     kb.retract(idrec)
 
-    assert kb.kb_data.subscribers[0].change_queue[0] == idrec
+    assert kb.kb_data.subscribers[0].change_queue.data[0] == idrec
 
 
 

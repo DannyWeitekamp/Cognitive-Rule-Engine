@@ -8,6 +8,7 @@ from numbert.experimental.structref import define_structref, define_structref_te
 # from numbert.experimental.kb import KnowledgeBaseType, KnowledgeBase
 from numbert.experimental.fact import define_fact
 from numbert.experimental.utils import _struct_from_meminfo, _meminfo_from_struct, _cast_structref
+from numbert.experimental.vector import new_vector, VectorType
 from copy import copy
 
 meminfo_type = types.MemInfoPointer(types.voidptr)
@@ -22,15 +23,17 @@ base_subscriber_fields = [
     ("children", ListType(meminfo_type)), 
     #Indicies or idrecs of things that have changed in the subscriber's parent (i.e. last 
     #  upstream). The parent is responsible for filling this.
-    ("change_queue", ListType(u8)),
+    ("change_queue", VectorType),#ListType(u8)),
     #Same as change_queue but for when the something has been added upstream
-    ("grow_queue", ListType(u8)),
+    ("grow_queue", VectorType),#ListType(u8)),
     #An update function that updates state of the subscriber and pushes changes to all children.
     ("update_func", types.FunctionType(void(meminfo_type))), 
     # #The t_id corresponding to the type to which this subscriber subscribes
     # ("t_id", i8)
     #
 ]
+
+BASE_SUBSCRIBER_QUEUE_SIZE = 8
 
 BaseSubscriber, BaseSubscriberType = define_structref("BaseSubscriber", base_subscriber_fields)
 
@@ -39,8 +42,8 @@ def init_base_subscriber(bs):
     bs.kb_meminfo = None#_meminfo_from_struct(kb)
     bs.upstream = List.empty_list(meminfo_type)
     bs.children = List.empty_list(meminfo_type)
-    bs.change_queue = List.empty_list(u8)
-    bs.grow_queue = List.empty_list(u8)
+    bs.change_queue = new_vector(BASE_SUBSCRIBER_QUEUE_SIZE)#List.empty_list(u8)
+    bs.grow_queue = new_vector(BASE_SUBSCRIBER_QUEUE_SIZE)#List.empty_list(u8)
 
 
 @njit(cache=True)

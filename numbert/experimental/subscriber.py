@@ -21,11 +21,17 @@ base_subscriber_fields = [
     ("upstream", ListType(meminfo_type)), 
     #The subscribers immediately downstream of this one.
     ("children", ListType(meminfo_type)), 
-    #Indicies or idrecs of things that have changed in the subscriber's parent (i.e. last 
-    #  upstream). The parent is responsible for filling this.
+
+    ("change_head", i8),
+    ("grow_head", i8),
     ("change_queue", VectorType),#ListType(u8)),
-    #Same as change_queue but for when the something has been added upstream
     ("grow_queue", VectorType),#ListType(u8)),
+
+    # #Indicies or idrecs of things that have changed in the subscriber's parent (i.e. last 
+    # #  upstream). The parent is responsible for filling this.
+    # ("change_queue", VectorType),#ListType(u8)),
+    # #Same as change_queue but for when the something has been added upstream
+    # ("grow_queue", VectorType),#ListType(u8)),
     #An update function that updates state of the subscriber and pushes changes to all children.
     ("update_func", types.FunctionType(void(meminfo_type))), 
     # #The t_id corresponding to the type to which this subscriber subscribes
@@ -42,6 +48,9 @@ def init_base_subscriber(bs):
     bs.kb_meminfo = None#_meminfo_from_struct(kb)
     bs.upstream = List.empty_list(meminfo_type)
     bs.children = List.empty_list(meminfo_type)
+
+    bs.change_head = 0
+    bs.grow_head = 0
     bs.change_queue = new_vector(BASE_SUBSCRIBER_QUEUE_SIZE)#List.empty_list(u8)
     bs.grow_queue = new_vector(BASE_SUBSCRIBER_QUEUE_SIZE)#List.empty_list(u8)
 

@@ -66,27 +66,45 @@ def resolve_predicate_op(op):
         return op_str_map[op]
     return op
 
-
+#### Struct Definitions ####
 
 base_predicate_node_field_dict = {
-    "truth_values" : u1[:],
     "left_t_id" : i8,
-    "op_str" : unicode_type,
     "left_attr" : types.Any,
     "left_type" : types.Any,
+    "op_str" : unicode_type,
 }
 
 basepredicate_node_fields = [(k,v) for k,v, in base_predicate_node_field_dict.items()]
 BasePredicateNode, BasePredicateNodeType = define_structref("BasePredicateNode", base_subscriber_fields + basepredicate_node_fields)
 
+
 alpha_predicate_node_field_dict = {
     **base_predicate_node_field_dict,
-    "signature" : types.Any,
+    "truth_values" : u1[:],
+    "signature" : types.Any, #TOOO: Maybe don't need this 
     "right_val" : types.Any,
     # "update_func" : types.FunctionType(void(types.Any,meminfo_type))
 }
 alpha_predicate_node_fields = [(k,v) for k,v, in alpha_predicate_node_field_dict.items()]
-PredicateNode, PredicateNodeTemplate = define_structref_template("PredicateNode", base_subscriber_fields + predicate_node_fields)
+AlphaPredicateNode, AlphaPredicateNodeTemplate = define_structref_template("AlphaPredicateNode", base_subscriber_fields + alpha_predicate_node_fields)
+
+
+beta_predicate_node_field_dict = {
+    **base_predicate_node_field_dict,
+    "truth_values" : u1[:,:],
+    "right_t_id" : i8,
+    "right_attr" : types.Any,
+    "right_type" : types.Any,
+    "left_consistency" : u1[:],
+    "right_consistency" : u1[:],
+    # "update_func" : types.FunctionType(void(types.Any,meminfo_type))
+}
+beta_predicate_node_fields = [(k,v) for k,v, in beta_predicate_node_field_dict.items()]
+BetaPredicateNode, BetaPredicateNodeTemplate = define_structref_template("BetaPredicateNode", base_subscriber_fields + beta_predicate_node_fields)
+
+
+#### Alpha Predicate Nodes #####
 
 @njit(cache=True)
 def init_alpha(st,t_id, op_str,literal_val):
@@ -110,54 +128,42 @@ def alpha_eval_truth(kb,facts,f_id, pred_node):
     else:
         return 0xFF
 
+@njit(cache=True)
+def expand_1d(truth_values,size,dtype):
+    new_truth_values = np.empty((size,),dtype=dtype)
+    for i,b in enumerate(truth_values):
+        new_truth_values[i] = b
+    return new_truth_values
+
+
 @njit(cache=True,locals={'new_size':u8})
 def alpha_update(pred_meminfo,pnode_type):
     if(pred_meminfo is None): return
     pred_node = _struct_from_meminfo(pnode_type, pred_meminfo)
-    grw_s = pred_node.grow_queue
-    chg_s = pred_node.change_queue
     kb = _struct_from_meminfo(KnowledgeBaseType, pred_node.kb_meminfo)
-
-    new_size = 0
-    if len(grw_s) > 0:
-        new_size = max([decode_idrec(grw_s[i])[1] for i in range(grw_s.head)])+1
-
-    if(new_size > 0):
-        new_truth_values = np.empty((new_size,),dtype=np.uint8)
-        for i,b in enumerate(pred_node.truth_values):
-            new_truth_values[i] = b
-    else:
-        new_truth_values = pred_node.truth_values
+    grw_q = kb.kb_data.grow_queue
+    chg_q = kb.kb_data.change_queue
 
     facts = facts_for_t_id(kb.kb_data,i8(pred_node.left_t_id))
+    if(len(facts.data) > len(pred_node.truth_values)):
+        pred_node.truth_values = expand_1d(pred_node.truth_values,len(facts.data),np.uint8)
 
-    if(len(grw_s) > 0):
-        for _ in range(len(grw_s)):
-        # for idrec in pred_node.grow_queue:
-            idrec = grw_s.pop()
-            t_id, f_id,_ = decode_idrec(idrec)
+    for i in range(pred_node.grow_head, grw_q.head):
+        t_id, f_id, a_id = decode_idrec(grw_q[i])
+        if(pred_node.left_t_id == t_id):
             truth = alpha_eval_truth(kb,facts,f_id, pred_node)
-            new_truth_values[f_id] = truth
+            pred_node.truth_values[f_id] = truth
+            pred_node.grow_queue.add(f_id)
+    pred_node.grow_head = grw_q.head
 
-            for child_meminfo in pred_node.children:
-                child = _struct_from_meminfo(BaseSubscriberType,child_meminfo)
-                child.grow_queue.add(idrec)
-        # pred_node.grow_queue = List.empty_list(u8)
-        pred_node.truth_values = new_truth_values
-
-    if(len(chg_s) > 0):
-        for _ in range(len(chg_s)):
-            idrec = chg_s.pop()
-            t_id, f_id,_ = decode_idrec(idrec)
+    for i in range(pred_node.change_head, chg_q.head):
+        t_id, f_id, a_id = decode_idrec(chg_q[i])
+        if(pred_node.left_t_id == t_id):
             truth = alpha_eval_truth(kb,facts,f_id, pred_node)
-
-            new_truth_values[f_id] = truth
+            pred_node.truth_values[f_id] = truth
             if(truth != pred_node.truth_values[f_id]):
-                for child_meminfo in pred_node.children:
-                    child = _struct_from_meminfo(BaseSubscriberType, child_meminfo)
-                    child.change_queue.add(idrec)
-        # pred_node.change_queue = List.empty_list(u8)
-        pred_node.truth_values = new_truth_values
+                pred_node.change_queue.add(f_id)
+    pred_node.change_head = chg_q.head
 
 
 def gen_alpha_source(typ, attr, literal_val):
@@ -166,7 +172,7 @@ def gen_alpha_source(typ, attr, literal_val):
 from numba import types, njit
 from numba.experimental.structref import new
 from numba.types import *
-from numbert.experimental.predicate_node import PredicateNodeTemplate, init_alpha, alpha_update, predicate_node_field_dict
+from numbert.experimental.predicate_node import AlphaPredicateNodeTemplate, init_alpha, alpha_update, alpha_predicate_node_field_dict
 from numbert.experimental.subscriber import base_subscriber_fields, init_base_subscriber
 {gen_import_str(typ._fact_name,typ._hash_code,[typ_name])}
 
@@ -176,11 +182,11 @@ specialization_dict = {{
     'right_val' : {types.literal(literal_val).literal_type}
 }}
 
-field_dict = {{**predicate_node_field_dict,**specialization_dict}}
+field_dict = {{**alpha_predicate_node_field_dict,**specialization_dict}}
 if(isinstance(field_dict["right_val"],types.Integer)): field_dict["right_val"] = types.float64
 fields = base_subscriber_fields + [(k,v) for k,v, in field_dict.items()]
 
-pnode_type = PredicateNodeTemplate(fields=fields)
+pnode_type = AlphaPredicateNodeTemplate(fields=fields)
 
 
 @njit(cache=True)
@@ -218,10 +224,6 @@ def define_alpha_predicate_node(typ, attr, literal_val):
 
     return ctor, pnode_type
 
-# @njit
-# def set_update_func(pred_node,update_func):
-#     pred_node.update_func = update_func
-
 def get_alpha_predicate_node(typ, attr, op, literal_val):
     context = kb_context()    
     t_id = context.fact_to_t_id[typ._fact_name]
@@ -231,37 +233,191 @@ def get_alpha_predicate_node(typ, attr, op, literal_val):
 
     return out
 
-def define_beta_predicate_node(left_type, left_attr, op, right_type, right_attr):
-    # op = resolve_predicate_op(op)
-    field_dict = copy(predicate_node_field_dict)
-    field_dict["left_type"] = types.TypeRef(left_type)
-    field_dict["left_attr"] = types.literal(left_attr)
-    field_dict["op_str"] = types.literal(op)
-    field_dict["right_type"] = types.TypeRef(right_type)
-    field_dict["right_attr"] = types.literal(right_attr)
-    fields = base_subscriber_fields + [(k,v) for k,v, in field_dict.items()]
 
-    pnode_type = PredicateNodeTemplate(fields=fields)
-    @njit(cache=True)
-    def ctor(kb_meminfo):
-        st = new(pnode_type)
-        # st.kb = _struct_from_meminfo(KnowledgeBaseType,kb_meminfo)
-        st.truth_values = np.empty((0,),dtype=np.uint8)
-        st.ndim = 2
-        st.left_type = left_type
-        st.left_attr = left_attr
-        st.op_str = op
-        st.right_type = right_type
-        st.right_attr = right_attr
-        return st
+#### Beta Predicate Nodes ####
+
+@njit(cache=True)
+def init_beta(st, left_t_id, right_t_id, op_str):
+    st.truth_values = np.empty((0,0),dtype=np.uint8)
+    st.left_t_id = left_t_id
+    st.right_t_id = right_t_id
+    st.op_str = op_str
+    
+
+@njit(cache=True)
+def beta_eval_truth(kb,pred_node, left_facts, right_facts, i, j):
+    left_ptr = left_facts.data[i]
+    right_ptr = right_facts.data[j]
+
+    if(left_ptr != 0 and right_ptr != 0):
+        left_inst = _struct_from_pointer(pred_node.left_type,left_ptr)
+        right_inst = _struct_from_pointer(pred_node.right_type,right_ptr)
+        left_val = lower_getattr(left_inst, pred_node.left_attr)
+        right_val = lower_getattr(right_inst, pred_node.right_attr)
+        return exec_op(pred_node.op_str, left_val, right_val)
+    else:
+        return 0xFF
+
+@njit(cache=True)
+def expand_2d(truth_values, n, m, dtype):
+    new_truth_values = np.empty((n,m),dtype=dtype)
+    for i in range(truth_values.shape[0]):
+        for j in range(truth_values.shape[1]):
+            new_truth_values[i,j] = truth_values[i,j]
+    return new_truth_values
+
+
+@njit(cache=True,inline='always')
+def update_pair(kb,pred_node, left_facts, right_facts, i, j):
+    truth = beta_eval_truth(kb,pred_node, left_facts, right_facts, i, j)
+    pred_node.truth_values[i,j] = truth
+
+
+
+@njit(cache=True,locals={'new_size':u8})
+def beta_update(pred_meminfo,pnode_type):
+    if(pred_meminfo is None): return
+    pred_node = _struct_from_meminfo(pnode_type, pred_meminfo)
+    kb = _struct_from_meminfo(KnowledgeBaseType, pred_node.kb_meminfo)
+    grw_q = kb.kb_data.grow_queue
+    chg_q = kb.kb_data.change_queue
+
+    left_facts = facts_for_t_id(kb.kb_data,i8(pred_node.left_t_id))
+    right_facts = facts_for_t_id(kb.kb_data,i8(pred_node.right_t_id))
+
+
+    print("TARGET", len(left_facts.data) , len(right_facts.data))
+    if(len(left_facts.data) > pred_node.truth_values.shape[0] or
+       len(right_facts.data) > pred_node.truth_values.shape[1]):
+        pred_node.truth_values = expand_2d(pred_node.truth_values,
+                                    len(left_facts.data),len(right_facts.data),np.uint8
+                                 )
+    if(len(left_facts.data) > len(pred_node.left_consistency)):
+        pred_node.left_consistency = expand_1d(pred_node.left_consistency,
+                                        len(left_facts.data),np.uint8)
+    if(len(right_facts.data) > len(pred_node.right_consistency)):
+        pred_node.right_consistency = expand_1d(pred_node.right_consistency,
+                                        len(right_facts.data),np.uint8)
+
+    print("EXPAND OK", len(pred_node.left_consistency) , len(pred_node.right_consistency))
+    for i in range(pred_node.grow_head, grw_q.head):
+        t_id, f_id, a_id = decode_idrec(grw_q[i])
+        if(pred_node.left_t_id == t_id):
+            pred_node.left_consistency[f_id] = 0
+        if(pred_node.right_t_id == t_id):
+            pred_node.right_consistency[f_id] = 0
+    pred_node.grow_head = grw_q.head
+
+    for i in range(pred_node.change_head, chg_q.head):
+        t_id, f_id, a_id = decode_idrec(chg_q[i])
+        if(pred_node.left_t_id == t_id):
+            pred_node.left_consistency[f_id] = 0
+        if(pred_node.right_t_id == t_id):
+            pred_node.right_consistency[f_id] = 0
+    pred_node.change_head = chg_q.head
+
+    print("CONSISTENCY OK")
+
+    #NOTE: This part might be sped up by running it only on request
+
+    lc, rc = pred_node.left_consistency, pred_node.right_consistency
+    for i in range(left_facts.head):
+        if(not lc[i]):
+            for j in range(right_facts.head):
+                print(i,j)
+                update_pair(kb,pred_node,left_facts,right_facts,i,j)
+
+    for j in range(right_facts.head):
+        if(not rc[j]):
+            for i in range(left_facts.head):
+                print(i,j)
+                if(lc[i]): update_pair(kb,pred_node,left_facts,right_facts,i,j)
+                    
+
+    print("UPDATE OK")
+
+
+
+
+
+
+def gen_beta_source(left_type, left_attr, right_type, right_attr):
+    left_typ_name = f'{left_type._fact_name}Type'
+    right_typ_name = f'{right_type._fact_name}Type'
+    source = f'''
+from numba import types, njit
+from numba.experimental.structref import new
+from numba.types import *
+from numbert.experimental.predicate_node import BetaPredicateNodeTemplate, init_beta, beta_update, beta_predicate_node_field_dict
+from numbert.experimental.subscriber import base_subscriber_fields, init_base_subscriber
+{gen_import_str(left_type._fact_name,left_type._hash_code,[left_typ_name])}
+{gen_import_str(right_type._fact_name,right_type._hash_code,[right_typ_name])}
+
+specialization_dict = {{
+    'left_type' : types.TypeRef({left_typ_name}),
+    'left_attr' : types.literal('{left_attr}'),
+    'right_type' : types.TypeRef({right_typ_name}),
+    'right_attr' : types.literal('{right_attr}'),
+}}
+
+field_dict = {{**beta_predicate_node_field_dict,**specialization_dict}}
+fields = base_subscriber_fields + [(k,v) for k,v, in field_dict.items()]
+
+pnode_type = BetaPredicateNodeTemplate(fields=fields)
+
+
+@njit(cache=True)
+def update_func(pred_meminfo):
+    beta_update(pred_meminfo, pnode_type)        
+
+@njit(cache=True)
+def pre_ctor(left_t_id, right_t_id, op_str):
+    st = new(pnode_type)
+    init_base_subscriber(st)
+    init_beta(st, left_t_id, right_t_id, op_str)
+    st.left_type = {left_typ_name}
+    st.left_attr = '{left_attr}'
+    st.right_type = {right_typ_name}
+    st.right_attr = '{right_attr}'
+    return st
+
+@njit
+def ctor(*args):
+    st = pre_ctor(*args)
+    st.update_func = update_func
+    return st
+    '''
+    return source
+
+
+def define_beta_predicate_node(left_type, left_attr, op, right_type, right_attr):
+    name = "BetaPredicate"
+    hash_code = unique_hash([left_type._fact_name, left_type._hash_code, left_attr,
+                             right_type._fact_name, right_type._hash_code, right_attr])
+    if(not source_in_cache(name,hash_code)):
+        source = gen_beta_source(left_type, left_attr, right_type, right_attr)
+        source_to_cache(name, hash_code, source)
+        
+    ctor, pnode_type = import_from_cached(name, hash_code,['ctor','pnode_type']).values()
 
     return ctor, pnode_type
 
-def get_beta_predicate_node(kb, left_type, left_attr, op, right_type, right_attr):
-    ctor, pnode_type = define_beta_predicate_node(left_type, left_attr, op, right_type, right_attr)    
-    out = ctor(kb._meminfo)
-    # out.kb = kb
+# @njit
+# def set_update_func(pred_node,update_func):
+#     pred_node.update_func = update_func
+
+def get_beta_predicate_node(left_type, left_attr, op, right_type, right_attr):
+    context = kb_context()    
+    left_t_id = context.fact_to_t_id[left_type._fact_name]
+    right_t_id = context.fact_to_t_id[right_type._fact_name]
+
+    ctor, pnode_type = define_beta_predicate_node(left_type, left_attr, op, right_type, right_attr)
+    print("PP", pnode_type)
+
+    out = ctor(left_t_id, right_t_id, op)
+
     return out
+
 
 # @overload_method(PredicateNodeTemplate, "update")
 # def pred_update(self):

@@ -5,7 +5,8 @@ from numbert.experimental.subscriber import BaseSubscriberType
 from numbert.experimental.fact import define_fact
 from numbert.experimental.kb import KnowledgeBase
 from numbert.experimental.context import kb_context
-from numbert.experimental.predicate_node import get_alpha_predicate_node
+from numbert.experimental.predicate_node import get_alpha_predicate_node, get_beta_predicate_node
+from numbert.experimental.test_kb import _delcare_10000, _retract_10000
 import pytest
 
 @njit
@@ -36,29 +37,28 @@ def test_alpha_predicate_node():
         kb.declare(z)
 
         njit_update(pn)
-
-        assert all(pn.truth_values == [1,0,1])
+        assert all(pn.truth_values[:3] == [1,0,1])
 
         kb.modify(x,"B", 100)
         kb.modify(y,"B", 3)
         kb.modify(z,"B", 88)
 
         #Checks doesn't change before update
-        assert all(pn.truth_values == [1,0,1])
+        assert all(pn.truth_values[:3] == [1,0,1])
         njit_update(pn)
-        assert all(pn.truth_values == [0,1,0])
+        assert all(pn.truth_values[:3] == [0,1,0])
 
         kb.retract(x)
         kb.retract(y)
         kb.retract(z)
 
         #Checks doesn't change before update
-        assert all(pn.truth_values == [0,1,0])
+        assert all(pn.truth_values[:3] == [0,1,0])
 
         njit_update(pn)
         # print(pn.truth_values)
         #Checks that retracted facts show up as u1.nan = 0XFF
-        assert all(pn.truth_values == [0xFF,0xFF,0xFF])
+        assert all(pn.truth_values[:3] == [0xFF,0xFF,0xFF])
 
         kb.declare(x)
         kb.declare(y)
@@ -70,7 +70,35 @@ def test_alpha_predicate_node():
 
         njit_update(pn)
 
-        assert all(pn.truth_values == [1,1,1])
+        assert all(pn.truth_values[:3] == [1,1,1])
+
+def test_beta_predicate_node():
+    with kb_context("test_beta_predicate_node"):
+        BOOP, BOOPType = define_fact("BOOP",{"A": "string", "B" : "number"})
+
+        kb = KnowledgeBase()
+
+        pn = get_beta_predicate_node(BOOPType,"B", "<", BOOPType,"B")
+
+        kb.add_subscriber(pn)
+
+        x = BOOP("x",7)
+        y = BOOP("y",11)
+        z = BOOP("z",8)
+
+        assert len(pn.truth_values) == 0        
+
+        kb.declare(x)
+        kb.declare(y)
+        kb.declare(z)
+
+        njit_update(pn)
+
+        print(pn.truth_values)
+        assert all(pn.truth_values[0,:3] == [0,1,1])
+        assert all(pn.truth_values[1,:3] == [0,0,0])
+        assert all(pn.truth_values[2,:3] == [0,1,0])
+
 
 
 
@@ -102,39 +130,12 @@ def _benchmark_setup():
 def test_b_setup(benchmark):
     benchmark.pedantic(_benchmark_setup, iterations=1)
 
-#### declare_10000 ####
-
-@njit(cache=True)
-def _delcare_10000(kb,pn):
-    out = np.empty((10000,),dtype=np.uint64)
-    for i in range(10000):
-        out[i] = kb.declare(BOOP("?",i))
-    return out
-
-def test_b_declare10000(benchmark):
-    benchmark.pedantic(_delcare_10000,setup=_benchmark_setup, warmup_rounds=1)
-
-#### retract_10000 ####
-
-def _retract_setup():
-    (kb,pn),_ = _benchmark_setup()
-    idrecs = _delcare_10000(kb,pn)
-    return (kb,pn,idrecs), {}
-
-@njit(cache=True)
-def _retract_10000(kb,pn,idrecs):
-    for idrec in idrecs:
-        kb.retract(idrec)
-
-def test_b_retract10000(benchmark):
-    benchmark.pedantic(_retract_10000,setup=_retract_setup, warmup_rounds=1)
-
 
 #### alpha_update_post_declare ####
 
 def _alpha_update_post_declare_setup():
     (kb,pn),_ = _benchmark_setup()
-    idrecs = _delcare_10000(kb,pn)
+    idrecs = _delcare_10000(kb)
     return (kb,pn,idrecs), {}
 
 
@@ -149,9 +150,9 @@ def test_b_alpha_update_post_declare_10000(benchmark):
 
 def _alpha_update_post_retract_setup():
     (kb,pn),_ = _benchmark_setup()
-    idrecs = _delcare_10000(kb,pn)
+    idrecs = _delcare_10000(kb)
     njit_update(pn) #<-- Handle update after declare to time just change set 
-    _retract_10000(kb,pn,idrecs)
+    _retract_10000(kb,idrecs)
 
     return (kb,pn), {}
 
@@ -179,5 +180,6 @@ def test_b_alpha_update_10000_times(benchmark):
 
 
 if __name__ == "__main__":
-    test_alpha_predicate_node()
+    # test_alpha_predicate_node()
+    test_beta_predicate_node()
 

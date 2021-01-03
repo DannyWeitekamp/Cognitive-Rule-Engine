@@ -38,6 +38,7 @@ from numbert.caching import import_from_cached, source_in_cache, source_to_cache
 BASE_T_ID_STACK_SIZE = 16
 BASE_F_ID_STACK_SIZE = 64
 BASE_FACT_SET_SIZE = 64
+BASE_CHANGE_QUEUE_SIZE = 2048
    
 #### KB Data Definition ####
 
@@ -63,7 +64,10 @@ kb_data_fields = [
 
     ("enum_data" , DictType(unicode_type,i8_arr)),
     ("enum_consistency" , DictType(two_str,u1)),
-    ("subscribers" , ListType(BaseSubscriberType)), 
+    ("subscribers" , ListType(BaseSubscriberType)), #<- Might not need 
+
+    ("change_queue" , VectorType), 
+    ("grow_queue" , VectorType), 
 
     # ("consistency_listeners" , DictType(i8, two_str_set)),
     # ("consistency_listener_counter" , Array(i8, 0, "C")),
@@ -123,6 +127,9 @@ def init_kb_data(context_data):
     # consistency_listeners[0] = enum_consistency
     # consistency_listener_counter += 1
     kb_data.subscribers = List.empty_list(BaseSubscriberType) #FUTURE: Replace w/ resolved type
+
+    kb_data.change_queue = new_vector(BASE_CHANGE_QUEUE_SIZE)
+    kb_data.grow_queue = new_vector(BASE_CHANGE_QUEUE_SIZE)
     
     # kb_data.unnamed_counter = np.zeros(1,dtype=np.int64)
     kb_data.NULL_FACT = BaseFact()
@@ -325,10 +332,12 @@ def declare_fact(kb,fact):
 
     if(f_id < len(facts)): # .2ms / 10000
         facts.data[f_id] = fact_ptr
-        signal_subscribers_change(kb, idrec)
+        kb.kb_data.change_queue.add(idrec)
+        # signal_subscribers_change(kb, idrec)
     else:
         facts.add(fact_ptr)
-        signal_subscribers_grow(kb, idrec)
+        kb.kb_data.grow_queue.add(idrec)
+        # signal_subscribers_grow(kb, idrec)
     
     return idrec
 
@@ -352,7 +361,8 @@ def declare(kb,fact,name):
 def retract_by_idrec(kb,idrec):
     t_id, f_id, a_id = decode_idrec(idrec) #negligible
     make_f_id_empty(kb.kb_data,i8(t_id), i8(f_id)) #3.6ms
-    signal_subscribers_change(kb, idrec) #.8ms
+    kb.kb_data.change_queue.add(idrec)
+    # signal_subscribers_change(kb, idrec) #.8ms
 
 @njit(cache=True)
 def retract_by_name(kb,name):
@@ -370,7 +380,8 @@ def retract(kb,identifier):
 def modify_by_fact(kb,fact,attr,val):
     lower_setattr(fact,literally(attr),val)
     #TODO signal_subscribers w/ idrec w/ attr_ind
-    signal_subscribers_change(kb, fact.idrec)
+    # signal_subscribers_change(kb, fact.idrec)
+    kb.kb_data.change_queue.add(fact.idrec)
 
 @njit(cache=True)
 def modify_by_idrec(kb,fact,attr,val):

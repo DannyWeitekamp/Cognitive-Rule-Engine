@@ -188,7 +188,7 @@ def dummy_subscriber_ctor():
 
     return st
 
-def test_subscriber():
+def test_grow_change_queues():
     #NRT version
     kb = KnowledgeBase()
     dummy_subscriber = dummy_subscriber_ctor() 
@@ -196,11 +196,15 @@ def test_subscriber():
 
     idrec = declare_unnamed(kb)
 
-    assert kb.kb_data.subscribers[0].grow_queue.data[0] == idrec
+    # assert kb.kb_data.subscribers[0].grow_queue.data[0] == idrec
+    gr_q = kb.kb_data.grow_queue
+    assert gr_q.data[gr_q.head-1] == idrec
 
     kb.retract(idrec)
 
-    assert kb.kb_data.subscribers[0].change_queue.data[0] == idrec
+    # assert kb.kb_data.subscribers[0].change_queue.data[0] == idrec
+    ch_q = kb.kb_data.change_queue
+    assert ch_q.data[ch_q.head-1] == idrec
 
 
 

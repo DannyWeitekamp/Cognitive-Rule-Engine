@@ -8,77 +8,28 @@ from numbert.caching import gen_import_str, unique_hash,import_from_cached, sour
 from numbert.experimental.context import kb_context
 from numbert.experimental.structref import define_structref, define_structref_template
 from numbert.experimental.kb import KnowledgeBaseType, KnowledgeBase, facts_for_t_id, fact_at_f_id
-# <<<<<<< Updated upstream
-# from numbert.experimental.fact import define_fact, BaseFactType
-# =======
 from numbert.experimental.fact import define_fact, BaseFactType, cast_fact
-# >>>>>>> Stashed changes
 from numbert.experimental.utils import _struct_from_meminfo, _meminfo_from_struct, _cast_structref, decode_idrec, lower_getattr, _struct_from_pointer
 from numbert.experimental.subscriber import base_subscriber_fields, BaseSubscriber, BaseSubscriberType, init_base_subscriber, link_downstream
 from copy import copy
 
 meminfo_type = types.MemInfoPointer(types.voidptr)
 
-@njit(cache=True)
-def lt(a,b):
-    return a < b
-
-@njit(cache=True)
-def lte(a,b):
-    return a <= b
-
-@njit(cache=True)
-def gt(a,b):
-    return a > b
-
-@njit(cache=True)
-def gte(a,b):
-    return a >= b
-
-@njit(cache=True)
-def eq(a,b):
-    return a == b
 
 @njit(cache=True)
 def exec_op(op_str,a,b):
-    # return a < b
     if(op_str == "<"):
-        return lt(a,b)
+        return a < b
     elif(op_str == "<="):
-        return lte(a,b)
+        return a <= b
     elif(op_str == ">"):
-        return gt(a,b)
+        return b > a
     elif(op_str == ">="):
-        return gte(a,b)
-    elif(op_str == ">="):
-        return gte(a,b)
+        return a >= b
+    elif(op_str == "=="):
+        return a == b
     raise ValueError()
 
-op_str_map = {
-    "<" : lt,
-    "<=" : lte,
-    ">" : gt,
-    ">=" : gte,
-    "==" : eq
-}
-
-@njit(cache=True)
-def resolve_predicate_op(op_str):
-    if(op_str == "<"):
-        return lt
-    elif(op_str == "<="):
-        return lte
-    elif(op_str == ">"):
-        return gt
-    elif(op_str == ">="):
-        return gte
-    elif(op_str == "=="):
-        return eq
-
-def resolve_predicate_op(op):
-    if(isinstance(op,str)):
-        return op_str_map[op]
-    return op
 
 #### Struct Definitions ####
 
@@ -87,7 +38,6 @@ base_predicate_node_field_dict = {
     "left_attr" : types.Any,
     "left_type" : types.Any,
     "op_str" : unicode_type,
-    # "op_func" : types.FunctionType(u1(types.Any,types.Any)),
 }
 
 basepredicate_node_fields = [(k,v) for k,v, in base_predicate_node_field_dict.items()]
@@ -97,9 +47,7 @@ BasePredicateNode, BasePredicateNodeType = define_structref("BasePredicateNode",
 alpha_predicate_node_field_dict = {
     **base_predicate_node_field_dict,
     "truth_values" : u1[:],
-    "signature" : types.Any, #TOOO: Maybe don't need this 
     "right_val" : types.Any,
-    # "update_func" : types.FunctionType(void(types.Any,meminfo_type))
 }
 alpha_predicate_node_fields = [(k,v) for k,v, in alpha_predicate_node_field_dict.items()]
 AlphaPredicateNode, AlphaPredicateNodeTemplate = define_structref_template("AlphaPredicateNode", base_subscriber_fields + alpha_predicate_node_fields)
@@ -113,7 +61,6 @@ beta_predicate_node_field_dict = {
     "right_type" : types.Any,
     "left_consistency" : u1[:],
     "right_consistency" : u1[:],
-    # "update_func" : types.FunctionType(void(types.Any,meminfo_type))
 }
 beta_predicate_node_fields = [(k,v) for k,v, in beta_predicate_node_field_dict.items()]
 BetaPredicateNode, BetaPredicateNodeTemplate = define_structref_template("BetaPredicateNode", base_subscriber_fields + beta_predicate_node_fields)
@@ -125,21 +72,15 @@ BetaPredicateNode, BetaPredicateNodeTemplate = define_structref_template("BetaPr
 def init_alpha(st,t_id,literal_val):
     st.truth_values = np.empty((0,),dtype=np.uint8)
     st.left_t_id = t_id
-    # st.left_attr = left_attr
-    # st.op_str = op_str
     st.right_val = literal_val
     
 
 @njit(cache=True)
 def alpha_eval_truth(kb,facts,f_id, pred_node):
-    # fact_ptr = facts.data[i8(f_id)]
     inst_ptr = facts.data[i8(f_id)]
-    # inst = fact_at_f_id(pred_node.left_type,facts,i8(f_id))
-    # inst = _cast_structref(pred_node.left_type, facts[i8(f_id)])
     if(inst_ptr != 0):
         inst = _struct_from_pointer(pred_node.left_type,inst_ptr)
         val = lower_getattr(inst, pred_node.left_attr)
-        # return pred_node.op_func(val, pred_node.right_val)#exec_op(pred_node.op_str, val, pred_node.right_val)
         return exec_op(pred_node.op_str, val, pred_node.right_val)
     else:
         return 0xFF
@@ -199,7 +140,7 @@ def gen_alpha_source(typ, attr, op_str, literal_val):
 from numba import types, njit
 from numba.experimental.structref import new
 from numba.types import *
-from numbert.experimental.predicate_node import AlphaPredicateNodeTemplate, init_alpha, alpha_update, alpha_predicate_node_field_dict, resolve_predicate_op
+from numbert.experimental.predicate_node import AlphaPredicateNodeTemplate, init_alpha, alpha_update, alpha_predicate_node_field_dict
 from numbert.experimental.subscriber import base_subscriber_fields, init_base_subscriber
 {gen_import_str(typ._fact_name,typ._hash_code,[typ_name])}
 
@@ -269,7 +210,6 @@ def init_beta(st, left_t_id, right_t_id):
     st.truth_values = np.empty((0,0),dtype=np.uint8)
     st.left_t_id = left_t_id
     st.right_t_id = right_t_id
-    # st.op_str = '<'
     
 
 @njit(cache=True)
@@ -282,7 +222,6 @@ def beta_eval_truth(kb,pred_node, left_facts, right_facts, i, j):
         right_inst = _struct_from_pointer(pred_node.right_type,right_ptr)
         left_val = lower_getattr(left_inst, pred_node.left_attr)
         right_val = lower_getattr(right_inst, pred_node.right_attr)
-        # return pred_node.op_func(left_val, right_val)
         return exec_op(pred_node.op_str, left_val, right_val)
     else:
         return 0#0xFF
@@ -354,13 +293,6 @@ def beta_update(pred_meminfo,pnode_type):
     pred_node.right_consistency[:len(right_facts)] = 1
                     
 
-    # print("UPDATE OK")
-
-
-
-
-
-
 def gen_beta_source(left_type, left_attr, op_str, right_type, right_attr):
     left_typ_name = f'{left_type._fact_name}Type'
     right_typ_name = f'{right_type._fact_name}Type'
@@ -426,193 +358,16 @@ def define_beta_predicate_node(left_type, left_attr, op_str, right_type, right_a
 
     return ctor, pnode_type
 
-# @njit
-# def set_update_func(pred_node,update_func):
-#     pred_node.update_func = update_func
-
 def get_beta_predicate_node(left_type, left_attr, op_str, right_type, right_attr):
     context = kb_context()    
     left_t_id = context.fact_to_t_id[left_type._fact_name]
     right_t_id = context.fact_to_t_id[right_type._fact_name]
 
     ctor, pnode_type = define_beta_predicate_node(left_type, left_attr, op_str, right_type, right_attr)
-    print("PP", pnode_type)
 
     out = ctor(left_t_id, right_t_id)
 
     return out
-
-
-# @overload_method(PredicateNodeTemplate, "update")
-# def pred_update(self):
-#     def impl(self):
-#         pred_meminfo = _meminfo_from_struct(pred_node)
-#         pred_node.update_func(pred_meminfo)
-
-
-
-
-
-
-# BOOP, BOOPType = define_fact("BOOP",{"A": "string", "B" : "number"})
-
-# @njit
-# def njit_update(pt):
-#     meminfo = _meminfo_from_struct(pt)
-#     subscriber = _struct_from_meminfo(BaseSubscriberType,meminfo)
-#     subscriber.update_func(meminfo)
-
-
-# # from time import time_ns
-# # ts = time_ns()
-# # for i in range(1):
-# #     PT = get_alpha_predicate_node(kb,BOOPType,"A", "<",i)
-# #     njit_update(PT)
-
-# #     PT.update_func(PT._meminfo)
-#     # print(PT.left_attr)
-#     # print(PT.right_val)
-
-# kb = KnowledgeBase()
-
-# pn = get_alpha_predicate_node(BOOPType,"B", "<",9)
-
-
-# kb.add_subscriber(pn)
-
-# kb.declare(BOOP("Q",7))
-# kb.declare(BOOP("Z",11))
-
-# njit_update(pn)
-
-
-# # for i in range(1):
-# #     PT = get_beta_predicate_node(kb,BOOPType,str(i)+"A", "<", BOOPType,"B")
-
-# # print(float(time_ns()-ts)/1e6)
-
-
-# @njit(cache=True)
-# def dummy_grow(dummy_meminfo):
-#     node = _struct_from_meminfo(BaseSubscriberType, dummy_meminfo)
-#     for child_meminfo in node.children:
-#         child = _struct_from_meminfo(BaseSubscriberType, child_meminfo)
-#         for x in range(0,40):
-#             child.grow_queue.append(x)
-
-# @njit(cache=True)
-# def dummy_change(dummy_meminfo):
-#     node = _struct_from_meminfo(BaseSubscriberType, dummy_meminfo)
-#     for child_meminfo in node.children:
-#         child = _struct_from_meminfo(BaseSubscriberType, child_meminfo)
-#         for x in range(0,40):
-#             child.change_queue.append(x)
-
-
-# @njit(cache=True)
-# def dummy_ctor(kb_meminfo):
-#     st = new(BaseSubscriberType)
-#     init_base_subscriber(st)
-#     # st.update_func = dumm
-#     # st.change_queue = change_queue
-
-#     return st
-
-
-
-
-
-
-
-
-# exit()
-
-
-# dummy_upstream = dummy_ctor(kb._meminfo)
-
-
-
-# PT = get_alpha_predicate_node(kb,BOOPType,"B", "<",9)
-# link_downstream(dummy_upstream,PT)
-
-# dummy_grow(dummy_upstream._meminfo)
-# njit_update(PT)
-# dummy_change(dummy_upstream._meminfo)
-# # njit_update(dummy_grow)
-# # njit_update(dummy_change)
-
-
-# njit_update(PT)
-
-# print("----DONE-----")
-
-# PT.update_func(PT._meminfo)
-
-
-
-    # print(PT.left_attr)
-    # print(PT.right_attr)
-import timeit
-N=100000
-def time_ms(f):
-    f() #warm start
-    return " %0.6f ms" % (1000.0*(timeit.timeit(f, number=N)/float(N)))
-
-@njit
-def re_lt(a,b):
-    return exec_op(literally("<"),a,b)
-
-@njit
-def re(op,a,b):
-    return exec_op(literally("<"),a,b)
-
-@njit
-def l():
-    for i in range(10000):
-        lt(i,2)
-
-@njit
-def rl():
-    for i in range(10000):
-        re_lt(i,2)
-
-
-
-@njit
-def r(op):
-    out = np.empty(10000,dtype=np.uint8)
-    for i in range(10000):
-        out[i] = re(op,i,2)
-    return out
-
-@njit
-def _r(op):
-    out = np.empty(10000,dtype=np.uint8)
-    for i in range(10000):
-        out[i] = lt(i,2)
-    return out
-
-def foor():
-    r("<")
-
-def fool():
-    _r("<")
-
-print(time_ms(l))
-print(time_ms(rl))
-# print(time_ms(r))
-print(time_ms(foor))
-print(time_ms(fool))
-
-# pt = PredicateNode(kb,
-#     List.empty_list(meminfo_type),
-#     List.empty_list(u8),
-#     np.zeros(0,dtype=np.uint8),
-#     1,
-#     BOOPType,
-#     "A",
-#     None,
-
 
 
 

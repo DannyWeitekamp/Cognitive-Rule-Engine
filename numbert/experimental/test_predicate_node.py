@@ -72,8 +72,8 @@ def test_alpha_predicate_node():
 
         assert all(pn.truth_values[:3] == [1,1,1])
 
-def test_beta_predicate_node():
-    with kb_context("test_beta_predicate_node"):
+def test_beta_predicate_node_1_typed():
+    with kb_context("test_beta_predicate_node_1_typed"):
         BOOP, BOOPType = define_fact("BOOP",{"A": "string", "B" : "number"})
 
         kb = KnowledgeBase()
@@ -94,10 +94,120 @@ def test_beta_predicate_node():
 
         njit_update(pn)
 
-        print(pn.truth_values)
+        # print(pn.truth_values)
         assert all(pn.truth_values[0,:3] == [0,1,1])
         assert all(pn.truth_values[1,:3] == [0,0,0])
         assert all(pn.truth_values[2,:3] == [0,1,0])
+
+        q = BOOP("q",-7)
+        r = BOOP("r",-11)
+        t = BOOP("t",-8)
+        kb.declare(q)
+        kb.declare(r)
+        kb.declare(t)
+
+        njit_update(pn)
+        # print(pn.truth_values[:6,:6])
+        assert all(pn.truth_values[0,:6] == [0,1,1,0,0,0])
+        assert all(pn.truth_values[1,:6] == [0,0,0,0,0,0])
+        assert all(pn.truth_values[2,:6] == [0,1,0,0,0,0])
+        assert all(pn.truth_values[3,:6] == [1,1,1,0,0,0])
+        assert all(pn.truth_values[4,:6] == [1,1,1,1,0,1])
+        assert all(pn.truth_values[5,:6] == [1,1,1,1,0,0])
+
+        kb.modify(r,"B", 0)
+        kb.modify(y,"B", 0)
+
+        njit_update(pn)
+        print(pn.truth_values[:6,:6])
+        assert all(pn.truth_values[0,:6] == [0,0,1,0,0,0])
+        assert all(pn.truth_values[1,:6] == [1,0,1,0,0,0])
+        assert all(pn.truth_values[2,:6] == [0,0,0,0,0,0])
+        assert all(pn.truth_values[3,:6] == [1,1,1,0,1,0])
+        assert all(pn.truth_values[4,:6] == [1,0,1,0,0,0])
+        assert all(pn.truth_values[5,:6] == [1,1,1,1,1,0])
+
+        kb.retract(r)
+        kb.retract(y)
+
+        njit_update(pn)
+        print(pn.truth_values[:6,:6])
+        assert all(pn.truth_values[0,:6] == [0,0,1,0,0,0])
+        assert all(pn.truth_values[1,:6] == [0,0,0,0,0,0])
+        assert all(pn.truth_values[2,:6] == [0,0,0,0,0,0])
+        assert all(pn.truth_values[3,:6] == [1,0,1,0,0,0])
+        assert all(pn.truth_values[4,:6] == [0,0,0,0,0,0])
+        assert all(pn.truth_values[5,:6] == [1,0,1,1,0,0])
+
+
+def test_beta_predicate_node_2_typed():
+    with kb_context("test_beta_predicate_node_2_typed"):
+        BOOP1, BOOP1Type = define_fact("BOOP1",{"A": "number", "B" : "string"})
+        BOOP2, BOOP2Type = define_fact("BOOP2",{"A": "string", "B" : "number"})
+
+        kb = KnowledgeBase()
+
+        pn = get_beta_predicate_node(BOOP1Type,"A", "<", BOOP2Type,"B")
+
+        kb.add_subscriber(pn)
+
+        x1,x2 = BOOP1(7,"x"),  BOOP2("x",7.5) #<- slightly different
+        y1,y2 = BOOP1(11,"y"), BOOP2("y",11)
+        z1,z2 = BOOP1(8,"z"),  BOOP2("z",8)
+
+        assert len(pn.truth_values) == 0        
+
+        kb.declare(x1); kb.declare(x2)
+        kb.declare(y1); kb.declare(y2)
+        kb.declare(z1); kb.declare(z2)
+        
+        njit_update(pn)
+
+        # print(pn.truth_values)
+        assert all(pn.truth_values[0,:3] == [1,1,1])
+        assert all(pn.truth_values[1,:3] == [0,0,0])
+        assert all(pn.truth_values[2,:3] == [0,1,0])
+
+        q1, q2 = BOOP1(-7,"q"),  BOOP2("q",-7)
+        r1, r2 = BOOP1(-11,"r"), BOOP2("r",-11)
+        t1, t2 = BOOP1(-8,"t"),  BOOP2("t",-8)
+        kb.declare(q1); kb.declare(q2)
+        kb.declare(r1); kb.declare(r2)
+        kb.declare(t1); kb.declare(t2)
+
+        njit_update(pn)
+        # print(pn.truth_values[:6,:6])
+        assert all(pn.truth_values[0,:6] == [1,1,1,0,0,0])
+        assert all(pn.truth_values[1,:6] == [0,0,0,0,0,0])
+        assert all(pn.truth_values[2,:6] == [0,1,0,0,0,0])
+        assert all(pn.truth_values[3,:6] == [1,1,1,0,0,0])
+        assert all(pn.truth_values[4,:6] == [1,1,1,1,0,1])
+        assert all(pn.truth_values[5,:6] == [1,1,1,1,0,0])
+
+        kb.modify(r1,"A", 0); kb.modify(r2,"B", 0)
+        kb.modify(y1,"A", 0); kb.modify(y2,"B", 0)
+
+        njit_update(pn)
+        print(pn.truth_values[:6,:6])
+        assert all(pn.truth_values[0,:6] == [1,0,1,0,0,0])
+        assert all(pn.truth_values[1,:6] == [1,0,1,0,0,0])
+        assert all(pn.truth_values[2,:6] == [0,0,0,0,0,0])
+        assert all(pn.truth_values[3,:6] == [1,1,1,0,1,0])
+        assert all(pn.truth_values[4,:6] == [1,0,1,0,0,0])
+        assert all(pn.truth_values[5,:6] == [1,1,1,1,1,0])
+
+        kb.retract(r1); kb.retract(r2)
+        kb.retract(y1); kb.retract(y2)
+        
+        njit_update(pn)
+        print(pn.truth_values[:6,:6])
+        assert all(pn.truth_values[0,:6] == [1,0,1,0,0,0])
+        assert all(pn.truth_values[1,:6] == [0,0,0,0,0,0])
+        assert all(pn.truth_values[2,:6] == [0,0,0,0,0,0])
+        assert all(pn.truth_values[3,:6] == [1,0,1,0,0,0])
+        assert all(pn.truth_values[4,:6] == [0,0,0,0,0,0])
+        assert all(pn.truth_values[5,:6] == [1,0,1,1,0,0])
+
 
 
 
@@ -165,21 +275,57 @@ def test_b_alpha_update_post_retract_10000(benchmark):
 
 #### alpha_update_10000_times ####
 
+def _alpha_setup():
+    with kb_context("test_predicate_node"):
+        kb = KnowledgeBase()
+        pn = get_alpha_predicate_node(BOOPType,"B", "<", 50)
+        kb.add_subscriber(pn)
+        idrecs = np.empty((10000,),dtype=np.int64)
+        for i in range(10000):
+            idrecs[i] = kb.declare(BOOP("?",i))
+        # njit_update(pn)
+        return (kb, pn, idrecs), {}
+
+
 @njit(cache=True)
-def _alpha_update_10000_times(kb,pn):
+def _alpha_update_10000_times(kb,pn,idrecs):
+    njit_update(pn)
     for i in range(10000):
-        idrec = kb.declare(BOOP("?",i))
+        # idrec = kb.declare(BOOP("?",i))
+        kb.retract(idrecs[i])
         njit_update(pn)
-        kb.retract(idrec)
         # njit_update(pn)
 
 def test_b_alpha_update_10000_times(benchmark):
-    benchmark.pedantic(_alpha_update_10000_times,setup=_benchmark_setup, warmup_rounds=1)
-    
+    benchmark.pedantic(_alpha_update_10000_times,setup=_alpha_setup, warmup_rounds=1)
+
+
+
+def _beta_setup():
+    with kb_context("test_predicate_node"):
+        kb = KnowledgeBase()
+        pn = get_beta_predicate_node(BOOPType,"B", "<", BOOPType,"B")
+        kb.add_subscriber(pn)
+        idrecs = np.empty((100,),dtype=np.int64)
+        for i in range(100):
+            idrecs[i] = kb.declare(BOOP("?",i))
+        return (kb, pn, idrecs), {}
+
+
+@njit(cache=True)
+def _beta_update_100_times(kb, pn, idrecs):
+    njit_update(pn)
+    for i in range(100):
+        kb.retract(idrecs[i])
+        njit_update(pn)
+
+def test_b_beta_update_100x100(benchmark):
+    benchmark.pedantic(_beta_update_100_times,setup=_beta_setup, warmup_rounds=1)
+
 
 
 
 if __name__ == "__main__":
-    # test_alpha_predicate_node()
-    test_beta_predicate_node()
+    test_alpha_predicate_node()
+    test_beta_predicate_node_2_typed()
 

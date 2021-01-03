@@ -41,6 +41,7 @@ def eq(a,b):
 
 @njit(cache=True)
 def exec_op(op_str,a,b):
+    # return a < b
     if(op_str == "<"):
         return lt(a,b)
     elif(op_str == "<="):
@@ -61,6 +62,19 @@ op_str_map = {
     "==" : eq
 }
 
+@njit(cache=True)
+def resolve_predicate_op(op_str):
+    if(op_str == "<"):
+        return lt
+    elif(op_str == "<="):
+        return lte
+    elif(op_str == ">"):
+        return gt
+    elif(op_str == ">="):
+        return gte
+    elif(op_str == "=="):
+        return eq
+
 def resolve_predicate_op(op):
     if(isinstance(op,str)):
         return op_str_map[op]
@@ -73,6 +87,7 @@ base_predicate_node_field_dict = {
     "left_attr" : types.Any,
     "left_type" : types.Any,
     "op_str" : unicode_type,
+    # "op_func" : types.FunctionType(u1(types.Any,types.Any)),
 }
 
 basepredicate_node_fields = [(k,v) for k,v, in base_predicate_node_field_dict.items()]
@@ -107,11 +122,11 @@ BetaPredicateNode, BetaPredicateNodeTemplate = define_structref_template("BetaPr
 #### Alpha Predicate Nodes #####
 
 @njit(cache=True)
-def init_alpha(st,t_id, op_str,literal_val):
+def init_alpha(st,t_id,literal_val):
     st.truth_values = np.empty((0,),dtype=np.uint8)
     st.left_t_id = t_id
     # st.left_attr = left_attr
-    st.op_str = op_str
+    # st.op_str = op_str
     st.right_val = literal_val
     
 
@@ -124,6 +139,7 @@ def alpha_eval_truth(kb,facts,f_id, pred_node):
     if(inst_ptr != 0):
         inst = _struct_from_pointer(pred_node.left_type,inst_ptr)
         val = lower_getattr(inst, pred_node.left_attr)
+        # return pred_node.op_func(val, pred_node.right_val)#exec_op(pred_node.op_str, val, pred_node.right_val)
         return exec_op(pred_node.op_str, val, pred_node.right_val)
     else:
         return 0xFF
@@ -133,6 +149,14 @@ def expand_1d(truth_values,size,dtype):
     new_truth_values = np.empty((size,),dtype=dtype)
     for i,b in enumerate(truth_values):
         new_truth_values[i] = b
+    return new_truth_values
+
+@njit(cache=True)
+def expand_2d(truth_values, n, m, dtype):
+    new_truth_values = np.empty((n,m),dtype=dtype)
+    for i in range(truth_values.shape[0]):
+        for j in range(truth_values.shape[1]):
+            new_truth_values[i,j] = truth_values[i,j]
     return new_truth_values
 
 
@@ -153,7 +177,7 @@ def alpha_update(pred_meminfo,pnode_type):
         if(pred_node.left_t_id == t_id):
             truth = alpha_eval_truth(kb,facts,f_id, pred_node)
             pred_node.truth_values[f_id] = truth
-            pred_node.grow_queue.add(f_id)
+            # pred_node.grow_queue.add(f_id)
     pred_node.grow_head = grw_q.head
 
     for i in range(pred_node.change_head, chg_q.head):
@@ -161,25 +185,30 @@ def alpha_update(pred_meminfo,pnode_type):
         if(pred_node.left_t_id == t_id):
             truth = alpha_eval_truth(kb,facts,f_id, pred_node)
             pred_node.truth_values[f_id] = truth
-            if(truth != pred_node.truth_values[f_id]):
-                pred_node.change_queue.add(f_id)
+            # if(truth != pred_node.truth_values[f_id]):
+            #     pred_node.change_queue.add(f_id)
     pred_node.change_head = chg_q.head
 
 
-def gen_alpha_source(typ, attr, literal_val):
+def gen_alpha_source(typ, attr, op_str, literal_val):
     typ_name = f'{typ._fact_name}Type'
+    literal_type = types.literal(literal_val).literal_type
+    if(isinstance(literal_type,types.Integer)): literal_type = types.float64
+    fieldtype = typ.field_dict[attr]
     source = f'''
 from numba import types, njit
 from numba.experimental.structref import new
 from numba.types import *
-from numbert.experimental.predicate_node import AlphaPredicateNodeTemplate, init_alpha, alpha_update, alpha_predicate_node_field_dict
+from numbert.experimental.predicate_node import AlphaPredicateNodeTemplate, init_alpha, alpha_update, alpha_predicate_node_field_dict, resolve_predicate_op
 from numbert.experimental.subscriber import base_subscriber_fields, init_base_subscriber
 {gen_import_str(typ._fact_name,typ._hash_code,[typ_name])}
 
 specialization_dict = {{
+    # 'op_func' : types.FunctionType(u1({fieldtype},{literal_type})),
+    'op_str' : types.literal('{op_str}'),#types.FunctionType(u1({fieldtype},{literal_type})),
     'left_type' : types.TypeRef({typ_name}),
     'left_attr' : types.literal('{attr}'),
-    'right_val' : {types.literal(literal_val).literal_type}
+    'right_val' : {literal_type}
 }}
 
 field_dict = {{**alpha_predicate_node_field_dict,**specialization_dict}}
@@ -194,42 +223,41 @@ def update_func(pred_meminfo):
     alpha_update(pred_meminfo, pnode_type)        
 
 @njit(cache=True)
-def pre_ctor(t_id,op_str,literal_val):
+def pre_ctor(t_id,literal_val):
     st = new(pnode_type)
     init_base_subscriber(st)
-    init_alpha(st,t_id,op_str, literal_val)
+    init_alpha(st,t_id, literal_val)
     st.left_type = {typ_name}
     st.left_attr = '{attr}'
-    # st.update_func = update_func
     return st
 
 @njit
-def ctor(t_id,op_str,literal_val):
-    st = pre_ctor(t_id,op_str,literal_val)
+def ctor(t_id,literal_val):
+    st = pre_ctor(t_id,literal_val)
     st.update_func = update_func
     return st
     '''
     return source
 
 
-def define_alpha_predicate_node(typ, attr, literal_val):
+def define_alpha_predicate_node(typ, attr, op_str, literal_val):
     name = "AlphaPredicate"
     literal_type = types.literal(literal_val).literal_type
-    hash_code = unique_hash([typ._fact_name,typ._hash_code, attr, literal_type])
+    hash_code = unique_hash([typ._fact_name,typ._hash_code, attr, op_str, literal_type])
     if(not source_in_cache(name,hash_code)):
-        source = gen_alpha_source(typ, attr, literal_val)
+        source = gen_alpha_source(typ, attr, op_str, literal_val)
         source_to_cache(name, hash_code, source)
         
     ctor, pnode_type = import_from_cached(name, hash_code,['ctor','pnode_type']).values()
 
     return ctor, pnode_type
 
-def get_alpha_predicate_node(typ, attr, op, literal_val):
+def get_alpha_predicate_node(typ, attr, op_str, literal_val):
     context = kb_context()    
     t_id = context.fact_to_t_id[typ._fact_name]
 
-    ctor, pnode_type = define_alpha_predicate_node(typ, attr, literal_val)
-    out = ctor(t_id, op, literal_val)
+    ctor, pnode_type = define_alpha_predicate_node(typ, attr, op_str, literal_val)
+    out = ctor(t_id, literal_val)
 
     return out
 
@@ -237,11 +265,11 @@ def get_alpha_predicate_node(typ, attr, op, literal_val):
 #### Beta Predicate Nodes ####
 
 @njit(cache=True)
-def init_beta(st, left_t_id, right_t_id, op_str):
+def init_beta(st, left_t_id, right_t_id):
     st.truth_values = np.empty((0,0),dtype=np.uint8)
     st.left_t_id = left_t_id
     st.right_t_id = right_t_id
-    st.op_str = op_str
+    # st.op_str = '<'
     
 
 @njit(cache=True)
@@ -254,17 +282,10 @@ def beta_eval_truth(kb,pred_node, left_facts, right_facts, i, j):
         right_inst = _struct_from_pointer(pred_node.right_type,right_ptr)
         left_val = lower_getattr(left_inst, pred_node.left_attr)
         right_val = lower_getattr(right_inst, pred_node.right_attr)
+        # return pred_node.op_func(left_val, right_val)
         return exec_op(pred_node.op_str, left_val, right_val)
     else:
-        return 0xFF
-
-@njit(cache=True)
-def expand_2d(truth_values, n, m, dtype):
-    new_truth_values = np.empty((n,m),dtype=dtype)
-    for i in range(truth_values.shape[0]):
-        for j in range(truth_values.shape[1]):
-            new_truth_values[i,j] = truth_values[i,j]
-    return new_truth_values
+        return 0#0xFF
 
 
 @njit(cache=True,inline='always')
@@ -286,7 +307,6 @@ def beta_update(pred_meminfo,pnode_type):
     right_facts = facts_for_t_id(kb.kb_data,i8(pred_node.right_t_id))
 
 
-    print("TARGET", len(left_facts.data) , len(right_facts.data))
     if(len(left_facts.data) > pred_node.truth_values.shape[0] or
        len(right_facts.data) > pred_node.truth_values.shape[1]):
         pred_node.truth_values = expand_2d(pred_node.truth_values,
@@ -299,7 +319,6 @@ def beta_update(pred_meminfo,pnode_type):
         pred_node.right_consistency = expand_1d(pred_node.right_consistency,
                                         len(right_facts.data),np.uint8)
 
-    print("EXPAND OK", len(pred_node.left_consistency) , len(pred_node.right_consistency))
     for i in range(pred_node.grow_head, grw_q.head):
         t_id, f_id, a_id = decode_idrec(grw_q[i])
         if(pred_node.left_t_id == t_id):
@@ -316,34 +335,37 @@ def beta_update(pred_meminfo,pnode_type):
             pred_node.right_consistency[f_id] = 0
     pred_node.change_head = chg_q.head
 
-    print("CONSISTENCY OK")
 
     #NOTE: This part might be sped up by running it only on request
 
     lc, rc = pred_node.left_consistency, pred_node.right_consistency
+    # print(lc[:6], rc[:6])
     for i in range(left_facts.head):
         if(not lc[i]):
             for j in range(right_facts.head):
-                print(i,j)
                 update_pair(kb,pred_node,left_facts,right_facts,i,j)
+    
 
     for j in range(right_facts.head):
         if(not rc[j]):
             for i in range(left_facts.head):
-                print(i,j)
                 if(lc[i]): update_pair(kb,pred_node,left_facts,right_facts,i,j)
+    pred_node.left_consistency[:len(left_facts)] = 1
+    pred_node.right_consistency[:len(right_facts)] = 1
                     
 
-    print("UPDATE OK")
+    # print("UPDATE OK")
 
 
 
 
 
 
-def gen_beta_source(left_type, left_attr, right_type, right_attr):
+def gen_beta_source(left_type, left_attr, op_str, right_type, right_attr):
     left_typ_name = f'{left_type._fact_name}Type'
     right_typ_name = f'{right_type._fact_name}Type'
+    left_fieldtype = left_type.field_dict[left_attr]
+    right_fieldtype = right_type.field_dict[right_attr]
     source = f'''
 from numba import types, njit
 from numba.experimental.structref import new
@@ -354,6 +376,8 @@ from numbert.experimental.subscriber import base_subscriber_fields, init_base_su
 {gen_import_str(right_type._fact_name,right_type._hash_code,[right_typ_name])}
 
 specialization_dict = {{
+    # 'op_func' : types.FunctionType(u1({left_fieldtype},{right_fieldtype})),
+    'op_str' : types.literal('{op_str}'),
     'left_type' : types.TypeRef({left_typ_name}),
     'left_attr' : types.literal('{left_attr}'),
     'right_type' : types.TypeRef({right_typ_name}),
@@ -371,10 +395,10 @@ def update_func(pred_meminfo):
     beta_update(pred_meminfo, pnode_type)        
 
 @njit(cache=True)
-def pre_ctor(left_t_id, right_t_id, op_str):
+def pre_ctor(left_t_id, right_t_id):
     st = new(pnode_type)
     init_base_subscriber(st)
-    init_beta(st, left_t_id, right_t_id, op_str)
+    init_beta(st, left_t_id, right_t_id)
     st.left_type = {left_typ_name}
     st.left_attr = '{left_attr}'
     st.right_type = {right_typ_name}
@@ -390,12 +414,12 @@ def ctor(*args):
     return source
 
 
-def define_beta_predicate_node(left_type, left_attr, op, right_type, right_attr):
+def define_beta_predicate_node(left_type, left_attr, op_str, right_type, right_attr):
     name = "BetaPredicate"
-    hash_code = unique_hash([left_type._fact_name, left_type._hash_code, left_attr,
+    hash_code = unique_hash([left_type._fact_name, left_type._hash_code, left_attr, op_str,
                              right_type._fact_name, right_type._hash_code, right_attr])
     if(not source_in_cache(name,hash_code)):
-        source = gen_beta_source(left_type, left_attr, right_type, right_attr)
+        source = gen_beta_source(left_type, left_attr, op_str, right_type, right_attr)
         source_to_cache(name, hash_code, source)
         
     ctor, pnode_type = import_from_cached(name, hash_code,['ctor','pnode_type']).values()
@@ -406,15 +430,15 @@ def define_beta_predicate_node(left_type, left_attr, op, right_type, right_attr)
 # def set_update_func(pred_node,update_func):
 #     pred_node.update_func = update_func
 
-def get_beta_predicate_node(left_type, left_attr, op, right_type, right_attr):
+def get_beta_predicate_node(left_type, left_attr, op_str, right_type, right_attr):
     context = kb_context()    
     left_t_id = context.fact_to_t_id[left_type._fact_name]
     right_t_id = context.fact_to_t_id[right_type._fact_name]
 
-    ctor, pnode_type = define_beta_predicate_node(left_type, left_attr, op, right_type, right_attr)
+    ctor, pnode_type = define_beta_predicate_node(left_type, left_attr, op_str, right_type, right_attr)
     print("PP", pnode_type)
 
-    out = ctor(left_t_id, right_t_id, op)
+    out = ctor(left_t_id, right_t_id)
 
     return out
 

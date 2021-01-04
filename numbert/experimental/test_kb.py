@@ -13,34 +13,17 @@ from numbert.experimental.subscriber import BaseSubscriberType, init_base_subscr
 from numbert.experimental.utils import _struct_from_meminfo
 
 
-spec = {"value" : "string",
+tf_spec = {"value" : "string",
         "above" : "string",
         "below" : "string",
         "to_left" : "string",
         "to_right" : "string",
         }
 
-
-# with kb_context("test_kb") as context:
-TextField, TextFieldType = define_fact("TextField",spec)
-
-
-
-# from numba.extending import overload_method
-# @overload_method(TextFieldTypeTemplate, 'as_named_tuple')
-# def TextField_as_named_tuple(self):
-#     return TextField_NT(self.value,self.above,self.below,self.to_left,self.to_right)
-
-
-##### test_encode_decode #####
-
-def test_encode_decode():
-    id_rec = encode_idrec(7,8,9)
-    assert isinstance(id_rec,int)
-    assert decode_idrec(id_rec) == (7,8,9)
-
-
 ##### test_declare_retract #####
+
+with kb_context("test_declare_retract"):
+    TextField, TextFieldType = define_fact("TextField",tf_spec)
 
 @njit(cache=True)
 def declare_retract(kb):
@@ -75,27 +58,28 @@ def bad_retract_type(kb):
     kb.retract(["A",1])
 
 def test_declare_retract():
-    #NRT version
-    kb = KnowledgeBase()
-    assert declare_retract(kb) == 10
-    assert declare_again(kb) == 0
+    with kb_context("test_declare_retract"):
+        #NRT version
+        kb = KnowledgeBase()
+        assert declare_retract(kb) == 10
+        assert declare_again(kb) == 0
 
-    #Python version
-    kb = KnowledgeBase()
-    assert declare_retract.py_func(kb) == 10
-    assert declare_again.py_func(kb) == 0
+        #Python version
+        kb = KnowledgeBase()
+        assert declare_retract.py_func(kb) == 10
+        assert declare_again.py_func(kb) == 0
 
-    with pytest.raises(TypingError):
-        bad_declare_type(kb)
+        with pytest.raises(TypingError):
+            bad_declare_type(kb)
 
-    with pytest.raises(TypingError):
-        bad_declare_type.py_func(kb)
+        with pytest.raises(TypingError):
+            bad_declare_type.py_func(kb)
 
-    with pytest.raises(TypingError):
-        bad_retract_type(kb)
+        with pytest.raises(TypingError):
+            bad_retract_type(kb)
 
-    with pytest.raises(TypingError):
-        bad_retract_type.py_func(kb)
+        with pytest.raises(TypingError):
+            bad_retract_type.py_func(kb)
 
 ##### test_modify #####
 @njit(cache=True)
@@ -108,38 +92,44 @@ def bad_modify_type(kb):
     
 
 def test_modify():
-    kb = KnowledgeBase()
-    fact = TextField("A","B","C","D","E")
+    with kb_context("test_modify"):
+        TextField, TextFieldType = define_fact("TextField",tf_spec)
+        kb = KnowledgeBase()
+        fact = TextField("A","B","C","D","E")
 
-    modify_right(kb,fact,"nb")
-    assert fact.to_right == "nb"
+        modify_right(kb,fact,"nb")
+        assert fact.to_right == "nb"
 
-    modify_right.py_func(kb,fact,"py")
-    assert fact.to_right == "py"
+        modify_right.py_func(kb,fact,"py")
+        assert fact.to_right == "py"
 
-    with pytest.raises(TypingError):
-        bad_modify_type(kb)
+        with pytest.raises(TypingError):
+            bad_modify_type(kb)
 
-    with pytest.raises(TypingError):
-        bad_modify_type.py_func(kb)
-    
-
-
-    
+        with pytest.raises(TypingError):
+            bad_modify_type.py_func(kb)
+        
 
 ##### test_declare_overloading #####
+
+with kb_context("test_declare_overloading"):
+    TextField, TextFieldType = define_fact("TextField",tf_spec)
+
 @njit(cache=True)
 def declare_unnamed(kb):
     return kb.declare(TextField("A","B","C","D","E"))
 
 def test_declare_overloading():
-    kb = KnowledgeBase()
-    idrec1 = declare_unnamed(kb)
-    idrec2 = declare_unnamed.py_func(kb)
-    assert idrec1 != idrec2
+    with kb_context("test_declare_overloading"):
+        kb = KnowledgeBase()
+        idrec1 = declare_unnamed(kb)
+        idrec2 = declare_unnamed.py_func(kb)
+        assert idrec1 != idrec2
 
 
 ##### test_retract_keyerror #####
+with kb_context("test_retract_keyerror"):
+    TextField, TextFieldType = define_fact("TextField",tf_spec)
 
 @njit(cache=True)
 def retract_keyerror(kb):
@@ -148,38 +138,41 @@ def retract_keyerror(kb):
     kb.retract("A")
 
 def test_retract_keyerror():
-    #NRT version
-    kb = KnowledgeBase()
-    with pytest.raises(KeyError):
-        retract_keyerror(kb)
+    with kb_context("test_retract_keyerror"):
+        #NRT version
+        kb = KnowledgeBase()
+        with pytest.raises(KeyError):
+            retract_keyerror(kb)
 
-    #Python version
-    kb = KnowledgeBase()
-    with pytest.raises(KeyError):
-        retract_keyerror.py_func(kb)
+        #Python version
+        kb = KnowledgeBase()
+        with pytest.raises(KeyError):
+            retract_keyerror.py_func(kb)
 
 ##### test_all_facts_of_type #####
+
+with kb_context("test_all_facts_of_type"):
+    TextField, TextFieldType = define_fact("TextField",tf_spec)
 
 @njit(cache=True)
 def all_of_type(kb):
     return kb.all_facts_of_type(TextFieldType)
 
 def test_all_facts_of_type():
-    #NRT version
-    kb = KnowledgeBase()
-    declare_retract(kb)
-    all_tf = all_of_type(kb)
-    assert isinstance(all_tf[0],TextField)
-    assert len(all_tf) == 90
+    with kb_context("test_all_facts_of_type"):
+        #NRT version
+        kb = KnowledgeBase()
+        declare_retract(kb)
+        all_tf = all_of_type(kb)
+        assert isinstance(all_tf[0],TextField)
+        assert len(all_tf) == 90
 
-    all_tf = all_of_type.py_func(kb)
-    assert isinstance(all_tf[0],TextField)
-    assert len(all_tf) == 90
+        all_tf = all_of_type.py_func(kb)
+        assert isinstance(all_tf[0],TextField)
+        assert len(all_tf) == 90
 
 
 ##### test_subscriber #####
-
-
 
 @njit(cache=True)
 def dummy_subscriber_ctor():
@@ -189,28 +182,28 @@ def dummy_subscriber_ctor():
     return st
 
 def test_grow_change_queues():
-    #NRT version
-    kb = KnowledgeBase()
-    dummy_subscriber = dummy_subscriber_ctor() 
-    kb.add_subscriber(dummy_subscriber)
+    with kb_context("test_grow_change_queues"):
+        TextField, TextFieldType = define_fact("TextField",tf_spec)
+        #NRT version
+        kb = KnowledgeBase()
+        dummy_subscriber = dummy_subscriber_ctor() 
+        kb.add_subscriber(dummy_subscriber)
 
-    idrec = declare_unnamed(kb)
+        idrec = kb.declare(TextField("A","B","C","D","E"))
 
-    # assert kb.kb_data.subscribers[0].grow_queue.data[0] == idrec
-    gr_q = kb.kb_data.grow_queue
-    assert gr_q.data[gr_q.head-1] == idrec
+        # assert kb.kb_data.subscribers[0].grow_queue.data[0] == idrec
+        gr_q = kb.kb_data.grow_queue
+        assert gr_q.data[gr_q.head-1] == idrec
 
-    kb.retract(idrec)
+        kb.retract(idrec)
 
-    # assert kb.kb_data.subscribers[0].change_queue.data[0] == idrec
-    ch_q = kb.kb_data.change_queue
-    assert ch_q.data[ch_q.head-1] == idrec
+        # assert kb.kb_data.subscribers[0].change_queue.data[0] == idrec
+        ch_q = kb.kb_data.change_queue
+        assert ch_q.data[ch_q.head-1] == idrec
 
 
 
 ###################### BENCHMARKS ########################
-
-
 
 
 #### b_encode_idrec ####
@@ -288,8 +281,8 @@ def test_b_retract10000(benchmark):
 
 if __name__ == "__main__":
     test_modify()
-    test_encode_decode()
+    # test_encode_decode()
     test_declare_retract()
     test_retract_keyerror()
-    test_subscriber()
+    # test_subscriber()
     test_all_facts_of_type()

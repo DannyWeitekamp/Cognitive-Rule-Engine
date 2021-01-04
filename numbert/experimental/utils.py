@@ -1,5 +1,5 @@
 from numba import types, njit, u1,u2,u4,u8, i8
-from numba.types import Tuple
+from numba.types import Tuple, void
 from numba.experimental.structref import _Utils, imputils
 from numba.extending import intrinsic
 from numba.core import cgutils
@@ -157,6 +157,26 @@ def _pointer_from_struct(typingctx, val):
         meminfo = dstruct.meminfo
 
         #NOTE: Fixes sefault but not sure about it's lifecycle (i.e. watch out for memleaks)
+        # context.nrt.incref(builder, types.MemInfoPointer(types.voidptr), meminfo)
+
+        res = builder.ptrtoint(dstruct.meminfo, cgutils.intp_t)
+
+        return res
+        
+    sig = i8(val,)
+    return sig, codegen
+
+@intrinsic
+def _pointer_from_struct_incref(typingctx, val):
+    def codegen(context, builder, sig, args):
+        [td] = sig.args
+        [d] = args
+
+        ctor = cgutils.create_struct_proxy(td)
+        dstruct = ctor(context, builder, value=d)
+        meminfo = dstruct.meminfo
+
+        #NOTE: Fixes sefault but not sure about it's lifecycle (i.e. watch out for memleaks)
         context.nrt.incref(builder, types.MemInfoPointer(types.voidptr), meminfo)
 
         res = builder.ptrtoint(dstruct.meminfo, cgutils.intp_t)
@@ -164,4 +184,44 @@ def _pointer_from_struct(typingctx, val):
         return res
         
     sig = i8(val,)
+    return sig, codegen
+
+
+
+@intrinsic
+def _incref_structref(typingctx,inst_type):
+    def codegen(context, builder, sig, args):
+        d, = args
+
+        ctor = cgutils.create_struct_proxy(inst_type)
+        dstruct = ctor(context, builder, value=d)
+        context.nrt.incref(builder, types.MemInfoPointer(types.voidptr), dstruct.meminfo)
+
+    sig = void(inst_type)
+    return sig, codegen
+
+
+@intrinsic
+def _decref_structref(typingctx,inst_type):
+    def codegen(context, builder, sig, args):
+        d, = args
+
+        ctor = cgutils.create_struct_proxy(inst_type)
+        dstruct = ctor(context, builder, value=d)
+        meminfo = dstruct.meminfo
+        context.nrt.decref(builder, types.MemInfoPointer(types.voidptr), dstruct.meminfo)
+
+    sig = void(inst_type)
+    return sig, codegen
+
+
+@intrinsic
+def _decref_pointer(typingctx, raw_ptr):
+    def codegen(context, builder, sig, args):
+        raw_ptr, = args
+        meminfo = builder.inttoptr(raw_ptr, cgutils.voidptr_t)
+        context.nrt.decref(builder, types.MemInfoPointer(types.voidptr), meminfo)
+
+
+    sig = void(raw_ptr)
     return sig, codegen

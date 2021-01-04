@@ -31,7 +31,8 @@ from numbert.experimental.transform import infer_type
 from numbert.experimental.subscriber import BaseSubscriberType
 from numbert.experimental.structref import define_structref
 from numbert.experimental.fact import BaseFact,BaseFactType, cast_fact
-from numbert.experimental.utils import lower_setattr, _cast_structref, _meminfo_from_struct, decode_idrec, encode_idrec, _pointer_from_struct, _struct_from_pointer
+from numbert.experimental.utils import lower_setattr, _cast_structref, _meminfo_from_struct, decode_idrec, encode_idrec, \
+ _pointer_from_struct, _pointer_from_struct_incref, _struct_from_pointer, _decref_pointer
 from numbert.experimental.vector import new_vector, VectorType
 from numbert.caching import import_from_cached, source_in_cache, source_to_cache
 
@@ -69,17 +70,11 @@ kb_data_fields = [
     ("change_queue" , VectorType), 
     ("grow_queue" , VectorType), 
 
-    # ("consistency_listeners" , DictType(i8, two_str_set)),
-    # ("consistency_listener_counter" , Array(i8, 0, "C")),
-    # ("unnamed_counter" , Array(i8, 0, "C")),    
     ("NULL_FACT", BaseFactType)
 ]
 
 KnowledgeBaseData, KnowledgeBaseDataType = define_structref("KnowledgeBaseData",kb_data_fields)
 
-
-# @njit(cache=True)
-# def 
 
 
 @njit(cache=True)
@@ -87,17 +82,13 @@ def expand_kb_data_types(kb_data,n):
     old_n = kb_data.n_types
     kb_data.n_types += n
 
-    #If the head buffer is too small double it
-    # if(kb_data.n_types > len(kb_data.empty_f_id_heads)):
-    # temp = kb_data.empty_f_id_heads
-
     for i in range(n):
         v = new_vector(BASE_F_ID_STACK_SIZE)    
-        v_ptr =_pointer_from_struct(v)
+        v_ptr =_pointer_from_struct_incref(v)
         kb_data.retracted_f_ids.add(v_ptr)
 
         v = new_vector(BASE_FACT_SET_SIZE)    
-        v_ptr =_pointer_from_struct(v)
+        v_ptr =_pointer_from_struct_incref(v)
         kb_data.facts.add(v_ptr)
         
         # kb_data.facts.append(List.empty_list(BaseFactType))
@@ -140,6 +131,28 @@ def init_kb_data(context_data):
     L = max(len(context_data.attr_inds_by_type),1)
     expand_kb_data_types(kb_data,L)
     return kb_data
+
+@njit(cache=True)
+def kb_data_dtor(kb_data):
+    '''Decref out data structures in kb_data that we explicitly incref'ed '''
+
+    #Decref all declared facts and their container vectors 
+    for i in range(kb_data.facts.head):
+        facts_ptr = kb_data.facts.data[i]
+        facts = _struct_from_pointer(VectorType, facts_ptr)
+        for j in range(facts.head):
+            fact_ptr = facts.data[j]
+            _decref_pointer(fact_ptr)
+        _decref_pointer(facts_ptr)
+
+    #Decref the inner vectors of retracted_f_ids
+    for i in range(kb_data.retracted_f_ids.head):
+        ptr = kb_data.retracted_f_ids.data[i]
+        _decref_pointer(ptr)
+
+
+
+
 
 #### Consistency ####
 
@@ -191,6 +204,10 @@ class KnowledgeBase(structref.StructRefProxy):
     def modify(self, fact, attr, val):
         return modify(self,fact, attr, val)
 
+    def __del__(self):
+        pass
+        # kb_data_dtor(self.kb_data)
+
 
 
 @structref.register
@@ -239,6 +256,10 @@ def make_f_id_empty(kb_data, t_id, f_id):
     retracted_f_ids_for_t_id(kb_data,t_id).add(f_id)
     #_struct_from_pointer(VectorType, kb_data.retracted_f_ids[t_id]).add(f_id)
     # kb_data.empty_f_id_heads[t_id] += 1
+    fact_ptr = facts_for_t_id(kb_data,t_id)[f_id]
+    if(fact_ptr != 0):
+        _decref_pointer(fact_ptr)
+    
     facts_for_t_id(kb_data,t_id)[f_id] = 0#_pointer_from_struct(kb_data.NULL_FACT)
     # kb_data.facts[t_id][f_id] = _pointer_from_struct(kb_data.NULL_FACT)
 
@@ -322,7 +343,10 @@ def signal_subscribers_change(kb, idrec):
 
 @njit(cache=True)
 def declare_fact(kb,fact):
-    fact_ptr = _pointer_from_struct(fact) #.4ms / 10000
+    #Incref so that the fact is not garbage collected if this is the only reference
+    fact_ptr = _pointer_from_struct_incref(fact) #.4ms / 10000
+
+
     t_id = resolve_t_id(kb,fact)  #.1ms / 10000
     facts = facts_for_t_id(kb.kb_data,t_id) #negligible
     f_id = next_empty_f_id(kb.kb_data,facts,t_id) # .5ms / 10000

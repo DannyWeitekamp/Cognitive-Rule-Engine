@@ -1,3 +1,19 @@
+'''Utilities for defining alpha/beta predicate nodes
+
+These subscriber nodes are roughly analagous to the alpha and beta nodes of the 
+RETE matching algorithm, with a few important differences, including the fact
+that there isn't a precompiled RETE graph, and the loose graph structure that does
+exist does not pass around tuples. PredicateNodes are mostly independant of each other
+and can be rearranged and resused in ConditionNodes as needed.
+
+Alpha predicates correspond to statements of the form `fact.attribute < literal_value`, 
+and Beta predicates correspond to satements of the form `fact1.attribute1 < fact2.attribute2`
+where `<` can be any comparison operator. These nodes subscribe to changes
+in a KnowledgeBase. When their update_func() is called each predicate nodes' internal 
+truth_values are updated for each fact or pair of facts of the particular type(s) evaluated 
+on the nodes' particular comparison statement.
+'''
+
 import numpy as np
 from numba import types, njit, i8, u8, i4, u1, literally, generated_jit
 from numba.typed import List
@@ -18,6 +34,9 @@ meminfo_type = types.MemInfoPointer(types.voidptr)
 
 @njit(cache=True)
 def exec_op(op_str,a,b):
+    '''Executes one of 5 boolean comparison operations. Since the predicate_node type
+       fixes 'op_str' to a literal value. LLVM will compile out the switch case.
+    '''
     if(op_str == "<"):
         return a < b
     elif(op_str == "<="):
@@ -66,24 +85,7 @@ beta_predicate_node_fields = [(k,v) for k,v, in beta_predicate_node_field_dict.i
 BetaPredicateNode, BetaPredicateNodeTemplate = define_structref_template("BetaPredicateNode", base_subscriber_fields + beta_predicate_node_fields)
 
 
-#### Alpha Predicate Nodes #####
-
-@njit(cache=True)
-def init_alpha(st,t_id,literal_val):
-    st.truth_values = np.empty((0,),dtype=np.uint8)
-    st.left_t_id = t_id
-    st.right_val = literal_val
-    
-
-@njit(cache=True)
-def alpha_eval_truth(kb,facts,f_id, pred_node):
-    inst_ptr = facts.data[i8(f_id)]
-    if(inst_ptr != 0):
-        inst = _struct_from_pointer(pred_node.left_type,inst_ptr)
-        val = lower_getattr(inst, pred_node.left_attr)
-        return exec_op(pred_node.op_str, val, pred_node.right_val)
-    else:
-        return 0xFF
+#### Helper Array Expansion Functions ####
 
 @njit(cache=True)
 def expand_1d(truth_values,size,dtype):
@@ -101,18 +103,45 @@ def expand_2d(truth_values, n, m, dtype):
     return new_truth_values
 
 
+#### Alpha Predicate Nodes #####
+
+@njit(cache=True)
+def init_alpha(st,t_id,right_val):
+    '''Initializes an empty AlphaPredicateNode with t_id and right_val'''
+    st.truth_values = np.empty((0,),dtype=np.uint8)
+    st.left_t_id = t_id
+    st.right_val = right_val
+    
+
+@njit(cache=True)
+def alpha_eval_truth(kb,facts,f_id, pred_node):
+    '''Updates an AlphaPredicateNode with fact at f_id'''
+    inst_ptr = facts.data[i8(f_id)]
+    if(inst_ptr != 0):
+        inst = _struct_from_pointer(pred_node.left_type,inst_ptr)
+        val = lower_getattr(inst, pred_node.left_attr)
+        return exec_op(pred_node.op_str, val, pred_node.right_val)
+    else:
+        return 0xFF
+
 @njit(cache=True,locals={'new_size':u8})
 def alpha_update(pred_meminfo,pnode_type):
+    '''Implements update_func of AlphaPredicateNode subscriber'''
     if(pred_meminfo is None): return
+
+    # Resolve this instance of the AlphaPredicateNode, it's KnowledgeBase, and 
+    #   the fact pointer vector associated with this AlphaPredicateNode's t_id
     pred_node = _struct_from_meminfo(pnode_type, pred_meminfo)
     kb = _struct_from_meminfo(KnowledgeBaseType, pred_node.kb_meminfo)
     grw_q = kb.kb_data.grow_queue
     chg_q = kb.kb_data.change_queue
-
     facts = facts_for_t_id(kb.kb_data,i8(pred_node.left_t_id))
+
+    # Ensure that truth_values is the size of the fact pointer vector
     if(len(facts.data) > len(pred_node.truth_values)):
         pred_node.truth_values = expand_1d(pred_node.truth_values,len(facts.data),np.uint8)
 
+    # Update from the grow head to the KnowledgeBase's grow head  
     for i in range(pred_node.grow_head, grw_q.head):
         t_id, f_id, a_id = decode_idrec(grw_q[i])
         if(pred_node.left_t_id == t_id):
@@ -121,6 +150,7 @@ def alpha_update(pred_meminfo,pnode_type):
             # pred_node.grow_queue.add(f_id)
     pred_node.grow_head = grw_q.head
 
+    # Update from the change head to the KnowledgeBase's change head
     for i in range(pred_node.change_head, chg_q.head):
         t_id, f_id, a_id = decode_idrec(chg_q[i])
         if(pred_node.left_t_id == t_id):
@@ -131,9 +161,11 @@ def alpha_update(pred_meminfo,pnode_type):
     pred_node.change_head = chg_q.head
 
 
-def gen_alpha_source(typ, attr, op_str, literal_val):
+def gen_alpha_source(typ, attr, op_str, literal_type):
+    '''Produces source code for an AlphaPredicateNode that is specialized for the given types,
+        attribute and comparison operator.'''
     typ_name = f'{typ._fact_name}Type'
-    literal_type = types.literal(literal_val).literal_type
+    # literal_type = types.literal(literal_val).literal_type
     if(isinstance(literal_type,types.Integer)): literal_type = types.float64
     fieldtype = typ.field_dict[attr]
     source = f'''
@@ -181,12 +213,13 @@ def ctor(t_id,literal_val):
     return source
 
 
-def define_alpha_predicate_node(typ, attr, op_str, literal_val):
+def define_alpha_predicate_node(typ, attr, op_str, literal_type):
+    '''Generates or gets the cached definition for an AlphaPredicateNode with the given 
+        types, attributes, and comparison op. '''
     name = "AlphaPredicate"
-    literal_type = types.literal(literal_val).literal_type
     hash_code = unique_hash([typ._fact_name,typ._hash_code, attr, op_str, literal_type])
     if(not source_in_cache(name,hash_code)):
-        source = gen_alpha_source(typ, attr, op_str, literal_val)
+        source = gen_alpha_source(typ, attr, op_str, literal_type)
         source_to_cache(name, hash_code, source)
         
     ctor, pnode_type = import_from_cached(name, hash_code,['ctor','pnode_type']).values()
@@ -194,10 +227,12 @@ def define_alpha_predicate_node(typ, attr, op_str, literal_val):
     return ctor, pnode_type
 
 def get_alpha_predicate_node(typ, attr, op_str, literal_val):
+    '''Gets a new instance of an AlphaPredicateNode that evals op(typ.attr, literal_val) '''
     context = kb_context()    
     t_id = context.fact_to_t_id[typ._fact_name]
+    literal_type = types.literal(literal_val).literal_type
 
-    ctor, pnode_type = define_alpha_predicate_node(typ, attr, op_str, literal_val)
+    ctor, pnode_type = define_alpha_predicate_node(typ, attr, op_str, literal_type)
     out = ctor(t_id, literal_val)
 
     return out
@@ -207,6 +242,7 @@ def get_alpha_predicate_node(typ, attr, op_str, literal_val):
 
 @njit(cache=True)
 def init_beta(st, left_t_id, right_t_id):
+    '''Initializes an empty BetaPredicateNode with left_t_id and right_t_id'''
     st.truth_values = np.empty((0,0),dtype=np.uint8)
     st.left_t_id = left_t_id
     st.right_t_id = right_t_id
@@ -214,6 +250,7 @@ def init_beta(st, left_t_id, right_t_id):
 
 @njit(cache=True)
 def beta_eval_truth(kb,pred_node, left_facts, right_facts, i, j):
+    '''Eval truth for BetaPredicateNode for facts i and j of left_facts and right_facts'''
     left_ptr = left_facts.data[i]
     right_ptr = right_facts.data[j]
 
@@ -229,6 +266,7 @@ def beta_eval_truth(kb,pred_node, left_facts, right_facts, i, j):
 
 @njit(cache=True,inline='always')
 def update_pair(kb,pred_node, left_facts, right_facts, i, j):
+    '''Updates an BetaPredicateNode for facts i and j of left_facts and right_facts'''
     truth = beta_eval_truth(kb,pred_node, left_facts, right_facts, i, j)
     pred_node.truth_values[i,j] = truth
 
@@ -236,16 +274,18 @@ def update_pair(kb,pred_node, left_facts, right_facts, i, j):
 
 @njit(cache=True,locals={'new_size':u8})
 def beta_update(pred_meminfo,pnode_type):
+    '''Implements update_func of BetaPredicateNode subscriber'''
     if(pred_meminfo is None): return
+    # Resolve this instance of the BetaPredicateNode, it's KnowledgeBase, and 
+    #   the fact pointer vectors associated with this the left and right t_id.
     pred_node = _struct_from_meminfo(pnode_type, pred_meminfo)
     kb = _struct_from_meminfo(KnowledgeBaseType, pred_node.kb_meminfo)
     grw_q = kb.kb_data.grow_queue
     chg_q = kb.kb_data.change_queue
-
     left_facts = facts_for_t_id(kb.kb_data,i8(pred_node.left_t_id))
     right_facts = facts_for_t_id(kb.kb_data,i8(pred_node.right_t_id))
 
-
+    #Expand the truth_values, and left and right consistencies to match fact vectors
     if(len(left_facts.data) > pred_node.truth_values.shape[0] or
        len(right_facts.data) > pred_node.truth_values.shape[1]):
         pred_node.truth_values = expand_2d(pred_node.truth_values,
@@ -258,6 +298,7 @@ def beta_update(pred_meminfo,pnode_type):
         pred_node.right_consistency = expand_1d(pred_node.right_consistency,
                                         len(right_facts.data),np.uint8)
 
+    #Fill in inconsistencies, catching up to the KnoweldgeBases' grow_queue 
     for i in range(pred_node.grow_head, grw_q.head):
         t_id, f_id, a_id = decode_idrec(grw_q[i])
         if(pred_node.left_t_id == t_id):
@@ -266,6 +307,7 @@ def beta_update(pred_meminfo,pnode_type):
             pred_node.right_consistency[f_id] = 0
     pred_node.grow_head = grw_q.head
 
+    #Fill in inconsistencies, catching up to the KnoweldgeBases' change_queue 
     for i in range(pred_node.change_head, chg_q.head):
         t_id, f_id, a_id = decode_idrec(chg_q[i])
         if(pred_node.left_t_id == t_id):
@@ -277,23 +319,29 @@ def beta_update(pred_meminfo,pnode_type):
 
     #NOTE: This part might be sped up by running it only on request
 
+    # Update all facts that are inconsistent, check inconsistent left_facts
+    #   against all right facts.
     lc, rc = pred_node.left_consistency, pred_node.right_consistency
-    # print(lc[:6], rc[:6])
     for i in range(left_facts.head):
         if(not lc[i]):
             for j in range(right_facts.head):
                 update_pair(kb,pred_node,left_facts,right_facts,i,j)
     
-
+    # Check inconsistent right facts agains all left facts, except the ones that
+    #   were already checked.
     for j in range(right_facts.head):
         if(not rc[j]):
             for i in range(left_facts.head):
                 if(lc[i]): update_pair(kb,pred_node,left_facts,right_facts,i,j)
+
+    # left and right inconsistencies all handled so fill in with 1s. 
     pred_node.left_consistency[:len(left_facts)] = 1
     pred_node.right_consistency[:len(right_facts)] = 1
                     
 
 def gen_beta_source(left_type, left_attr, op_str, right_type, right_attr):
+    '''Generates or gets the cached definition for an BetaPredicateNode with the given 
+        types, attributes, and comparison op. '''
     left_typ_name = f'{left_type._fact_name}Type'
     right_typ_name = f'{right_type._fact_name}Type'
     left_fieldtype = left_type.field_dict[left_attr]
@@ -347,6 +395,8 @@ def ctor(*args):
 
 
 def define_beta_predicate_node(left_type, left_attr, op_str, right_type, right_attr):
+    '''Generates or gets the cached definition for an AlphaPredicateNode with the given 
+        types, attributes, and comparison op. '''
     name = "BetaPredicate"
     hash_code = unique_hash([left_type._fact_name, left_type._hash_code, left_attr, op_str,
                              right_type._fact_name, right_type._hash_code, right_attr])
@@ -359,6 +409,8 @@ def define_beta_predicate_node(left_type, left_attr, op_str, right_type, right_a
     return ctor, pnode_type
 
 def get_beta_predicate_node(left_type, left_attr, op_str, right_type, right_attr):
+    '''Gets a new instance of an AlphaPredicateNode that evals 
+        op(left_type.left_attr, right_type.right_attr).'''
     context = kb_context()    
     left_t_id = context.fact_to_t_id[left_type._fact_name]
     right_t_id = context.fact_to_t_id[right_type._fact_name]

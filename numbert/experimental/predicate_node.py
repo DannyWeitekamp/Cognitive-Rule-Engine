@@ -57,6 +57,7 @@ base_predicate_node_field_dict = {
     "left_attr" : types.Any,
     "left_type" : types.Any,
     "op_str" : unicode_type,
+    "truth_values" : u1[:,:],
 }
 
 basepredicate_node_fields = [(k,v) for k,v, in base_predicate_node_field_dict.items()]
@@ -65,7 +66,7 @@ BasePredicateNode, BasePredicateNodeType = define_structref("BasePredicateNode",
 
 alpha_predicate_node_field_dict = {
     **base_predicate_node_field_dict,
-    "truth_values" : u1[:],
+    # "truth_values" : u1[:],
     "right_val" : types.Any,
 }
 alpha_predicate_node_fields = [(k,v) for k,v, in alpha_predicate_node_field_dict.items()]
@@ -74,7 +75,7 @@ AlphaPredicateNode, AlphaPredicateNodeTemplate = define_structref_template("Alph
 
 beta_predicate_node_field_dict = {
     **base_predicate_node_field_dict,
-    "truth_values" : u1[:,:],
+    
     "right_t_id" : i8,
     "right_attr" : types.Any,
     "right_type" : types.Any,
@@ -108,7 +109,7 @@ def expand_2d(truth_values, n, m, dtype):
 @njit(cache=True)
 def init_alpha(st,t_id,right_val):
     '''Initializes an empty AlphaPredicateNode with t_id and right_val'''
-    st.truth_values = np.empty((0,),dtype=np.uint8)
+    st.truth_values = np.empty((0,0),dtype=np.uint8)
     st.left_t_id = t_id
     st.right_val = right_val
     
@@ -139,14 +140,14 @@ def alpha_update(pred_meminfo,pnode_type):
 
     # Ensure that truth_values is the size of the fact pointer vector
     if(len(facts.data) > len(pred_node.truth_values)):
-        pred_node.truth_values = expand_1d(pred_node.truth_values,len(facts.data),np.uint8)
+        pred_node.truth_values = expand_2d(pred_node.truth_values,len(facts.data),1,np.uint8)
 
     # Update from the grow head to the KnowledgeBase's grow head  
     for i in range(pred_node.grow_head, grw_q.head):
         t_id, f_id, a_id = decode_idrec(grw_q[i])
         if(pred_node.left_t_id == t_id):
             truth = alpha_eval_truth(kb,facts,f_id, pred_node)
-            pred_node.truth_values[f_id] = truth
+            pred_node.truth_values[f_id,0] = truth
             # pred_node.grow_queue.add(f_id)
     pred_node.grow_head = grw_q.head
 
@@ -155,7 +156,7 @@ def alpha_update(pred_meminfo,pnode_type):
         t_id, f_id, a_id = decode_idrec(chg_q[i])
         if(pred_node.left_t_id == t_id):
             truth = alpha_eval_truth(kb,facts,f_id, pred_node)
-            pred_node.truth_values[f_id] = truth
+            pred_node.truth_values[f_id,0] = truth
             # if(truth != pred_node.truth_values[f_id]):
             #     pred_node.change_queue.add(f_id)
     pred_node.change_head = chg_q.head

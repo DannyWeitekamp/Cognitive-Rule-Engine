@@ -37,28 +37,28 @@ def test_alpha_predicate_node():
         kb.declare(z)
 
         njit_update(pn)
-        assert all(pn.truth_values[:3] == [1,0,1])
+        assert all(pn.truth_values[:3,0] == [1,0,1])
 
         kb.modify(x,"B", 100)
         kb.modify(y,"B", 3)
         kb.modify(z,"B", 88)
 
         #Checks doesn't change before update
-        assert all(pn.truth_values[:3] == [1,0,1])
+        assert all(pn.truth_values[:3,0] == [1,0,1])
         njit_update(pn)
-        assert all(pn.truth_values[:3] == [0,1,0])
+        assert all(pn.truth_values[:3,0] == [0,1,0])
 
         kb.retract(x)
         kb.retract(y)
         kb.retract(z)
 
         #Checks doesn't change before update
-        assert all(pn.truth_values[:3] == [0,1,0])
+        assert all(pn.truth_values[:3,0] == [0,1,0])
 
         njit_update(pn)
         # print(pn.truth_values)
         #Checks that retracted facts show up as u1.nan = 0XFF
-        assert all(pn.truth_values[:3] == [0xFF,0xFF,0xFF])
+        assert all(pn.truth_values[:3,0] == [0xFF,0xFF,0xFF])
 
         kb.declare(x)
         kb.declare(y)
@@ -70,7 +70,7 @@ def test_alpha_predicate_node():
 
         njit_update(pn)
 
-        assert all(pn.truth_values[:3] == [1,1,1])
+        assert all(pn.truth_values[:3,0] == [1,1,1])
 
 def test_beta_predicate_node_1_typed():
     with kb_context("test_beta_predicate_node_1_typed"):

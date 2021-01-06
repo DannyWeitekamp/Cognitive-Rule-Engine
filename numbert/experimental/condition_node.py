@@ -23,25 +23,25 @@ from copy import copy
 
 BOOP, BOOPType = define_fact("BOOP",{"A": "string", "B" : "number"})
 
-bindable_fields_dict = {
+var_fields_dict = {
     'fact_type': types.Any,
     'deref_attrs': types.Any,
 }
 
-bindable_fields =  [(k,v) for k,v, in bindable_fields_dict.items()]
+var_fields =  [(k,v) for k,v, in var_fields_dict.items()]
 
-class BindableTypeTemplate(types.StructRef):
+class VarTypeTemplate(types.StructRef):
     pass
 
 # Manually register the type to avoid automatic getattr overloading 
-default_manager.register(BindableTypeTemplate, models.StructRefModel)
+default_manager.register(VarTypeTemplate, models.StructRefModel)
 
-def bindable_str_from_type(inst_type):
+def var_str_from_type(inst_type):
     fn = inst_type.field_dict['fact_type'].instance_type._fact_name
     attr_str = inst_type.field_dict['deref_attrs'].literal_value
-    return f'Bindable[{fn}]{attr_str}'
+    return f'Var[{fn}]{attr_str}'
 
-class Bindable(structref.StructRefProxy):
+class Var(structref.StructRefProxy):
     def __new__(cls, *args):
         return structref.StructRefProxy.__new__(cls, *args)
 
@@ -51,21 +51,21 @@ class Bindable(structref.StructRefProxy):
         elif(attr == 'deref_attrs'):
             return self._numba_type_.field_dict['deref_attrs'].literal_value
         elif(True): #TODO
-            return Bindable(self.fact_type,types.literal(self.deref_attrs+f'.{attr}'))
+            return Var(self.fact_type,types.literal(self.deref_attrs+f'.{attr}'))
 
     def __str__(self):
-        return bindable_str_from_type(self._numba_type_)
+        return var_str_from_type(self._numba_type_)
 
 
 # Manually define the boxing to avoid constructor overloading
-define_boxing(BindableTypeTemplate,Bindable)
+define_boxing(VarTypeTemplate,Var)
 
-@overload(Bindable,strict=False,prefer_literal=False)
+@overload(Var,strict=False,prefer_literal=False)
 def ctor(typ,attr_chain_str=types.literal('')):
     if(not isinstance(attr_chain_str, types.Literal)):
         return 
 
-    struct_type = BindableTypeTemplate([('fact_type', typ), ('deref_attrs', attr_chain_str)])
+    struct_type = VarTypeTemplate([('fact_type', typ), ('deref_attrs', attr_chain_str)])
     if(len(attr_chain_str.literal_value) > 0):
         def impl(typ,attr_chain_str):
             return new(struct_type)
@@ -78,13 +78,13 @@ def resolve_deref_type(inst_type, attr):
     old_str = inst_type.field_dict['deref_attrs'].literal_value
     fact_type = inst_type.field_dict['fact_type']
     new_str = old_str + f".{attr}"
-    new_struct_type = BindableTypeTemplate([('fact_type', fact_type), ('deref_attrs', types.literal(new_str))])    
+    new_struct_type = VarTypeTemplate([('fact_type', fact_type), ('deref_attrs', types.literal(new_str))])    
     return new_struct_type
 
 @overload(str)
-def str_bindable(inst_type):
-    if(not isinstance(inst_type, BindableTypeTemplate)): return
-    str_val = bindable_str_from_type(inst_type)
+def str_var(inst_type):
+    if(not isinstance(inst_type, VarTypeTemplate)): return
+    str_val = var_str_from_type(inst_type)
     def impl(typ, attr_chain_str):
         return str_val
 
@@ -94,7 +94,7 @@ def str_bindable(inst_type):
 
 @infer_getattr
 class StructAttribute(AttributeTemplate):
-    key = BindableTypeTemplate
+    key = VarTypeTemplate
     def generic_resolve(self, typ, attr):
         if attr in typ.field_dict:
             attrty = typ.field_dict[attr]
@@ -103,16 +103,15 @@ class StructAttribute(AttributeTemplate):
         elif(attr in typ.field_dict['fact_type'].instance_type.field_dict):
             return resolve_deref_type(typ, attr)
 
-@lower_getattr_generic(BindableTypeTemplate)
+@lower_getattr_generic(VarTypeTemplate)
 def struct_getattr_impl(context, builder, typ, val, attr):
-    if(attr in bindable_fields_dict):
+    if(attr in var_fields_dict):
         utils = _Utils(context, builder, typ)
         dataval = utils.get_data_struct(val)
         ret = getattr(dataval, attr)
         fieldtype = typ.field_dict[attr]
         return imputils.impl_ret_borrowed(context, builder, fieldtype, ret)
     else:
-        # print("AAAAA",attr)
         new_struct_type = resolve_deref_type(typ,attr)
 
         ctor = cgutils.create_struct_proxy(typ)
@@ -128,7 +127,7 @@ def struct_getattr_impl(context, builder, typ, val, attr):
 
 @njit
 def foo():
-    b = Bindable(BOOPType)
+    b = Var(BOOPType)
     print(b)
     b7 = b.A.B
     print(b7)
@@ -136,14 +135,13 @@ def foo():
     print(b8)    
 foo()
 
-b = Bindable(BOOPType)
+b = Var(BOOPType)
 b1 = b.A
 print(b1)
 
 
 term_fields_dict = {
-    'fact_type': types.Any,
-    'deref_attrs': types.Any,
+    "pred_node" : BasePredicateNode,
 }
 
 term_fields =  [(k,v) for k,v, in term_fields_dict.items()]
@@ -153,7 +151,7 @@ term_fields =  [(k,v) for k,v, in term_fields_dict.items()]
 
 
 # var_fields = [
-#     ('bindable', ???)
+#     ('var', ???)
 #     ('attr', unicode_type)
 #     ('a_id', i8)
 # ]
@@ -169,15 +167,15 @@ term_fields =  [(k,v) for k,v, in term_fields_dict.items()]
 
 
 # condition_fields = [
-#     #A Vector<*Bindable>
-#     ("bindables", VectorType)
+#     #A Vector<*var>
+#     ("vars", VectorType)
 #     #A Vector<*Vector<*Term>>
 #     ("conjuncts", VectorType)
     
 # ]
 
 
-# def new_condition(bindables, conjucts)
+# def new_condition(vars, conjucts)
 
 
 
@@ -190,7 +188,7 @@ term_fields =  [(k,v) for k,v, in term_fields_dict.items()]
 # OR((ab+c), (de+f)) = ab+c+de+f
 
 
-#There needs to be Bindable and Var types probably
+#There needs to be var and Var types probably
 # because we can Bind to something without conditioning on it
 # so
 

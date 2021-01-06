@@ -224,6 +224,7 @@ def _get_alpha_predicate_node():
         pn = get_alpha_predicate_node(BOOPType,"B", "<",50)
         pn = get_alpha_predicate_node(BOOPType,"B", "<",49)
 
+@pytest.mark.benchmark(group="setup")
 def test_b_get_alpha_predicate_node(benchmark):
     benchmark.pedantic(_get_alpha_predicate_node, iterations=1)
 
@@ -237,6 +238,7 @@ def _benchmark_setup():
         kb.add_subscriber(pn)
         return (kb, pn), {}
 
+@pytest.mark.benchmark(group="setup")
 def test_b_setup(benchmark):
     benchmark.pedantic(_benchmark_setup, iterations=1)
 

@@ -147,10 +147,12 @@ def gen_fact_code(typ, fields, fact_num, ind='    '):
 
     str_temp = ", ".join([f'{k}={{self.{k}}}' for k,v in fields])
 
+
     # t_id = lines_in_fact_registry()
     # print("FEILD LIST", field_list)
     code = \
 f'''
+import numpy as np
 from numba.core import types
 from numba import njit
 from numba.core.types import *
@@ -159,6 +161,9 @@ from numba.experimental import structref
 from numba.experimental.structref import new, define_boxing
 from numba.core.extending import overload
 from numbert.experimental.fact import _register_fact_structref, FactProxy
+from numbert.experimental.utils import struct_get_attr_offset
+
+attr_offsets = np.empty(({len(all_fields)},),dtype=np.int16)
 
 {getter_jits}
 
@@ -168,11 +173,17 @@ class {typ}TypeTemplate(types.StructRef):
         super().__init__(*args,**kwargs)
         self._fact_name = '{typ}'
         self._fact_num = {fact_num}
+        self._attr_offsets = attr_offsets
 
     def preprocess_fields(self, fields):
         return tuple((name, types.unliteral(typ)) for name, typ in fields)
 
 {typ}Type = {typ}TypeTemplate(list(zip([{base_list},{field_list}], [{base_type_list},{field_type_list}])))
+
+
+#TODO: This is an expensive operation, ~5ms/iter, consider combining
+for i,attr in enumerate([{base_list},{field_list}]):
+    attr_offsets[i] = struct_get_attr_offset({typ}Type,attr)
 
 @njit(cache=True)
 def ctor({param_list}):
@@ -187,6 +198,7 @@ class {typ}(FactProxy):
     _fact_type = {typ}Type
     _fact_name = '{typ}'
     _fact_num = {fact_num}
+    _attr_offsets = attr_offsets
 
     def __new__(cls, *args):
         return structref.StructRefProxy.__new__(cls, *args)

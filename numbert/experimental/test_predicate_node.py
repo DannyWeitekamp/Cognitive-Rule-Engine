@@ -327,5 +327,5 @@ def test_b_beta_update_100x100(benchmark):
 
 if __name__ == "__main__":
     test_alpha_predicate_node()
-    test_beta_predicate_node_2_typed()
+    # test_beta_predicate_node_2_typed()
 

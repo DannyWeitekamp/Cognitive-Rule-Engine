@@ -1,4 +1,4 @@
-from numba import types, njit, u1,u2,u4,u8, i8,i2
+from numba import types, njit, u1,u2,u4,u8, i8,i2, literally
 from numba.types import Tuple, void
 from numba.experimental.structref import _Utils, imputils
 from numba.extending import intrinsic
@@ -106,10 +106,8 @@ def _meminfo_from_struct(typingctx, val):
 
 @intrinsic
 def _cast_structref(typingctx, cast_type_ref, inst_type):
-    # inst_type = struct_type.instance_type
     cast_type = cast_type_ref.instance_type
     def codegen(context, builder, sig, args):
-        # [td] = sig.args
         _,d = args
 
         ctor = cgutils.create_struct_proxy(inst_type)
@@ -119,9 +117,7 @@ def _cast_structref(typingctx, cast_type_ref, inst_type):
 
         st = cgutils.create_struct_proxy(cast_type)(context, builder)
         st.meminfo = meminfo
-        #NOTE: Fixes sefault but not sure about it's lifecycle (i.e. watch out for memleaks)
-        # context.nrt.incref(builder, types.MemInfoPointer(types.voidptr), meminfo)
-
+        
         return st._getvalue()
     sig = cast_type(cast_type_ref, inst_type)
     return sig, codegen
@@ -157,9 +153,6 @@ def _pointer_from_struct(typingctx, val):
         dstruct = ctor(context, builder, value=d)
         meminfo = dstruct.meminfo
 
-        #NOTE: Fixes sefault but not sure about it's lifecycle (i.e. watch out for memleaks)
-        # context.nrt.incref(builder, types.MemInfoPointer(types.voidptr), meminfo)
-
         res = builder.ptrtoint(dstruct.meminfo, cgutils.intp_t)
 
         return res
@@ -177,7 +170,7 @@ def _pointer_from_struct_incref(typingctx, val):
         dstruct = ctor(context, builder, value=d)
         meminfo = dstruct.meminfo
 
-        #NOTE: Fixes sefault but not sure about it's lifecycle (i.e. watch out for memleaks)
+        #Incref to prevent struct from being freed
         context.nrt.incref(builder, types.MemInfoPointer(types.voidptr), meminfo)
 
         res = builder.ptrtoint(dstruct.meminfo, cgutils.intp_t)
@@ -187,6 +180,22 @@ def _pointer_from_struct_incref(typingctx, val):
     sig = i8(val,)
     return sig, codegen
 
+@intrinsic
+def _pointer_to_data_pointer(typingctx, raw_ptr):
+    def codegen(context, builder, sig, args):
+        raw_ptr,  = args
+        raw_ptr_ty,  = sig.args
+
+        meminfo = builder.inttoptr(raw_ptr, cgutils.voidptr_t)
+        data_ptr = context.nrt.meminfo_data(builder, meminfo)
+        ret = builder.ptrtoint(data_ptr, cgutils.intp_t)
+
+        return ret
+
+    
+
+    sig = i8(raw_ptr, )
+    return sig, codegen
 
 #### Refcounting Utils #### 
 
@@ -265,6 +274,10 @@ def _struct_get_attr_offset(typingctx, inst, attr):
     sig = i8(inst,attr)
     return sig, codegen
 
+@njit(cache=True)
+def struct_get_attr_offset(inst,attr):
+    return _struct_get_attr_offset(inst,literally(attr))
+
 @intrinsic
 def _struct_get_data_pointer(typingctx, inst_type):
     '''get the base address of the struct pointed to by structref 'inst' '''
@@ -294,3 +307,7 @@ def _load_pointer(typingctx, typ, ptr):
 
     sig = inst_type(typ,ptr)
     return sig, codegen
+
+
+
+

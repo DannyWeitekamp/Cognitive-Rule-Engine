@@ -25,7 +25,9 @@ from numbert.experimental.context import kb_context
 from numbert.experimental.structref import define_structref, define_structref_template
 from numbert.experimental.kb import KnowledgeBaseType, KnowledgeBase, facts_for_t_id, fact_at_f_id
 from numbert.experimental.fact import define_fact, BaseFactType, cast_fact
-from numbert.experimental.utils import _struct_from_meminfo, _meminfo_from_struct, _cast_structref, decode_idrec, lower_getattr, _struct_from_pointer
+from numbert.experimental.utils import _struct_from_meminfo, _meminfo_from_struct, _cast_structref, \
+ decode_idrec, lower_getattr, _struct_from_pointer, struct_get_attr_offset, _struct_get_data_pointer, \
+ _load_pointer, _pointer_to_data_pointer
 from numbert.experimental.subscriber import base_subscriber_fields, BaseSubscriber, BaseSubscriberType, init_base_subscriber, link_downstream
 from copy import copy
 
@@ -54,7 +56,7 @@ def exec_op(op_str,a,b):
 
 base_predicate_node_field_dict = {
     "left_t_id" : i8,
-    "left_attr" : types.Any,
+    "left_attr_offsets" : i8[:],#types.Any,
     "left_type" : types.Any,
     "op_str" : unicode_type,
     "truth_values" : u1[:,:],
@@ -107,20 +109,32 @@ def expand_2d(truth_values, n, m, dtype):
 #### Alpha Predicate Nodes #####
 
 @njit(cache=True)
-def init_alpha(st,t_id,right_val):
+def init_alpha(st,t_id, attr_offsets, right_val):
     '''Initializes an empty AlphaPredicateNode with t_id and right_val'''
     st.truth_values = np.empty((0,0),dtype=np.uint8)
     st.left_t_id = t_id
+    st.left_attr_offsets = attr_offsets
     st.right_val = right_val
     
+
+@njit(cache=True)
+def deref_attrs(inst_ptr,attr_offsets):
+    pass
+    #TODO
+
 
 @njit(cache=True)
 def alpha_eval_truth(kb,facts,f_id, pred_node):
     '''Updates an AlphaPredicateNode with fact at f_id'''
     inst_ptr = facts.data[i8(f_id)]
     if(inst_ptr != 0):
-        inst = _struct_from_pointer(pred_node.left_type,inst_ptr)
-        val = lower_getattr(inst, pred_node.left_attr)
+
+
+        # inst = _struct_from_pointer(BaseFactType,inst_ptr)
+        # data_ptr = _struct_get_data_pointer(inst)
+        data_ptr = _pointer_to_data_pointer(inst_ptr)
+        val = _load_pointer(pred_node.left_type, data_ptr+pred_node.left_attr_offsets[0])
+        # val = lower_getattr(inst, pred_node.left_attr)
         return exec_op(pred_node.op_str, val, pred_node.right_val)
     else:
         return 0xFF
@@ -162,27 +176,24 @@ def alpha_update(pred_meminfo,pnode_type):
     pred_node.change_head = chg_q.head
 
 
-def gen_alpha_source(typ, attr, op_str, literal_type):
+def gen_alpha_source(left_type, op_str, right_type):
     '''Produces source code for an AlphaPredicateNode that is specialized for the given types,
         attribute and comparison operator.'''
-    typ_name = f'{typ._fact_name}Type'
+    # typ_name = f'{typ._fact_name}Type'
     # literal_type = types.literal(literal_val).literal_type
-    if(isinstance(literal_type,types.Integer)): literal_type = types.float64
-    fieldtype = typ.field_dict[attr]
+    if(isinstance(right_type,types.Integer)): right_type = types.float64
+    # fieldtype = typ.field_dict[attr]
     source = f'''
 from numba import types, njit
 from numba.experimental.structref import new
 from numba.types import *
 from numbert.experimental.predicate_node import AlphaPredicateNodeTemplate, init_alpha, alpha_update, alpha_predicate_node_field_dict
 from numbert.experimental.subscriber import base_subscriber_fields, init_base_subscriber
-{gen_import_str(typ._fact_name,typ._hash_code,[typ_name])}
 
 specialization_dict = {{
-    # 'op_func' : types.FunctionType(u1({fieldtype},{literal_type})),
-    'op_str' : types.literal('{op_str}'),#types.FunctionType(u1({fieldtype},{literal_type})),
-    'left_type' : types.TypeRef({typ_name}),
-    'left_attr' : types.literal('{attr}'),
-    'right_val' : {literal_type}
+    'op_str' : types.literal('{op_str}'),
+    'left_type' : types.TypeRef({left_type}),
+    'right_val' : {right_type}
 }}
 
 field_dict = {{**alpha_predicate_node_field_dict,**specialization_dict}}
@@ -197,44 +208,66 @@ def update_func(pred_meminfo):
     alpha_update(pred_meminfo, pnode_type)        
 
 @njit(cache=True)
-def pre_ctor(t_id,literal_val):
+def pre_ctor(t_id, attr_offsets, literal_val):
     st = new(pnode_type)
     init_base_subscriber(st)
-    init_alpha(st,t_id, literal_val)
-    st.left_type = {typ_name}
-    st.left_attr = '{attr}'
+    init_alpha(st,t_id, attr_offsets, literal_val)
+    # st.left_type = {left_type}
     return st
 
 @njit
-def ctor(t_id,literal_val):
-    st = pre_ctor(t_id,literal_val)
+def ctor(t_id, attr_offsets, literal_val):
+    st = pre_ctor(t_id, attr_offsets, literal_val)
     st.update_func = update_func
     return st
     '''
     return source
 
 
-def define_alpha_predicate_node(typ, attr, op_str, literal_type):
+def resolve_deref(typ,attr_chain):
+    offsets = np.empty((len(attr_chain),),dtype=np.int64)
+    out_type = typ 
+    for i, attr in enumerate(attr_chain):
+        # t = time.time_ns()
+        offsets[i] = struct_get_attr_offset(out_type,attr) #For some reason ~4.6ms
+        # print((time.time_ns()-t)/1e6)
+        # if(i < len(attr_chain)-1):
+        out_type = out_type.field_dict[attr]
+
+
+    return out_type, offsets
+
+def define_alpha_predicate_node(left_type, op_str, right_type):
     '''Generates or gets the cached definition for an AlphaPredicateNode with the given 
         types, attributes, and comparison op. '''
     name = "AlphaPredicate"
-    hash_code = unique_hash([typ._fact_name,typ._hash_code, attr, op_str, literal_type])
+    hash_code = unique_hash([left_type, op_str, right_type])
     if(not source_in_cache(name,hash_code)):
-        source = gen_alpha_source(typ, attr, op_str, literal_type)
+        source = gen_alpha_source(left_type, op_str, right_type)
         source_to_cache(name, hash_code, source)
         
     ctor, pnode_type = import_from_cached(name, hash_code,['ctor','pnode_type']).values()
 
     return ctor, pnode_type
 
-def get_alpha_predicate_node(typ, attr, op_str, literal_val):
+import time
+def get_alpha_predicate_node(typ, attr_chain, op_str, literal_val):
     '''Gets a new instance of an AlphaPredicateNode that evals op(typ.attr, literal_val) '''
     context = kb_context()    
     t_id = context.fact_to_t_id[typ._fact_name]
-    literal_type = types.literal(literal_val).literal_type
+    right_type = types.literal(literal_val).literal_type
 
-    ctor, pnode_type = define_alpha_predicate_node(typ, attr, op_str, literal_type)
-    out = ctor(t_id, literal_val)
+    if(not isinstance(attr_chain,list)): attr_chain = [attr_chain]
+
+    # t = time.time_ns()
+    left_type, left_attr_offsets = resolve_deref(typ, attr_chain)
+    # print((time.time_ns()-t)/1e6)
+    # left_type = f8
+    # left_attr_offsets = 48
+    # print("LEFT",left_type)
+
+    ctor, pnode_type = define_alpha_predicate_node(left_type, op_str, right_type)
+    out = ctor(t_id, left_attr_offsets, literal_val)
 
     return out
 

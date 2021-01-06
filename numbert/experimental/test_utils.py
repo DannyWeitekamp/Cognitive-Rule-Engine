@@ -10,7 +10,7 @@ import pytest
 from numbert.experimental.utils import _incref_structref, _decref_structref, \
          _meminfo_from_struct, _struct_from_meminfo, _pointer_from_struct, \
          _struct_from_pointer, encode_idrec, decode_idrec, _struct_get_attr_offset, \
-         _struct_get_data_pointer, _load_pointer
+         _struct_get_data_pointer, _load_pointer, struct_get_attr_offset
 from numba.core.runtime.nrt import rtsys
 
 BOOP, BOOPType = define_structref("BOOP", [("A", unicode_type), ("B", i8)])
@@ -102,9 +102,9 @@ def test_structref_to_pointer():
     assert b1._meminfo.refcount == 1
     assert b2._meminfo.refcount == 1
 
-@njit(cache=True)
-def get_offset_inst(b,attr):
-    return _struct_get_attr_offset(b,literally(attr))
+# @njit(cache=True)
+# def struct_get_attr_offset(b,attr):
+#     return _struct_get_attr_offset(b,literally(attr))
 
 @njit(cache=True)
 def load_offset(typ, b ,offset):
@@ -118,12 +118,12 @@ def test_direct_member_access():
     b1 = BEEP1(1,2,1)
     b2 = BEEP1(1,2,3)
 
-    assert get_offset_inst(b1,"A") == 0
-    assert get_offset_inst(b1,"B") == 8
-    assert get_offset_inst(b1,"C") == 16
+    assert struct_get_attr_offset(b1,"A") == 0
+    assert struct_get_attr_offset(b1,"B") == 8
+    assert struct_get_attr_offset(b1,"C") == 16
 
-    offset = get_offset_inst(b1,"C")
-    cls_offset = get_offset_inst(BEEP1Type,"C")
+    offset = struct_get_attr_offset(b1,"C")
+    cls_offset = struct_get_attr_offset(BEEP1Type,"C")
 
     assert offset == cls_offset
 
@@ -132,12 +132,12 @@ def test_direct_member_access():
     b1 = BEEP2("b1",2,1)
     b2 = BEEP2("b2",2,3)
 
-    offset = get_offset_inst(b1,"C")
-    cls_offset = get_offset_inst(BEEP2Type,"C")
+    offset = struct_get_attr_offset(b1,"C")
+    cls_offset = struct_get_attr_offset(BEEP2Type,"C")
     assert offset == cls_offset
 
-    offset = get_offset_inst(b1,"A")
-    cls_offset = get_offset_inst(BEEP2Type,"A")
+    offset = struct_get_attr_offset(b1,"A")
+    cls_offset = struct_get_attr_offset(BEEP2Type,"A")
     assert offset == cls_offset
 
     load_offset(unicode_type,b2,offset) == "b2"

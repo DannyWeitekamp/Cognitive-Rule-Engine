@@ -184,7 +184,7 @@ def gen_alpha_source(left_type, op_str, right_type):
     source = f'''
 from numba import types, njit
 from numba.experimental.structref import new
-from numba.types import *
+from numba.types import float64, unicode_type
 from numbert.experimental.predicate_node import AlphaPredicateNodeTemplate, init_alpha, alpha_update, alpha_predicate_node_field_dict
 from numbert.experimental.subscriber import base_subscriber_fields, init_base_subscriber
 
@@ -225,6 +225,9 @@ def resolve_deref(typ,attr_chain):
     offsets = np.empty((len(attr_chain),),dtype=np.int64)
     out_type = typ 
     for i, attr in enumerate(attr_chain):
+        if(not hasattr(out_type,'field_dict')): 
+            attr_chain_str = ".".join(attr_chain)
+            raise AttributeError(f"Invalid dereference {typ}.{attr_chain_str}. {out_type} has no attribute '{attr}'.")
         fd = out_type.field_dict
         offsets[i] = out_type._attr_offsets[list(fd.keys()).index(attr)]  #struct_get_attr_offset(out_type,attr) #For some reason ~4.6ms
         out_type = fd[attr]

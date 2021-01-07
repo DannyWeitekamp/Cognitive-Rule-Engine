@@ -53,13 +53,18 @@ class Var(structref.StructRefProxy):
             # return self._numba_type_.field_dict['deref_attrs'].literal_value
             return var_get_deref_attrs(self)
         elif(True): #TODO
-            return Var(self.fact_type,types.literal(self.deref_attrs+f'.{attr}'))
+            return var_deref(self,attr)
 
     def __str__(self):
-        # return var_str_from_type(self._numba_type_)
-        # print("BBB",self.fact_type._fact_name)
-        # print("DA",self.deref_attrs)
         return ".".join([f'Var[{self.fact_type._fact_name}]']+list(self.deref_attrs))
+
+    def __lt__(self,other): return var_lt(self,other)
+    def __le__(self,other): return var_le(self,other)
+    def __gt__(self,other): return var_gt(self,other)
+    def __ge__(self,other): return var_ge(self,other)
+    def __eq__(self,other): return var_eq(self,other)
+    def __ne__(self,other): return var_ne(self,other)
+        
 
 @njit(cache=True)
 def var_get_deref_attrs(self):
@@ -125,7 +130,6 @@ def str_var(self):
 class StructAttribute(AttributeTemplate):
     key = VarTypeTemplate
     def generic_resolve(self, typ, attr):
-
         if attr in typ.field_dict:
             attrty = typ.field_dict[attr]
             return attrty
@@ -133,8 +137,9 @@ class StructAttribute(AttributeTemplate):
         #TODO Should check that all subtype references are valid
         if(not hasattr(head_type,'field_dict')):
             raise AttributeError(f"Cannot dereference attribute '{attr}' of {head_type}.")
+
+        fact_type = typ.field_dict['fact_type']
         if(attr in head_type.field_dict):
-            fact_type = typ.field_dict['fact_type']
             new_head_type = types.TypeRef(head_type.field_dict[attr])
             # print(head_type, new_head_type)
             field_dict = {
@@ -142,12 +147,11 @@ class StructAttribute(AttributeTemplate):
                 **{"fact_type" : fact_type,
                  "head_type" : new_head_type}
             }
-            # print(field_dict)
             return VarTypeTemplate([(k,v) for k,v, in field_dict.items()])
         else:
             raise AttributeError(f"Var[{fact_type}] has no attribute '{attr}'")
-            # 
-            # return resolve_deref_type(typ, attr)
+
+#### getattr and dereferencing ####
 
 @njit(cache=True)
 def copy_and_append(self,st,attr,offset):
@@ -161,24 +165,22 @@ def copy_and_append(self,st,attr,offset):
     new_deref_offsets.append(offset)
     lower_setattr(st,'deref_attrs',new_deref_attrs)
     lower_setattr(st,'deref_offsets',new_deref_offsets)
-    # st.deref_attrs = new_deref_attrs
-    # return st
 
 
 @lower_getattr_generic(VarTypeTemplate)
-def struct_getattr_impl(context, builder, typ, val, attr):
-    #If the attribute is one of the var fields then retrieve it
+def var_getattr_impl(context, builder, typ, val, attr):
+    if(attr == "__getattr__"): return
+
+    #If the attribute is one of the var struct fields then retrieve it.
     if(attr in var_fields_dict):
-        print("NORMAL", attr, type(attr))
         utils = _Utils(context, builder, typ)
         dataval = utils.get_data_struct(val)
         ret = getattr(dataval, attr)
         fieldtype = typ.field_dict[attr]
         return imputils.impl_ret_borrowed(context, builder, fieldtype, ret)
 
-    #Otherwise make a new instance and copy the 'deref_attrs' and append 'attr'
+    #Otherwise return a new instance with a new 'attr' and 'offset' append 
     else:
-        print("EXT",attr, type(attr))
         fact_type = typ.field_dict['fact_type'].instance_type 
         fd = fact_type.field_dict
         offset = fact_type._attr_offsets[list(fd.keys()).index(attr)]
@@ -195,17 +197,21 @@ def struct_getattr_impl(context, builder, typ, val, attr):
         return ret
 
 
-        # new_struct_type = resolve_deref_type(typ,attr)
+#### dereferencing for py_funcs ####
 
-        # ctor = cgutils.create_struct_proxy(typ)
-        # dstruct = ctor(context, builder, value=val)
-        # meminfo = dstruct.meminfo
-        # context.nrt.incref(builder, types.MemInfoPointer(types.voidptr), meminfo)
+@intrinsic
+def _var_deref(typingctx, typ, attr_type):
+    attr = attr_type.literal_value
+    def codegen(context, builder, sig, args):
+        impl = context.get_getattr(sig.args[0], attr)
+        return impl(context, builder, sig.args[0], args[0], attr)
 
-        # st = cgutils.create_struct_proxy(new_struct_type)(context, builder)
-        # st.meminfo = meminfo
-        
-        # return st._getvalue()
+    sig = typ(typ,attr_type)
+    return sig, codegen
+
+@njit(cache=True)
+def var_deref(self,attr):
+    return _var_deref(self,literally(attr))
 
 
 @njit(cache=True)
@@ -239,6 +245,7 @@ pterm_fields_dict = {
     "str_val" : unicode_type,
     "pred_node" : BasePredicateNodeType,
     "negated" : u1,
+    "is_alpha" : u1,
 }
 
 pterm_fields =  [(k,v) for k,v, in pterm_fields_dict.items()]
@@ -281,7 +288,7 @@ def pterm_ctor(left_var, op_str, right_var):
     # left_attr_chain = left_var.field_dict['deref_attrs'].literal_value.split(".")[1:]
     op_str = op_str.literal_value
     if(not isinstance(right_var, VarTypeTemplate)):
-        right_type = right_var.literal_type
+        right_type = right_var.literal_type if (isinstance(right_var,types.Literal)) else right_var
         # ctor, _ = define_alpha_predicate_node(left_type, op_str, right_type)
         # print(ctor.__module__)
 
@@ -294,7 +301,8 @@ def pterm_ctor(left_var, op_str, right_var):
             pred_node = AlphaPredicateNode(left_type, l_offsets, op_str, right_var)
             st.pred_node = _cast_structref(BasePredicateNodeType, pred_node)
             st.str_val = str(left_var) + " " + op_str + " " + "?" #base_str + "?"#TODO str->float needs to work
-            st.negated = True
+            st.negated = False
+            st.is_alpha = True
             return st
 
     else:
@@ -314,7 +322,8 @@ def pterm_ctor(left_var, op_str, right_var):
             pred_node = BetaPredicateNode(left_type, l_offsets, op_str, right_type, r_offsets)
             st.pred_node = _cast_structref(BasePredicateNodeType, pred_node)
             st.str_val = str(left_var) + " " + op_str + " " + str(right_var)
-            st.negated = True
+            st.negated = False
+            st.is_alpha = False
             return st
 
 
@@ -384,34 +393,34 @@ def comparator_helper(op_str, left_var, right_var,negate=False):
         return impl
 
 
+@generated_jit(cache=True)
 @overload(operator.lt)
-@njit(cache=True)
 def var_lt(left_var, right_var):
     return comparator_helper("<", left_var, right_var)
 
-@overload(operator.lte)
-@njit(cache=True)
-def var_lte(left_var, right_var):
+@generated_jit(cache=True)
+@overload(operator.le)
+def var_le(left_var, right_var):
     return comparator_helper("<=", left_var, right_var)
 
+@generated_jit(cache=True)
 @overload(operator.gt)
-@njit(cache=True)
 def var_gt(left_var, right_var):
     return comparator_helper(">", left_var, right_var)
 
-@overload(operator.gte)
-@njit(cache=True)
-def var_gte(left_var, right_var):
+@generated_jit(cache=True)
+@overload(operator.ge)
+def var_ge(left_var, right_var):
     return comparator_helper(">=", left_var, right_var)
 
+@generated_jit(cache=True)
 @overload(operator.eq)
-@njit(cache=True)
 def var_eq(left_var, right_var):
     return comparator_helper("==", left_var, right_var)
 
-@overload(operator.neq)
-@njit(cache=True)
-def var_neq(left_var, right_var):
+@generated_jit(cache=True)
+@overload(operator.ne)
+def var_ne(left_var, right_var):
     return comparator_helper("==", left_var, right_var, negate=True)
 
 
@@ -429,8 +438,13 @@ def baz():
     pt2 = l < r
 
     print(pt2)
+
+    pt3 = var_lt(l,r)
+    print(pt3)
     return pt2
 baz()
+print("--------------------")
+baz.py_func()
 
 # var_fields = [
 #     ('var', ???)

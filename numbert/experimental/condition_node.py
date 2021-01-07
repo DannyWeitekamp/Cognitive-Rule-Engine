@@ -238,6 +238,7 @@ foo()
 pterm_fields_dict = {
     "str_val" : unicode_type,
     "pred_node" : BasePredicateNodeType,
+    "negated" : u1,
 }
 
 pterm_fields =  [(k,v) for k,v, in pterm_fields_dict.items()]
@@ -293,6 +294,7 @@ def pterm_ctor(left_var, op_str, right_var):
             pred_node = AlphaPredicateNode(left_type, l_offsets, op_str, right_var)
             st.pred_node = _cast_structref(BasePredicateNodeType, pred_node)
             st.str_val = str(left_var) + " " + op_str + " " + "?" #base_str + "?"#TODO str->float needs to work
+            st.negated = True
             return st
 
     else:
@@ -312,6 +314,7 @@ def pterm_ctor(left_var, op_str, right_var):
             pred_node = BetaPredicateNode(left_type, l_offsets, op_str, right_type, r_offsets)
             st.pred_node = _cast_structref(BasePredicateNodeType, pred_node)
             st.str_val = str(left_var) + " " + op_str + " " + str(right_var)
+            st.negated = True
             return st
 
 
@@ -368,18 +371,48 @@ bar()
 # def var_b_lt(context, builder, sig, args):
     
 
+def comparator_helper(op_str, left_var, right_var,negate=False):
+    if(isinstance(left_var,VarTypeTemplate)):
+        if(negate):
+            def impl(left_var, right_var):
+                pt = PTerm(left_var, op_str, right_var)
+                pt.negated = True
+                return pt
+        else:
+            def impl(left_var, right_var):
+                return PTerm(left_var, op_str, right_var)
+        return impl
+
 
 @overload(operator.lt)
-def var_less_than(left_var, right_var):
-    def impl(left_var, right_var):
-        return PTerm(left_var, "<", right_var)
-    return impl
+@njit(cache=True)
+def var_lt(left_var, right_var):
+    return comparator_helper("<", left_var, right_var)
+
+@overload(operator.lte)
+@njit(cache=True)
+def var_lte(left_var, right_var):
+    return comparator_helper("<=", left_var, right_var)
 
 @overload(operator.gt)
-def var_less_than(left_var, right_var):
-    def impl(left_var, right_var):
-        return PTerm(left_var, ">", right_var)
-    return impl
+@njit(cache=True)
+def var_gt(left_var, right_var):
+    return comparator_helper(">", left_var, right_var)
+
+@overload(operator.gte)
+@njit(cache=True)
+def var_gte(left_var, right_var):
+    return comparator_helper(">=", left_var, right_var)
+
+@overload(operator.eq)
+@njit(cache=True)
+def var_eq(left_var, right_var):
+    return comparator_helper("==", left_var, right_var)
+
+@overload(operator.neq)
+@njit(cache=True)
+def var_neq(left_var, right_var):
+    return comparator_helper("==", left_var, right_var, negate=True)
 
 
 @njit(cache=True)

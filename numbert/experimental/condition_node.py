@@ -1,3 +1,4 @@
+import operator
 import numpy as np
 from numba import types, njit, i8, u8, i4, u1, i8, literally, generated_jit
 from numba.typed import List
@@ -15,7 +16,7 @@ from numbert.experimental.utils import _struct_from_meminfo, _meminfo_from_struc
 from numbert.experimental.subscriber import base_subscriber_fields, BaseSubscriber, BaseSubscriberType, init_base_subscriber, link_downstream
 from numbert.experimental.vector import VectorType
 from numbert.experimental.predicate_node import BasePredicateNode,BasePredicateNodeType, get_alpha_predicate_node_definition, \
- get_beta_predicate_node_definition, deref_attrs, define_alpha_predicate_node, define_beta_predicate_node
+ get_beta_predicate_node_definition, deref_attrs, define_alpha_predicate_node, define_beta_predicate_node, AlphaPredicateNode, BetaPredicateNode
 from numba.core import imputils, cgutils
 from numba.core.datamodel import default_manager, models
 
@@ -280,22 +281,23 @@ def pterm_ctor(left_var, op_str, right_var):
     op_str = op_str.literal_value
     if(not isinstance(right_var, VarTypeTemplate)):
         right_type = right_var.literal_type
-        ctor, _ = define_alpha_predicate_node(left_type, op_str, right_type)
-        print(ctor.__module__)
+        # ctor, _ = define_alpha_predicate_node(left_type, op_str, right_type)
+        # print(ctor.__module__)
 
         def impl(left_var, op_str, right_var):
             st = new(PTermType)
             left_t_id = -1 #Not defined yet, needs Kb to resolve
             l_offsets = np.empty((len(left_var.deref_offsets),),dtype=np.int64)
             for i,x in enumerate(left_var.deref_offsets): l_offsets[i] = x
-            pred_node = ctor(left_t_id, l_offsets, right_var)
+            # pred_node = ctor(left_t_id, l_offsets, right_var)
+            pred_node = AlphaPredicateNode(left_type, l_offsets, op_str, right_var)
             st.pred_node = _cast_structref(BasePredicateNodeType, pred_node)
             st.str_val = str(left_var) + " " + op_str + " " + "?" #base_str + "?"#TODO str->float needs to work
             return st
 
     else:
         right_type = right_var.field_dict['head_type'].instance_type
-        ctor, _ = define_beta_predicate_node(left_type, op_str, right_type)
+        # ctor, _ = define_beta_predicate_node(left_type, op_str, right_type)
 
         def impl(left_var, op_str, right_var):
             st = new(PTermType)
@@ -306,7 +308,8 @@ def pterm_ctor(left_var, op_str, right_var):
             for i,x in enumerate(left_var.deref_offsets): l_offsets[i] = x
             for i,x in enumerate(right_var.deref_offsets): r_offsets[i] = x
 
-            pred_node = ctor(left_t_id, l_offsets, right_t_id, r_offsets)
+            # pred_node = ctor(left_t_id, l_offsets, right_t_id, r_offsets)
+            pred_node = BetaPredicateNode(left_type, l_offsets, op_str, right_type, r_offsets)
             st.pred_node = _cast_structref(BasePredicateNodeType, pred_node)
             st.str_val = str(left_var) + " " + op_str + " " + str(right_var)
             return st
@@ -348,10 +351,53 @@ def bar():
 
     print(pt2)
     return pt2
-    # print(pt2.str_val)
-    # print(str(pt2))
-    # print(pt2)
 bar()
+
+
+
+# def lower_var_alpha_comparator(context, builder, sig, args, op_str):
+
+
+# def lower_var_beta_comparator(context, builder, sig, args, op_str):
+
+# @lower_builtin(operator.lt, VarTypeTemplate, types.Any)
+# def var_a_lt(context, builder, sig, args):
+#     return lower_var_alpha_comparator(context, builder, sig, args, "<")
+    
+# @lower_builtin(operator.lt, VarTypeTemplate, VarTypeTemplate)
+# def var_b_lt(context, builder, sig, args):
+    
+
+
+@overload(operator.lt)
+def var_less_than(left_var, right_var):
+    def impl(left_var, right_var):
+        return PTerm(left_var, "<", right_var)
+    return impl
+
+@overload(operator.gt)
+def var_less_than(left_var, right_var):
+    def impl(left_var, right_var):
+        return PTerm(left_var, ">", right_var)
+    return impl
+
+
+@njit(cache=True)
+def baz():
+    l = Var(BOOPType).B
+    print(l)
+    r_l = 5
+    r = Var(BOOPType).B
+    print(r)
+    pt = l < r_l
+    # print(pt.str_val)
+    print(pt)
+    # pt2 = PTerm(l,"<",r)
+    pt2 = l < r
+
+    print(pt2)
+    return pt2
+baz()
 
 # var_fields = [
 #     ('var', ???)

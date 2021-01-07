@@ -19,7 +19,7 @@ from numba import types, njit, i8, u8, i4, u1, literally, generated_jit
 from numba.typed import List
 from numba.types import ListType, unicode_type, void
 from numba.experimental.structref import new
-from numba.extending import overload_method, intrinsic
+from numba.extending import overload_method, intrinsic, overload
 from numbert.caching import gen_import_str, unique_hash,import_from_cached, source_to_cache, source_in_cache
 from numbert.experimental.context import kb_context
 from numbert.experimental.structref import define_structref, define_structref_template
@@ -73,7 +73,8 @@ alpha_predicate_node_field_dict = {
     "right_val" : types.Any,
 }
 alpha_predicate_node_fields = [(k,v) for k,v, in alpha_predicate_node_field_dict.items()]
-AlphaPredicateNode, AlphaPredicateNodeTemplate = define_structref_template("AlphaPredicateNode", base_subscriber_fields + alpha_predicate_node_fields)
+AlphaPredicateNode, AlphaPredicateNodeTemplate = define_structref_template("AlphaPredicateNode",
+             base_subscriber_fields + alpha_predicate_node_fields, define_constructor=False)
 
 
 beta_predicate_node_field_dict = {
@@ -86,7 +87,8 @@ beta_predicate_node_field_dict = {
     "right_consistency" : u1[:],
 }
 beta_predicate_node_fields = [(k,v) for k,v, in beta_predicate_node_field_dict.items()]
-BetaPredicateNode, BetaPredicateNodeTemplate = define_structref_template("BetaPredicateNode", base_subscriber_fields + beta_predicate_node_fields)
+BetaPredicateNode, BetaPredicateNodeTemplate = define_structref_template("BetaPredicateNode", 
+                base_subscriber_fields + beta_predicate_node_fields, define_constructor=False)
 
 
 #### Helper Array Expansion Functions ####
@@ -110,11 +112,11 @@ def expand_2d(truth_values, n, m, dtype):
 #### Alpha Predicate Nodes #####
 
 @njit(cache=True)
-def init_alpha(st,t_id, attr_offsets, right_val):
+def init_alpha(st, left_attr_offsets, right_val):
     '''Initializes an empty AlphaPredicateNode with t_id and right_val'''
     st.truth_values = np.empty((0,0),dtype=np.uint8)
-    st.left_t_id = t_id
-    st.left_attr_offsets = attr_offsets
+    st.left_t_id = -1
+    st.left_attr_offsets = left_attr_offsets
     st.right_val = right_val
     
 
@@ -172,6 +174,30 @@ def alpha_update(pred_meminfo,pnode_type):
             # if(truth != pred_node.truth_values[f_id]):
             #     pred_node.change_queue.add(f_id)
     pred_node.change_head = chg_q.head
+
+@overload(AlphaPredicateNode,prefer_literal=True)
+def alpha_ctor(left_type, left_attr_offsets, op_str, right_val):
+    if(not isinstance(op_str, types.Literal)): return 
+    if(not isinstance(left_attr_offsets, types.Array)):
+        raise ValueError(f"AlphaPredicateNode left_attr_offsets must be array, got {left_attr_offsets}.")
+
+    specialization_dict = {
+        'op_str' : types.literal(op_str.literal_value),
+        'left_type' : left_type,
+        'right_val' : right_val
+    }
+
+    d = {**alpha_predicate_node_field_dict,**specialization_dict}
+    pnode_type = AlphaPredicateNodeTemplate(base_subscriber_fields+[(k,v) for k,v, in d.items()])
+    # print("!!!!",struct_type)
+    def impl(left_type, left_attr_offsets, op_str, right_val):
+        st = new(pnode_type)
+        init_base_subscriber(st)
+        init_alpha(st, left_attr_offsets, right_val)
+        return st
+
+    return impl
+
 
 
 def gen_alpha_source(left_type, op_str, right_type):
@@ -276,12 +302,12 @@ def get_alpha_predicate_node(typ, attr_chain, op_str, literal_val):
 #### Beta Predicate Nodes ####
 
 @njit(cache=True)
-def init_beta(st, left_t_id, left_attr_offsets, right_t_id, right_attr_offsets):
+def init_beta(st, left_attr_offsets, right_attr_offsets):
     '''Initializes an empty BetaPredicateNode with left_t_id and right_t_id'''
     st.truth_values = np.empty((0,0),dtype=np.uint8)
-    st.left_t_id = left_t_id
+    st.left_t_id = -1
     st.left_attr_offsets = left_attr_offsets
-    st.right_t_id = right_t_id
+    st.right_t_id = -1
     st.right_attr_offsets = right_attr_offsets
     
 
@@ -376,6 +402,31 @@ def beta_update(pred_meminfo,pnode_type):
     # left and right inconsistencies all handled so fill in with 1s. 
     pred_node.left_consistency[:len(left_facts)] = 1
     pred_node.right_consistency[:len(right_facts)] = 1
+
+@overload(BetaPredicateNode,prefer_literal=True)
+def beta_ctor(left_type, left_attr_offsets, op_str, right_type, right_attr_offsets):
+    if(not isinstance(op_str, types.Literal)): return 
+    if(not isinstance(left_attr_offsets, types.Array)):
+        raise ValueError(f"AlphaPredicateNode left_attr_offsets must be array, got {left_attr_offsets}.")
+    if(not isinstance(right_attr_offsets, types.Array)):
+        raise ValueError(f"AlphaPredicateNode right_attr_offsets must be array, got {left_attr_offsets}.")
+
+    specialization_dict = {
+        'op_str' : types.literal(op_str.literal_value),
+        'left_type' : left_type,
+        'right_type' : right_type
+    }
+
+    d = {**beta_predicate_node_field_dict,**specialization_dict}
+    pnode_type = BetaPredicateNodeTemplate(base_subscriber_fields+[(k,v) for k,v, in d.items()])
+    # print("!!!!",struct_type)
+    def impl(left_type, left_attr_offsets, op_str, right_type, right_attr_offsets):
+        st = new(pnode_type)
+        init_base_subscriber(st)
+        init_beta(st, left_attr_offsets, right_attr_offsets)
+        return st
+
+    return impl
                     
 
 # def gen_beta_source(left_type, left_attr, op_str, right_type, right_attr):

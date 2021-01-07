@@ -18,7 +18,10 @@ def _gen_getter(typ,attr):
 
 def gen_structref_code(typ,fields,
     extra_imports="from numba.experimental import structref",
-    register_decorator="@structref.register"
+    register_decorator="@structref.register",
+    define_constructor=True,
+    define_boxing=True
+
     ):
     attrs = [x[0] if isinstance(x,tuple) else x for x in fields]
     getters = "\n".join([_gen_getter(typ,attr) for attr in attrs])
@@ -42,8 +45,8 @@ class {typ}(structref.StructRefProxy):
 
 {getters}
 
-structref.define_proxy({typ}, {typ}TypeTemplate, [{attr_list}])
-
+{f'structref.define_constructor({typ}, {typ}TypeTemplate, [{attr_list}])' if(define_constructor) else ''}
+{f'structref.define_boxing({typ}TypeTemplate, {typ})' if(define_boxing) else ''}
 
 
 '''
@@ -57,11 +60,12 @@ structref.define_proxy({typ}, {typ}TypeTemplate, [{attr_list}])
 #     print(l[f"{typ}TypeTemplate"])
 #     return l[f"{typ}TypeTemplate"](fields=fields)
 
-def define_structref_template(name, fields):
+def define_structref_template(name, fields, define_constructor=True,define_boxing=True):
     if(isinstance(fields,dict)): [(k,v) for k,v in fields.items()]
     hash_code = unique_hash([name,fields])
     if(not source_in_cache(name,hash_code)):
-        source = gen_structref_code(name,fields)
+        source = gen_structref_code(name, fields, define_constructor=define_constructor,
+             define_boxing=define_boxing)
         source_to_cache(name,hash_code,source)
         
     ctor, template = import_from_cached(name,hash_code,[name,f"{name}TypeTemplate"]).values()

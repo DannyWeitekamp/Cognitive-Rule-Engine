@@ -416,10 +416,10 @@ def pre_ctor(left_t_id, left_attr_offsets, right_t_id, right_attr_offsets):
     init_beta(st, left_t_id, left_attr_offsets, right_t_id, right_attr_offsets)
     return st
 
-@njit
+@njit(cache=True)
 def ctor(*args):
     st = pre_ctor(*args)
-    st.update_func = update_func
+    # st.update_func = update_func
     return st
     '''
     return source

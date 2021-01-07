@@ -1,5 +1,5 @@
 import numpy as np
-from numba import types, njit, i8, u8, i4, u1, literally, generated_jit
+from numba import types, njit, i8, u8, i4, u1, i8, literally, generated_jit
 from numba.typed import List
 from numba.types import ListType, unicode_type, void
 from numba.experimental import structref
@@ -11,12 +11,14 @@ from numbert.experimental.context import kb_context
 from numbert.experimental.structref import define_structref, define_structref_template
 from numbert.experimental.kb import KnowledgeBaseType, KnowledgeBase, facts_for_t_id, fact_at_f_id
 from numbert.experimental.fact import define_fact, BaseFactType, cast_fact
-from numbert.experimental.utils import _struct_from_meminfo, _meminfo_from_struct, _cast_structref, decode_idrec, lower_getattr, _struct_from_pointer
+from numbert.experimental.utils import _struct_from_meminfo, _meminfo_from_struct, _cast_structref, decode_idrec, lower_getattr, _struct_from_pointer,  lower_setattr, lower_getattr
 from numbert.experimental.subscriber import base_subscriber_fields, BaseSubscriber, BaseSubscriberType, init_base_subscriber, link_downstream
 from numbert.experimental.vector import VectorType
-from numbert.experimental.predicate_node import BasePredicateNode,BasePredicateNodeType, get_alpha_predicate_node_definition, get_beta_predicate_node_definition
+from numbert.experimental.predicate_node import BasePredicateNode,BasePredicateNodeType, get_alpha_predicate_node_definition, \
+ get_beta_predicate_node_definition, deref_attrs, define_alpha_predicate_node, define_beta_predicate_node
 from numba.core import imputils, cgutils
 from numba.core.datamodel import default_manager, models
+
 
 from operator import itemgetter
 from copy import copy
@@ -26,7 +28,9 @@ BOOP, BOOPType = define_fact("BOOP",{"A": "string", "B" : "number"})
 
 var_fields_dict = {
     'fact_type': types.Any,
-    'deref_attrs': types.Any,
+    'head_type': types.Any,
+    'deref_attrs': ListType(unicode_type),
+    'deref_offsets': ListType(i8),
 }
 
 var_fields =  [(k,v) for k,v, in var_fields_dict.items()]
@@ -45,17 +49,24 @@ class Var(structref.StructRefProxy):
         if(attr == 'fact_type'):
             return self._numba_type_.field_dict['fact_type'].instance_type
         elif(attr == 'deref_attrs'):
-            return self._numba_type_.field_dict['deref_attrs'].literal_value
+            # return self._numba_type_.field_dict['deref_attrs'].literal_value
+            return var_get_deref_attrs(self)
         elif(True): #TODO
             return Var(self.fact_type,types.literal(self.deref_attrs+f'.{attr}'))
 
     def __str__(self):
-        return var_str_from_type(self._numba_type_)
+        # return var_str_from_type(self._numba_type_)
+        # print("BBB",self.fact_type._fact_name)
+        # print("DA",self.deref_attrs)
+        return ".".join([f'Var[{self.fact_type._fact_name}]']+list(self.deref_attrs))
 
-def var_str_from_type(inst_type):
-    fn = inst_type.field_dict['fact_type'].instance_type._fact_name
-    attr_str = inst_type.field_dict['deref_attrs'].literal_value
-    return f'Var[{fn}]{attr_str}'
+@njit(cache=True)
+def var_get_deref_attrs(self):
+    return self.deref_attrs
+# def var_str_from_type(inst_type):
+#     fn = inst_type.field_dict['fact_type'].instance_type._fact_name
+#     # attr_str = inst_type.field_dict['deref_attrs'].literal_value
+#     return f'Var[{fn}]{attr_str}'
 
 
 # Manually define the boxing to avoid constructor overloading
@@ -63,30 +74,47 @@ define_boxing(VarTypeTemplate,Var)
 
 @overload(Var,strict=False,prefer_literal=False)
 def ctor(typ,attr_chain_str=types.literal('')):
-    if(not isinstance(attr_chain_str, types.Literal)): return 
+    # if(not isinstance(attr_chain_str, types.Literal)): return 
 
-    struct_type = VarTypeTemplate([('fact_type', typ), ('deref_attrs', attr_chain_str)])
+
+    d = {**var_fields_dict,**{'fact_type':typ, 'head_type':typ}}
+    struct_type = VarTypeTemplate([(k,v) for k,v, in d.items()])
+    # print("!!!!",struct_type)
     if(len(attr_chain_str.literal_value) > 0):
         def impl(typ,attr_chain_str):
-            return new(struct_type)
+            st = new(struct_type)
+            st.deref_attrs = List.empty_list(unicode_type)
+            st.deref_offsets = List.empty_list(i8)
+            return st
     else:
+        # print("HERE")
         def impl(typ):
-            return new(struct_type)
+            st = new(struct_type)
+            lower_setattr(st,'deref_attrs',List.empty_list(unicode_type))
+            lower_setattr(st,'deref_offsets',List.empty_list(i8))
+
+            # st.deref_attrs = List.empty_list(unicode_type)
+            # st.deref_offsets = List.empty_list(i8)
+            return st
     return impl
 
-def resolve_deref_type(inst_type, attr):
-    old_str = inst_type.field_dict['deref_attrs'].literal_value
-    fact_type = inst_type.field_dict['fact_type']
-    new_str = old_str + f".{attr}"
-    new_struct_type = VarTypeTemplate([('fact_type', fact_type), ('deref_attrs', types.literal(new_str))])    
-    return new_struct_type
+# def resolve_deref_type(inst_type, attr):
+#     old_str = inst_type.field_dict['deref_attrs'].literal_value
+#     fact_type = inst_type.field_dict['fact_type']
+#     new_str = old_str + f".{attr}"
+#     new_struct_type = VarTypeTemplate([('fact_type', fact_type), ('deref_attrs', types.literal(new_str))])    
+#     return new_struct_type
 
 @overload(str)
 def str_var(self):
     if(not isinstance(self, VarTypeTemplate)): return
-    str_val = var_str_from_type(self)
+    fact_name = self.field_dict['fact_type'].instance_type._fact_name
+    # str_val = var_str_from_type(self)
     def impl(self):
-        return str_val
+        s = fact_name
+        for attr in self.deref_attrs:
+            s += "." + attr
+        return s
 
     return impl
 
@@ -96,51 +124,110 @@ def str_var(self):
 class StructAttribute(AttributeTemplate):
     key = VarTypeTemplate
     def generic_resolve(self, typ, attr):
+
         if attr in typ.field_dict:
             attrty = typ.field_dict[attr]
             return attrty
+        head_type = typ.field_dict['head_type'].instance_type 
         #TODO Should check that all subtype references are valid
-        elif(attr in typ.field_dict['fact_type'].instance_type.field_dict):
-            return resolve_deref_type(typ, attr)
+        if(not hasattr(head_type,'field_dict')):
+            raise AttributeError(f"Cannot dereference attribute '{attr}' of {head_type}.")
+        if(attr in head_type.field_dict):
+            fact_type = typ.field_dict['fact_type']
+            new_head_type = types.TypeRef(head_type.field_dict[attr])
+            # print(head_type, new_head_type)
+            field_dict = {
+                **var_fields_dict,
+                **{"fact_type" : fact_type,
+                 "head_type" : new_head_type}
+            }
+            # print(field_dict)
+            return VarTypeTemplate([(k,v) for k,v, in field_dict.items()])
+        else:
+            raise AttributeError(f"Var[{fact_type}] has no attribute '{attr}'")
+            # 
+            # return resolve_deref_type(typ, attr)
+
+@njit(cache=True)
+def copy_and_append(self,st,attr,offset):
+    new_deref_attrs = List.empty_list(unicode_type)
+    new_deref_offsets = List.empty_list(i8)
+    for x in lower_getattr(self,"deref_attrs"):
+        new_deref_attrs.append(x)
+    for y in lower_getattr(self,"deref_offsets"):
+        new_deref_offsets.append(y)
+    new_deref_attrs.append(attr)
+    new_deref_offsets.append(offset)
+    lower_setattr(st,'deref_attrs',new_deref_attrs)
+    lower_setattr(st,'deref_offsets',new_deref_offsets)
+    # st.deref_attrs = new_deref_attrs
+    # return st
+
 
 @lower_getattr_generic(VarTypeTemplate)
 def struct_getattr_impl(context, builder, typ, val, attr):
-    #If the attribute is one of the var fields then get it
+    #If the attribute is one of the var fields then retrieve it
     if(attr in var_fields_dict):
+        print("NORMAL", attr, type(attr))
         utils = _Utils(context, builder, typ)
         dataval = utils.get_data_struct(val)
         ret = getattr(dataval, attr)
         fieldtype = typ.field_dict[attr]
         return imputils.impl_ret_borrowed(context, builder, fieldtype, ret)
 
-    #Otherwise poop out a new reference to the Var with a new type
+    #Otherwise make a new instance and copy the 'deref_attrs' and append 'attr'
     else:
-        new_struct_type = resolve_deref_type(typ,attr)
-
+        print("EXT",attr, type(attr))
+        fact_type = typ.field_dict['fact_type'].instance_type 
+        fd = fact_type.field_dict
+        offset = fact_type._attr_offsets[list(fd.keys()).index(attr)]
         ctor = cgutils.create_struct_proxy(typ)
-        dstruct = ctor(context, builder, value=val)
-        meminfo = dstruct.meminfo
-        context.nrt.incref(builder, types.MemInfoPointer(types.voidptr), meminfo)
+        st = ctor(context, builder, value=val)._getvalue()
 
-        st = cgutils.create_struct_proxy(new_struct_type)(context, builder)
-        st.meminfo = meminfo
+        def new_var_and_append(self):
+            st = new(typ)
+            copy_and_append(self,st,attr,offset)
+            return st
+
+        ret = context.compile_internal(builder, new_var_and_append, typ(typ,), (st,))
+        context.nrt.incref(builder, typ, ret)
+        return ret
+
+
+        # new_struct_type = resolve_deref_type(typ,attr)
+
+        # ctor = cgutils.create_struct_proxy(typ)
+        # dstruct = ctor(context, builder, value=val)
+        # meminfo = dstruct.meminfo
+        # context.nrt.incref(builder, types.MemInfoPointer(types.voidptr), meminfo)
+
+        # st = cgutils.create_struct_proxy(new_struct_type)(context, builder)
+        # st.meminfo = meminfo
         
-        return st._getvalue()
+        # return st._getvalue()
 
 
-@njit
+@njit(cache=True)
 def foo():
     b = Var(BOOPType)
-    print(b)
-    b7 = b.A.B
+    print("F",b)
+    print(b.A)
+    b7 = b.A
+    print(b7.deref_attrs)
+    print(b7)    
+    print(b7.deref_attrs)
     print(b7)
-    b8 = b.B
-    print(b8)    
+    print(b.deref_offsets)
+    print(b7.deref_offsets)
+    # print(b7.B)
+    # b8 = b.B
+    # print(str(b8))    
+    # print(b8)    
 foo()
 
-b = Var(BOOPType)
-b1 = b.A
-print(b1)
+# b = Var(BOOPType)
+# b1 = b.A
+# print(b1)
 
 #### PTerm ####
 
@@ -183,46 +270,45 @@ define_boxing(PTermTypeTemplate,PTerm)
 PTermType = PTermTypeTemplate(pterm_fields)
     
 @overload(PTerm)
-def ctor(left_var, op_str, right_var):
+def pterm_ctor(left_var, op_str, right_var):
     # print(left_var, op_str, right_var)
     if(not isinstance(op_str, types.Literal)): return 
     if(not isinstance(left_var, VarTypeTemplate)): return
 
-    left_type = left_var.field_dict['fact_type'].instance_type
-    left_attr_chain = left_var.field_dict['deref_attrs'].literal_value.split(".")[1:]
+    left_type = left_var.field_dict['head_type'].instance_type
+    # left_attr_chain = left_var.field_dict['deref_attrs'].literal_value.split(".")[1:]
     op_str = op_str.literal_value
     if(not isinstance(right_var, VarTypeTemplate)):
         right_type = right_var.literal_type
-         
-        dfn = get_alpha_predicate_node_definition(left_type, left_attr_chain, op_str, right_type)
-        ctor, left_attr_offsets = itemgetter('ctor', 'left_attr_offsets')(dfn)
-
-        base_str = f'{var_str_from_type(left_var)} {op_str} '
+        ctor, _ = define_alpha_predicate_node(left_type, op_str, right_type)
+        print(ctor.__module__)
 
         def impl(left_var, op_str, right_var):
             st = new(PTermType)
             left_t_id = -1 #Not defined yet, needs Kb to resolve
-            pred_node = ctor(left_t_id, left_attr_offsets, right_var)
+            l_offsets = np.empty((len(left_var.deref_offsets),),dtype=np.int64)
+            for i,x in enumerate(left_var.deref_offsets): l_offsets[i] = x
+            pred_node = ctor(left_t_id, l_offsets, right_var)
             st.pred_node = _cast_structref(BasePredicateNodeType, pred_node)
-            st.str_val = base_str + "?"#TODO str->float needs to work
+            st.str_val = str(left_var) + " " + op_str + " " + "?" #base_str + "?"#TODO str->float needs to work
             return st
 
     else:
-        right_type = right_var.field_dict['fact_type'].instance_type
-        right_attr_chain = right_var.field_dict['deref_attrs'].literal_value.split(".")[1:]
-
-        dfn = get_beta_predicate_node_definition(left_type, left_attr_chain, op_str, right_type, right_attr_chain)
-        ctor, left_attr_offsets, right_attr_offsets = itemgetter('ctor', 'left_attr_offsets', 'right_attr_offsets')(dfn)
-
-        base_str = f'{var_str_from_type(left_var)} {op_str} {var_str_from_type(right_var)} '
+        right_type = right_var.field_dict['head_type'].instance_type
+        ctor, _ = define_beta_predicate_node(left_type, op_str, right_type)
 
         def impl(left_var, op_str, right_var):
             st = new(PTermType)
             left_t_id = -1 #Not defined yet, needs Kb to resolve
-            righ_t_id = -1 #Not defined yet, needs Kb to resolve
-            pred_node = ctor(left_t_id, left_attr_offsets, righ_t_id, right_attr_offsets)
+            right_t_id = -1 #Not defined yet, needs Kb to resolve
+            l_offsets = np.empty((len(left_var.deref_offsets),),dtype=np.int64)
+            r_offsets = np.empty((len(right_var.deref_offsets),),dtype=np.int64)
+            for i,x in enumerate(left_var.deref_offsets): l_offsets[i] = x
+            for i,x in enumerate(right_var.deref_offsets): r_offsets[i] = x
+
+            pred_node = ctor(left_t_id, l_offsets, right_t_id, r_offsets)
             st.pred_node = _cast_structref(BasePredicateNodeType, pred_node)
-            st.str_val = base_str
+            st.str_val = str(left_var) + " " + op_str + " " + str(right_var)
             return st
 
 
@@ -244,14 +330,23 @@ def str_pterm(self):
 @njit(cache=True)
 def bar():
     l = Var(BOOPType).B
-    # print(l)
+    print(l)
     r_l = 5
     r = Var(BOOPType).B
-    # print(r)
-    # pt = PTerm(l,"<",r_l)
+    print(r)
+    pt = PTerm(l,"<",r_l)
+    pt = PTerm(l,"<",r_l)
+    pt = PTerm(l,"<",r_l)
+    pt = PTerm(l,"<",r_l)
     # print(pt.str_val)
-    # print(pt)
+    print(pt)
     pt2 = PTerm(l,"<",r)
+    pt2 = PTerm(l,"<",r)
+    pt2 = PTerm(l,"<",r)
+    pt2 = PTerm(l,"<",r)
+    pt2 = PTerm(l,"<",r)
+
+    print(pt2)
     return pt2
     # print(pt2.str_val)
     # print(str(pt2))

@@ -170,7 +170,7 @@ class OperatorComposition(object):
 	@property
 	def depth(self):
 		if(not hasattr(self,"_depth")):
-			_ = self.args
+			_ = self.args #Trigger args property to fill in _depth
 		return self._depth
 
 
@@ -180,21 +180,22 @@ class OperatorComposition(object):
 			self._template = self._gen_template(self.tup)
 		return self._template
 
-	def _accum_args(self,x,arg_arr,typ_arr,depth,maxdepth):
+	def _accum_args(self, x, arg_arr, typ_arr, depth, maxdepth, num_ops):
 		
-		if(isinstance(x,(list,tuple))):
+		if(isinstance(x, (list, tuple))):
 			arg_types = x[0].arg_types
 			# depth += 1
 			depth = depth + 1
-			maxdepth[0] = max(maxdepth,depth)
+			maxdepth[0] = max(maxdepth, depth)
+			num_ops += 1
 			for i, x_i in enumerate(x[1:]):
 				if(isinstance(x_i,Var)):
 					x_i.index = len(arg_arr)
 					arg_arr.append(x_i)
 					typ_arr.append(arg_types[i])
 				else:
-					self._accum_args(x_i,arg_arr,typ_arr,depth,maxdepth)
-		elif(isinstance(x,Var)):
+					self._accum_args(x_i, arg_arr, typ_arr, depth, maxdepth, num_ops)
+		elif(isinstance(x, Var)):
 			arg_arr.append(x)
 			typ_arr.append(None)
 	@property
@@ -207,10 +208,12 @@ class OperatorComposition(object):
 		if(not hasattr(self,"_args")):
 			args_arr, type_arr = [],[]
 			depth_arr = np.zeros(1,np.int64)
-			self._accum_args(self.tup, args_arr,type_arr,0,depth_arr)
+			num_ops_arr = np.zeros(1,np.int64)
+			self._accum_args(self.tup, args_arr,type_arr,0,depth_arr, num_ops_arr)
 			self._args = args_arr#self._count_args(self.tup)
 			self._arg_types = type_arr#self._count_args(self.tup)
 			self._depth = depth_arr[0]#self._count_args(self.tup)
+			self._num_ops = num_ops_arr[0]
 		return self._args
 
 	@property
@@ -227,6 +230,12 @@ class OperatorComposition(object):
 		if(not hasattr(self,"_arg_types")):
 			_ = self.args
 		return self._arg_types
+
+	@property
+	def num_ops(self):
+		if(not hasattr(self,"_num_ops")):
+			_ = self.args
+		return self._num_ops
 
 	@property
 	def uid(self):
@@ -503,6 +512,20 @@ if __name__ == "__main__":
 
 	# print(a.forward)
 	# a(1,2,3)
+	class Add(BaseOperator):
+	    commutes = True
+	    signature = 'float(float,float)'
+
+	    def forward(x, y):
+	        return x + y
+
+	class Subtract(BaseOperator):
+	    commutes = True
+	    signature = 'float(float,float)'
+
+	    def forward(x, y):
+	        return x - y
+
 	print(repr(Add))
 	# print(Add.__metaclass__)
 	v = Var()
@@ -512,3 +535,5 @@ if __name__ == "__main__":
 	print(oc)
 	print(oc.template)
 	print(oc(1,2,3))
+
+	print(oc.num_ops)

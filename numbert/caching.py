@@ -5,20 +5,24 @@ import timeit
 from types import FunctionType
 #Snatch AppDirs from numba numba and find the cache dir
 import os
+import time
+from pathlib import Path
 # from numbert.caching import cache_dir
 
 from numba.misc.appdirs import AppDirs
 
-
-# from numbert.core import Add
+#Resolve the location of the cache_dir
 appdirs = AppDirs(appname="numbert", appauthor=False)
 cache_dir = os.path.join(appdirs.user_cache_dir,"numbert_cache")
 os.environ['NUMBA_CACHE_DIR'] = os.path.join(os.path.split(cache_dir)[0], "numba_cache")
 print("Numbert Cache Lives Here: ", cache_dir)
 
+#Make the cache_dir if it doesn't exist
 if not os.path.exists(cache_dir):
 	os.makedirs(cache_dir)
+# Path(os.path.join(cache_dir,"__init__.py")).touch(exist_ok=True)
 
+#Add numbert_cache to path
 sys.path.insert(0, appdirs.user_cache_dir)
 
 
@@ -59,8 +63,11 @@ def unique_hash(stuff,hash_func='sha256'):
 	update_unique_hash(m,stuff)	
 	return m.hexdigest()
 
-def get_cache_path(name,hsh):
-	return os.path.join(cache_dir,name,"_" + str(hsh) +".py")
+def get_cache_path(name,hsh=None):
+	if(hsh is None):
+		return os.path.join(cache_dir,name+".py")
+	else:
+		return os.path.join(cache_dir,name,"_" + str(hsh) +".py")
 
 def source_in_cache(name,hsh):
 	path = get_cache_path(name,hsh)
@@ -82,6 +89,7 @@ def source_to_cache(name,hsh,source,is_aot=False):
 	os.makedirs(os.path.dirname(path), exist_ok=True)
 	with open(path,mode='w') as f:
 		f.write(source)
+		f.flush()
 	if(is_aot): aot_compile(name,hsh)
 
 
@@ -90,32 +98,36 @@ def gen_import_str(name,hsh,targets,aot_module=None):
 	return "from numbert_cache.{}.{}_{} import {}".format(name,aot_module,hsh,", ".join(targets))
 
 
+def _import_cached(name,hsh,aot_module=None):
+	if(not aot_module): aot_module = ''
+	mod_str = f'numbert_cache.{name}.{aot_module}_{hsh}'
+	try:
+		return importlib.import_module(mod_str)
+	except (ModuleNotFoundError) as e:
+		#Invalidates any the finder caches in case the module has was newly created
+		importlib.invalidate_caches()
+		return importlib.import_module(mod_str)
 
 import importlib
 def import_from_cached(name,hsh,targets,aot_module=None):
-	l = {}
-	imp_str = gen_import_str(name,hsh,targets,aot_module)
-	# print("imp_str:",imp_str)
 	if(aot_module):
 		try:
 			#Try to import the AOT Module
-			exec(imp_str, {}, l)
-			# mod = importlib.import_module('numbert_cache.{}.{}_{}'.format(name,aot_module,hsh))
-			# l = {x:getattr(mod,x) for x in targets}
-			# print(l)
+			mod = _import_cached(name,hsh,aot_module)
 		except (ImportError,AttributeError) as e:
 			try:
 				#If couldn't import try to compile the AOT Module
 				aot_compile(name,hsh)
-				exec(imp_str, {}, l)
+				mod = _import_cached(name,hsh,aot_module)
 			except Exception as e:
-				#If still couldn't import or recompile import as cached
-				imp_str = gen_import_str(name,hsh,targets)
-				exec(imp_str, {}, l)
+				#If still couldn't import or recompile, import as cached
+				mod = _import_cached(name,hsh)
 	else:
-		exec(imp_str, {}, l)
-
-	return {k:l[k] for k in targets}
+		mod = _import_cached(name,hsh)
+		
+	return {x:getattr(mod,x) for x in targets}
+	# l = {x:getattr(mod,x) for x in targets}
+	# return {k:l[k] for k in targets}
 	# path = get_cache_path(name,hsh)
 
 

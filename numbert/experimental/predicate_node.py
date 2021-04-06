@@ -15,7 +15,7 @@ on the nodes' particular comparison statement.
 '''
 
 import numpy as np
-from numba import types, njit, i8, u8, i4, u1, literally, generated_jit
+from numba import types, njit, i8, u8, i4, u1, u4, literally, generated_jit
 from numba.typed import List
 from numba.types import ListType, unicode_type, void
 from numba.experimental.structref import new
@@ -29,6 +29,7 @@ from numbert.experimental.utils import _struct_from_meminfo, _meminfo_from_struc
  decode_idrec, lower_getattr, _struct_from_pointer, struct_get_attr_offset, _struct_get_data_pointer, \
  _load_pointer, _pointer_to_data_pointer
 from numbert.experimental.subscriber import base_subscriber_fields, BaseSubscriber, BaseSubscriberType, init_base_subscriber, link_downstream
+from numbert.experimental.vector import VectorType
 from copy import copy
 from operator import itemgetter
 
@@ -53,14 +54,23 @@ def exec_op(op_str,a,b):
     raise ValueError()
 
 
+meminfo_type = types.MemInfoPointer(types.voidptr)
+alpha_filter_func_type = types.FunctionType(i8[::1](meminfo_type,i8[::1]))
+beta_filter_func_type = types.FunctionType(i8[:,::1](meminfo_type,i8[::1], i8[::1]))
+
+
 #### Struct Definitions ####
 
 base_predicate_node_field_dict = {
-    "left_t_id" : i8,
+    "id_str" : unicode_type,
+    "left_t_id" : u8,
+    "left_facts" : VectorType, #Vector<*Fact>
     "left_attr_offsets" : i8[:],#types.Any,
-    "left_type" : types.Any,
+    "left_type" : types.Any, #<- Filled in at definition
     "op_str" : unicode_type,
     "truth_values" : u1[:,:],
+    "kb_grow_queue" : VectorType,
+    "kb_change_queue" : VectorType,
 }
 
 basepredicate_node_fields = [(k,v) for k,v, in base_predicate_node_field_dict.items()]
@@ -70,6 +80,7 @@ BasePredicateNode, BasePredicateNodeType = define_structref("BasePredicateNode",
 alpha_predicate_node_field_dict = {
     **base_predicate_node_field_dict,
     # "truth_values" : u1[:],
+    "filter_func" : alpha_filter_func_type,
     "right_val" : types.Any,
 }
 alpha_predicate_node_fields = [(k,v) for k,v, in alpha_predicate_node_field_dict.items()]
@@ -79,8 +90,9 @@ AlphaPredicateNode, AlphaPredicateNodeTemplate = define_structref_template("Alph
 
 beta_predicate_node_field_dict = {
     **base_predicate_node_field_dict,
-    
-    "right_t_id" : i8,
+    "filter_func" : beta_filter_func_type,
+    "right_t_id" : u8,
+    "right_facts" : VectorType, #Vector<*Fact>
     "right_attr_offsets" : i8[:],
     "right_type" : types.Any,
     "left_consistency" : u1[:],
@@ -115,7 +127,7 @@ def expand_2d(truth_values, n, m, dtype):
 def init_alpha(st, left_attr_offsets, right_val):
     '''Initializes an empty AlphaPredicateNode with t_id and right_val'''
     st.truth_values = np.empty((0,0),dtype=np.uint8)
-    st.left_t_id = -1
+    # st.left_t_id = -1
     st.left_attr_offsets = left_attr_offsets
     st.right_val = right_val
     
@@ -130,7 +142,7 @@ def deref_attrs(val_type, inst_ptr,attr_offsets):
 
 
 @njit(cache=True)
-def alpha_eval_truth(kb,facts,f_id, pred_node):
+def alpha_eval_truth(facts, f_id, pred_node):
     '''Updates an AlphaPredicateNode with fact at f_id'''
     inst_ptr = facts.data[i8(f_id)]
     if(inst_ptr != 0):
@@ -140,17 +152,21 @@ def alpha_eval_truth(kb,facts,f_id, pred_node):
         return 0xFF
 
 @njit(cache=True,locals={'new_size':u8})
-def alpha_update(pred_meminfo,pnode_type):
+def alpha_filter(pnode_type, pred_meminfo, inds):
     '''Implements update_func of AlphaPredicateNode subscriber'''
+
+    print(inds)
+    return inds
+
     if(pred_meminfo is None): return
 
     # Resolve this instance of the AlphaPredicateNode, it's KnowledgeBase, and 
     #   the fact pointer vector associated with this AlphaPredicateNode's t_id
     pred_node = _struct_from_meminfo(pnode_type, pred_meminfo)
-    kb = _struct_from_meminfo(KnowledgeBaseType, pred_node.kb_meminfo)
-    grw_q = kb.kb_data.grow_queue
-    chg_q = kb.kb_data.change_queue
-    facts = facts_for_t_id(kb.kb_data,i8(pred_node.left_t_id))
+    # kb = _struct_from_meminfo(KnowledgeBaseType, pred_node.kb_meminfo)
+    grw_q = pred_node.kb_grow_queue
+    chg_q = pred_node.kb_change_queue
+    facts = pred_node.left_facts#facts_for_t_id(kb.kb_data,i8(pred_node.left_t_id))
 
     # Ensure that truth_values is the size of the fact pointer vector
     if(len(facts.data) > len(pred_node.truth_values)):
@@ -160,7 +176,7 @@ def alpha_update(pred_meminfo,pnode_type):
     for i in range(pred_node.grow_head, grw_q.head):
         t_id, f_id, a_id = decode_idrec(grw_q[i])
         if(pred_node.left_t_id == t_id):
-            truth = alpha_eval_truth(kb,facts,f_id, pred_node)
+            truth = alpha_eval_truth(facts,f_id, pred_node)
             pred_node.truth_values[f_id,0] = truth
             # pred_node.grow_queue.add(f_id)
     pred_node.grow_head = grw_q.head
@@ -169,7 +185,7 @@ def alpha_update(pred_meminfo,pnode_type):
     for i in range(pred_node.change_head, chg_q.head):
         t_id, f_id, a_id = decode_idrec(chg_q[i])
         if(pred_node.left_t_id == t_id):
-            truth = alpha_eval_truth(kb,facts,f_id, pred_node)
+            truth = alpha_eval_truth(facts,f_id, pred_node)
             pred_node.truth_values[f_id,0] = truth
             # if(truth != pred_node.truth_values[f_id]):
             #     pred_node.change_queue.add(f_id)
@@ -211,7 +227,7 @@ def gen_alpha_source(left_type, op_str, right_type):
 from numba import types, njit
 from numba.experimental.structref import new
 from numba.types import float64, unicode_type
-from numbert.experimental.predicate_node import AlphaPredicateNodeTemplate, init_alpha, alpha_update, alpha_predicate_node_field_dict
+from numbert.experimental.predicate_node import AlphaPredicateNodeTemplate, init_alpha, alpha_filter, alpha_predicate_node_field_dict
 from numbert.experimental.subscriber import base_subscriber_fields, init_base_subscriber
 
 specialization_dict = {{
@@ -228,20 +244,21 @@ pnode_type = AlphaPredicateNodeTemplate(fields=fields)
 
 
 @njit(cache=True)
-def update_func(pred_meminfo):
-    alpha_update(pred_meminfo, pnode_type)        
+def filter_func(pred_meminfo, inds):
+    return alpha_filter(pnode_type, pred_meminfo, inds)
+
 
 @njit(cache=True)
-def pre_ctor(t_id, attr_offsets, literal_val):
+def pre_ctor(attr_offsets, literal_val):
     st = new(pnode_type)
     init_base_subscriber(st)
-    init_alpha(st,t_id, attr_offsets, literal_val)
+    init_alpha(st, attr_offsets, literal_val)
     return st
 
 @njit
-def ctor(t_id, attr_offsets, literal_val):
-    st = pre_ctor(t_id, attr_offsets, literal_val)
-    st.update_func = update_func
+def ctor(attr_offsets, literal_val):
+    st = pre_ctor(attr_offsets, literal_val)
+    st.filter_func = filter_func
     return st
     '''
     return source
@@ -277,7 +294,7 @@ def get_alpha_predicate_node_definition(typ, attr_chain, op_str, right_type):
     '''Gets various definitions for an AlphaPredicateNode, returns a dict with 'ctor'
          'pnode_type', 'left_type', 'left_attr_offsets', 't_id' '''
     context = kb_context()    
-    t_id = context.fact_to_t_id[typ._fact_name]
+    # t_id = context.fact_to_t_id[typ._fact_name]
 
     if(not isinstance(attr_chain,list)): attr_chain = [attr_chain]
     
@@ -292,11 +309,17 @@ def get_alpha_predicate_node(typ, attr_chain, op_str, literal_val):
     right_type = types.literal(literal_val).literal_type
 
     dfn = get_alpha_predicate_node_definition(typ, attr_chain, op_str, right_type)
-    ctor, t_id, left_attr_offsets = itemgetter('ctor', 't_id','left_attr_offsets')(dfn)
+    ctor, left_attr_offsets = itemgetter('ctor', 'left_attr_offsets')(dfn)
         
-    out = ctor(t_id, left_attr_offsets, literal_val)
+    out = ctor(left_attr_offsets, literal_val)
 
     return out
+
+@overload_method(AlphaPredicateNodeTemplate, 'filter')
+def _impl_alpha_filter(self, inds):
+    def impl(self, inds):
+        return self.filter_func(_meminfo_from_struct(self),inds)
+    return impl
 
 
 #### Beta Predicate Nodes ####
@@ -305,14 +328,14 @@ def get_alpha_predicate_node(typ, attr_chain, op_str, literal_val):
 def init_beta(st, left_attr_offsets, right_attr_offsets):
     '''Initializes an empty BetaPredicateNode with left_t_id and right_t_id'''
     st.truth_values = np.empty((0,0),dtype=np.uint8)
-    st.left_t_id = -1
+    # st.left_t_id = -1
     st.left_attr_offsets = left_attr_offsets
-    st.right_t_id = -1
+    # st.right_t_id = -1
     st.right_attr_offsets = right_attr_offsets
     
 
 @njit(cache=True)
-def beta_eval_truth(kb,pred_node, left_facts, right_facts, i, j):
+def beta_eval_truth(pred_node, left_facts, right_facts, i, j):
     '''Eval truth for BetaPredicateNode for facts i and j of left_facts and right_facts'''
     left_ptr = left_facts.data[i]
     right_ptr = right_facts.data[j]
@@ -330,25 +353,29 @@ def beta_eval_truth(kb,pred_node, left_facts, right_facts, i, j):
 
 
 @njit(cache=True,inline='always')
-def update_pair(kb,pred_node, left_facts, right_facts, i, j):
+def update_pair(pred_node, left_facts, right_facts, i, j):
     '''Updates an BetaPredicateNode for facts i and j of left_facts and right_facts'''
-    truth = beta_eval_truth(kb,pred_node, left_facts, right_facts, i, j)
+    truth = beta_eval_truth(pred_node, left_facts, right_facts, i, j)
     pred_node.truth_values[i,j] = truth
 
 
 
 @njit(cache=True,locals={'new_size':u8})
-def beta_update(pred_meminfo,pnode_type):
+def beta_filter(pnode_type, pred_meminfo, left_inds, right_inds):
     '''Implements update_func of BetaPredicateNode subscriber'''
+
+    print(left_inds, right_inds)
+
+    return np.zeros((1,1))
     if(pred_meminfo is None): return
     # Resolve this instance of the BetaPredicateNode, it's KnowledgeBase, and 
     #   the fact pointer vectors associated with this the left and right t_id.
     pred_node = _struct_from_meminfo(pnode_type, pred_meminfo)
-    kb = _struct_from_meminfo(KnowledgeBaseType, pred_node.kb_meminfo)
+    # kb = _struct_from_meminfo(KnowledgeBaseType, pred_node.kb_meminfo)
     grw_q = kb.kb_data.grow_queue
     chg_q = kb.kb_data.change_queue
-    left_facts = facts_for_t_id(kb.kb_data,i8(pred_node.left_t_id))
-    right_facts = facts_for_t_id(kb.kb_data,i8(pred_node.right_t_id))
+    # left_facts = facts_for_t_id(kb.kb_data,i8(pred_node.left_t_id))
+    # right_facts = facts_for_t_id(kb.kb_data,i8(pred_node.right_t_id))
 
     #Expand the truth_values, and left and right consistencies to match fact vectors
     if(len(left_facts.data) > pred_node.truth_values.shape[0] or
@@ -390,14 +417,14 @@ def beta_update(pred_meminfo,pnode_type):
     for i in range(left_facts.head):
         if(not lc[i]):
             for j in range(right_facts.head):
-                update_pair(kb,pred_node,left_facts,right_facts,i,j)
+                update_pair(pred_node,left_facts,right_facts,i,j)
     
     # Check inconsistent right facts agains all left facts, except the ones that
     #   were already checked.
     for j in range(right_facts.head):
         if(not rc[j]):
             for i in range(left_facts.head):
-                if(lc[i]): update_pair(kb,pred_node,left_facts,right_facts,i,j)
+                if(lc[i]): update_pair(pred_node,left_facts,right_facts,i,j)
 
     # left and right inconsistencies all handled so fill in with 1s. 
     pred_node.left_consistency[:len(left_facts)] = 1
@@ -441,7 +468,7 @@ def gen_beta_source(left_type, op_str, right_type):
 from numba import types, njit
 from numba.experimental.structref import new
 from numba.types import *
-from numbert.experimental.predicate_node import BetaPredicateNodeTemplate, init_beta, beta_update, beta_predicate_node_field_dict
+from numbert.experimental.predicate_node import BetaPredicateNodeTemplate, init_beta, beta_filter, beta_predicate_node_field_dict
 from numbert.experimental.subscriber import base_subscriber_fields, init_base_subscriber
 
 specialization_dict = {{
@@ -455,22 +482,21 @@ fields = base_subscriber_fields + [(k,v) for k,v, in field_dict.items()]
 
 pnode_type = BetaPredicateNodeTemplate(fields=fields)
 
+@njit(cache=True)
+def filter_func(pred_meminfo, left_inds, right_inds):
+    return beta_filter(pnode_type, pred_meminfo, left_inds, right_inds)        
 
 @njit(cache=True)
-def update_func(pred_meminfo):
-    beta_update(pred_meminfo, pnode_type)        
-
-@njit(cache=True)
-def pre_ctor(left_t_id, left_attr_offsets, right_t_id, right_attr_offsets):
+def pre_ctor(left_attr_offsets, right_attr_offsets):
     st = new(pnode_type)
     init_base_subscriber(st)
-    init_beta(st, left_t_id, left_attr_offsets, right_t_id, right_attr_offsets)
+    init_beta(st, left_attr_offsets, right_attr_offsets)
     return st
 
-@njit(cache=True)
-def ctor(*args):
-    st = pre_ctor(*args)
-    # st.update_func = update_func
+@njit
+def ctor(left_attr_offsets, right_attr_offsets):
+    st = pre_ctor(left_attr_offsets, right_attr_offsets)
+    st.filter_func = filter_func
     return st
     '''
     return source
@@ -514,10 +540,16 @@ def get_beta_predicate_node(left_fact_type, left_attr_chain, op_str, right_fact_
     ctor, left_t_id, left_attr_offsets, right_t_id, right_attr_offsets = \
      itemgetter('ctor', 'left_t_id', 'left_attr_offsets', 'right_t_id', 'right_attr_offsets')(dfn)
 
-    out = ctor(left_t_id, left_attr_offsets, right_t_id, right_attr_offsets)
+    out = ctor(left_attr_offsets, right_attr_offsets)
 
     return out
 
+
+@overload_method(BetaPredicateNodeTemplate, 'filter')
+def _impl_beta_filter(self, left_inds, right_inds):
+    def impl(self, left_inds, right_inds):
+        return self.filter_func(_meminfo_from_struct(self),left_inds, right_inds)
+    return impl
 
 
 
@@ -534,3 +566,56 @@ def get_beta_predicate_node(left_fact_type, left_attr_chain, op_str, right_fact_
 # Conditions with a signature of one argument type are essentially alpha conditions
 # So OR/AND nodes need to know what the first beta argument index is or -1 for none
 # Conditions are subscribers
+
+#  April 6, 2021
+# Conditions are instantiated seperately from the knowledge base
+# When they are linked to a knowledge base a copy might need to be made
+#   because the creation of the conditions was a prototype but they
+#   will have different cache info.
+# When linked, predicate node in the conditions need to be initialized with
+#    the fact vector for the knowledge base 
+# Somehow predicate nodes need to be shared across Conditions objects
+#   probably makes sense to have a predicate node cache in the knowledgebase
+#   that is a dictionary of the predicate nodes' str (which needs to be precomputed)
+#   as something like str(Var) + str(comp) + str(val/Var)
+#   this should happen at link time if the node is cached then use that one
+#   otherwise make a copy insert it into the dict and use that copy
+#
+# What is the speed tradeoff between passing indicies around vs masks around?
+# does it even make sense to keep a big mask of the true comparisons?
+#  if there are multiple conditions with the same nodes it may make sense
+#  although the alternative is to pass around arrays of indicies in the 
+#  alpha case... seems like the mask makes sense since there is a
+#  dedicated slot for each item it only needs to recheck things that 
+#  have changed..
+#  ... so inside the conditions object, external to the predicate nodes
+#  there can be a set of alpha and beta memory indicies which are sort
+#  of the sparse versions of the masks
+# alpha->alpha:
+#  update() should pass in a set of indicies vetted by the previous node
+#  and output the subset that passes then next alpha
+# alpha->beta:
+#  all beta nodes are updated independantly of one another 
+# 
+
+
+
+# The Plan:
+# 1. Implement id_str from conditions object
+# 2. Implement link_copy(node, kb) + tests which 
+#  copies a prototype predicate node and links it to a knowledge_base
+#  -attr_offsets, id_str, and op are kept
+#  -left_facts, right_fact, kb_grow_queue, kb_change_queue are ripped
+#  -truth values are reinstantiated (don't instantiate if attr_offsets > 1)
+#  *By the end we should no longer need to import KnowledgeBase here
+# 3. Implement filter() + tests as described above
+# 4. Reimplement so that truth/consistency are densely bit packed 
+
+
+# Small Hiccup, if the node can deref as much as it wants then
+#  we need to account for this. We're not necessarily checking
+#  for consistency with the index that comes in, so it can be
+#  part of a different fact set. We can still use the original
+#  fact set as the basis for the mask, but we can't really
+#  trust the consistency, we need to recheck everything. Still
+#  this is probably an improvement on RETE

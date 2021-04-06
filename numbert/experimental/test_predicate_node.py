@@ -15,6 +15,30 @@ def njit_update(pt):
     subscriber = _struct_from_meminfo(BaseSubscriberType,meminfo)
     subscriber.update_func(meminfo)
 
+@njit
+def filter_alpha(pn,inds):
+    # print(pn.filter_func)
+    return pn.filter(inds)
+
+@njit
+def filter_beta(pn,left_inds, right_inds):
+    # print(pn.filter_func)
+    return pn.filter(left_inds, right_inds)
+
+
+def test_predicate_node_sanity():
+    with kb_context("test_predicate_node_sanity"):
+        BOOP, BOOPType = define_fact("BOOP",{"A": "string", "B" : "number"})
+        kb = KnowledgeBase()
+
+        pn = get_alpha_predicate_node(BOOPType,"B", "<",9)
+        print(filter_alpha(pn, np.arange(5)))
+
+        pn = get_beta_predicate_node(BOOPType,"B", "<", BOOPType,"B")
+        print(filter_beta(pn,np.arange(5), np.arange(5)))
+        # pn.filter(np.arange(5))
+
+
 
 def test_alpha_predicate_node():
     with kb_context("test_alpha_predicate_node"):
@@ -328,6 +352,7 @@ def test_b_beta_update_100x100(benchmark):
 
 
 if __name__ == "__main__":
-    test_alpha_predicate_node()
+    test_predicate_node_sanity()
+    # test_alpha_predicate_node()
     # test_beta_predicate_node_2_typed()
 

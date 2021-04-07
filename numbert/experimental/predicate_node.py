@@ -53,54 +53,158 @@ def exec_op(op_str,a,b):
         return a == b
     raise ValueError()
 
+#### Link Data ####
+
+predicate_node_link_data_field_dict = {
+    "left_t_id" : u8,
+    "right_t_id" : u8,
+    "left_facts" : VectorType, #Vector<*Fact>
+    "right_facts" : VectorType, #Vector<*Fact>
+    
+    "kb_grow_queue" : VectorType,
+    "kb_change_queue" : VectorType,
+
+    "truth_values" : u1[:,:],
+    "left_consistency" : u1[:],
+    "right_consistency" : u1[:],
+}
+
+predicate_node_link_data_fields = [(k,v) for k,v, in predicate_node_link_data_field_dict.items()]
+PredicateNodeLinkData, PredicateNodeLinkDataType = define_structref("PredicateNodeLinkData", 
+                predicate_node_link_data_fields, define_constructor=False)
+
+
+
+@njit(cache=True)
+def get_linked_instance(pn, kb):
+    '''Takes a prototype predicate node and a knowledge base and returns
+        a linked instance of that predicate node, which is either a copy
+        or an equivalent instance already linked to the knowledge base'''
+    link_data = new(PredicateNodeLinkDataType)
+    # print(pn.left_fact_type_name)
+    print(kb.context_data.fact_to_t_id)
+    print(pn.left_fact_type_name)
+    link_data.left_t_id = kb.context_data.fact_to_t_id[pn.left_fact_type_name]
+
+    if(not pn.is_alpha):
+        link_data.right_t_id = kb.context_data.fact_to_t_id[pn.right_fact_type_name]
+        link_data.left_consistency = np.empty((0,),dtype=np.uint8)
+        link_data.right_consistency = np.empty((0,),dtype=np.uint8)
+    else:
+        link_data.right_t_id = -1
+
+    link_data.kb_grow_queue = kb.kb_data.grow_queue
+    link_data.kb_change_queue = kb.kb_data.change_queue
+    link_data.truth_values = np.empty((0,0),dtype=np.uint8)
+        
+
+    # print(pn.is_alpha)
+    # if(pn.is_alpha):
+    #     a = _cast_structref(GenericAlphaPredicateNodeType, pn)
+    #     new_a = new(GenericAlphaPredicateNodeType)
+    #     new_a.filter_func = a.filter_func
+    #     new_a.right_val = a.right_val
+
+    #     new_pn = _cast_structref(BasePredicateNodeType, new_a)
+    # else:
+    #     b = _cast_structref(GenericBetaPredicateNodeType, pn)
+    #     new_b = new(GenericBetaPredicateNodeType)
+    #     new_b.filter_func = b.filter_func
+    #     new_b.right_t_id = b.right_t_id
+    #     new_b.right_facts = b.right_facts
+        
+    #     new_pn = _cast_structref(BasePredicateNodeType, new_b)
+
+    
+    return link_data
+
 
 meminfo_type = types.MemInfoPointer(types.voidptr)
-alpha_filter_func_type = types.FunctionType(i8[::1](meminfo_type,i8[::1]))
-beta_filter_func_type = types.FunctionType(i8[:,::1](meminfo_type,i8[::1], i8[::1]))
+alpha_filter_func_type = types.FunctionType(i8[::1](meminfo_type, PredicateNodeLinkDataType, i8[::1]))
+beta_filter_func_type = types.FunctionType(i8[:,::1](meminfo_type, PredicateNodeLinkDataType, i8[::1], i8[::1]))
 
 
 #### Struct Definitions ####
 
 base_predicate_node_field_dict = {
+    #### Attributes filled in at definition time ###
     "id_str" : unicode_type,
-    "left_t_id" : u8,
-    "left_facts" : VectorType, #Vector<*Fact>
-    "left_attr_offsets" : i8[:],#types.Any,
-    "left_type" : types.Any, #<- Filled in at definition
-    "op_str" : unicode_type,
-    "truth_values" : u1[:,:],
-    "kb_grow_queue" : VectorType,
-    "kb_change_queue" : VectorType,
+    "is_alpha" : u1,
+    
+    "left_fact_type_name" : unicode_type,
+    "right_fact_type_name" : unicode_type,
+
+    
+    "left_attr_offsets" : i8[::1],#types.Any,
+    # "filter_func" : filter_func_type,
+    "op_str" : types.literal('=='),
+    
+    
+    
+
+    # #### Attributes filled in at link time ###
+    
+    # "left_t_id" : u8,
+    # "left_facts" : VectorType, #Vector<*Fact>
+    # "truth_values" : u1[:,:],
+    # "kb_grow_queue" : VectorType,
+    # "kb_change_queue" : VectorType,
+    
 }
 
+from pprint import pprint
+
 basepredicate_node_fields = [(k,v) for k,v, in base_predicate_node_field_dict.items()]
+pprint(basepredicate_node_fields)
 BasePredicateNode, BasePredicateNodeType = define_structref("BasePredicateNode", base_subscriber_fields + basepredicate_node_fields)
 
 
 alpha_predicate_node_field_dict = {
     **base_predicate_node_field_dict,
     # "truth_values" : u1[:],
+
+    #### Attributes filled in at definition time ###
     "filter_func" : alpha_filter_func_type,
-    "right_val" : types.Any,
+    "left_type" : types.TypeRef(BaseFactType), #<- Filled in at definition
+    "right_val" : types.float64, #<- Can be specialized to something else
+    
 }
 alpha_predicate_node_fields = [(k,v) for k,v, in alpha_predicate_node_field_dict.items()]
+pprint(alpha_predicate_node_fields)
 AlphaPredicateNode, AlphaPredicateNodeTemplate = define_structref_template("AlphaPredicateNode",
              base_subscriber_fields + alpha_predicate_node_fields, define_constructor=False)
 
+GenericAlphaPredicateNodeType = AlphaPredicateNodeTemplate(base_subscriber_fields + alpha_predicate_node_fields)
+# print(GenericAlphaPredicateNodeType)
 
 beta_predicate_node_field_dict = {
     **base_predicate_node_field_dict,
+    
+
+    #### Attributes filled in at definition time ###
     "filter_func" : beta_filter_func_type,
-    "right_t_id" : u8,
-    "right_facts" : VectorType, #Vector<*Fact>
     "right_attr_offsets" : i8[:],
-    "right_type" : types.Any,
-    "left_consistency" : u1[:],
-    "right_consistency" : u1[:],
+    "left_type" : types.TypeRef(BaseFactType), #<- Filled in at definition
+    "right_type" : types.TypeRef(BaseFactType),
+    
+    
+    #### Attributes filled in at link time ###
+
+    
+    # "right_t_id" : u8,
+    # "right_facts" : VectorType, #Vector<*Fact>
+    # "left_consistency" : u1[:],
+    # "right_consistency" : u1[:],
 }
 beta_predicate_node_fields = [(k,v) for k,v, in beta_predicate_node_field_dict.items()]
 BetaPredicateNode, BetaPredicateNodeTemplate = define_structref_template("BetaPredicateNode", 
                 base_subscriber_fields + beta_predicate_node_fields, define_constructor=False)
+
+GenericBetaPredicateNodeType = AlphaPredicateNodeTemplate(base_subscriber_fields + beta_predicate_node_fields)
+
+
+
+
 
 
 #### Helper Array Expansion Functions ####
@@ -123,11 +227,13 @@ def expand_2d(truth_values, n, m, dtype):
 
 #### Alpha Predicate Nodes #####
 
-@njit(cache=True)
-def init_alpha(st, left_attr_offsets, right_val):
+@njit(cache=True,locals={'left_fact_type_name': unicode_type})
+def init_alpha(st, left_fact_type_name, left_attr_offsets, right_val):
     '''Initializes an empty AlphaPredicateNode with t_id and right_val'''
-    st.truth_values = np.empty((0,0),dtype=np.uint8)
+    st.is_alpha = 1
+    # st.truth_values = np.empty((0,0),dtype=np.uint8)
     # st.left_t_id = -1
+    st.left_fact_type_name = left_fact_type_name
     st.left_attr_offsets = left_attr_offsets
     st.right_val = right_val
     
@@ -152,21 +258,22 @@ def alpha_eval_truth(facts, f_id, pred_node):
         return 0xFF
 
 @njit(cache=True,locals={'new_size':u8})
-def alpha_filter(pnode_type, pred_meminfo, inds):
+def alpha_filter(pnode_type, pred_meminfo, link_data, inds):
     '''Implements update_func of AlphaPredicateNode subscriber'''
 
-    print(inds)
     return inds
-
     if(pred_meminfo is None): return
+    # return inds
+
+    # if(pred_meminfo is None): return
 
     # Resolve this instance of the AlphaPredicateNode, it's KnowledgeBase, and 
     #   the fact pointer vector associated with this AlphaPredicateNode's t_id
     pred_node = _struct_from_meminfo(pnode_type, pred_meminfo)
     # kb = _struct_from_meminfo(KnowledgeBaseType, pred_node.kb_meminfo)
-    grw_q = pred_node.kb_grow_queue
-    chg_q = pred_node.kb_change_queue
-    facts = pred_node.left_facts#facts_for_t_id(kb.kb_data,i8(pred_node.left_t_id))
+    grw_q = link_data.kb_grow_queue
+    chg_q = link_data.kb_change_queue
+    facts = link_data.left_facts#facts_for_t_id(kb.kb_data,i8(pred_node.left_t_id))
 
     # Ensure that truth_values is the size of the fact pointer vector
     if(len(facts.data) > len(pred_node.truth_values)):
@@ -175,21 +282,21 @@ def alpha_filter(pnode_type, pred_meminfo, inds):
     # Update from the grow head to the KnowledgeBase's grow head  
     for i in range(pred_node.grow_head, grw_q.head):
         t_id, f_id, a_id = decode_idrec(grw_q[i])
-        if(pred_node.left_t_id == t_id):
+        if(link_data.left_t_id == t_id):
             truth = alpha_eval_truth(facts,f_id, pred_node)
-            pred_node.truth_values[f_id,0] = truth
+            link_data.truth_values[f_id,0] = truth
             # pred_node.grow_queue.add(f_id)
-    pred_node.grow_head = grw_q.head
+    link_data.grow_head = grw_q.head
 
     # Update from the change head to the KnowledgeBase's change head
     for i in range(pred_node.change_head, chg_q.head):
         t_id, f_id, a_id = decode_idrec(chg_q[i])
-        if(pred_node.left_t_id == t_id):
+        if(link_data.left_t_id == t_id):
             truth = alpha_eval_truth(facts,f_id, pred_node)
-            pred_node.truth_values[f_id,0] = truth
+            link_data.truth_values[f_id,0] = truth
             # if(truth != pred_node.truth_values[f_id]):
             #     pred_node.change_queue.add(f_id)
-    pred_node.change_head = chg_q.head
+    link_data.change_head = chg_q.head
 
 @overload(AlphaPredicateNode,prefer_literal=True)
 def alpha_ctor(left_type, left_attr_offsets, op_str, right_val):
@@ -209,7 +316,7 @@ def alpha_ctor(left_type, left_attr_offsets, op_str, right_val):
     def impl(left_type, left_attr_offsets, op_str, right_val):
         st = new(pnode_type)
         init_base_subscriber(st)
-        init_alpha(st, left_attr_offsets, right_val)
+        init_alpha(st, left_type._fact_name, left_attr_offsets, right_val)
         return st
 
     return impl
@@ -244,20 +351,20 @@ pnode_type = AlphaPredicateNodeTemplate(fields=fields)
 
 
 @njit(cache=True)
-def filter_func(pred_meminfo, inds):
-    return alpha_filter(pnode_type, pred_meminfo, inds)
+def filter_func(pred_meminfo, link_data, inds):
+    return alpha_filter(pnode_type, pred_meminfo, link_data,  inds)
 
 
 @njit(cache=True)
-def pre_ctor(attr_offsets, literal_val):
+def pre_ctor(left_fact_type_name, attr_offsets, literal_val):
     st = new(pnode_type)
     init_base_subscriber(st)
-    init_alpha(st, attr_offsets, literal_val)
+    init_alpha(st, left_fact_type_name, attr_offsets, literal_val)
     return st
 
 @njit
-def ctor(attr_offsets, literal_val):
-    st = pre_ctor(attr_offsets, literal_val)
+def ctor(left_fact_type_name, attr_offsets, literal_val):
+    st = pre_ctor(left_fact_type_name, attr_offsets, literal_val)
     st.filter_func = filter_func
     return st
     '''
@@ -310,27 +417,32 @@ def get_alpha_predicate_node(typ, attr_chain, op_str, literal_val):
 
     dfn = get_alpha_predicate_node_definition(typ, attr_chain, op_str, right_type)
     ctor, left_attr_offsets = itemgetter('ctor', 'left_attr_offsets')(dfn)
-        
-    out = ctor(left_attr_offsets, literal_val)
+    lft = str(typ._fact_name)
+    print("L<",lft, lft.isascii() )
+
+    out = ctor(lft, left_attr_offsets, literal_val)
 
     return out
 
-@overload_method(AlphaPredicateNodeTemplate, 'filter')
-def _impl_alpha_filter(self, inds):
-    def impl(self, inds):
-        return self.filter_func(_meminfo_from_struct(self),inds)
-    return impl
+# @overload_method(AlphaPredicateNodeTemplate, 'filter')
+# def _impl_alpha_filter(self, inds):
+#     def impl(self, inds):
+#         return self.filter_func(_meminfo_from_struct(self),inds)
+#     return impl
 
 
 #### Beta Predicate Nodes ####
 
-@njit(cache=True)
-def init_beta(st, left_attr_offsets, right_attr_offsets):
+@njit(cache=True, locals={'left_fact_type_name': unicode_type, 'right_fact_type_name': unicode_type})
+def init_beta(st, left_fact_type_name, left_attr_offsets, right_fact_type_name, right_attr_offsets):
     '''Initializes an empty BetaPredicateNode with left_t_id and right_t_id'''
-    st.truth_values = np.empty((0,0),dtype=np.uint8)
+    st.is_alpha = 0
+    # st.truth_values = np.empty((0,0),dtype=np.uint8)
     # st.left_t_id = -1
+    st.left_fact_type_name = left_fact_type_name
     st.left_attr_offsets = left_attr_offsets
     # st.right_t_id = -1
+    st.right_fact_type_name = right_fact_type_name
     st.right_attr_offsets = right_attr_offsets
     
 
@@ -361,7 +473,7 @@ def update_pair(pred_node, left_facts, right_facts, i, j):
 
 
 @njit(cache=True,locals={'new_size':u8})
-def beta_filter(pnode_type, pred_meminfo, left_inds, right_inds):
+def beta_filter(pnode_type, pred_meminfo, link_data, left_inds, right_inds):
     '''Implements update_func of BetaPredicateNode subscriber'''
 
     print(left_inds, right_inds)
@@ -372,8 +484,8 @@ def beta_filter(pnode_type, pred_meminfo, left_inds, right_inds):
     #   the fact pointer vectors associated with this the left and right t_id.
     pred_node = _struct_from_meminfo(pnode_type, pred_meminfo)
     # kb = _struct_from_meminfo(KnowledgeBaseType, pred_node.kb_meminfo)
-    grw_q = kb.kb_data.grow_queue
-    chg_q = kb.kb_data.change_queue
+    grw_q = link_data.kb_grow_queue #kb.kb_data.grow_queue
+    chg_q = link_data.kb_change_queue#kb.kb_data.change_queue
     # left_facts = facts_for_t_id(kb.kb_data,i8(pred_node.left_t_id))
     # right_facts = facts_for_t_id(kb.kb_data,i8(pred_node.right_t_id))
 
@@ -450,7 +562,7 @@ def beta_ctor(left_type, left_attr_offsets, op_str, right_type, right_attr_offse
     def impl(left_type, left_attr_offsets, op_str, right_type, right_attr_offsets):
         st = new(pnode_type)
         init_base_subscriber(st)
-        init_beta(st, left_attr_offsets, right_attr_offsets)
+        init_beta(st, left_type._fact_name, left_attr_offsets, right_type._fact_name, right_attr_offsets)
         return st
 
     return impl
@@ -483,19 +595,19 @@ fields = base_subscriber_fields + [(k,v) for k,v, in field_dict.items()]
 pnode_type = BetaPredicateNodeTemplate(fields=fields)
 
 @njit(cache=True)
-def filter_func(pred_meminfo, left_inds, right_inds):
-    return beta_filter(pnode_type, pred_meminfo, left_inds, right_inds)        
+def filter_func(pred_meminfo, link_data, left_inds, right_inds):
+    return beta_filter(pnode_type, pred_meminfo, link_data,  left_inds, right_inds)        
 
 @njit(cache=True)
-def pre_ctor(left_attr_offsets, right_attr_offsets):
+def pre_ctor(left_fact_type_name, left_attr_offsets, right_fact_type_name, right_attr_offsets):
     st = new(pnode_type)
     init_base_subscriber(st)
-    init_beta(st, left_attr_offsets, right_attr_offsets)
+    init_beta(st, left_fact_type_name, left_attr_offsets, right_fact_type_name, right_attr_offsets)
     return st
 
 @njit
-def ctor(left_attr_offsets, right_attr_offsets):
-    st = pre_ctor(left_attr_offsets, right_attr_offsets)
+def ctor(left_fact_type_name, left_attr_offsets, right_fact_type_name, right_attr_offsets):
+    st = pre_ctor(left_fact_type_name, left_attr_offsets, right_fact_type_name, right_attr_offsets)
     st.filter_func = filter_func
     return st
     '''
@@ -539,17 +651,25 @@ def get_beta_predicate_node(left_fact_type, left_attr_chain, op_str, right_fact_
     dfn = get_beta_predicate_node_definition(left_fact_type, left_attr_chain, op_str, right_fact_type, right_attr_chain)
     ctor, left_t_id, left_attr_offsets, right_t_id, right_attr_offsets = \
      itemgetter('ctor', 'left_t_id', 'left_attr_offsets', 'right_t_id', 'right_attr_offsets')(dfn)
-
-    out = ctor(left_attr_offsets, right_attr_offsets)
+    
+    lft = left_fact_type._fact_name
+    rft = right_fact_type._fact_name
+    print("LR<",lft, rft)
+    out = ctor(lft, left_attr_offsets, rft, right_attr_offsets)
 
     return out
 
 
-@overload_method(BetaPredicateNodeTemplate, 'filter')
-def _impl_beta_filter(self, left_inds, right_inds):
-    def impl(self, left_inds, right_inds):
-        return self.filter_func(_meminfo_from_struct(self),left_inds, right_inds)
-    return impl
+# @overload_method(BetaPredicateNodeTemplate, 'filter')
+# def _impl_beta_filter(self, left_inds, right_inds):
+#     def impl(self, left_inds, right_inds):
+#         return self.filter_func(_meminfo_from_struct(self),left_inds, right_inds)
+#     return impl
+
+
+#### Linking ####
+
+
 
 
 
@@ -601,14 +721,14 @@ def _impl_beta_filter(self, left_inds, right_inds):
 
 
 # The Plan:
-# 1. Implement id_str from conditions object
-# 2. Implement link_copy(node, kb) + tests which 
+# 1. [0%] Implement id_str from conditions object
+# 2. [0%] Implement link_copy(node, kb) + tests which 
 #  copies a prototype predicate node and links it to a knowledge_base
 #  -attr_offsets, id_str, and op are kept
 #  -left_facts, right_fact, kb_grow_queue, kb_change_queue are ripped
 #  -truth values are reinstantiated (don't instantiate if attr_offsets > 1)
 #  *By the end we should no longer need to import KnowledgeBase here
-# 3. Implement filter() + tests as described above
+# 3. [20%] Implement filter() + tests as described above
 # 4. Reimplement so that truth/consistency are densely bit packed 
 
 

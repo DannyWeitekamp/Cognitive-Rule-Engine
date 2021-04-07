@@ -1,11 +1,12 @@
 import numpy as np
-from numba import njit
-from numbert.experimental.utils import _meminfo_from_struct, _struct_from_meminfo
+from numba import njit, f8
+from numbert.experimental.utils import _meminfo_from_struct, _struct_from_meminfo, _cast_structref, struct_get_attr_offset
 from numbert.experimental.subscriber import BaseSubscriberType
 from numbert.experimental.fact import define_fact
 from numbert.experimental.kb import KnowledgeBase
 from numbert.experimental.context import kb_context
-from numbert.experimental.predicate_node import get_alpha_predicate_node, get_beta_predicate_node
+from numbert.experimental.predicate_node import get_alpha_predicate_node, get_beta_predicate_node, BasePredicateNodeType, get_linked_instance
+from numbert.experimental.predicate_node import get_alpha_predicate_node_definition, get_beta_predicate_node_definition
 from numbert.experimental.test_kb import _delcare_10000, _retract_10000
 import pytest
 
@@ -16,15 +17,25 @@ def njit_update(pt):
     subscriber.update_func(meminfo)
 
 @njit
-def filter_alpha(pn,inds):
+def filter_alpha(pn,link_data, inds):
     # print(pn.filter_func)
-    return pn.filter(inds)
+    mi = _meminfo_from_struct(pn)
+    return pn.filter_func(mi, link_data, inds)
 
 @njit
-def filter_beta(pn,left_inds, right_inds):
+def filter_beta(pn,link_data, left_inds, right_inds):
     # print(pn.filter_func)
-    return pn.filter(left_inds, right_inds)
+    mi = _meminfo_from_struct(pn)
+    return pn.filter_func(mi, link_data, left_inds, right_inds)
 
+@njit
+def cast(pn,ty):
+    return _cast_structref(ty, pn)
+
+# @njit
+# def offset(inst,attr):
+#     return _struct_get_attr_offset(inst,attr)
+from numbert.experimental.predicate_node import base_subscriber_fields, basepredicate_node_fields, alpha_predicate_node_fields, beta_predicate_node_fields, GenericAlphaPredicateNodeType, GenericBetaPredicateNodeType
 
 def test_predicate_node_sanity():
     with kb_context("test_predicate_node_sanity"):
@@ -32,11 +43,36 @@ def test_predicate_node_sanity():
         kb = KnowledgeBase()
 
         pn = get_alpha_predicate_node(BOOPType,"B", "<",9)
-        print(filter_alpha(pn, np.arange(5)))
+        pnc = cast(pn, BasePredicateNodeType)
+        png = cast(pn, GenericAlphaPredicateNodeType)
+        attrs_pn  = np.array([struct_get_attr_offset(pnc,x[0]) for x in base_subscriber_fields+basepredicate_node_fields])
+        attrs_pnc = np.array([struct_get_attr_offset(pn, x[0]) for x in base_subscriber_fields+alpha_predicate_node_fields])
+        attrs_png = np.array([struct_get_attr_offset(png,x[0]) for x in base_subscriber_fields+alpha_predicate_node_fields])
+        assert np.array_equal(attrs_pn,attrs_pnc[:len(attrs_pn)])
+        assert np.array_equal(attrs_pn,attrs_png[:len(attrs_pn)])
+        assert np.array_equal(attrs_pnc,attrs_png)
+        
+        ld = get_linked_instance(pnc, kb)
+
+        print(filter_alpha(png, ld, np.arange(5)))
+
 
         pn = get_beta_predicate_node(BOOPType,"B", "<", BOOPType,"B")
-        print(filter_beta(pn,np.arange(5), np.arange(5)))
+        pnc = cast(pn, BasePredicateNodeType)
+        png = cast(pn, GenericBetaPredicateNodeType)
+
+        attrs_pn  = np.array([struct_get_attr_offset(pnc,x[0]) for x in base_subscriber_fields+basepredicate_node_fields])
+        attrs_pnc = np.array([struct_get_attr_offset(pn, x[0]) for x in base_subscriber_fields+beta_predicate_node_fields])
+        attrs_png = np.array([struct_get_attr_offset(png,x[0]) for x in base_subscriber_fields+beta_predicate_node_fields])
+
+        assert np.array_equal(attrs_pn,attrs_pnc[:len(attrs_pn)])
+        assert np.array_equal(attrs_pn,attrs_png[:len(attrs_pn)])
+        assert np.array_equal(attrs_pnc,attrs_png)
+        print(filter_beta(png,ld, np.arange(5), np.arange(5)))
+        # print('l')
         # pn.filter(np.arange(5))
+        # pnn = get_linked_instance(cast(pn, BasePredicateNodeType), kb)
+
 
 
 

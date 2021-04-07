@@ -72,8 +72,8 @@ def define_structref_template(name, fields, define_constructor=True,define_boxin
     ctor._hash_code = hash_code
     return ctor,template
 
-def define_structref(name, fields):
-    ctor, template = define_structref_template(name,fields)
+def define_structref(name, fields, define_constructor=True,define_boxing=True):
+    ctor, template = define_structref_template(name,fields, define_constructor=define_constructor,define_boxing=define_boxing)
     struct_type = template(fields=fields)
     struct_type._hash_code = ctor._hash_code
     return ctor, struct_type

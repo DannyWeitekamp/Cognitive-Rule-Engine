@@ -12,7 +12,7 @@ import numpy as np
 
 vector_fields = [
     ("head", i8),
-    ("data",i8[:])
+    ("data",i8[::1])
 ]
 
 Vector, VectorTypeTemplate = define_structref_template("Vector",vector_fields)

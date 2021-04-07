@@ -223,6 +223,9 @@ KnowledgeBaseType = KnowledgeBaseTypeTemplate(fields=[
 
 @njit(cache=True)
 def facts_for_t_id(kb_data,t_id):
+    L = len(kb_data.facts)
+    if(t_id >= L):
+        expand_kb_data_types(kb_data, 1+L-t_id)
     return _struct_from_pointer(VectorType, kb_data.facts[t_id])
 
 @njit(cache=True)

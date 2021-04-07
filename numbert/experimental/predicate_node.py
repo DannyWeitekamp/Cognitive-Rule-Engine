@@ -29,7 +29,7 @@ from numbert.experimental.utils import _struct_from_meminfo, _meminfo_from_struc
  decode_idrec, lower_getattr, _struct_from_pointer, struct_get_attr_offset, _struct_get_data_pointer, \
  _load_pointer, _pointer_to_data_pointer
 from numbert.experimental.subscriber import base_subscriber_fields, BaseSubscriber, BaseSubscriberType, init_base_subscriber, link_downstream
-from numbert.experimental.vector import VectorType
+from numbert.experimental.vector import VectorType, new_vector
 from copy import copy
 from operator import itemgetter
 
@@ -61,8 +61,14 @@ predicate_node_link_data_field_dict = {
     "left_facts" : VectorType, #Vector<*Fact>
     "right_facts" : VectorType, #Vector<*Fact>
     
+    "change_head": i8,
+    "grow_head": i8,
+    "change_queue": VectorType,
+    "grow_queue": VectorType,
     "kb_grow_queue" : VectorType,
     "kb_change_queue" : VectorType,
+
+
 
     "truth_values" : u1[:,:],
     "left_consistency" : u1[:],
@@ -82,21 +88,33 @@ def get_linked_instance(pn, kb):
         or an equivalent instance already linked to the knowledge base'''
     link_data = new(PredicateNodeLinkDataType)
     # print(pn.left_fact_type_name)
-    print(kb.context_data.fact_to_t_id)
-    print(pn.left_fact_type_name)
+    # print(kb.context_data.fact_to_t_id)
+    # print(pn.left_fact_type_name)
+    # print("Q")
     link_data.left_t_id = kb.context_data.fact_to_t_id[pn.left_fact_type_name]
-
+    # print("Q2", link_data.left_t_id)
+    link_data.left_facts = facts_for_t_id(kb.kb_data,i8(link_data.left_t_id)) 
+    # print("Z")
     if(not pn.is_alpha):
         link_data.right_t_id = kb.context_data.fact_to_t_id[pn.right_fact_type_name]
+        link_data.right_facts = facts_for_t_id(kb.kb_data,i8(link_data.right_t_id)) 
         link_data.left_consistency = np.empty((0,),dtype=np.uint8)
         link_data.right_consistency = np.empty((0,),dtype=np.uint8)
     else:
         link_data.right_t_id = -1
 
+    # print("S")
+
+    link_data.change_head = 0
+    link_data.grow_head = 0
+    link_data.change_queue = new_vector(8)
+    link_data.grow_queue = new_vector(8)
+
     link_data.kb_grow_queue = kb.kb_data.grow_queue
     link_data.kb_change_queue = kb.kb_data.change_queue
     link_data.truth_values = np.empty((0,0),dtype=np.uint8)
         
+    # print("DONE")
 
     # print(pn.is_alpha)
     # if(pn.is_alpha):
@@ -155,7 +173,7 @@ base_predicate_node_field_dict = {
 from pprint import pprint
 
 basepredicate_node_fields = [(k,v) for k,v, in base_predicate_node_field_dict.items()]
-pprint(basepredicate_node_fields)
+# pprint(basepredicate_node_fields)
 BasePredicateNode, BasePredicateNodeType = define_structref("BasePredicateNode", base_subscriber_fields + basepredicate_node_fields)
 
 
@@ -170,7 +188,7 @@ alpha_predicate_node_field_dict = {
     
 }
 alpha_predicate_node_fields = [(k,v) for k,v, in alpha_predicate_node_field_dict.items()]
-pprint(alpha_predicate_node_fields)
+# pprint(alpha_predicate_node_fields)
 AlphaPredicateNode, AlphaPredicateNodeTemplate = define_structref_template("AlphaPredicateNode",
              base_subscriber_fields + alpha_predicate_node_fields, define_constructor=False)
 
@@ -261,10 +279,10 @@ def alpha_eval_truth(facts, f_id, pred_node):
 def alpha_filter(pnode_type, pred_meminfo, link_data, inds):
     '''Implements update_func of AlphaPredicateNode subscriber'''
 
-    return inds
-    if(pred_meminfo is None): return
     # return inds
-
+    # if(pred_meminfo is None): return
+    # return inds
+    # print("A")
     # if(pred_meminfo is None): return
 
     # Resolve this instance of the AlphaPredicateNode, it's KnowledgeBase, and 
@@ -274,11 +292,11 @@ def alpha_filter(pnode_type, pred_meminfo, link_data, inds):
     grw_q = link_data.kb_grow_queue
     chg_q = link_data.kb_change_queue
     facts = link_data.left_facts#facts_for_t_id(kb.kb_data,i8(pred_node.left_t_id))
-
+    # print("B")
     # Ensure that truth_values is the size of the fact pointer vector
-    if(len(facts.data) > len(pred_node.truth_values)):
-        pred_node.truth_values = expand_2d(pred_node.truth_values,len(facts.data),1,np.uint8)
-
+    if(len(facts.data) > len(link_data.truth_values)):
+        link_data.truth_values = expand_2d(link_data.truth_values,len(facts.data),1,np.uint8)
+    # print("C")
     # Update from the grow head to the KnowledgeBase's grow head  
     for i in range(pred_node.grow_head, grw_q.head):
         t_id, f_id, a_id = decode_idrec(grw_q[i])
@@ -287,7 +305,7 @@ def alpha_filter(pnode_type, pred_meminfo, link_data, inds):
             link_data.truth_values[f_id,0] = truth
             # pred_node.grow_queue.add(f_id)
     link_data.grow_head = grw_q.head
-
+    # print("D")
     # Update from the change head to the KnowledgeBase's change head
     for i in range(pred_node.change_head, chg_q.head):
         t_id, f_id, a_id = decode_idrec(chg_q[i])
@@ -297,6 +315,17 @@ def alpha_filter(pnode_type, pred_meminfo, link_data, inds):
             # if(truth != pred_node.truth_values[f_id]):
             #     pred_node.change_queue.add(f_id)
     link_data.change_head = chg_q.head
+
+    # print(link_data.truth_values)
+
+    new_inds = np.empty(len(inds),dtype=np.int64)
+    n = 0
+    for ind in inds:
+        if(link_data.truth_values[ind,0]==1):
+            new_inds[n] = ind
+            n += 1
+    # print(new_inds)
+    return new_inds[:n]
 
 @overload(AlphaPredicateNode,prefer_literal=True)
 def alpha_ctor(left_type, left_attr_offsets, op_str, right_val):
@@ -418,7 +447,7 @@ def get_alpha_predicate_node(typ, attr_chain, op_str, literal_val):
     dfn = get_alpha_predicate_node_definition(typ, attr_chain, op_str, right_type)
     ctor, left_attr_offsets = itemgetter('ctor', 'left_attr_offsets')(dfn)
     lft = str(typ._fact_name)
-    print("L<",lft, lft.isascii() )
+    # print("L<",lft, lft.isascii() )
 
     out = ctor(lft, left_attr_offsets, literal_val)
 
@@ -465,10 +494,10 @@ def beta_eval_truth(pred_node, left_facts, right_facts, i, j):
 
 
 @njit(cache=True,inline='always')
-def update_pair(pred_node, left_facts, right_facts, i, j):
+def update_pair(pred_node, truth_values, left_facts, right_facts, i, j):
     '''Updates an BetaPredicateNode for facts i and j of left_facts and right_facts'''
     truth = beta_eval_truth(pred_node, left_facts, right_facts, i, j)
-    pred_node.truth_values[i,j] = truth
+    truth_values[i,j] = truth
 
 
 
@@ -476,71 +505,80 @@ def update_pair(pred_node, left_facts, right_facts, i, j):
 def beta_filter(pnode_type, pred_meminfo, link_data, left_inds, right_inds):
     '''Implements update_func of BetaPredicateNode subscriber'''
 
-    print(left_inds, right_inds)
+    # print(left_inds, right_inds)
 
-    return np.zeros((1,1))
-    if(pred_meminfo is None): return
+    # return np.zeros((1,1))
+    # if(pred_meminfo is None): return
     # Resolve this instance of the BetaPredicateNode, it's KnowledgeBase, and 
     #   the fact pointer vectors associated with this the left and right t_id.
     pred_node = _struct_from_meminfo(pnode_type, pred_meminfo)
     # kb = _struct_from_meminfo(KnowledgeBaseType, pred_node.kb_meminfo)
     grw_q = link_data.kb_grow_queue #kb.kb_data.grow_queue
     chg_q = link_data.kb_change_queue#kb.kb_data.change_queue
-    # left_facts = facts_for_t_id(kb.kb_data,i8(pred_node.left_t_id))
-    # right_facts = facts_for_t_id(kb.kb_data,i8(pred_node.right_t_id))
-
+    left_facts = link_data.left_facts#facts_for_t_id(kb.kb_data,i8(pred_node.left_t_id))
+    right_facts = link_data.right_facts#facts_for_t_id(kb.kb_data,i8(pred_node.right_t_id))
     #Expand the truth_values, and left and right consistencies to match fact vectors
-    if(len(left_facts.data) > pred_node.truth_values.shape[0] or
-       len(right_facts.data) > pred_node.truth_values.shape[1]):
-        pred_node.truth_values = expand_2d(pred_node.truth_values,
+    if(len(left_facts.data) > link_data.truth_values.shape[0] or
+       len(right_facts.data) > link_data.truth_values.shape[1]):
+        link_data.truth_values = expand_2d(link_data.truth_values,
                                     len(left_facts.data),len(right_facts.data),np.uint8
                                  )
-    if(len(left_facts.data) > len(pred_node.left_consistency)):
-        pred_node.left_consistency = expand_1d(pred_node.left_consistency,
+    if(len(left_facts.data) > len(link_data.left_consistency)):
+        link_data.left_consistency = expand_1d(link_data.left_consistency,
                                         len(left_facts.data),np.uint8)
-    if(len(right_facts.data) > len(pred_node.right_consistency)):
-        pred_node.right_consistency = expand_1d(pred_node.right_consistency,
+    if(len(right_facts.data) > len(link_data.right_consistency)):
+        link_data.right_consistency = expand_1d(link_data.right_consistency,
                                         len(right_facts.data),np.uint8)
 
     #Fill in inconsistencies, catching up to the KnoweldgeBases' grow_queue 
-    for i in range(pred_node.grow_head, grw_q.head):
+    for i in range(link_data.grow_head, grw_q.head):
         t_id, f_id, a_id = decode_idrec(grw_q[i])
-        if(pred_node.left_t_id == t_id):
-            pred_node.left_consistency[f_id] = 0
-        if(pred_node.right_t_id == t_id):
-            pred_node.right_consistency[f_id] = 0
-    pred_node.grow_head = grw_q.head
+        if(link_data.left_t_id == t_id):
+            link_data.left_consistency[f_id] = 0
+        if(link_data.right_t_id == t_id):
+            link_data.right_consistency[f_id] = 0
+    link_data.grow_head = grw_q.head
 
     #Fill in inconsistencies, catching up to the KnoweldgeBases' change_queue 
-    for i in range(pred_node.change_head, chg_q.head):
+    for i in range(link_data.change_head, chg_q.head):
         t_id, f_id, a_id = decode_idrec(chg_q[i])
-        if(pred_node.left_t_id == t_id):
-            pred_node.left_consistency[f_id] = 0
-        if(pred_node.right_t_id == t_id):
-            pred_node.right_consistency[f_id] = 0
-    pred_node.change_head = chg_q.head
-
+        if(link_data.left_t_id == t_id):
+            link_data.left_consistency[f_id] = 0
+        if(link_data.right_t_id == t_id):
+            link_data.right_consistency[f_id] = 0
+    link_data.change_head = chg_q.head
 
     #NOTE: This part might be sped up by running it only on request
 
     # Update all facts that are inconsistent, check inconsistent left_facts
     #   against all right facts.
-    lc, rc = pred_node.left_consistency, pred_node.right_consistency
+    lc, rc = link_data.left_consistency, link_data.right_consistency
     for i in range(left_facts.head):
         if(not lc[i]):
             for j in range(right_facts.head):
-                update_pair(pred_node,left_facts,right_facts,i,j)
+                update_pair(pred_node, link_data.truth_values,left_facts,right_facts,i,j)
     
     # Check inconsistent right facts agains all left facts, except the ones that
     #   were already checked.
     for j in range(right_facts.head):
         if(not rc[j]):
             for i in range(left_facts.head):
-                if(lc[i]): update_pair(pred_node,left_facts,right_facts,i,j)
+                if(lc[i]): update_pair(pred_node, link_data.truth_values,left_facts,right_facts,i,j)
 
     # left and right inconsistencies all handled so fill in with 1s. 
-    pred_node.left_consistency[:len(left_facts)] = 1
-    pred_node.right_consistency[:len(right_facts)] = 1
+    link_data.left_consistency[:len(left_facts)] = 1
+    link_data.right_consistency[:len(right_facts)] = 1
+
+    out = new_vector(8)
+    for l_ind in left_inds:
+        if(l_ind >= len(left_facts.data)): continue
+        for r_ind in right_inds:
+            if(r_ind >= len(left_facts.data)): continue
+            if(link_data.truth_values[l_ind,r_ind] == 1):
+                out.add(l_ind)
+                out.add(r_ind)
+    return out.data[:out.head].reshape(out.head >> 1, 2)
+
 
 @overload(BetaPredicateNode,prefer_literal=True)
 def beta_ctor(left_type, left_attr_offsets, op_str, right_type, right_attr_offsets):
@@ -654,7 +692,7 @@ def get_beta_predicate_node(left_fact_type, left_attr_chain, op_str, right_fact_
     
     lft = left_fact_type._fact_name
     rft = right_fact_type._fact_name
-    print("LR<",lft, rft)
+    # print("LR<",lft, rft)
     out = ctor(lft, left_attr_offsets, rft, right_attr_offsets)
 
     return out

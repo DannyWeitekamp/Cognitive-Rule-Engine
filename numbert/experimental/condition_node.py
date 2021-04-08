@@ -58,22 +58,17 @@ class Var(structref.StructRefProxy):
             return var_get_deref_attrs(self)
         elif(attr == 'alias'):
             return var_get_alias(self)
-        elif(True): #TODO
+        elif(True): 
             typ = self._numba_type_
-            
             
             fact_type = typ.field_dict['fact_type'].instance_type 
             head_type = fact_type.field_dict[attr]
-            # print("FACT", fact_type)
-            # print("HEAD", head_type)
 
             fd = fact_type.field_dict
             offset = fact_type._attr_offsets[list(fd.keys()).index(attr)]
             struct_type = get_var_definition(types.TypeRef(fact_type), types.TypeRef(head_type))
             new = var_ctor(struct_type, var_get_alias(self))
             copy_and_append(self, new,attr, offset)
-            # dr = var_deref(self,attr)
-            # print("DDD", new)
             return new
 
     def __str__(self):
@@ -85,7 +80,7 @@ class Var(structref.StructRefProxy):
             return var_cmp_alpha(self,types.literal(op_str),other, negate)
         else:
             return var_cmp_beta(self,types.literal(op_str),other, negate)
-            
+    
 
     def __lt__(self,other): return self._cmp_helper("<",other,False)
     def __le__(self,other): return self._cmp_helper("<=",other,False)
@@ -95,10 +90,28 @@ class Var(structref.StructRefProxy):
     def __ne__(self,other): return self._cmp_helper("==",other,True)
         
 
+def var_cmp_alpha(left_var, op_str, right_var,negated):
+    right_var_type = types.unliteral(types.literal(right_var))
+    ctor = gen_pterm_ctor_alpha(left_var._numba_type_, op_str, right_var_type)
+    pt = ctor(left_var, op_str, right_var)
+    return pt_to_cond(pt, left_var.alias, None, negated)
+    
+
+def var_cmp_beta(left_var, op_str, right_var, negated):
+    ctor = gen_pterm_ctor_beta(left_var._numba_type_, op_str, right_var._numba_type_)
+    pt = ctor(left_var, op_str, right_var)
+    return pt_to_cond(pt, left_var.alias, right_var.alias, negated)
+
+
 def check_legal_cmp(var, op_str, other_var):
+    if(isinstance(var,Var)): var = var._numba_type_
+    if(isinstance(other_var,Var)): other_var = other_var._numba_type_
     if(op_str != "=="):
-        if(hasattr(var.head_type,'_fact_name') or
-         isinstance(other_var, (VarTypeTemplate,Var)) and hasattr(other_var.head_type,'_fact_name')):
+        head_type = var.field_dict['head_type'].instance_type
+        other_head_type = None
+        if(isinstance(other_var, (VarTypeTemplate,Var))):
+            other_head_type = other_var.field_dict['head_type'].instance_type
+        if(hasattr(head_type, '_fact_name') or hasattr(other_head_type, '_fact_name')):
             raise AttributeError("Inequality not valid comparitor for Fact types.")
 
 
@@ -110,17 +123,10 @@ def var_get_deref_attrs(self):
 @njit(cache=True)
 def var_get_alias(self):
     return self.alias
-# def var_str_from_type(inst_type):
-#     fn = inst_type.field_dict['fact_type'].instance_type._fact_name
-#     # attr_str = inst_type.field_dict['deref_attrs'].literal_value
-#     return f'Var[{fn}]{attr_str}'
-
 
 # Manually define the boxing to avoid constructor overloading
 define_boxing(VarTypeTemplate,Var)
 
-# @njit(cache=True)
-# def var_new(struct_type,):
 
 var_type_cache = {}
 def get_var_definition(fact_type, head_type):
@@ -145,36 +151,17 @@ def var_ctor(var_struct_type, alias):
 @overload(Var,strict=False)
 def overload_Var(typ,alias=None):
     struct_type = get_var_definition(typ,typ)
-    # d = {**var_fields_dict,**{'fact_type':typ, 'head_type':typ}}
-    # struct_type = VarTypeTemplate([(k,v) for k,v, in d.items()])
-
     def impl(typ, alias=None):
         return var_ctor(struct_type,alias)
-        # print(alias)
-        # print("JEEEEFFEE",alias)q
-        
-        # print("WHEEEEEEEE")
-        # print(st.alias)
-        # lower_setattr(st,'alias', 'jeffe')
-        # lower_setattr(st,'deref_attrs',List.empty_list(unicode_type))
-        # lower_setattr(st,'deref_offsets',List.empty_list(i8))
-        # return st
 
     return impl
 
-# def resolve_deref_type(inst_type, attr):
-#     old_str = inst_type.field_dict['deref_attrs'].literal_value
-#     fact_type = inst_type.field_dict['fact_type']
-#     new_str = old_str + f".{attr}"
-#     new_struct_type = VarTypeTemplate([('fact_type', fact_type), ('deref_attrs', types.literal(new_str))])    
-#     return new_struct_type
 
 @overload(repr)
 def repr_var(self):
     if(not isinstance(self, VarTypeTemplate)): return
     fact_name = self.field_dict['fact_type'].instance_type._fact_name
     def impl(self):
-        # print("WHAAA",len(self.alias))
         alias_part = ", '" + self.alias + "'" if len(self.alias) > 0 else ""
         s = "Var(" + fact_name + "Type" + alias_part + ")"
         for attr in self.deref_attrs:
@@ -188,7 +175,6 @@ def str_var(self):
     if(not isinstance(self, VarTypeTemplate)): return
     fact_name = self.field_dict['fact_type'].instance_type._fact_name
     def impl(self):
-        # print("ALIAS", len(self.alias))
         s = self.alias
         if (len(s) > 0):
             for attr in self.deref_attrs:
@@ -208,7 +194,6 @@ class StructAttribute(AttributeTemplate):
     def generic_resolve(self, typ, attr):
         if attr in typ.field_dict:
             attrty = typ.field_dict[attr]
-            # print("GETATTR_TY",attrty,attr)
             return attrty
         head_type = typ.field_dict['head_type'].instance_type 
         #TODO Should check that all subtype references are valid
@@ -218,14 +203,12 @@ class StructAttribute(AttributeTemplate):
         fact_type = typ.field_dict['fact_type']
         if(attr in head_type.field_dict):
             new_head_type = types.TypeRef(head_type.field_dict[attr])
-            # print(head_type, new_head_type)
             field_dict = {
                 **var_fields_dict,
                 **{"fact_type" : fact_type,
                  "head_type" : new_head_type}
             }
             attrty = VarTypeTemplate([(k,v) for k,v, in field_dict.items()])
-            # print("GETATTR_TY",attrty,attr)
             return attrty
         else:
             raise AttributeError(f"Var[{fact_type}] has no attribute '{attr}'")
@@ -277,7 +260,6 @@ def var_getattr_impl(context, builder, typ, val, attr):
 
 @lower_setattr_generic(VarTypeTemplate)
 def struct_setattr_impl(context, builder, sig, args, attr):
-    # print("SETATTR",attr,sig.args[-1])
     [inst_type, val_type] = sig.args
     [instance, val] = args
     utils = _Utils(context, builder, inst_type)
@@ -309,10 +291,6 @@ def _var_deref(typingctx, typ, attr_type):
 @njit(cache=True)
 def var_deref(self,attr):
     return _var_deref(self,literally(attr))
-
-
-
-
 
 
 pterm_fields_dict = {
@@ -349,25 +327,8 @@ def pterm_get_pred_node(self):
     return self.pred_node
 
 define_boxing(PTermTypeTemplate,PTerm)
-# structref.define_proxy(PTerm, PTermTypeTemplate, list(pterm_fields_dict.keys()))
-
-# from numbert.caching import source_to_cache, import_from_cached, source_in_cache
-# source = '''
-# from numbert.experimental.condition_node import PTermTypeTemplate, pterm_fields
-# PTermType = PTermTypeTemplate(pterm_fields)
-# '''
-# if(not source_in_cache("PTerm", '1')):
-#     source_to_cache("PTerm", '1', source)
-
-# PTermType = import_from_cached("PTerm", '1', ['PTermType'])['PTermType']
-
-
-
 PTermType = PTermTypeTemplate(pterm_fields)
 
-
-# @njit(cache=True)
-# def pterm_alpha_ctor():
 
 @njit(cache=True)
 def alpha_pterm_ctor(pn, left_var, op_str, right_var):
@@ -381,16 +342,6 @@ def alpha_pterm_ctor(pn, left_var, op_str, right_var):
 @njit(cache=True)
 def beta_pterm_ctor(pn, left_var, op_str, right_var):
     st = new(PTermType)
-    # left_t_id = -1 #Not defined yet, needs Kb to resolve
-    # right_t_id = -1 #Not defined yet, needs Kb to resolve
-    # l_offsets = np.empty((len(left_var.deref_offsets),),dtype=np.int64)
-    # r_offsets = np.empty((len(right_var.deref_offsets),),dtype=np.int64)
-    # for i,x in enumerate(left_var.deref_offsets): l_offsets[i] = x
-    # for i,x in enumerate(right_var.deref_offsets): r_offsets[i] = x
-
-    # pred_node = ctor(left_t_id, l_offsets, right_t_id, r_offsets)
-    # pred_node = BetaPredicateNode(left_var.fact_type, left_var.head_type, l_offsets, op_str, right_var.fact_type, left_var.head_type, r_offsets)
-    # st.pred_node = _cast_structref(BasePredicateNodeType, pred_node)
     st.pred_node = pn
     st.str_val = str(left_var) + " " + op_str + " " + str(right_var)
     st.negated = False
@@ -401,7 +352,6 @@ def beta_pterm_ctor(pn, left_var, op_str, right_var):
 pnode_dat_cache = {}
 def get_alpha_pnode_ctor(left_var, op_str, right_var):
     t = ("alpha",str(left_var), op_str, right_var)
-    # print("T", t)
     if(t not in pnode_dat_cache):
         left_fact_type = left_var.field_dict['fact_type'].instance_type
         left_type = left_var.field_dict['head_type'].instance_type
@@ -459,7 +409,6 @@ def gen_pterm_ctor_beta(left_var, op_str, right_var):
         return beta_pterm_ctor(pn, left_var, op_str, right_var)            
     return impl
 
-# @generated_jit(cache=True)
 @overload(PTerm)
 def pterm_ctor(left_var, op_str, right_var):
     if(not isinstance(op_str, types.Literal)): return 
@@ -470,9 +419,6 @@ def pterm_ctor(left_var, op_str, right_var):
         return gen_pterm_ctor_alpha(left_var, op_str, right_var)
     else:
         return gen_pterm_ctor_beta(left_var, op_str, right_var)
-    
-    # return impl
-
 
 
 @overload(str)
@@ -497,23 +443,6 @@ def pterm_not(self):
     npt.negated = not npt.negated
     return npt
 
-# @overload(operator.)
-
-
-
-
-
-# def lower_var_alpha_comparator(context, builder, sig, args, op_str):
-
-
-# def lower_var_beta_comparator(context, builder, sig, args, op_str):
-
-# @lower_builtin(operator.lt, VarTypeTemplate, types.Any)
-# def var_a_lt(context, builder, sig, args):
-#     return lower_var_alpha_comparator(context, builder, sig, args, "<")
-    
-# @lower_builtin(operator.lt, VarTypeTemplate, VarTypeTemplate)
-# def var_b_lt(context, builder, sig, args):
 
 @njit(cache=True)
 def comparator_jitted(left_var, op_str, right_var, negated):
@@ -538,65 +467,33 @@ def pt_to_cond(pt, left_alias, right_alias, negated):
     _vars.append(left_alias)
     if(right_alias is not None):
         _vars.append(right_alias)
-    # if(not is_alpha): _vars.append(right_var.alias)
     pt.negated = negated
-    # print(type(right_var))
     c = Conditions(_vars, dnf)
     return c
 
-# @njit(cache=True)
-# def gen_pt(left_var, op_str, right_var):
-#     if(op_str == "<"):
-#         pt = PTerm(left_var, "<", right_var)
-#     elif(op_str == "<="):
-#         pt = PTerm(left_var, "<=", right_var)
-#     elif(op_str == ">"):
-#         pt = PTerm(left_var, ">", right_var)
-#     elif(op_str == ">="):
-#         pt = PTerm(left_var, ">=", right_var)
-#     elif(op_str == "=="):
-#         pt = PTerm(left_var, "==", right_var)
-#     else:
-#         raise ValueError()
-#     return pt
 
-# @njit(cache=True)
-def var_cmp_alpha(left_var, op_str, right_var,negated):
-    # print(left_var.__dict__)
-    right_var_type = types.unliteral(types.literal(right_var))
-    ctor = gen_pterm_ctor_alpha(left_var._numba_type_, op_str, right_var_type)
-    pt = ctor(left_var, op_str, right_var)
-    return pt_to_cond(pt, left_var.alias, None, negated)
-    
-
-# @njit(cache=True)
-def var_cmp_beta(left_var, op_str, right_var, negated):
-    ctor = gen_pterm_ctor_beta(left_var._numba_type_, op_str, right_var._numba_type_)
-    pt = ctor(left_var, op_str, right_var)
-    return pt_to_cond(pt, left_var.alias, right_var.alias, negated)
-    # c = var_cmp_alpha(left_var, op_str, right_var, negated)
-    # c.vars.append(right_var.alias)
-    # return c
-
-
-def comparator_helper(op_str, left_var, right_var,negate=False):
+def comparator_helper(op_str, left_var, right_var,negated=False):
     if(isinstance(left_var,VarTypeTemplate)):
+        check_legal_cmp(left_var, op_str, right_var)
+        op_str = types.unliteral(op_str)
+        if(not isinstance(right_var,VarTypeTemplate)):
+            # print("POOP")
+            right_var_type = types.unliteral(right_var)
+            # ctor = gen_pterm_ctor_alpha(left_var, op_str, right_var_type)
+            # print("POOP")
 
-        check_legal_cmp(left_var.instance_type, op_str,right_var.instance_type)
-        # lit_op_str = types.literal(op_str)
-
-        if(isinstance(right_var,VarTypeTemplate)):
-            return var_cmp_alpha
-            # def impl(left_var, right_var):
-            #     return var_cmp_beta(left_var, op_str, right_var,negate)
-            #     # c = comparator_jitted(left_var, op_str, right_var,negate)
-            #     # c.vars.append(right_var.alias)
-            #     # return c
+            def impl(left_var, right_var):
+                pt = PTerm(left_var, op_str, right_var)
+                return pt_to_cond(pt, left_var.alias, None, negated)
         else:
-            return var_cmp_beta
-            # def impl(left_var, right_var):
-            #     # return comparator_jitted(left_var, lit_op_str, right_var,negate)
-            #     return var_cmp_alpha(left_var, op_str, right_var,negate)
+            # ctor = gen_pterm_ctor_beta(left_var, op_str, right_var)
+            def impl(left_var, right_var):
+                pt = PTerm(left_var, op_str, right_var)
+                return pt_to_cond(pt, left_var.alias, right_var.alias, negated)
+
+            # return var_cmp_beta
+
+
         return impl
 
 
@@ -628,9 +525,7 @@ def var_eq(left_var, right_var):
 @generated_jit(cache=True)
 @overload(operator.ne)
 def var_ne(left_var, right_var):
-    return comparator_helper("==", left_var, right_var, negate=True)
-
-
+    return comparator_helper("==", left_var, right_var, True)
 
 
 
@@ -823,64 +718,3 @@ def var_or(l, r):
 def var_not(c):
     if(not isinstance(c,ConditionsTypeTemplate)): return
     return lambda c : conditions_not(c)
-
-
-
-
-
-
-    # return c,c2
-
-
-# var_fields = [
-#     ('var', ???)
-#     ('attr', unicode_type)
-#     ('a_id', i8)
-# ]
-
-# term_fields = [
-#     ("negated", u1),
-#     ("is_beta", u1),
-#     ("left_var", unicode_type),
-#     ("right_var", unicode_type),
-#     ("_str", unicode_type),
-#     ("predicate_node", BasePredicateNode)
-# ]
-
-
-# condition_fields = [
-#     #A Vector<*var>
-#     ("vars", VectorType)
-#     #A Vector<*Vector<*Term>>
-#     ("conjuncts", VectorType)
-    
-# ]
-
-
-# def new_condition(vars, conjucts)
-
-
-
-
-
-
-
-
-
-#There needs to be var and Var types probably
-# because we can Bind to something without conditioning on it
-# so
-
-
-
-
-
-
-
-#### PLANNING PLANNING PLANNING ###
-
-'''
-Condition_node has alpha bits and beta bits. It has a DNF structure
-
-
-'''

@@ -18,6 +18,7 @@ import numpy as np
 from numba import types, njit, i8, u8, i4, u1, u4, literally, generated_jit
 from numba.typed import List
 from numba.types import ListType, unicode_type, void
+from numba.core.types.misc import unliteral
 from numba.experimental.structref import new
 from numba.extending import overload_method, intrinsic, overload
 from numbert.caching import gen_import_str, unique_hash,import_from_cached, source_to_cache, source_in_cache
@@ -324,29 +325,51 @@ def alpha_filter(pnode_type, pred_meminfo, link_data, inds):
         if(link_data.truth_values[ind,0]==1):
             new_inds[n] = ind
             n += 1
+
     # print(new_inds)
     return new_inds[:n]
 
-@overload(AlphaPredicateNode,prefer_literal=True)
-def alpha_ctor(left_type, left_attr_offsets, op_str, right_val):
+@overload(AlphaPredicateNode, prefer_literal=True)
+def alpha_ctor(left_fact_type, left_type, l_offsets, op_str, right_val):
     if(not isinstance(op_str, types.Literal)): return 
-    if(not isinstance(left_attr_offsets, types.Array)):
+    if(not isinstance(l_offsets, types.Array)):
         raise ValueError(f"AlphaPredicateNode left_attr_offsets must be array, got {left_attr_offsets}.")
 
-    specialization_dict = {
-        'op_str' : types.literal(op_str.literal_value),
-        'left_type' : left_type,
-        'right_val' : right_val
-    }
+    print("---------")
+    print(left_fact_type)
+    print(left_type) 
+    print(l_offsets)
+    print(op_str)
+    print(right_val)
+    if(hasattr(right_val,"_fact_name")): raise ValueError("Alpha instantiated, but is a Beta")
+    ctor, pnode_type = define_alpha_predicate_node(left_type.instance_type, op_str, right_val)
+    left_fact_type_name = left_fact_type.instance_type._fact_name
+    # left_fact_type_name = np.array([left_fact_type_name],dtype="U")
+    # print(left_fact_type_name)
+    # @njit(unicode_type())
+    # def get_name():
+    #     return unicode_type(left_fact_type_name)
 
-    d = {**alpha_predicate_node_field_dict,**specialization_dict}
-    pnode_type = AlphaPredicateNodeTemplate(base_subscriber_fields+[(k,v) for k,v, in d.items()])
+
+
+    # left_fact_type_name._literal_type_cache = unicode_type
+    # specialization_dict = {
+    #     'op_str' : types.literal(op_str.literal_value),
+    #     'left_type' : left_type,
+    #     'right_val' : right_val
+    # }
+
+    # d = {**alpha_predicate_node_field_dict,**specialization_dict}
+    # pnode_type = AlphaPredicateNodeTemplate(base_subscriber_fields+[(k,v) for k,v, in d.items()])
     # print("!!!!",struct_type)
-    def impl(left_type, left_attr_offsets, op_str, right_val):
-        st = new(pnode_type)
-        init_base_subscriber(st)
-        init_alpha(st, left_type._fact_name, left_attr_offsets, right_val)
-        return st
+    def impl(left_fact_type, left_type, l_offsets, op_str, right_val):
+        # unq = get_name()
+        # unq = 'floop'+"1"
+        return ctor(str(left_fact_type_name), l_offsets, right_val)
+        # st = new(pnode_type)
+        # init_base_subscriber(st)
+        # init_alpha(st, unq, l_offsets, right_val)
+        # return st
 
     return impl
 
@@ -359,7 +382,7 @@ def gen_alpha_source(left_type, op_str, right_type):
     # literal_type = types.literal(literal_val).literal_type
     if(isinstance(right_type,types.Integer)): right_type = types.float64
     # fieldtype = typ.field_dict[attr]
-    source = f'''
+    source = f'''import numba
 from numba import types, njit
 from numba.experimental.structref import new
 from numba.types import float64, unicode_type
@@ -429,7 +452,7 @@ def define_alpha_predicate_node(left_type, op_str, right_type):
 def get_alpha_predicate_node_definition(typ, attr_chain, op_str, right_type):
     '''Gets various definitions for an AlphaPredicateNode, returns a dict with 'ctor'
          'pnode_type', 'left_type', 'left_attr_offsets', 't_id' '''
-    context = kb_context()    
+    # context = kb_context()    
     # t_id = context.fact_to_t_id[typ._fact_name]
 
     if(not isinstance(attr_chain,list)): attr_chain = [attr_chain]
@@ -446,10 +469,8 @@ def get_alpha_predicate_node(typ, attr_chain, op_str, literal_val):
 
     dfn = get_alpha_predicate_node_definition(typ, attr_chain, op_str, right_type)
     ctor, left_attr_offsets = itemgetter('ctor', 'left_attr_offsets')(dfn)
-    lft = str(typ._fact_name)
-    # print("L<",lft, lft.isascii() )
 
-    out = ctor(lft, left_attr_offsets, literal_val)
+    out = ctor(typ._fact_name, left_attr_offsets, literal_val)
 
     return out
 
@@ -581,27 +602,31 @@ def beta_filter(pnode_type, pred_meminfo, link_data, left_inds, right_inds):
 
 
 @overload(BetaPredicateNode,prefer_literal=True)
-def beta_ctor(left_type, left_attr_offsets, op_str, right_type, right_attr_offsets):
+def beta_ctor(left_fact_type, left_type, l_offsets, op_str, right_fact_type, right_type, r_offsets):
     if(not isinstance(op_str, types.Literal)): return 
-    if(not isinstance(left_attr_offsets, types.Array)):
-        raise ValueError(f"AlphaPredicateNode left_attr_offsets must be array, got {left_attr_offsets}.")
-    if(not isinstance(right_attr_offsets, types.Array)):
-        raise ValueError(f"AlphaPredicateNode right_attr_offsets must be array, got {left_attr_offsets}.")
+    if(not isinstance(l_offsets, types.Array)):
+        raise ValueError(f"BetaPredicateNode l_offsets must be array, got {left_attr_offsets}.")
+    if(not isinstance(r_offsets, types.Array)):
+        raise ValueError(f"BetaPredicateNode r_offsets must be array, got {left_attr_offsets}.")
 
-    specialization_dict = {
-        'op_str' : types.literal(op_str.literal_value),
-        'left_type' : left_type,
-        'right_type' : right_type
-    }
+    ctor, _ = define_beta_predicate_node(left_type.instance_type, op_str, right_type.instance_type)
+    left_fact_type_name = left_fact_type.instance_type._fact_name
+    right_fact_type_name = left_fact_type.instance_type._fact_name
+    # specialization_dict = {
+    #     'op_str' : types.literal(op_str.literal_value),
+    #     'left_type' : left_type,
+    #     'right_type' : right_type
+    # }
 
-    d = {**beta_predicate_node_field_dict,**specialization_dict}
-    pnode_type = BetaPredicateNodeTemplate(base_subscriber_fields+[(k,v) for k,v, in d.items()])
+    # d = {**beta_predicate_node_field_dict,**specialization_dict}
+    # pnode_type = BetaPredicateNodeTemplate(base_subscriber_fields+[(k,v) for k,v, in d.items()])
     # print("!!!!",struct_type)
-    def impl(left_type, left_attr_offsets, op_str, right_type, right_attr_offsets):
-        st = new(pnode_type)
-        init_base_subscriber(st)
-        init_beta(st, left_type._fact_name, left_attr_offsets, right_type._fact_name, right_attr_offsets)
-        return st
+    def impl(left_fact_type, left_type, l_offsets, op_str, right_fact_type, right_type, r_offsets):
+
+        # st = new(pnode_type)
+        # init_base_subscriber(st)
+        # init_beta(st, left_type._fact_name, left_attr_offsets, right_type._fact_name, right_attr_offsets)
+        return ctor(str(left_fact_type_name), l_offsets, str(right_fact_type_name), r_offsets)
 
     return impl
                     

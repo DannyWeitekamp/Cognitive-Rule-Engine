@@ -69,7 +69,7 @@ def get_cache_path(name,hsh=None):
 	else:
 		return os.path.join(cache_dir,name,"_" + str(hsh) +".py")
 
-def source_in_cache(name,hsh):
+def source_in_cache(name,hsh=None):
 	path = get_cache_path(name,hsh)
 	return path if os.path.exists(path) else None
 

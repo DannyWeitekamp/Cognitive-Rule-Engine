@@ -181,8 +181,8 @@ def pterm_not(self):
 def comparator_jitted(left_var, op_str, right_var, negated):
     pt = PTerm(left_var, op_str, right_var)
     dnf = new_dnf(1)
-    ind = 0 if (pt.is_alpha) else 1
-    dnf[0][ind].append(pt)
+    # ind = 0 if (pt.is_alpha) else 1
+    dnf[0].append(pt)
     _vars = List([left_var.alias])
     # if(not is_alpha): _vars.append(right_var.alias)
     pt.negated = negated
@@ -194,8 +194,8 @@ def comparator_jitted(left_var, op_str, right_var, negated):
 @njit(cache=True)
 def pt_to_cond(pt, left_alias, right_alias, negated):
     dnf = new_dnf(1)
-    ind = 0 if (pt.is_alpha) else 1
-    dnf[0][ind].append(pt)
+    # ind = 0 if (pt.is_alpha) else 1
+    dnf[0].append(pt)
     _vars = List.empty_list(unicode_type)
     _vars.append(left_alias)
     if(right_alias is not None):
@@ -263,9 +263,9 @@ def var_ne(left_var, right_var):
 
 
 pterm_list_type = ListType(PTermType)
-pterm_list_x2_type = Tuple((pterm_list_type, pterm_list_type))
-list_of_pterm_list_x2_type = ListType(Tuple((pterm_list_type, pterm_list_type)))
-dnf_type = list_of_pterm_list_x2_type
+# pterm_list_x2_type = Tuple((pterm_list_type, pterm_list_type))
+pterm_list_list_type = ListType(pterm_list_type)
+dnf_type = pterm_list_list_type
 
 conditions_fields_dict = {
     ### Fields that are filled on in instantiation ### 
@@ -276,7 +276,7 @@ conditions_fields_dict = {
     # The Disjunctive Normal Form of the condition but organized
     #  so that every conjunct has a seperate lists for alpha and 
     #  beta terms.
-    'dnf': ListType(pterm_list_x2_type),
+    'dnf': pterm_list_list_type,
 
     # A mapping from Var pointers to their associated index
     'var_map': DictType(i8,i8),
@@ -324,9 +324,9 @@ define_boxing(ConditionsTypeTemplate,Conditions)
 
 @njit(cache=True)
 def new_dnf(n):
-    dnf = List.empty_list(pterm_list_x2_type)
+    dnf = List.empty_list(pterm_list_type)
     for i in range(n):
-        dnf.append( (List.empty_list(PTermType), List.empty_list(PTermType)) )
+        dnf.append( List.empty_list(PTermType) )
     return dnf
 
 ConditionsType = ConditionsTypeTemplate(conditions_fields)
@@ -376,16 +376,16 @@ def str_pterm(self):
         #     if(j < len(self.vars)-1): s += ", "
         # s += '\n'
         for j, conjunct in enumerate(self.dnf):
-            alphas, betas = conjunct
-            for i, alpha_term in enumerate(alphas):
-                s += "~" if alpha_term.negated else ""
-                s += "(" + str(alpha_term) + ")" 
-                if(i < len(alphas)-1 or len(betas)): s += " & "
+            # alphas, betas = conjunct
+            for i, term in enumerate(conjunct):
+                s += "~" if term.negated else ""
+                s += "(" + str(term) + ")" 
+                if(i < len(conjunct)-1): s += " & "
 
-            for i, beta_term in enumerate(betas):
-                s += "~" if beta_term.negated else ""
-                s += "(" + str(beta_term) + ")" 
-                if(i < len(betas)-1): s += " & "
+            # for i, beta_term in enumerate(betas):
+            #     s += "~" if beta_term.negated else ""
+            #     s += "(" + str(beta_term) + ")" 
+            #     if(i < len(betas)-1): s += " & "
 
             if(j < len(self.dnf)-1): s += " |\\\n"
         return s
@@ -443,10 +443,12 @@ def dnf_and(l_dnf, r_dnf):
     for i, l_conjuct in enumerate(l_dnf):
         for j, r_conjuct in enumerate(r_dnf):
             k = i*len(r_dnf) + j
-            for x in l_conjuct[0]: dnf[k][0].append(x)
-            for x in r_conjuct[0]: dnf[k][0].append(x)
-            for x in l_conjuct[1]: dnf[k][1].append(x)
-            for x in r_conjuct[1]: dnf[k][1].append(x)
+            for x in l_conjuct: dnf[k].append(x)
+            for x in r_conjuct: dnf[k].append(x)
+            # for x in l_conjuct[0]: dnf[k][0].append(x)
+            # for x in r_conjuct[0]: dnf[k][0].append(x)
+            # for x in l_conjuct[1]: dnf[k][1].append(x)
+            # for x in r_conjuct[1]: dnf[k][1].append(x)
     return dnf
 
 
@@ -461,26 +463,27 @@ def conditions_or(left,right):
 def dnf_or(l_dnf, r_dnf):
     dnf = new_dnf(len(l_dnf)+len(r_dnf))
     for i, conjuct in enumerate(l_dnf):
-        for x in conjuct[0]: dnf[i][0].append(x)
-        for x in conjuct[1]: dnf[i][1].append(x)
+        for x in conjuct: dnf[i].append(x)
+        # for x in conjuct[1]: dnf[i][1].append(x)
 
     for i, conjuct in enumerate(r_dnf):
         k = len(l_dnf)+i
-        for x in conjuct[0]: dnf[k][0].append(x)
-        for x in conjuct[1]: dnf[k][1].append(x)
+        for x in conjuct: dnf[k].append(x)
+        # for x in conjuct[0]: dnf[k][0].append(x)
+        # for x in conjuct[1]: dnf[k][1].append(x)
 
     return dnf
 
 @njit(cache=True)
 def dnf_not(c_dnf):
-    dnfs = List.empty_list(list_of_pterm_list_x2_type)
+    dnfs = List.empty_list(pterm_list_list_type)
     for i, conjunct in enumerate(c_dnf):
-        dnf = new_dnf(len(conjunct[0])+len(conjunct[1]))
-        for j, term in enumerate(conjunct[0]):
-            dnf[j][0].append(pterm_not(term))
-        for j, term in enumerate(conjunct[1]):
-            k = len(conjunct[0]) + j
-            dnf[k][1].append(pterm_not(term))
+        dnf = new_dnf(len(conjunct))
+        for j, term in enumerate(conjunct):
+            dnf[j].append(pterm_not(term))
+        # for j, term in enumerate(conjunct[1]):
+        #     k = len(conjunct[0]) + j
+        #     dnf[k][1].append(pterm_not(term))
         dnfs.append(dnf)
 
     # print("PHAZZZZZZ")
@@ -534,6 +537,8 @@ def initialize_condition(cond):
     for i,v in enumerate(cond.vars):
         cond.alpha_dnfs.append(new_dnf(0))
         cond.beta_dnfs.append(new_dnf(0))
+
+    
 
 
 

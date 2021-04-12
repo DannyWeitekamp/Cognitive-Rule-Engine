@@ -12,7 +12,7 @@ from numbert.experimental.context import kb_context
 from numbert.experimental.structref import define_structref, define_structref_template
 from numbert.experimental.kb import KnowledgeBaseType, KnowledgeBase, facts_for_t_id, fact_at_f_id
 from numbert.experimental.fact import define_fact, BaseFactType, cast_fact
-from numbert.experimental.utils import _struct_from_meminfo, _meminfo_from_struct, _cast_structref, decode_idrec, lower_getattr, _struct_from_pointer,  lower_setattr, lower_getattr
+from numbert.experimental.utils import _struct_from_meminfo, _meminfo_from_struct, _cast_structref, cast_structref, decode_idrec, lower_getattr, _struct_from_pointer,  lower_setattr, lower_getattr, _pointer_from_struct
 from numbert.experimental.subscriber import base_subscriber_fields, BaseSubscriber, BaseSubscriberType, init_base_subscriber, link_downstream
 from numbert.experimental.vector import VectorType
 from numbert.experimental.predicate_node import BasePredicateNode,BasePredicateNodeType, get_alpha_predicate_node_definition, \
@@ -27,6 +27,7 @@ from copy import copy
 
 
 var_fields_dict = {
+    'base_ptr' : i8,
     'alias' : unicode_type,
     'deref_attrs': ListType(unicode_type),
     'deref_offsets': ListType(i8),
@@ -44,41 +45,47 @@ class VarTypeTemplate(types.StructRef):
 # Manually register the type to avoid automatic getattr overloading 
 default_manager.register(VarTypeTemplate, models.StructRefModel)
 
-BaseVarType = VarTypeTemplate([(k,v) for k,v in var_fields_dict.items()])
+GenericVarType = VarTypeTemplate([(k,v) for k,v in var_fields_dict.items()])
 
 class Var(structref.StructRefProxy):
     def __new__(cls, typ, alias=None):
+        fact_type_name = typ._fact_name
         typ = types.TypeRef(typ)
         struct_type = get_var_definition(typ,typ)
-        return var_ctor(struct_type, alias)
+        st = var_ctor(struct_type, fact_type_name, alias)
+        return st
         # return structref.StructRefProxy.__new__(cls, *args)
 
     def __getattr__(self, attr):
         # print("DEREF", attr)
         if(attr == 'fact_type'):
-            return self._numba_type_.field_dict['fact_type'].instance_type
+            fact_type = self._numba_type_.field_dict['fact_type']
+            return fact_type.instance_type if(fact_type != types.Any) else None
         elif(attr == 'head_type'):
-            return self._numba_type_.field_dict['head_type'].instance_type
-
+            head_type = self._numba_type_.field_dict['head_type']
+            return head_type.instance_type if(head_type != types.Any) else None
         elif(attr == 'deref_attrs'):
             return var_get_deref_attrs(self)
         elif(attr == 'alias'):
             return var_get_alias(self)
+        elif(attr == 'fact_type_name'):
+            return var_get_fact_type_name(self)
         elif(True): 
             typ = self._numba_type_
             
             fact_type = typ.field_dict['fact_type'].instance_type 
+            fact_type_name = fact_type._fact_name
             head_type = fact_type.field_dict[attr]
 
             fd = fact_type.field_dict
             offset = fact_type._attr_offsets[list(fd.keys()).index(attr)]
             struct_type = get_var_definition(types.TypeRef(fact_type), types.TypeRef(head_type))
-            new = var_ctor(struct_type, var_get_alias(self))
+            new = var_ctor(struct_type, fact_type_name, var_get_alias(self))
             copy_and_append(self, new,attr, offset)
             return new
 
     def __str__(self):
-        return ".".join([f'Var[{self.fact_type._fact_name}]']+list(self.deref_attrs))
+        return ".".join([f'Var[{self.fact_type_name},{self.alias}]']+list(self.deref_attrs))
 
     def _cmp_helper(self,op_str,other,negate):
         check_legal_cmp(self, op_str, other)
@@ -101,14 +108,17 @@ def var_cmp_alpha(left_var, op_str, right_var,negated):
     right_var_type = types.unliteral(types.literal(right_var))
     ctor = gen_pterm_ctor_alpha(left_var._numba_type_, op_str, right_var_type)
     pt = ctor(left_var, op_str, right_var)
-    return pt_to_cond(pt, left_var.alias, None, negated)
+    lbv = cast_structref(GenericVarType,left_var)
+    return pt_to_cond(pt, lbv, None, negated)
     
 
 def var_cmp_beta(left_var, op_str, right_var, negated):
     from numbert.experimental.condition_node import pt_to_cond, gen_pterm_ctor_alpha, gen_pterm_ctor_beta
     ctor = gen_pterm_ctor_beta(left_var._numba_type_, op_str, right_var._numba_type_)
     pt = ctor(left_var, op_str, right_var)
-    return pt_to_cond(pt, left_var.alias, right_var.alias, negated)
+    lbv = cast_structref(GenericVarType,left_var)
+    rbv = cast_structref(GenericVarType,right_var)
+    return pt_to_cond(pt, lbv, rbv, negated)
 
 
 def check_legal_cmp(var, op_str, other_var):
@@ -132,6 +142,10 @@ def var_get_deref_attrs(self):
 def var_get_alias(self):
     return self.alias
 
+@njit(cache=True)
+def var_get_fact_type_name(self):
+    return self.fact_type_name
+
 # Manually define the boxing to avoid constructor overloading
 define_boxing(VarTypeTemplate,Var)
 
@@ -148,8 +162,10 @@ def get_var_definition(fact_type, head_type):
         return var_type_cache[t]
 
 @njit(cache=True)
-def var_ctor(var_struct_type, alias):
+def var_ctor(var_struct_type, fact_type_name, alias):
     st = new(var_struct_type)
+    st.fact_type_name = fact_type_name
+    st.base_ptr = _pointer_from_struct(st)
     st.alias =  "boop" if(alias is  None) else alias
     st.deref_attrs = List.empty_list(unicode_type)
     st.deref_offsets = List.empty_list(i8)
@@ -158,9 +174,11 @@ def var_ctor(var_struct_type, alias):
 
 @overload(Var,strict=False)
 def overload_Var(typ,alias=None):
+    fact_type = typ.instance_type
+    fact_type_name = fact_type._fact_name
     struct_type = get_var_definition(typ,typ)
     def impl(typ, alias=None):
-        return var_ctor(struct_type,alias)
+        return var_ctor(struct_type,fact_type_name,alias)
 
     return impl
 
@@ -168,10 +186,10 @@ def overload_Var(typ,alias=None):
 @overload(repr)
 def repr_var(self):
     if(not isinstance(self, VarTypeTemplate)): return
-    fact_name = self.field_dict['fact_type'].instance_type._fact_name
+    # fact_name = self.field_dict['fact_type'].instance_type._fact_name
     def impl(self):
         alias_part = ", '" + self.alias + "'" if len(self.alias) > 0 else ""
-        s = "Var(" + fact_name + "Type" + alias_part + ")"
+        s = "Var(" + self.fact_type_name + "Type" + alias_part + ")"
         for attr in self.deref_attrs:
             s += "." + attr
         return s
@@ -181,7 +199,7 @@ def repr_var(self):
 @overload(str)
 def str_var(self):
     if(not isinstance(self, VarTypeTemplate)): return
-    fact_name = self.field_dict['fact_type'].instance_type._fact_name
+    # fact_name = self.field_dict['fact_type'].instance_type._fact_name
     def impl(self):
         s = self.alias
         if (len(s) > 0):
@@ -233,6 +251,7 @@ def copy_and_append(self,st,attr,offset):
         new_deref_offsets.append(y)
     new_deref_attrs.append(attr)
     new_deref_offsets.append(offset)
+    lower_setattr(st,'base_ptr',lower_getattr(self,"base_ptr"))
     lower_setattr(st,'deref_attrs',new_deref_attrs)
     lower_setattr(st,'deref_offsets',new_deref_offsets)
     lower_setattr(st,'alias',self.alias)

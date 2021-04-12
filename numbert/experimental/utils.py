@@ -122,6 +122,10 @@ def _cast_structref(typingctx, cast_type_ref, inst_type):
     sig = cast_type(cast_type_ref, inst_type)
     return sig, codegen
 
+@njit(cache=True)
+def cast_structref(typ,inst):
+    return _cast_structref(typ,inst)
+
 
 @intrinsic
 def _struct_from_pointer(typingctx, struct_type, raw_ptr):

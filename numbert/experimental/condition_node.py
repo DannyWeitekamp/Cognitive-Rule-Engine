@@ -2,7 +2,7 @@ import operator
 import numpy as np
 from numba import types, njit, i8, u8, i4, u1, i8, literally, generated_jit
 from numba.typed import List, Dict
-from numba.types import ListType, DictType, unicode_type, void, Tuple
+from numba.types import ListType, DictType, unicode_type, void, Tuple, UniTuple, optional
 from numba.experimental import structref
 from numba.experimental.structref import new, define_boxing, define_attributes, _Utils
 from numba.extending import overload_method, intrinsic, overload_attribute, intrinsic, lower_getattr_generic, overload, infer_getattr, lower_setattr_generic
@@ -12,7 +12,7 @@ from numbert.experimental.context import kb_context
 from numbert.experimental.structref import define_structref, define_structref_template
 from numbert.experimental.kb import KnowledgeBaseType, KnowledgeBase, facts_for_t_id, fact_at_f_id
 from numbert.experimental.fact import define_fact, BaseFactType, cast_fact
-from numbert.experimental.utils import _struct_from_meminfo, _meminfo_from_struct, _cast_structref, decode_idrec, lower_getattr, _struct_from_pointer,  lower_setattr, lower_getattr, _pointer_from_struct
+from numbert.experimental.utils import _struct_from_meminfo, _meminfo_from_struct, _cast_structref, cast_structref, decode_idrec, lower_getattr, _struct_from_pointer,  lower_setattr, lower_getattr, _pointer_from_struct
 from numbert.experimental.subscriber import base_subscriber_fields, BaseSubscriber, BaseSubscriberType, init_base_subscriber, link_downstream
 from numbert.experimental.vector import VectorType
 from numbert.experimental.predicate_node import BasePredicateNode,BasePredicateNodeType, get_alpha_predicate_node_definition, \
@@ -27,6 +27,7 @@ from copy import copy
 pterm_fields_dict = {
     "str_val" : unicode_type,
     "pred_node" : BasePredicateNodeType,
+    "var_base_ptrs" : UniTuple(i8,2),
     "negated" : u1,
     "is_alpha" : u1,
 }
@@ -67,6 +68,7 @@ def alpha_pterm_ctor(pn, left_var, op_str, right_var):
     st = new(PTermType)
     st.pred_node = pn
     st.str_val = str(left_var) + " " + op_str + " " + "?" #base_str + "?"#TODO str->float needs to work
+    st.var_base_ptrs = (left_var.base_ptr,0)
     st.negated = False
     st.is_alpha = True
     return st
@@ -76,6 +78,7 @@ def beta_pterm_ctor(pn, left_var, op_str, right_var):
     st = new(PTermType)
     st.pred_node = pn
     st.str_val = str(left_var) + " " + op_str + " " + str(right_var)
+    st.var_base_ptrs = (left_var.base_ptr,right_var.base_ptr)
     st.negated = False
     st.is_alpha = False
     return st
@@ -115,9 +118,9 @@ def cpy_derefs(var):
     for i,x in enumerate(var.deref_offsets): offsets[i] = x
     return offsets
 
-@njit(cache=True)
-def cast_pn_to_base(pn):
-    return _cast_structref(BasePredicateNodeType,pn) 
+# @njit(cache=True)
+# def cast_pn_to_base(pn):
+#     return _cast_structref(BasePredicateNodeType,pn) 
 
 def gen_pterm_ctor_alpha(left_var, op_str, right_var):
     ctor, left_fact_type_name = \
@@ -125,8 +128,9 @@ def gen_pterm_ctor_alpha(left_var, op_str, right_var):
     def impl(left_var, op_str, right_var):
         l_offsets = cpy_derefs(left_var)
         apn = ctor(str(left_fact_type_name), l_offsets, right_var)
-        pn = cast_pn_to_base(apn) 
-        return alpha_pterm_ctor(pn, left_var, op_str, right_var)
+        pn = cast_structref(BasePredicateNodeType, apn) 
+        lvb = cast_structref(GenericVarType, left_var)
+        return alpha_pterm_ctor(pn, lvb, op_str, right_var)
     return impl
 
 def gen_pterm_ctor_beta(left_var, op_str, right_var):
@@ -137,8 +141,10 @@ def gen_pterm_ctor_beta(left_var, op_str, right_var):
         l_offsets = cpy_derefs(left_var)
         r_offsets = cpy_derefs(right_var)
         apn = ctor(str(left_fact_type_name), l_offsets, str(left_fact_type_name), r_offsets)
-        pn = cast_pn_to_base(apn) 
-        return beta_pterm_ctor(pn, left_var, op_str, right_var)            
+        pn = cast_structref(BasePredicateNodeType, apn) 
+        lvb = cast_structref(GenericVarType, left_var)
+        rvb = cast_structref(GenericVarType, right_var)
+        return beta_pterm_ctor(pn, lvb, op_str, rvb)            
     return impl
 
 @generated_jit(cache=True)
@@ -192,14 +198,13 @@ def comparator_jitted(left_var, op_str, right_var, negated):
 
 
 @njit(cache=True)
-def pt_to_cond(pt, left_alias, right_alias, negated):
+def pt_to_cond(pt, left_var, right_var, negated):
     dnf = new_dnf(1)
-    # ind = 0 if (pt.is_alpha) else 1
     dnf[0].append(pt)
-    _vars = List.empty_list(unicode_type)
-    _vars.append(left_alias)
-    if(right_alias is not None):
-        _vars.append(right_alias)
+    _vars = List.empty_list(GenericVarType)
+    _vars.append(left_var)
+    if(right_var is not None):
+        _vars.append(right_var)
     pt.negated = negated
     c = Conditions(_vars, dnf)
     return c
@@ -217,12 +222,15 @@ def comparator_helper(op_str, left_var, right_var,negated=False):
 
             def impl(left_var, right_var):
                 pt = PTerm(left_var, op_str, right_var)
-                return pt_to_cond(pt, left_var.alias, None, negated)
+                lbv = cast_structref(GenericVarType,left_var)
+                return pt_to_cond(pt, lbv, None, negated)
         else:
             # ctor = gen_pterm_ctor_beta(left_var, op_str, right_var)
             def impl(left_var, right_var):
                 pt = PTerm(left_var, op_str, right_var)
-                return pt_to_cond(pt, left_var.alias, right_var.alias, negated)
+                lbv = cast_structref(GenericVarType,left_var)
+                rbv = cast_structref(GenericVarType,right_var)
+                return pt_to_cond(pt, lbv, rbv, negated)
 
             # return var_cmp_beta
 
@@ -271,7 +279,7 @@ conditions_fields_dict = {
     ### Fields that are filled on in instantiation ### 
 
     # The variables used by the condition
-    'vars': ListType(BaseVarType),
+    'vars': ListType(GenericVarType),
 
     # The Disjunctive Normal Form of the condition but organized
     #  so that every conjunct has a seperate lists for alpha and 
@@ -339,9 +347,10 @@ def conditions_ctor(_vars, dnf=None):
         # _vars is single Var
         def impl(_vars,dnf=None):
             st = new(ConditionsType)
-            st.vars = List.empty_list(BaseVarType)
-            st.vars.append(_cast_structref(BaseVarType,_vars)) #TODO should actually make a thing
+            st.vars = List.empty_list(GenericVarType)
+            st.vars.append(_struct_from_pointer(GenericVarType,_vars.base_ptr)) 
             st.var_map = build_var_map(st.vars)
+            # print("A",st.var_map)
             st.dnf = dnf if(dnf) else new_dnf(1)
             st.initialized = False
             return st
@@ -351,6 +360,7 @@ def conditions_ctor(_vars, dnf=None):
             st = new(ConditionsType)
             st.vars = build_var_list(_vars)
             st.var_map = _vars.copy() # is shallow copy
+            # print("B",st.var_map)
             st.dnf = dnf if(dnf) else new_dnf(len(_vars))
             st.initialized = False
             return st
@@ -358,8 +368,9 @@ def conditions_ctor(_vars, dnf=None):
         # _vars is a list of Vars
         def impl(_vars,dnf=None):
             st = new(ConditionsType)
-            st.vars = List([_cast_structref(BaseVarType,x) for x in _vars])
+            st.vars = List([_struct_from_pointer(GenericVarType,x.base_ptr) for x in _vars])
             st.var_map = build_var_map(st.vars)
+            # print("C",st.var_map)
             st.dnf = dnf if(dnf) else new_dnf(len(_vars))
             st.initialized = False
             return st
@@ -367,7 +378,7 @@ def conditions_ctor(_vars, dnf=None):
     return impl
 
 @overload(str)
-def str_pterm(self):
+def str_cond(self):
     if(not isinstance(self, ConditionsTypeTemplate)): return
     def impl(self):
         s = ""
@@ -407,12 +418,12 @@ def build_var_map(left_vars,right_vars=None):
     '''
     var_map = Dict.empty(i8,i8)
     for v in left_vars:
-        ptr = _pointer_from_struct(v)
+        ptr = v.base_ptr
         if(ptr not in var_map):
             var_map[ptr] = len(var_map)
     if(right_vars is not None):
         for v in right_vars:
-            ptr = _pointer_from_struct(v)
+            ptr = v.base_ptr
             if(ptr not in var_map):
                 var_map[ptr] = len(var_map)
                 
@@ -421,9 +432,9 @@ def build_var_map(left_vars,right_vars=None):
 @njit(cache=True)
 def build_var_list(var_map):
     '''Makes a Var list from a var_map'''
-    var_list = List.empty_list(BaseVarType)
+    var_list = List.empty_list(GenericVarType)
     for ptr in var_map:
-        var_list.append(_struct_from_pointer(BaseVarType,ptr))
+        var_list.append(_struct_from_pointer(GenericVarType,ptr))
     return var_list
 
 
@@ -440,15 +451,15 @@ def conditions_and(left,right):
 @njit(cache=True)
 def dnf_and(l_dnf, r_dnf):
     dnf = new_dnf(len(l_dnf)*len(r_dnf))
-    for i, l_conjuct in enumerate(l_dnf):
-        for j, r_conjuct in enumerate(r_dnf):
+    for i, l_conjunct in enumerate(l_dnf):
+        for j, r_conjunct in enumerate(r_dnf):
             k = i*len(r_dnf) + j
-            for x in l_conjuct: dnf[k].append(x)
-            for x in r_conjuct: dnf[k].append(x)
-            # for x in l_conjuct[0]: dnf[k][0].append(x)
-            # for x in r_conjuct[0]: dnf[k][0].append(x)
-            # for x in l_conjuct[1]: dnf[k][1].append(x)
-            # for x in r_conjuct[1]: dnf[k][1].append(x)
+            for x in l_conjunct: dnf[k].append(x)
+            for x in r_conjunct: dnf[k].append(x)
+            # for x in l_conjunct[0]: dnf[k][0].append(x)
+            # for x in r_conjunct[0]: dnf[k][0].append(x)
+            # for x in l_conjunct[1]: dnf[k][1].append(x)
+            # for x in r_conjunct[1]: dnf[k][1].append(x)
     return dnf
 
 
@@ -530,15 +541,52 @@ def cond_not(c):
 
 @njit(cache=True)
 def initialize_condition(cond):
-    cond.alpha_dnfs = List.empty(dnf_type)
-    cond.beta_dnfs = List.empty(dnf_type)
+    cond.alpha_dnfs = List.empty_list(dnf_type)
+    cond.beta_dnfs = List.empty_list(dnf_type)
 
     # Prefill with empty dnfs in case there are unconditioned variables.
     for i,v in enumerate(cond.vars):
         cond.alpha_dnfs.append(new_dnf(0))
         cond.beta_dnfs.append(new_dnf(0))
 
-    
+    # print(len(cond.vars))
+    for conjunct in cond.dnf:
+        a_is_in_this_conj = np.zeros(len(cond.vars),dtype=np.uint8)
+        b_is_in_this_conj = np.zeros(len(cond.vars),dtype=np.uint8)
+
+        for term in conjunct:
+            ptr = term.var_base_ptrs[0]
+            # ptr = _pointer_from_struct(l_var)
+            # print(">>>", ptr, cond.var_map)
+            ind = cond.var_map[ptr]
+            # print(ind, len(a_is_in_this_conj))
+
+            if(term.is_alpha):
+                if(not a_is_in_this_conj[ind]):
+                    alpha_conjunct = List.empty_list(PTermType)
+                    cond.alpha_dnfs[ind].append(alpha_conjunct)
+                    a_is_in_this_conj[ind] = 1
+                else:
+                    # print(len(cond.alpha_dnfs[ind]))
+                    alpha_conjunct = cond.alpha_dnfs[ind][-1]
+                alpha_conjunct.append(term)
+            else:
+                if(not b_is_in_this_conj[ind]):
+                    beta_conjunct = List.empty_list(PTermType)
+                    cond.beta_dnfs[ind].append(beta_conjunct)
+                    b_is_in_this_conj[ind] = 1
+                else:
+                    # print(len(cond.alpha_dnfs[ind]))
+                    beta_conjunct = cond.beta_dnfs[ind][-1]
+                beta_conjunct.append(term)
+
+            # print(a_is_in_this_conj)
+
+
+
+
+
+
 
 
 

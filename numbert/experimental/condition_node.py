@@ -16,7 +16,8 @@ from numbert.experimental.utils import _struct_from_meminfo, _meminfo_from_struc
 from numbert.experimental.subscriber import base_subscriber_fields, BaseSubscriber, BaseSubscriberType, init_base_subscriber, link_downstream
 from numbert.experimental.vector import VectorType
 from numbert.experimental.predicate_node import BasePredicateNode,BasePredicateNodeType, get_alpha_predicate_node_definition, \
- get_beta_predicate_node_definition, deref_attrs, define_alpha_predicate_node, define_beta_predicate_node, AlphaPredicateNode, BetaPredicateNode
+ get_beta_predicate_node_definition, deref_attrs, define_alpha_predicate_node, define_beta_predicate_node, AlphaPredicateNode, BetaPredicateNode, \
+ PredicateNodeLinkDataType, generate_link_data
 from numba.core import imputils, cgutils
 from numba.core.datamodel import default_manager, models
 from numbert.experimental.var import *
@@ -30,6 +31,8 @@ pterm_fields_dict = {
     "var_base_ptrs" : UniTuple(i8,2),
     "negated" : u1,
     "is_alpha" : u1,
+    "is_linked" : u1,
+    "link_data" : PredicateNodeLinkDataType
 }
 
 pterm_fields =  [(k,v) for k,v, in pterm_fields_dict.items()]
@@ -71,6 +74,7 @@ def alpha_pterm_ctor(pn, left_var, op_str, right_var):
     st.var_base_ptrs = (left_var.base_ptr,0)
     st.negated = False
     st.is_alpha = True
+    st.is_linked = False
     return st
 
 @njit(cache=True)
@@ -81,6 +85,7 @@ def beta_pterm_ctor(pn, left_var, op_str, right_var):
     st.var_base_ptrs = (left_var.base_ptr,right_var.base_ptr)
     st.negated = False
     st.is_alpha = False
+    st.is_linked = False
     return st
 
 
@@ -172,8 +177,12 @@ def pterm_copy(self):
     st = new(PTermType)
     st.str_val = self.str_val
     st.pred_node = self.pred_node
+    st.var_base_ptrs = self.var_base_ptrs
     st.negated = self.negated
     st.is_alpha = self.is_alpha
+    st.is_linked = self.is_linked
+    if(self.is_linked):
+        st.link_data = self.link_data
     return st
     
 @njit(cache=True)
@@ -183,24 +192,25 @@ def pterm_not(self):
     return npt
 
 
-@njit(cache=True)
-def comparator_jitted(left_var, op_str, right_var, negated):
-    pt = PTerm(left_var, op_str, right_var)
-    dnf = new_dnf(1)
-    # ind = 0 if (pt.is_alpha) else 1
-    dnf[0].append(pt)
-    _vars = List([left_var.alias])
-    # if(not is_alpha): _vars.append(right_var.alias)
-    pt.negated = negated
-    # print(type(right_var))
-    c = Conditions(_vars, dnf)
-    return c
+# @njit(cache=True)
+# def comparator_jitted(left_var, op_str, right_var, negated):
+#     pt = PTerm(left_var, op_str, right_var)
+#     dnf = new_dnf(1)
+#     # ind = 0 if (pt.is_alpha) else 1
+#     dnf[0].append(pt)
+#     _vars = List([left_var.alias])
+#     # if(not is_alpha): _vars.append(right_var.alias)
+#     pt.negated = negated
+#     # print(type(right_var))
+#     c = Conditions(_vars, dnf)
+#     return c
 
 
 @njit(cache=True)
 def pt_to_cond(pt, left_var, right_var, negated):
     dnf = new_dnf(1)
-    dnf[0].append(pt)
+    ind = 0 if (pt.is_alpha) else 1
+    dnf[0][ind].append(pt)
     _vars = List.empty_list(GenericVarType)
     _vars.append(left_var)
     if(right_var is not None):
@@ -214,6 +224,7 @@ def comparator_helper(op_str, left_var, right_var,negated=False):
     if(isinstance(left_var,VarTypeTemplate)):
         check_legal_cmp(left_var, op_str, right_var)
         op_str = types.unliteral(op_str)
+        # print("AAAA", op_str)
         if(not isinstance(right_var,VarTypeTemplate)):
             # print("POOP")
             right_var_type = types.unliteral(right_var)
@@ -269,11 +280,16 @@ def var_ne(left_var, right_var):
     return comparator_helper("==", left_var, right_var, True)
 
 
-
+## dnf_type ##
 pterm_list_type = ListType(PTermType)
-# pterm_list_x2_type = Tuple((pterm_list_type, pterm_list_type))
+ab_conjunct_type = Tuple((pterm_list_type, pterm_list_type))
+dnf_type = ListType(ab_conjunct_type)
+
+## distr_dnf_type ##e
 pterm_list_list_type = ListType(pterm_list_type)
-dnf_type = pterm_list_list_type
+distr_ab_conjunct_type = Tuple((pterm_list_list_type, pterm_list_list_type, i8[:,:]))
+distr_dnf_type = ListType(distr_ab_conjunct_type)
+
 
 conditions_fields_dict = {
     ### Fields that are filled on in instantiation ### 
@@ -284,21 +300,26 @@ conditions_fields_dict = {
     # The Disjunctive Normal Form of the condition but organized
     #  so that every conjunct has a seperate lists for alpha and 
     #  beta terms.
-    'dnf': pterm_list_list_type,
+    'dnf': dnf_type,
 
     # A mapping from Var pointers to their associated index
     'var_map': DictType(i8,i8),
 
     # Wether or not the conditions object has been initialized
-    'initialized' : u1,
+    'is_initialized' : u1,
+
+    # Wether or not the conditions object has been linked to a knowledge base
+    'is_linked' : u1,
 
     ### Fields that are filled in after initialization ### 
 
-    # The alpha parts of '.dnf' organized by which Var in 'vars' they use 
-    'alpha_dnfs': ListType(dnf_type),
+    "distr_dnf" : distr_dnf_type
 
-    # The beta parts of '.dnf' organized by which left Var in 'vars' they use 
-    'beta_dnfs': ListType(dnf_type),
+    # # The alpha parts of '.dnf' organized by which Var in 'vars' they use 
+    # 'alpha_dnfs': ListType(dnf_type),
+
+    # # The beta parts of '.dnf' organized by which left Var in 'vars' they use 
+    # 'beta_dnfs': ListType(dnf_type),
 }
 
 conditions_fields =  [(k,v) for k,v, in conditions_fields_dict.items()]
@@ -332,9 +353,9 @@ define_boxing(ConditionsTypeTemplate,Conditions)
 
 @njit(cache=True)
 def new_dnf(n):
-    dnf = List.empty_list(pterm_list_type)
+    dnf = List.empty_list(ab_conjunct_type)
     for i in range(n):
-        dnf.append( List.empty_list(PTermType) )
+        dnf.append((List.empty_list(PTermType), List.empty_list(PTermType)) )
     return dnf
 
 ConditionsType = ConditionsTypeTemplate(conditions_fields)
@@ -352,7 +373,7 @@ def conditions_ctor(_vars, dnf=None):
             st.var_map = build_var_map(st.vars)
             # print("A",st.var_map)
             st.dnf = dnf if(dnf) else new_dnf(1)
-            st.initialized = False
+            st.is_initialized = False
             return st
     elif(isinstance(_vars,DictType)):
          # _vars is a valid var_map dictionary
@@ -362,7 +383,7 @@ def conditions_ctor(_vars, dnf=None):
             st.var_map = _vars.copy() # is shallow copy
             # print("B",st.var_map)
             st.dnf = dnf if(dnf) else new_dnf(len(_vars))
-            st.initialized = False
+            st.is_initialized = False
             return st
     elif(isinstance(_vars,ListType)):
         # _vars is a list of Vars
@@ -372,7 +393,7 @@ def conditions_ctor(_vars, dnf=None):
             st.var_map = build_var_map(st.vars)
             # print("C",st.var_map)
             st.dnf = dnf if(dnf) else new_dnf(len(_vars))
-            st.initialized = False
+            st.is_initialized = False
             return st
 
     return impl
@@ -387,16 +408,16 @@ def str_cond(self):
         #     if(j < len(self.vars)-1): s += ", "
         # s += '\n'
         for j, conjunct in enumerate(self.dnf):
-            # alphas, betas = conjunct
-            for i, term in enumerate(conjunct):
-                s += "~" if term.negated else ""
-                s += "(" + str(term) + ")" 
-                if(i < len(conjunct)-1): s += " & "
+            alphas, betas = conjunct
+            for i, alpha_term in enumerate(alphas):
+                s += "~" if alpha_term.negated else ""
+                s += "(" + str(alpha_term) + ")" 
+                if(i < len(alphas)-1 or len(betas)): s += " & "
 
-            # for i, beta_term in enumerate(betas):
-            #     s += "~" if beta_term.negated else ""
-            #     s += "(" + str(beta_term) + ")" 
-            #     if(i < len(betas)-1): s += " & "
+            for i, beta_term in enumerate(betas):
+                s += "~" if beta_term.negated else ""
+                s += "(" + str(beta_term) + ")" 
+                if(i < len(betas)-1): s += " & "
 
             if(j < len(self.dnf)-1): s += " |\\\n"
         return s
@@ -454,12 +475,12 @@ def dnf_and(l_dnf, r_dnf):
     for i, l_conjunct in enumerate(l_dnf):
         for j, r_conjunct in enumerate(r_dnf):
             k = i*len(r_dnf) + j
-            for x in l_conjunct: dnf[k].append(x)
-            for x in r_conjunct: dnf[k].append(x)
-            # for x in l_conjunct[0]: dnf[k][0].append(x)
-            # for x in r_conjunct[0]: dnf[k][0].append(x)
-            # for x in l_conjunct[1]: dnf[k][1].append(x)
-            # for x in r_conjunct[1]: dnf[k][1].append(x)
+            # for x in l_conjunct: dnf[k].append(x)
+            # for x in r_conjunct: dnf[k].append(x)
+            for x in l_conjunct[0]: dnf[k][0].append(x)
+            for x in r_conjunct[0]: dnf[k][0].append(x)
+            for x in l_conjunct[1]: dnf[k][1].append(x)
+            for x in r_conjunct[1]: dnf[k][1].append(x)
     return dnf
 
 
@@ -474,27 +495,28 @@ def conditions_or(left,right):
 def dnf_or(l_dnf, r_dnf):
     dnf = new_dnf(len(l_dnf)+len(r_dnf))
     for i, conjuct in enumerate(l_dnf):
-        for x in conjuct: dnf[i].append(x)
-        # for x in conjuct[1]: dnf[i][1].append(x)
+        # for x in conjuct: dnf[i].append(x)
+        for x in conjuct[0]: dnf[i][0].append(x)
+        for x in conjuct[1]: dnf[i][1].append(x)
 
     for i, conjuct in enumerate(r_dnf):
         k = len(l_dnf)+i
-        for x in conjuct: dnf[k].append(x)
-        # for x in conjuct[0]: dnf[k][0].append(x)
-        # for x in conjuct[1]: dnf[k][1].append(x)
+        # for x in conjuct: dnf[k].append(x)
+        for x in conjuct[0]: dnf[k][0].append(x)
+        for x in conjuct[1]: dnf[k][1].append(x)
 
     return dnf
 
 @njit(cache=True)
 def dnf_not(c_dnf):
-    dnfs = List.empty_list(pterm_list_list_type)
+    dnfs = List.empty_list(dnf_type)
     for i, conjunct in enumerate(c_dnf):
-        dnf = new_dnf(len(conjunct))
-        for j, term in enumerate(conjunct):
-            dnf[j].append(pterm_not(term))
-        # for j, term in enumerate(conjunct[1]):
-        #     k = len(conjunct[0]) + j
-        #     dnf[k][1].append(pterm_not(term))
+        dnf = new_dnf(len(conjunct[0])+len(conjunct[1]))
+        for j, term in enumerate(conjunct[0]):
+            dnf[j][0].append(pterm_not(term))
+        for j, term in enumerate(conjunct[1]):
+            k = len(conjunct[0]) + j
+            dnf[k][1].append(pterm_not(term))
         dnfs.append(dnf)
 
     # print("PHAZZZZZZ")
@@ -536,51 +558,136 @@ def cond_not(c):
     return lambda c : conditions_not(c)
 
 
+#### Linking ####
+
+@njit(cache=True)
+def link_pterm_instance(pterm, kb):
+    link_data = generate_link_data(pterm.pred_node, kb)
+    # if(copy): pterm = pterm_copy(pterm)
+    pterm.link_data = link_data
+    pterm.is_linked = True
+    return pterm
+
+@njit(cache=True)
+def dnf_copy(dnf,shallow=True):
+    ndnf = new_dnf(len(dnf))
+    print(len(ndnf))
+    for i, conjunct in enumerate(dnf):
+        for alpha_terms, beta_terms in conjunct:
+            if(shallow):
+                ndnf[i][0].append(alpha_terms)
+                ndnf[i][1].append(beta_terms)
+            else:
+                ndnf[i][0].append(pterm_copy(alpha_terms))
+                ndnf[i][1].append(pterm_copy(beta_terms))
+    return ndnf
+
+@njit(cache=True)
+def get_linked_conditions_instance(conds, kb, copy=False):
+    dnf = dnf_copy(conds.dnf,shallow=False) if copy else conds.dnf
+    for alpha_conjunct, beta_conjunct in dnf:
+        for term in alpha_conjunct: link_pterm_instance(term, kb)
+        for term in beta_conjunct: link_pterm_instance(term, kb)
+    if(copy):
+        new_conds = Conditions(conds.var_map, dnf)
+        if(conds.is_initialized): initialize_conditions(new_conds)
+        conds = new_conds
+
+    conds.is_linked = True
+    return conds
+
 
 #### Initialization ####
 
+
+
 @njit(cache=True)
-def initialize_condition(cond):
-    cond.alpha_dnfs = List.empty_list(dnf_type)
-    cond.beta_dnfs = List.empty_list(dnf_type)
+def initialize_conditions(conds):
+    distr_dnf = List.empty_list(distr_ab_conjunct_type)
+    n_vars = len(conds.vars)
+    for ac, bc in conds.dnf:
+        alpha_conjuncts = List.empty_list(pterm_list_type)
+        beta_conjuncts = List.empty_list(pterm_list_type)
+        
+        for _ in range(n_vars): alpha_conjuncts.append(List.empty_list(PTermType))
+        
+        for term in ac:
+            i = conds.var_map[term.var_base_ptrs[0]]
+            alpha_conjuncts[i].append(term)
 
-    # Prefill with empty dnfs in case there are unconditioned variables.
-    for i,v in enumerate(cond.vars):
-        cond.alpha_dnfs.append(new_dnf(0))
-        cond.beta_dnfs.append(new_dnf(0))
+        
 
-    # print(len(cond.vars))
-    for conjunct in cond.dnf:
-        a_is_in_this_conj = np.zeros(len(cond.vars),dtype=np.uint8)
-        b_is_in_this_conj = np.zeros(len(cond.vars),dtype=np.uint8)
+        beta_inds = -np.ones((n_vars,n_vars),dtype=np.int64)
+        for term in bc:
+            i = conds.var_map[term.var_base_ptrs[0]]
+            j = conds.var_map[term.var_base_ptrs[1]]
+            if(beta_inds[i,j] == -1):
+                k = len(beta_conjuncts)
+                beta_inds[i,j] = k
+                beta_conjuncts.append(List.empty_list(PTermType))
+                
+            beta_conjuncts[beta_inds[i,j]].append(term)
+            # beta_conjuncts.append(term)
 
-        for term in conjunct:
-            ptr = term.var_base_ptrs[0]
-            # ptr = _pointer_from_struct(l_var)
-            # print(">>>", ptr, cond.var_map)
-            ind = cond.var_map[ptr]
-            # print(ind, len(a_is_in_this_conj))
+            # beta_conjuncts[j].append(term)
 
-            if(term.is_alpha):
-                if(not a_is_in_this_conj[ind]):
-                    alpha_conjunct = List.empty_list(PTermType)
-                    cond.alpha_dnfs[ind].append(alpha_conjunct)
-                    a_is_in_this_conj[ind] = 1
-                else:
-                    # print(len(cond.alpha_dnfs[ind]))
-                    alpha_conjunct = cond.alpha_dnfs[ind][-1]
-                alpha_conjunct.append(term)
-            else:
-                if(not b_is_in_this_conj[ind]):
-                    beta_conjunct = List.empty_list(PTermType)
-                    cond.beta_dnfs[ind].append(beta_conjunct)
-                    b_is_in_this_conj[ind] = 1
-                else:
-                    # print(len(cond.alpha_dnfs[ind]))
-                    beta_conjunct = cond.beta_dnfs[ind][-1]
-                beta_conjunct.append(term)
+        distr_dnf.append((alpha_conjuncts, beta_conjuncts, beta_inds))
+    conds.distr_dnf = distr_dnf
+
+
+# @njit(cache=True)
+# def initialize_conditions(conds):
+#     print("INITIALIZING")
+#     conds.alpha_dnfs = List.empty_list(dnf_type)
+#     conds.beta_dnfs = List.empty_list(dnf_type)
+
+#     print(conds.alpha_dnfs)
+
+#     # Prefill with empty dnfs in case there are uncondsitioned variables.
+#     for i,v in enumerate(conds.vars):
+#         conds.alpha_dnfs.append(new_dnf(0))
+#         conds.beta_dnfs.append(new_dnf(0))
+
+#     # print(len(conds.vars))
+#     for conjunct in conds.dnf:
+#         a_is_in_this_conj = np.zeros(len(conds.vars),dtype=np.uint8)
+#         b_is_in_this_conj = np.zeros(len(conds.vars),dtype=np.uint8)
+
+#         for term in conjunct:
+#             ptr = term.var_base_ptrs[0]
+#             # ptr = _pointer_from_struct(l_var)
+#             # print(">>>", ptr, conds.var_map)
+#             ind = conds.var_map[ptr]
+#             # print(ind, len(a_is_in_this_conj))
+
+#             if(term.is_alpha):
+#                 if(not a_is_in_this_conj[ind]):
+#                     alpha_conjunct = List.empty_list(PTermType)
+#                     conds.alpha_dnfs[ind].append(alpha_conjunct)
+#                     a_is_in_this_conj[ind] = 1
+#                 else:
+#                     print(len(conds.alpha_dnfs[ind]))
+#                     alpha_conjunct = conds.alpha_dnfs[ind][-1]
+#                 alpha_conjunct.append(term)
+#             else:
+#                 if(not b_is_in_this_conj[ind]):
+#                     beta_conjunct = List.empty_list(PTermType)
+#                     conds.beta_dnfs[ind].append(beta_conjunct)
+#                     b_is_in_this_conj[ind] = 1
+#                 else:
+#                     print(len(conds.alpha_dnfs[ind]))
+#                     beta_conjunct = conds.beta_dnfs[ind][-1]
+#                 beta_conjunct.append(term)
 
             # print(a_is_in_this_conj)
+    # print("BEF")
+    # print(conds.alpha_dnfs)
+    # print("AFT")
+
+
+
+
+
 
 
 

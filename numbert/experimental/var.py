@@ -89,10 +89,11 @@ class Var(structref.StructRefProxy):
 
     def _cmp_helper(self,op_str,other,negate):
         check_legal_cmp(self, op_str, other)
+        opt_str = types.literal(types.unliteral(op_str))
         if(not isinstance(other,(VarTypeTemplate,Var))):
-            return var_cmp_alpha(self,types.literal(op_str),other, negate)
+            return var_cmp_alpha(self,op_str,other, negate)
         else:
-            return var_cmp_beta(self,types.literal(op_str),other, negate)
+            return var_cmp_beta(self,op_str,other, negate)
     
 
     def __lt__(self,other): return self._cmp_helper("<",other,False)

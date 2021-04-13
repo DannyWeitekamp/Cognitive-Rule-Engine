@@ -37,22 +37,41 @@ from operator import itemgetter
 meminfo_type = types.MemInfoPointer(types.voidptr)
 
 
+
+# @generated_jit(cache=True)
+# def exec_op(op_str,a,b):
+#     if(op_str.literal_value == "<"):
+#         return lambda a,b : a < b
+#     elif(op_str.literal_value == "<="):
+#         return lambda a,b : a <= b
+#     elif(op_str.literal_value == ">"):
+#         return lambda a,b : b > a
+#     elif(op_str.literal_value == ">="):
+#         return lambda a,b : a >= b
+#     elif(op_str.literal_value == "=="):
+#         return lambda a,b : a == b
+#     raise ValueError(f"Unrecognized op_str {op_str} {op_str.literal_value}")
+
+# LT = types.literal("<")
+# GT = types.literal("<")
 @njit(cache=True)
 def exec_op(op_str,a,b):
     '''Executes one of 5 boolean comparison operations. Since the predicate_node type
        fixes 'op_str' to a literal value. LLVM will compile out the switch case.
     '''
+    # print("op_str", op_str, op_str == "<", op_str == ">")
     if(op_str == "<"):
         return a < b
     elif(op_str == "<="):
         return a <= b
     elif(op_str == ">"):
-        return b > a
+        return a > b
     elif(op_str == ">="):
         return a >= b
     elif(op_str == "=="):
         return a == b
-    raise ValueError()
+    # GT, op_str == GT)
+    raise ValueError("Unrecognized op_str.")
 
 #### Link Data ####
 
@@ -83,7 +102,7 @@ PredicateNodeLinkData, PredicateNodeLinkDataType = define_structref("PredicateNo
 
 
 @njit(cache=True)
-def get_linked_instance(pn, kb):
+def generate_link_data(pn, kb):
     '''Takes a prototype predicate node and a knowledge base and returns
         a linked instance of that predicate node, which is either a copy
         or an equivalent instance already linked to the knowledge base'''
@@ -139,8 +158,8 @@ def get_linked_instance(pn, kb):
 
 
 meminfo_type = types.MemInfoPointer(types.voidptr)
-alpha_filter_func_type = types.FunctionType(i8[::1](meminfo_type, PredicateNodeLinkDataType, i8[::1]))
-beta_filter_func_type = types.FunctionType(i8[:,::1](meminfo_type, PredicateNodeLinkDataType, i8[::1], i8[::1]))
+alpha_filter_func_type = types.FunctionType(i8[::1](meminfo_type, PredicateNodeLinkDataType, i8[::1], u1))
+beta_filter_func_type = types.FunctionType(i8[:,::1](meminfo_type, PredicateNodeLinkDataType, i8[::1], i8[::1], u1))
 
 
 #### Struct Definitions ####
@@ -277,7 +296,7 @@ def alpha_eval_truth(facts, f_id, pred_node):
         return 0xFF
 
 @njit(cache=True,locals={'new_size':u8})
-def alpha_filter(pnode_type, pred_meminfo, link_data, inds):
+def alpha_filter(pnode_type, pred_meminfo, link_data, inds, negated):
     '''Implements update_func of AlphaPredicateNode subscriber'''
 
     # return inds
@@ -322,7 +341,7 @@ def alpha_filter(pnode_type, pred_meminfo, link_data, inds):
     new_inds = np.empty(len(inds),dtype=np.int64)
     n = 0
     for ind in inds:
-        if(link_data.truth_values[ind,0]==1):
+        if((link_data.truth_values[ind,0]==1) ^ negated):
             new_inds[n] = ind
             n += 1
 
@@ -403,8 +422,8 @@ pnode_type = AlphaPredicateNodeTemplate(fields=fields)
 
 
 @njit(cache=True)
-def filter_func(pred_meminfo, link_data, inds):
-    return alpha_filter(pnode_type, pred_meminfo, link_data,  inds)
+def filter_func(pred_meminfo, link_data, inds, negated):
+    return alpha_filter(pnode_type, pred_meminfo, link_data,  inds, negated)
 
 
 @njit(cache=True)
@@ -523,7 +542,7 @@ def update_pair(pred_node, truth_values, left_facts, right_facts, i, j):
 
 
 @njit(cache=True,locals={'new_size':u8})
-def beta_filter(pnode_type, pred_meminfo, link_data, left_inds, right_inds):
+def beta_filter(pnode_type, pred_meminfo, link_data, left_inds, right_inds, negated):
     '''Implements update_func of BetaPredicateNode subscriber'''
 
     # print(left_inds, right_inds)
@@ -658,8 +677,8 @@ fields = base_subscriber_fields + [(k,v) for k,v, in field_dict.items()]
 pnode_type = BetaPredicateNodeTemplate(fields=fields)
 
 @njit(cache=True)
-def filter_func(pred_meminfo, link_data, left_inds, right_inds):
-    return beta_filter(pnode_type, pred_meminfo, link_data,  left_inds, right_inds)        
+def filter_func(pred_meminfo, link_data, left_inds, right_inds, negated):
+    return beta_filter(pnode_type, pred_meminfo, link_data,  left_inds, right_inds, negated)        
 
 @njit(cache=True)
 def pre_ctor(left_fact_type_name, left_attr_offsets, right_fact_type_name, right_attr_offsets):

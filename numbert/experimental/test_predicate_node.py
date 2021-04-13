@@ -5,7 +5,7 @@ from numbert.experimental.subscriber import BaseSubscriberType
 from numbert.experimental.fact import define_fact
 from numbert.experimental.kb import KnowledgeBase
 from numbert.experimental.context import kb_context
-from numbert.experimental.predicate_node import get_alpha_predicate_node, get_beta_predicate_node, BasePredicateNodeType, get_linked_instance
+from numbert.experimental.predicate_node import get_alpha_predicate_node, get_beta_predicate_node, BasePredicateNodeType, generate_link_data
 from numbert.experimental.predicate_node import get_alpha_predicate_node_definition, get_beta_predicate_node_definition
 from numbert.experimental.test_kb import _delcare_10000, _retract_10000
 import pytest
@@ -17,16 +17,16 @@ def njit_update(pt):
     subscriber.update_func(meminfo)
 
 @njit
-def filter_alpha(pn,link_data, inds):
+def filter_alpha(pn,link_data, inds, negated=False):
     # print(pn.filter_func)
     mi = _meminfo_from_struct(pn)
-    return pn.filter_func(mi, link_data, inds)
+    return pn.filter_func(mi, link_data, inds, negated)
 
 @njit
-def filter_beta(pn,link_data, left_inds, right_inds):
+def filter_beta(pn,link_data, left_inds, right_inds, negated=False):
     # print(pn.filter_func)
     mi = _meminfo_from_struct(pn)
-    return pn.filter_func(mi, link_data, left_inds, right_inds)
+    return pn.filter_func(mi, link_data, left_inds, right_inds, negated)
 
 @njit
 def cast(pn,ty):
@@ -52,7 +52,7 @@ def test_predicate_node_sanity():
         assert np.array_equal(attrs_pn,attrs_png[:len(attrs_pn)])
         assert np.array_equal(attrs_pnc,attrs_png)
         
-        ld = get_linked_instance(pnc, kb)
+        ld = generate_link_data(pnc, kb)
 
         assert len(filter_alpha(png, ld, np.arange(5)))==0
 
@@ -60,7 +60,7 @@ def test_predicate_node_sanity():
         pnc = cast(pn, BasePredicateNodeType)
         png = cast(pn, GenericBetaPredicateNodeType)
 
-        ld = get_linked_instance(pnc, kb)
+        ld = generate_link_data(pnc, kb)
 
         attrs_pn  = np.array([struct_get_attr_offset(pnc,x[0]) for x in base_subscriber_fields+basepredicate_node_fields])
         attrs_pnc = np.array([struct_get_attr_offset(pn, x[0]) for x in base_subscriber_fields+beta_predicate_node_fields])
@@ -72,7 +72,7 @@ def test_predicate_node_sanity():
         assert len(filter_beta(png, ld, np.arange(5), np.arange(5))) == 0
         # print('l')
         # pn.filter(np.arange(5))
-        # pnn = get_linked_instance(cast(pn, BasePredicateNodeType), kb)
+        # pnn = generate_link_data(cast(pn, BasePredicateNodeType), kb)
 
 
 
@@ -83,7 +83,7 @@ def test_alpha_predicate_node():
 
         kb = KnowledgeBase()
         pn = get_alpha_predicate_node(BOOPType,"B", "<",9)
-        ld = get_linked_instance(pn, kb)
+        ld = generate_link_data(pn, kb)
 
         # kb.add_subscriber(pn)
 
@@ -147,7 +147,7 @@ def test_beta_predicate_node_1_typed():
         kb = KnowledgeBase()
         pn = get_beta_predicate_node(BOOPType,"B", "<", BOOPType,"B")
         # png = cast(pn, GenericBetaPredicateNodeType)
-        ld = get_linked_instance(pn, kb)
+        ld = generate_link_data(pn, kb)
         # kb.add_subscriber(pn)
 
         x = BOOP("x",7)
@@ -228,7 +228,7 @@ def test_beta_predicate_node_2_typed():
         kb = KnowledgeBase()
 
         pn = get_beta_predicate_node(BOOP1Type,"A", "<", BOOP2Type,"B")
-        ld = get_linked_instance(pn, kb)
+        ld = generate_link_data(pn, kb)
         # kb.add_subscriber(pn)
 
         x1,x2 = BOOP1(7,"x"),  BOOP2("x",7.5) #<- slightly different
@@ -320,7 +320,7 @@ def _benchmark_setup():
     with kb_context("test_predicate_node"):
         kb = KnowledgeBase()
         pn = get_alpha_predicate_node(BOOPType,"B", "<",50)
-        ld = get_linked_instance(pn,kb)
+        ld = generate_link_data(pn,kb)
         # kb.add_subscriber(pn)
         return (kb, pn, ld), {}
 
@@ -370,7 +370,7 @@ def _alpha_setup():
     with kb_context("test_predicate_node"):
         kb = KnowledgeBase()
         pn = get_alpha_predicate_node(BOOPType,"B", "<", 50)
-        ld = get_linked_instance(pn, kb)
+        ld = generate_link_data(pn, kb)
         # kb.add_subscriber(pn)
         idrecs = np.empty((10000,),dtype=np.int64)
         for i in range(10000):
@@ -399,7 +399,7 @@ def _beta_setup():
         kb = KnowledgeBase()
         pn = get_beta_predicate_node(BOOPType,"B", "<", BOOPType,"B")
         # kb.add_subscriber(pn)
-        ld = get_linked_instance(pn, kb)
+        ld = generate_link_data(pn, kb)
         idrecs = np.empty((100,),dtype=np.int64)
         for i in range(100):
             idrecs[i] = kb.declare(BOOP("?",i))

@@ -1,3 +1,5 @@
+from numbert.experimental.context import KnowledgeBaseContext
+
 from numba import types, njit, guvectorize,vectorize,prange
 from numba.experimental import jitclass
 from numba import deferred_type, optional
@@ -6,14 +8,13 @@ from numba.typed import List, Dict
 from numba.core.types import DictType, ListType, unicode_type, float64, NamedTuple, NamedUniTuple, UniTuple 
 from numba.cpython.unicode import  _set_code_point
 from numbert.utils import cache_safe_exec
-from numbert.core import TYPE_ALIASES, REGISTERED_TYPES, py_type_map, numba_type_map, numpy_type_map
-from numbert.gensource import gen_source_standard_imports, gen_source_get_enumerized, \
-							  gen_source_enumerize_nb_objs, \
-							  gen_source_tuple_defs, gen_source_pack_from_numpy
+from numbert.core import TYPE_ALIASES, REGISTERED_TYPES, JITSTRUCTS, py_type_map, numba_type_map, numpy_type_map
+from numbert.gensource import assert_gen_source
 from numbert.caching import unique_hash, source_to_cache, import_from_cached, source_in_cache
 from collections import namedtuple
 import numpy as np
 import timeit
+import itertools
 import types as pytypes
 import sys
 import __main__
@@ -46,37 +47,30 @@ def exp_fixed_width(x,_min=20):
 		out[i] = (1 << count)*_min; 
 	return out
 
-# @njit(cache=True)
-# def charseq_len(s,max_l=100):
-# 	i = 0
-# 	for i in range(max_l):
-# 		try:
-# 			v = s[i]
-# 		except Exception:
-# 			break
-# 	return i
 
-# NULL = chr(0)
+@njit(cache=True)
+def enumerize_array(inp,enums,backmap,counter):
+	out = np.empty((len(inp),),dtype=np.int64)
+	for i,x in enumerate(inp):
+		_assert_map(x,enums,backmap,counter)
+		out[i] = enums[x]
+	return out
 
-# @njit
-# def charseq_to_str(x,max_l=100):
-# 	return str(x)
-	# l = len(x)
-	# if(l == 0):
-	# 	return ""
-	# else:
-	# 	s = NULL*(l+1)
-	# 	for i in range(l):
-	# 		_set_code_point(s,i,x[i])
-	# 	return s[:l]
-
-
+@njit(cache=True)
+def enumerize_str_array(inp,enums,backmap,counter):
+	out = np.empty((len(inp),),dtype=np.int64)
+	for i,x in enumerate(inp):
+		_x = str(x)
+		_assert_map(_x,enums,backmap,counter)
+		out[i] = enums[_x]
+	return out
 
 
 @njit(cache=False)
 def enumerize_nb_objs(inp,out,enumerize_f, string_enums, number_enums,
 					string_backmap,number_backmap,enum_counter):
 	for k,v in inp.items():
+		_assert_map(k,string_enums,string_backmap,enum_counter)
 		out[k] = enumerize_f(v,string_enums, number_enums,
 					string_backmap,number_backmap,enum_counter)
 
@@ -276,12 +270,6 @@ def decode_vectorized(indicies, isnominal, inversion_data):
 	return out
 
 
-
-
-
-
-
-
 def infer_type(value):
 	if(isinstance(value,str)):
 		return "string"
@@ -298,226 +286,140 @@ def infer_nb_type(value):
 
 
 
-Dict_Unicode_to_Enums = DictType(unicode_type,i8[:])
+def state_to_nb_objects(state,context=None):
+	c = KnowledgeBaseContext.get_context(context)
 
-class Numbalizer(object):
-	#Static Values
-	registered_specs = {}
-	jitstructs = {}
-	string_enums = Dict.empty(unicode_type,i8)
-	number_enums = Dict.empty(f8,i8)
-	string_backmap = Dict.empty(i8,unicode_type)
-	number_backmap = Dict.empty(i8,f8)
-	enum_counter = np.array(0)
-	nominal_maps = Dict.empty(unicode_type,u1[:])
+	tm = numpy_type_map
+	#Throw the attribute values into tuples and find the lengths of
+	#	all of the strings.
+	data_by_type = {}
+	mlens_by_type = {}
+	for name, elm in state.items():
+		# print(elm)
+		assert 'type' in elm, "All objects need 'type' attribute to be numbalized."
+		typ = elm['type']
 
-	def __init__(self):
-		for x in ["<#ANY>",'','?sel']:
-			self.enumerize_value(x)
 
-	def jitstruct_from_spec(self,name,spec,ind="   "):
-		
-		#For the purposes of autogenerating code we need a clean alphanumeric name 
-		name = "".join(x for x in name if x.isalnum())
+		spec = c.registered_specs[typ]
 
-		hash_code = unique_hash([name,spec])
-		if(not source_in_cache(name,hash_code)):
-			source = gen_source_standard_imports()
-			source += gen_source_tuple_defs(name,spec)
-			source += gen_source_get_enumerized(name,spec)
-			source += gen_source_enumerize_nb_objs(name,spec)
-			source += gen_source_pack_from_numpy(name,spec)
-			source_to_cache(name,hash_code,source)
-		# else:
-		# 	source = source_from_cache(name,hash_code)
-		# pack_from_numpy =	l['{}_pack_from_numpy'.format(name)]}
-		out = import_from_cached(name,hash_code,[
-			'{}_get_enumerized'.format(name),
-			'{}_pack_from_numpy'.format(name),
-			name,
-			'NB_{}_NamedTuple'.format(name),
-			'{}_enumerize_nb_objs'.format(name)
-			]).values()
+		values = [elm.get(k,"" if s_obj['type'] == "string" else np.nan) for k,s_obj in spec.items() if k != 'type']
+		assert len(values) == len(spec), "Dict with keys [{}], cannot be cast to {} [{}]".format(
+			",".join(elm.keys()),name,",",join(spec.keys())) 
 
-		get_enumerized, pack_from_numpy, nt, nb_nt, enumerize_nb_objs = tuple(out)
-		# tuple_def_source = gen_source_tuple_defs(name,spec,ind)
-		# print(tuple_def_source)
-		# nb_nt_name = 'NB_{}_NamedTuple'.format(name)
-		# l,g = cache_safe_exec(tuple_def_source,gbls=globals())
-		# nt = 				l[name]
-		# nb_nt = 			l[nb_nt_name]
+		elm_data = tuple([name] + values)
 
-		# #Do this to make the namedtuple picklable (see https://stackoverflow.com/questions/16377215/how-to-pickle-a-namedtuple-instance-correctly)
-		# print("NAME",nt.__name__)
-		# setattr(__main__, nt.__name__, nt)
-		# nt.__module__ = "__main__"
+		data = data_by_type.get(typ,[])
+		data.append(elm_data)
+		data_by_type[typ] = data
 
-		# #Dynamically generate njit functions, pass in the namedtuple and wrapper as globals
-		# source = gen_source_get_enumerized(name,spec,ind=ind)
-		# source += gen_source_pack_from_numpy(name,spec,ind=ind)
-		
-		# print(source)
-		# l,g = cache_safe_exec(source,gbls={**globals(), **{name:nt,nb_nt_name:nb_nt} })
-		# get_enumerized = 	l['{}_get_enumerized'.format(name)]
-		# pack_from_numpy =	l['{}_pack_from_numpy'.format(name)]
-		
+		if(typ not in mlens_by_type):
+			mlens_by_type[typ] = [0]*len(elm_data)
+		mlens = mlens_by_type[typ]
 
-		# source = gen_source_enumerize_nb_objs(name,spec,ind=ind)
-		# l,g = cache_safe_exec(source,gbls={**globals(), **{'{}_get_enumerized'.format(name):get_enumerized} })
-		# enumerize_nb_objs =	l['{}_enumerize_nb_objs'.format(name)]
+		for i,(attr, s_obj) in enumerate(spec.items()):
+			typ = s_obj['type']
+			cast_fn = py_type_map[typ]
+			if(typ == 'string'):
+				L = len(cast_fn(elm.get(attr,"")))
+				if(L > mlens[i+1]): mlens[i+1] = L
 
-		def py_get_enumerized(_self,assert_maps=True):
-			return get_enumerized(_self,
-								   string_enums=self.string_enums,
-								   number_enums=self.number_enums,
-								   string_backmap=self.string_backmap,
-								   number_backmap=self.number_backmap,
-								   enum_counter=self.enum_counter,
-								   assert_maps=assert_maps)
-		nt.get_enumerized = py_get_enumerized#pytypes.MethodType(_get_enumerized, self) 
-		nt._get_enumerized = get_enumerized#pytypes.MethodType(_get_enumerized, self) 
-		nt.pack_from_numpy = pack_from_numpy
-		nt.enumerize_nb_objs = enumerize_nb_objs
-		nt.numba_type = nb_nt
+	#Make a fixed bitwidth numpy datatype for the tuples based off of
+	#	the max string lengths per attribute.
+	out = {}
+	for spec_typ,len_arrs in mlens_by_type.items():
+		#Pick string widths that fit into [20,80,320,...] to` avoid jit recompiles
+		spec = c.registered_specs[spec_typ]
+		mlens = exp_fixed_width(np.array(mlens_by_type[spec_typ]),20) 
+		dtype = dtype = [('__name__', tm['string']%int(mlens[0]))]
+		for i,(attr, s_obj) in enumerate(spec.items()):
+			typ = s_obj['type']
+			if(typ == 'string'):
+				dtype.append( (attr, tm['string']%int(mlens[i+1])) )
+			else:
+				dtype.append( (attr, tm[typ]) )
+		pack_from_numpy = c.jitstructs[spec_typ].pack_from_numpy
+		# print(data_by_type[spec_typ],dtype)
+		out[spec_typ] = pack_from_numpy(np.array(data_by_type[spec_typ],dtype=dtype),mlens)
+	return out	
 
-		return nt
+def object_to_nb_object(name,obj_d,context=None):
+	c = KnowledgeBaseContext.get_context(context)
+	assert 'type' in obj_d, "Object %s missing required attribute 'type'" % name
+	assert obj_d['type'] in c.registered_specs, \
+			 "Object specification not defined for %s" % obj_d['type']
+	spec = c.registered_specs[obj_d['type']]
+	o_struct_type = c.jitstructs[obj_d['type']]
+	args = []
+	for x,s_obj in spec.items():
+		t = s_obj['type']
+		try:
+			args.append(py_type_map[t](obj_d[x]))
+		except ValueError as e:
+			raise ValueError("Cannot cast %r to %r in %r of %r" % (obj_d[x],py_type_map[t],x,name)) from e
 
-	def register_specification(self, name, spec):
-		spec = {k:v.lower() for k,v in spec.items()}
-		if(name in self.registered_specs):
-			assert self.registered_specs[name] == spec, \
-			"Specification redefinition not permitted. Attempted on %r" % name
+	obj = o_struct_type(*args)
+	return obj
+
+def nb_objects_to_enumerized(nb_objects,context=None):
+	c = KnowledgeBaseContext.get_context(context)
+	out = Dict.empty(unicode_type,Dict_Unicode_to_Enums)
+	for typ,objs in nb_objects.items():
+		enumerize_nb_objs = c.jitstructs[typ].enumerize_nb_objs
+
+		out_typ = out[typ] = Dict.empty(unicode_type,i8[:])
+		enumerize_nb_objs(objs,out_typ, c.string_enums, c.number_enums,
+     		c.string_backmap, c.number_backmap, c.enum_counter)
+	return out
+
+
+def enumerize(value, typ=None,context=None):
+	c = KnowledgeBaseContext.get_context(context)
+	if(isinstance(value,np.ndarray)):
+		if(np.issubdtype(value.dtype, np.number)):
+			return enumerize_array(value,c.number_enums,c.number_backmap,c.enum_counter)
+		elif(np.issubdtype(value.dtype, np.str_)):
+			return enumerize_str_array(value,c.string_enums,c.string_backmap,c.enum_counter)
 		else:
-			self.registered_specs[name] = spec
-			# print("start jit")
-			jitstruct = self.jitstruct_from_spec(name,spec)
-			self.jitstructs[name] = jitstruct
-			self.nominal_maps[name] = np.array([x == "string" for k,x in spec.items() if k != 'type'],dtype=np.uint8)
-			# print("end jit")
-
-			REGISTERED_TYPES[name] = jitstruct.numba_type
-			TYPE_ALIASES[name] = jitstruct.__name__
-
-	def register_specifications(self, specs):
-		for name, spec in specs.items():
-			self.register_specification(name,spec)
+			raise ValueError("Type could not be enumerized %s" % type(value))
 
 
-	def state_to_nb_objects(self,state):
+	elif(isinstance(value,(list,tuple))):
+		return [c.enumerize_value(x) for x in value]
+	else:
+		return c.enumerize_value(value)
 
-		tm = numpy_type_map
-		#Throw the attribute values into tuples and find the lengths of
-		#	all of the strings.
-		data_by_type = {}
-		mlens_by_type = {}
-		for name, elm in state.items():
-			# print(elm)
-			assert 'type' in elm, "All objects need 'type' attribute to be numbalized."
-			typ = elm['type']
-			spec = self.registered_specs[typ]
+def enumerize_value(c,value, typ=None,context=None):
+	c = KnowledgeBaseContext.get_context(context)
+	if(typ is None): typ = infer_type(value)
+	if(typ == 'string'):
+		value = str(value)
+		_assert_map(value,c.string_enums,c.string_backmap,c.enum_counter)
+		# print(value,typ)
+		return c.string_enums[value]
+	elif(typ == 'number'):
+		value = float(value)
+		_assert_map(value,c.number_enums,c.number_backmap,c.enum_counter)
+		return c.number_enums[value]
+	else:
+		raise ValueError("Unrecognized type %r" % typ)
 
-			values = [elm[k] for k in spec.keys() if k != 'type']
-			assert len(values) == len(spec), "Dict with keys [{}], cannot be cast to {} [{}]".format(
-				",".join(elm.keys()),name,",",join(spec.keys())) 
+def unenumerize_value(c,value, typ=None, context=None):
+	c = KnowledgeBaseContext.get_context(context)
+	if(value in c.string_backmap):
+		return c.string_backmap[value]
+	elif(value in c.number_backmap):
+		return c.number_backmap[value]
+	else:
+		raise ValueError("No enum for %r." % value)
 
-			elm_data = tuple([name] + values)
+def enumerized_to_vectorized(c,enumerized_state,return_inversion_data=False,context=None):
+	c = KnowledgeBaseContext.get_context(context)
 
-			data = data_by_type.get(typ,[])
-			data.append(elm_data)
-			data_by_type[typ] = data
+	nominal, continuous, inversion_data = enumerized_to_vectorized(enumerized_state,
+									c.spec_flags['nominal'],c.number_backmap,
+									return_inversion_data=return_inversion_data)
+	out = {'nominal':nominal,'continuous':continuous, 'inversion_data': inversion_data}
+	return out
 
-			if(typ not in mlens_by_type):
-				mlens_by_type[typ] = [0]*len(elm_data)
-			mlens = mlens_by_type[typ]
-
-			for i,(attr, typ) in enumerate(spec.items()):
-				cast_fn = py_type_map[typ]
-				if(typ == 'string'):
-					L = len(cast_fn(elm[attr]))
-					if(L > mlens[i+1]): mlens[i+1] = L
-
-		#Make a fixed bitwidth numpy datatype for the tuples based off of
-		#	the max string lengths per attribute.
-		out = {}
-		for spec_typ,len_arrs in mlens_by_type.items():
-			#Pick string widths that fit into [20,80,320,...] to avoid jit recompiles
-			spec = self.registered_specs[spec_typ]
-			mlens = exp_fixed_width(np.array(mlens_by_type[spec_typ]),20) 
-			dtype = dtype = [('__name__', tm['string']%int(mlens[0]))]
-			for i,(attr, typ) in enumerate(spec.items()):
-				if(typ == 'string'):
-					dtype.append( (attr, tm['string']%int(mlens[i+1])) )
-				else:
-					dtype.append( (attr, tm[spec[attr]]) )
-			pack_from_numpy = self.jitstructs[spec_typ].pack_from_numpy
-			out[spec_typ] = pack_from_numpy(np.array(data_by_type[spec_typ],dtype=dtype),mlens)
-		return out	
-
-	def object_to_nb_object(self,name,obj_d):
-		assert 'type' in obj_d, "Object %s missing required attribute 'type'" % name
-		assert obj_d['type'] in object_specifications, \
-				 "Object specification not defined for %s" % obj_d['type']
-		spec = self.registered_specs[obj_d['type']]
-		o_struct_type = self.jitstructs[obj_d['type']]
-		args = []
-		for x,t in spec.items():
-			try:
-				args.append(py_type_map[t](obj_d[x]))
-			except ValueError as e:
-				raise ValueError("Cannot cast %r to %r in %r of %r" % (obj_d[x],py_type_map[t],x,name)) from e
-
-		obj = o_struct_type(*args)
-		return obj
-
-	def nb_objects_to_enumerized(self,nb_objects):
-		out = Dict.empty(unicode_type,Dict_Unicode_to_Enums)
-		for typ,objs in nb_objects.items():
-			enumerize_nb_objs = self.jitstructs[typ].enumerize_nb_objs
-
-			out_typ = out[typ] = Dict.empty(unicode_type,i8[:])
-			enumerize_nb_objs(objs,out_typ, self.string_enums, self.number_enums,
-         		self.string_backmap, self.number_backmap, self.enum_counter)
-		return out
-
-
-	def enumerize(self,value, typ=None):
-		if(isinstance(value,(list,tuple))):
-			return [self.enumerize_value(x) for x in value]
-		else:
-			return self.enumerize_value(x)
-
-	def enumerize_value(self,value, typ=None):
-		if(typ is None): typ = infer_type(value)
-		if(typ == 'string'):
-			value = str(value)
-			_assert_map(value,self.string_enums,self.string_backmap,self.enum_counter)
-			# print(value,typ)
-			return self.string_enums[value]
-		elif(typ == 'number'):
-			value = float(value)
-			_assert_map(value,self.number_enums,self.number_backmap,self.enum_counter)
-			return self.number_enums[value]
-		else:
-			raise ValueError("Unrecognized type %r" % typ)
-
-	def unenumerize_value(self,value, typ=None):
-		if(value in self.string_backmap):
-			return self.string_backmap[value]
-		elif(value in self.number_backmap):
-			return self.number_backmap[value]
-		else:
-			raise ValueError("No enum for %r." % value)
-
-	def enumerized_to_vectorized(self,enumerized_state,return_inversion_data=False):
-
-		nominal, continuous, inversion_data = enumerized_to_vectorized(enumerized_state,
-										self.nominal_maps,self.number_backmap,
-										return_inversion_data=return_inversion_data)
-		out = {'nominal':nominal,'continuous':continuous, 'inversion_data': inversion_data}
-		return out
-
-	def remap_vectorized(self,vectorized):
-		pass
-
-
-
+def remap_vectorized(c,vectorized):
+	pass

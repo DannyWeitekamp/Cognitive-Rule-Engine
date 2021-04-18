@@ -6,12 +6,12 @@ with open('requirements.txt') as f:
 long_description = '...need to add description' 
   
 setup( 
-        name ='numbert', 
+        name ='cre', 
         version ='0.1.0', 
         author ='Daniel Weitekamp', 
         author_email ='weitekamp@cmu.edu', 
-        url ='https://github.com/DannyWeitekamp/numbert', 
-        description ='Planner..', 
+        url ='https://github.com/DannyWeitekamp/Cognitive-Rule-Engine', 
+        description ='A rule engine for Python powered by numba.', 
         long_description = long_description, 
         long_description_content_type ="text/markdown", 
         license ='MIT', 

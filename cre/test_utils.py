@@ -1,5 +1,5 @@
-from numbert.experimental.fact import define_fact
-from numbert.experimental.structref import define_structref
+from cre.fact import define_fact
+from cre.structref import define_structref
 from numba import njit,literally
 from numba.types import unicode_type, f8, i8
 from numba.experimental.structref import new
@@ -7,7 +7,7 @@ import logging
 import numpy as np
 import pytest
 
-from numbert.experimental.utils import _incref_structref, _decref_structref, \
+from cre.utils import _incref_structref, _decref_structref, \
          _meminfo_from_struct, _struct_from_meminfo, _pointer_from_struct, \
          _struct_from_pointer, encode_idrec, decode_idrec, _struct_get_attr_offset, \
          _struct_get_data_pointer, _load_pointer, struct_get_attr_offset

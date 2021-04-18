@@ -1,6 +1,6 @@
 from numba import i8
 from numba.types import unicode_type, void, Type
-# from numbert.experimental.struct_gen import gen_struct_code
+# from cre.struct_gen import gen_struct_code
 from numba.extending import intrinsic, box, NativeValue
 
 

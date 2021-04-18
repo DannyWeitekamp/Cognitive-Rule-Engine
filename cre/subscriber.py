@@ -4,11 +4,11 @@ from numba.typed import List
 from numba.types import ListType, unicode_type, void
 from numba.experimental.structref import new
 from numba.extending import overload_method, intrinsic
-from numbert.experimental.structref import define_structref, define_structref_template
-# from numbert.experimental.kb import KnowledgeBaseType, KnowledgeBase
-from numbert.experimental.fact import define_fact
-from numbert.experimental.utils import _struct_from_meminfo, _meminfo_from_struct, _cast_structref
-from numbert.experimental.vector import new_vector, VectorType
+from cre.structref import define_structref, define_structref_template
+# from cre.kb import KnowledgeBaseType, KnowledgeBase
+from cre.fact import define_fact
+from cre.utils import _struct_from_meminfo, _meminfo_from_struct, _cast_structref
+from cre.vector import new_vector, VectorType
 from copy import copy
 
 meminfo_type = types.MemInfoPointer(types.voidptr)

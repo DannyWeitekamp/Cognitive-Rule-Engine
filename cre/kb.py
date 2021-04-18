@@ -9,13 +9,12 @@ from numba.cpython.unicode import  _set_code_point
 from numba.experimental import structref
 from numba.experimental.structref import new
 from numba.extending import overload_method, intrinsic
-from numbert.utils import cache_safe_exec
-from numbert.core import TYPE_ALIASES, REGISTERED_TYPES, JITSTRUCTS, py_type_map, numba_type_map, numpy_type_map
+from cre.core import TYPE_ALIASES, REGISTERED_TYPES, JITSTRUCTS, py_type_map, numba_type_map, numpy_type_map
 from numba.core import types, cgutils
 from numba.core.errors import TypingError
 
-from numbert.gensource import assert_gen_source
-from numbert.caching import unique_hash, source_to_cache, import_from_cached, source_in_cache
+from cre.gensource import assert_gen_source
+from cre.caching import unique_hash, source_to_cache, import_from_cached, source_in_cache
 from collections import namedtuple
 import numpy as np
 import timeit
@@ -24,17 +23,17 @@ import types as pytypes
 import sys
 import __main__
 
-from numbert.experimental.context import _BaseContextful, KnowledgeBaseContextDataType, KnowledgeBaseContext
-from numbert.experimental.transform import infer_type
+from cre.context import _BaseContextful, KnowledgeBaseContextDataType, KnowledgeBaseContext
+from cre.transform import infer_type
 
 
-from numbert.experimental.subscriber import BaseSubscriberType
-from numbert.experimental.structref import define_structref
-from numbert.experimental.fact import BaseFact,BaseFactType, cast_fact
-from numbert.experimental.utils import lower_setattr, _cast_structref, _meminfo_from_struct, decode_idrec, encode_idrec, \
+from cre.subscriber import BaseSubscriberType
+from cre.structref import define_structref
+from cre.fact import BaseFact,BaseFactType, cast_fact
+from cre.utils import lower_setattr, _cast_structref, _meminfo_from_struct, decode_idrec, encode_idrec, \
  _pointer_from_struct, _pointer_from_struct_incref, _struct_from_pointer, _decref_pointer
-from numbert.experimental.vector import new_vector, VectorType
-from numbert.caching import import_from_cached, source_in_cache, source_to_cache
+from cre.vector import new_vector, VectorType
+from cre.caching import import_from_cached, source_in_cache, source_to_cache
 
 BASE_T_ID_STACK_SIZE = 16
 BASE_F_ID_STACK_SIZE = 64

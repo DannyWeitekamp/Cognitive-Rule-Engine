@@ -1,8 +1,8 @@
-from numbert.experimental.condition_node import *
-from numbert.experimental.kb import KnowledgeBase
-from numbert.experimental.context import kb_context
+from cre.condition_node import *
+from cre.kb import KnowledgeBase
+from cre.context import kb_context
 from time import time_ns
-from numbert.experimental.utils import  _pointer_from_struct
+from cre.utils import  _pointer_from_struct
 
 BOOP, BOOPType = define_fact("BOOP",{"A": "string", "B" : "number"})
 

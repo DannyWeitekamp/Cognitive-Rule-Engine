@@ -7,12 +7,12 @@ from numba.experimental import structref
 from numba.experimental.structref import new, define_boxing, define_attributes, _Utils
 from numba.extending import overload_method, intrinsic, overload_attribute, intrinsic, lower_getattr_generic, overload, infer_getattr, lower_setattr_generic
 from numba.core.typing.templates import AttributeTemplate
-from numbert.experimental.utils import _struct_from_meminfo, _meminfo_from_struct, _cast_structref, cast_structref, decode_idrec, lower_getattr, _struct_from_pointer,  lower_setattr, lower_getattr, _pointer_from_struct
-from numbert.caching import gen_import_str, unique_hash,import_from_cached, source_to_cache, source_in_cache
-from numbert.experimental.condition_node import Conditions, ConditionsType, initialize_conditions
+from cre.utils import _struct_from_meminfo, _meminfo_from_struct, _cast_structref, cast_structref, decode_idrec, lower_getattr, _struct_from_pointer,  lower_setattr, lower_getattr, _pointer_from_struct
+from cre.caching import gen_import_str, unique_hash,import_from_cached, source_to_cache, source_in_cache
+from cre.condition_node import Conditions, ConditionsType, initialize_conditions
 
-from numbert.experimental.var import *
-from numbert.experimental.predicate_node import GenericAlphaPredicateNodeType, GenericBetaPredicateNodeType
+from cre.var import *
+from cre.predicate_node import GenericAlphaPredicateNodeType, GenericBetaPredicateNodeType
 
 from operator import itemgetter
 from copy import copy

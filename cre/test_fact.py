@@ -1,7 +1,7 @@
-from numbert.experimental.fact import _fact_from_spec, _standardize_spec, _merge_spec_inheritance, \
+from cre.fact import _fact_from_spec, _standardize_spec, _merge_spec_inheritance, \
     define_fact, cast_fact, _cast_structref, BaseFact, BaseFactType
-from numbert.experimental.context import kb_context
-from numbert.experimental.kb import KnowledgeBase
+from cre.context import kb_context
+from cre.kb import KnowledgeBase
 from numba import njit, u8
 import pytest
 

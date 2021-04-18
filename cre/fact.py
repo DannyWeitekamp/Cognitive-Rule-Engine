@@ -17,13 +17,12 @@ from numba.core.typing.templates import AttributeTemplate
 from numba.core import types, cgutils
 # from numba.core.extending import overload
 
-from numbert.utils import cache_safe_exec
-from numbert.core import TYPE_ALIASES, REGISTERED_TYPES, JITSTRUCTS, py_type_map, numba_type_map, numpy_type_map
-from numbert.gensource import assert_gen_source
-from numbert.caching import unique_hash, source_to_cache, import_from_cached, source_in_cache, get_cache_path
-from numbert.experimental.structref import gen_structref_code, define_structref
-from numbert.experimental.context import kb_context
-from numbert.experimental.utils import _cast_structref
+from cre.core import TYPE_ALIASES, REGISTERED_TYPES, JITSTRUCTS, py_type_map, numba_type_map, numpy_type_map
+from cre.gensource import assert_gen_source
+from cre.caching import unique_hash, source_to_cache, import_from_cached, source_in_cache, get_cache_path
+from cre.structref import gen_structref_code, define_structref
+from cre.context import kb_context
+from cre.utils import _cast_structref
 
 import numpy as np
 
@@ -160,8 +159,8 @@ from numba.core.types import unicode_type
 from numba.experimental import structref
 from numba.experimental.structref import new, define_boxing
 from numba.core.extending import overload
-from numbert.experimental.fact import _register_fact_structref, FactProxy
-from numbert.experimental.utils import struct_get_attr_offset
+from cre.fact import _register_fact_structref, FactProxy
+from cre.utils import struct_get_attr_offset
 
 attr_offsets = np.empty(({len(all_fields)},),dtype=np.int16)
 

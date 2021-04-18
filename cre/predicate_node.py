@@ -21,16 +21,16 @@ from numba.types import ListType, unicode_type, void
 from numba.core.types.misc import unliteral
 from numba.experimental.structref import new
 from numba.extending import overload_method, intrinsic, overload
-from numbert.caching import gen_import_str, unique_hash,import_from_cached, source_to_cache, source_in_cache
-from numbert.experimental.context import kb_context
-from numbert.experimental.structref import define_structref, define_structref_template
-from numbert.experimental.kb import KnowledgeBaseType, KnowledgeBase, facts_for_t_id, fact_at_f_id
-from numbert.experimental.fact import define_fact, BaseFactType, cast_fact
-from numbert.experimental.utils import _struct_from_meminfo, _meminfo_from_struct, _cast_structref, \
+from cre.caching import gen_import_str, unique_hash,import_from_cached, source_to_cache, source_in_cache
+from cre.context import kb_context
+from cre.structref import define_structref, define_structref_template
+from cre.kb import KnowledgeBaseType, KnowledgeBase, facts_for_t_id, fact_at_f_id
+from cre.fact import define_fact, BaseFactType, cast_fact
+from cre.utils import _struct_from_meminfo, _meminfo_from_struct, _cast_structref, \
  decode_idrec, lower_getattr, _struct_from_pointer, struct_get_attr_offset, _struct_get_data_pointer, \
  _load_pointer, _pointer_to_data_pointer
-from numbert.experimental.subscriber import base_subscriber_fields, BaseSubscriber, BaseSubscriberType, init_base_subscriber, link_downstream
-from numbert.experimental.vector import VectorType, new_vector
+from cre.subscriber import base_subscriber_fields, BaseSubscriber, BaseSubscriberType, init_base_subscriber, link_downstream
+from cre.vector import VectorType, new_vector
 from copy import copy
 from operator import itemgetter
 
@@ -405,8 +405,8 @@ def gen_alpha_source(left_type, op_str, right_type):
 from numba import types, njit
 from numba.experimental.structref import new
 from numba.types import float64, unicode_type
-from numbert.experimental.predicate_node import AlphaPredicateNodeTemplate, init_alpha, alpha_filter, alpha_predicate_node_field_dict
-from numbert.experimental.subscriber import base_subscriber_fields, init_base_subscriber
+from cre.predicate_node import AlphaPredicateNodeTemplate, init_alpha, alpha_filter, alpha_predicate_node_field_dict
+from cre.subscriber import base_subscriber_fields, init_base_subscriber
 
 specialization_dict = {{
     'op_str' : types.literal('{op_str}'),
@@ -662,8 +662,8 @@ def gen_beta_source(left_type, op_str, right_type):
 from numba import types, njit
 from numba.experimental.structref import new
 from numba.types import *
-from numbert.experimental.predicate_node import BetaPredicateNodeTemplate, init_beta, beta_filter, beta_predicate_node_field_dict
-from numbert.experimental.subscriber import base_subscriber_fields, init_base_subscriber
+from cre.predicate_node import BetaPredicateNodeTemplate, init_beta, beta_filter, beta_predicate_node_field_dict
+from cre.subscriber import base_subscriber_fields, init_base_subscriber
 
 specialization_dict = {{
     'op_str' : types.literal('{op_str}'),

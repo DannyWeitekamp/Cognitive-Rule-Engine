@@ -7,15 +7,15 @@ from numba.experimental import structref
 from numba.experimental.structref import new, define_boxing, define_attributes, _Utils
 from numba.extending import overload_method, intrinsic, overload_attribute, intrinsic, lower_getattr_generic, overload, infer_getattr, lower_setattr_generic
 from numba.core.typing.templates import AttributeTemplate
-from numbert.caching import gen_import_str, unique_hash,import_from_cached, source_to_cache, source_in_cache
-from numbert.experimental.context import kb_context
-from numbert.experimental.structref import define_structref, define_structref_template
-from numbert.experimental.kb import KnowledgeBaseType, KnowledgeBase, facts_for_t_id, fact_at_f_id
-from numbert.experimental.fact import define_fact, BaseFactType, cast_fact
-from numbert.experimental.utils import _struct_from_meminfo, _meminfo_from_struct, _cast_structref, cast_structref, decode_idrec, lower_getattr, _struct_from_pointer,  lower_setattr, lower_getattr, _pointer_from_struct
-from numbert.experimental.subscriber import base_subscriber_fields, BaseSubscriber, BaseSubscriberType, init_base_subscriber, link_downstream
-from numbert.experimental.vector import VectorType
-from numbert.experimental.predicate_node import BasePredicateNode,BasePredicateNodeType, get_alpha_predicate_node_definition, \
+from cre.caching import gen_import_str, unique_hash,import_from_cached, source_to_cache, source_in_cache
+from cre.context import kb_context
+from cre.structref import define_structref, define_structref_template
+from cre.kb import KnowledgeBaseType, KnowledgeBase, facts_for_t_id, fact_at_f_id
+from cre.fact import define_fact, BaseFactType, cast_fact
+from cre.utils import _struct_from_meminfo, _meminfo_from_struct, _cast_structref, cast_structref, decode_idrec, lower_getattr, _struct_from_pointer,  lower_setattr, lower_getattr, _pointer_from_struct
+from cre.subscriber import base_subscriber_fields, BaseSubscriber, BaseSubscriberType, init_base_subscriber, link_downstream
+from cre.vector import VectorType
+from cre.predicate_node import BasePredicateNode,BasePredicateNodeType, get_alpha_predicate_node_definition, \
  get_beta_predicate_node_definition, deref_attrs, define_alpha_predicate_node, define_beta_predicate_node, AlphaPredicateNode, BetaPredicateNode
 from numba.core import imputils, cgutils
 from numba.core.datamodel import default_manager, models
@@ -105,7 +105,7 @@ class Var(structref.StructRefProxy):
         
 
 def var_cmp_alpha(left_var, op_str, right_var,negated):
-    from numbert.experimental.condition_node import pt_to_cond, gen_pterm_ctor_alpha, gen_pterm_ctor_beta
+    from cre.condition_node import pt_to_cond, gen_pterm_ctor_alpha, gen_pterm_ctor_beta
     right_var_type = types.unliteral(types.literal(right_var))
     ctor = gen_pterm_ctor_alpha(left_var._numba_type_, op_str, right_var_type)
     pt = ctor(left_var, op_str, right_var)
@@ -114,7 +114,7 @@ def var_cmp_alpha(left_var, op_str, right_var,negated):
     
 
 def var_cmp_beta(left_var, op_str, right_var, negated):
-    from numbert.experimental.condition_node import pt_to_cond, gen_pterm_ctor_alpha, gen_pterm_ctor_beta
+    from cre.condition_node import pt_to_cond, gen_pterm_ctor_alpha, gen_pterm_ctor_beta
     ctor = gen_pterm_ctor_beta(left_var._numba_type_, op_str, right_var._numba_type_)
     pt = ctor(left_var, op_str, right_var)
     lbv = cast_structref(GenericVarType,left_var)

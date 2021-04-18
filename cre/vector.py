@@ -4,7 +4,7 @@ from numba.types import Tuple
 from numba.typed import List
 from numba.extending import overload_method, overload
 from numba.experimental.structref import new
-from numbert.experimental.structref import define_structref_template
+from cre.structref import define_structref_template
 from llvmlite import ir
 import numpy as np
 

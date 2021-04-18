@@ -1,7 +1,7 @@
 # from numba.typed import DictType
 from numba.types import DictType
 from numba import i8
-from numbert.caching import unique_hash, source_in_cache, import_from_cached, source_to_cache
+from cre.caching import unique_hash, source_in_cache, import_from_cached, source_to_cache
 from numba.experimental import structref
 
 def _gen_getter_jit(typ,attr):

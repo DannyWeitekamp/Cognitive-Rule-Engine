@@ -1,2 +1,2 @@
-from numbert.experimental.condition_node import *
-from numbert.experimental.KnowledgeBase import kb_context, KnowledgeBase
+from cre.condition_node import *
+from cre.KnowledgeBase import kb_context, KnowledgeBase

@@ -1,7 +1,7 @@
-from numbert.experimental.condition_node import *
-from numbert.experimental.kb import KnowledgeBase
-from numbert.experimental.context import kb_context
-from numbert.experimental.matching import conditions_get_matches
+from cre.condition_node import *
+from cre.kb import KnowledgeBase
+from cre.context import kb_context
+from cre.matching import conditions_get_matches
 
 
 def test_matching():

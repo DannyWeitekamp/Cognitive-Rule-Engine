@@ -5,12 +5,11 @@ from numba import void,b1,u1,u2,u4,u8,i1,i2,i4,i8,f4,f8,c8,c16
 from numba.typed import List, Dict
 from numba.core.types import DictType, ListType, unicode_type, float64, NamedTuple, NamedUniTuple, UniTuple, Array
 from numba.cpython.unicode import  _set_code_point
-from numbert.utils import cache_safe_exec
-from numbert.core import TYPE_ALIASES, REGISTERED_TYPES, JITSTRUCTS, py_type_map, numba_type_map, numpy_type_map
-from numbert.gensource import assert_gen_source
-from numbert.caching import unique_hash, source_to_cache, import_from_cached, source_in_cache
-# from numbert.experimental.struct_gen import gen_struct_code
-from numbert.experimental.structref import define_structref
+from cre.core import TYPE_ALIASES, REGISTERED_TYPES, JITSTRUCTS, py_type_map, numba_type_map, numpy_type_map
+from cre.gensource import assert_gen_source
+from cre.caching import unique_hash, source_to_cache, import_from_cached, source_in_cache
+# from cre.struct_gen import gen_struct_code
+from cre.structref import define_structref
 from collections import namedtuple
 import numpy as np
 import timeit
@@ -85,8 +84,8 @@ class KnowledgeBaseContext(object):
 
     @classmethod
     def get_default_context(cls):
-        df_c = os.environ.get("NUMBERT_DEFAULT_CONTEXT")
-        df_c = df_c if df_c else "numbert"
+        df_c = os.environ.get("cre_DEFAULT_CONTEXT")
+        df_c = df_c if df_c else "cre"
         return cls.get_context(df_c)
 
     @classmethod
@@ -105,7 +104,7 @@ class KnowledgeBaseContext(object):
 
     @classmethod
     def set_default_context(cls, name):
-        os.environ["NUMBERT_DEFAULT_CONTEXT"] = cls.get_context(name)
+        os.environ["cre_DEFAULT_CONTEXT"] = cls.get_context(name)
 
     def __init__(self,name):
         self.name = name

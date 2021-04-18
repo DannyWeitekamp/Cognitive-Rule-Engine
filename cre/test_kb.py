@@ -1,6 +1,6 @@
-from numbert.experimental.context import kb_context
-from numbert.experimental.fact import define_fact
-from numbert.experimental.kb import KnowledgeBase, KnowledgeBaseType, decode_idrec, encode_idrec, next_empty_f_id, make_f_id_empty, retracted_f_ids_for_t_id
+from cre.context import kb_context
+from cre.fact import define_fact
+from cre.kb import KnowledgeBase, KnowledgeBaseType, decode_idrec, encode_idrec, next_empty_f_id, make_f_id_empty, retracted_f_ids_for_t_id
 from numba import njit
 from numba.types import unicode_type, NamedTuple
 from numba.core.errors import TypingError
@@ -9,8 +9,8 @@ import logging
 import numpy as np
 import pytest
 from collections import namedtuple
-from numbert.experimental.subscriber import BaseSubscriberType, init_base_subscriber
-from numbert.experimental.utils import _struct_from_meminfo
+from cre.subscriber import BaseSubscriberType, init_base_subscriber
+from cre.utils import _struct_from_meminfo
 
 
 tf_spec = {"value" : "string",

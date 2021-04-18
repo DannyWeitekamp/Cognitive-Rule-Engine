@@ -1,13 +1,13 @@
 import numpy as np
 from numba import njit, f8
-from numbert.experimental.utils import _meminfo_from_struct, _struct_from_meminfo, _cast_structref, struct_get_attr_offset
-from numbert.experimental.subscriber import BaseSubscriberType
-from numbert.experimental.fact import define_fact
-from numbert.experimental.kb import KnowledgeBase
-from numbert.experimental.context import kb_context
-from numbert.experimental.predicate_node import get_alpha_predicate_node, get_beta_predicate_node, BasePredicateNodeType, generate_link_data
-from numbert.experimental.predicate_node import get_alpha_predicate_node_definition, get_beta_predicate_node_definition
-from numbert.experimental.test_kb import _delcare_10000, _retract_10000
+from cre.utils import _meminfo_from_struct, _struct_from_meminfo, _cast_structref, struct_get_attr_offset
+from cre.subscriber import BaseSubscriberType
+from cre.fact import define_fact
+from cre.kb import KnowledgeBase
+from cre.context import kb_context
+from cre.predicate_node import get_alpha_predicate_node, get_beta_predicate_node, BasePredicateNodeType, generate_link_data
+from cre.predicate_node import get_alpha_predicate_node_definition, get_beta_predicate_node_definition
+from cre.test_kb import _delcare_10000, _retract_10000
 import pytest
 
 @njit
@@ -35,7 +35,7 @@ def cast(pn,ty):
 # @njit
 # def offset(inst,attr):
 #     return _struct_get_attr_offset(inst,attr)
-from numbert.experimental.predicate_node import base_subscriber_fields, basepredicate_node_fields, alpha_predicate_node_fields, beta_predicate_node_fields, GenericAlphaPredicateNodeType, GenericBetaPredicateNodeType
+from cre.predicate_node import base_subscriber_fields, basepredicate_node_fields, alpha_predicate_node_fields, beta_predicate_node_fields, GenericAlphaPredicateNodeType, GenericBetaPredicateNodeType
 
 def test_predicate_node_sanity():
     with kb_context("test_predicate_node_sanity"):

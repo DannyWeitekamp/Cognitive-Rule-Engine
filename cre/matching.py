@@ -69,7 +69,7 @@ def get_alpha_inds(facts_per_var, alpha_conjuncts, conds):
         alpha_inds.append(inds)
 
             # print(i, alpha_inds[i])
-    # print("alpha_inds", alpha_inds)
+    print("alpha_inds", alpha_inds)
     # alpha_inds_list.append(alpha_inds)
     return alpha_inds
 
@@ -77,7 +77,7 @@ def get_alpha_inds(facts_per_var, alpha_conjuncts, conds):
 def get_pair_matches(alpha_inds, beta_conjuncts, beta_inds, conds):
     n_vars = len(conds.vars)
     pair_matches = List([List.empty_list(i8_i8_arr_tuple) for _ in range(n_vars)])
-    print(beta_inds)
+    # print(beta_inds)
     # print(beta_inds)
     for i in range(n_vars):
         pair_matches_i = pair_matches[i]
@@ -114,7 +114,7 @@ def get_pair_matches(alpha_inds, beta_conjuncts, beta_inds, conds):
                     #  pair of variables  
                     term = terms_ij[0]
                     pairs = filter_beta(term, alpha_inds[i], alpha_inds[j])
-                    print(pairs)
+                    # print(pairs)
 
                 pair_matches_i.append((j, pairs))
     return pair_matches
@@ -166,6 +166,26 @@ def fill_pairs_at(partial_matches, i, pair_matches):
         partial_matches = new_pms
     return partial_matches
 
+@njit(nogil=False, parallel=False,fastmath=False,cache=True)
+def fill_singles_at(partial_matches,i, candidate_inds):
+    '''
+    For var_i which is free floating and without any beta
+    constraints, bind the candidates for this variable
+    to every partial match in partial_matches. 
+    '''
+    new_pms = List()
+    for pm in partial_matches:
+        if(pm[i] == -1):
+            for ind in candidate_inds:
+                # if(not (inds == pm).any()):
+                new_pm = pm.copy()
+                new_pm[i] = ind
+                new_pms.append(new_pm)
+        else:
+            new_pms.append(pm)
+    return new_pms
+
+
 
 @njit(cache=True)
 def _get_fact_vectors(conds):
@@ -194,6 +214,7 @@ def get_pointer_matches_from_linked(conds):
     n_vars = len(conds.vars)
     fact_vectors = _get_fact_vectors(conds)
 
+    # partial_matches_set = Dict(i8_arr)
     for alpha_conjuncts, beta_conjuncts, beta_inds in conds.distr_dnf:
         alpha_inds = get_alpha_inds(fact_vectors, alpha_conjuncts, conds)
         pair_matches = get_pair_matches(alpha_inds, beta_conjuncts, beta_inds, conds)
@@ -204,6 +225,14 @@ def get_pointer_matches_from_linked(conds):
         for i in range(n_vars):
             partial_matches = fill_pairs_at(partial_matches,i,pair_matches)
 
+        for i in range(n_vars):
+            if(len(pair_matches[i]) == 0):
+                partial_matches = fill_singles_at(partial_matches,i,alpha_inds[i])
+
+
+
+    #Turn indicies into fact pointers 
+    # Time Negligible
     matching_fact_ptrs = np.empty((len(partial_matches),n_vars),dtype=np.int64)
     for i,match in enumerate(partial_matches):
         # print("match", match)

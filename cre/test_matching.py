@@ -23,23 +23,26 @@ def get_ptr(fact):
     return _pointer_from_struct(fact)
 
 
+def kb_w_n_boops(n):
+    kb = KnowledgeBase()
+    for i in range(n):
+        boop = BOOP(str(i), i)
+        kb.declare(boop)
+    return kb
+
 
 def test_matching():
     # with kb_context("test_link"):
     # BOOP, BOOPType = define_fact("BOOP",{"A": "string", "B" : "number"})
+    kb = kb_w_n_boops(5)
+
+
     l1, l2 = Var(BOOPType,"l1"), Var(BOOPType,"l2")
     r1, r2 = Var(BOOPType,"r1"), Var(BOOPType,"r2")
 
     c = (l1.B > 0) & (l1.B != 3) & (l1.B < 4) & (l2.B != 3) | \
         (l1.B == 3) 
 
-    kb = KnowledgeBase()
-
-    for i in range(5):
-        boop = BOOP(str(i), i)
-        # print(i, ":", get_ptr(boop))
-        kb.declare(boop)
-    
     cl = get_linked_conditions_instance(c, kb)
 
     Bs = boop_Bs_from_ptrs(get_pointer_matches_from_linked(cl))
@@ -55,8 +58,27 @@ def test_matching():
     print("Bs", Bs)
 
 
+def matching_1_t_4_lit_setup():
+    kb = kb_w_n_boops(1000)
+
+    l1, l2 = Var(BOOPType,"l1"), Var(BOOPType,"l2")
+    r1, r2 = Var(BOOPType,"r1"), Var(BOOPType,"r2")
+
+    c = (l1.B > 0) & (l1.B != 3) & (l1.B < 4) & (l2.B != 3) 
+
+    cl = get_linked_conditions_instance(c, kb)
+
+    # Bs = boop_Bs_from_ptrs(get_pointer_matches_from_linked(cl))
+    return (cl,), {}
+
+@njit(cache=True)
+def check_twice(cl):
+    get_pointer_matches_from_linked(cl)
+    get_pointer_matches_from_linked(cl)
 
 
+def test_b_matching_1_t_4_lit(benchmark):
+    benchmark.pedantic(check_twice,setup=matching_1_t_4_lit_setup, warmup_rounds=1)
 
 
 
@@ -71,4 +93,5 @@ def test_matching():
 
 
 if(__name__ == "__main__"):
-    test_matching()
+    # test_matching()
+    test_b_matching_1_t_4_lit()

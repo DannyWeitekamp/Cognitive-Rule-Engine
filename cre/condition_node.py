@@ -12,7 +12,7 @@ from cre.context import kb_context
 from cre.structref import define_structref, define_structref_template
 from cre.kb import KnowledgeBaseType, KnowledgeBase, facts_for_t_id, fact_at_f_id
 from cre.fact import define_fact, BaseFactType, cast_fact
-from cre.utils import _struct_from_meminfo, _meminfo_from_struct, _cast_structref, cast_structref, decode_idrec, lower_getattr, _struct_from_pointer,  lower_setattr, lower_getattr, _pointer_from_struct
+from cre.utils import _struct_from_meminfo, _meminfo_from_struct, _cast_structref, cast_structref, decode_idrec, lower_getattr, _struct_from_pointer,  lower_setattr, lower_getattr, _pointer_from_struct, _pointer_from_struct_incref, _decref_pointer
 from cre.subscriber import base_subscriber_fields, BaseSubscriber, BaseSubscriberType, init_base_subscriber, link_downstream
 from cre.vector import VectorType
 from cre.predicate_node import BasePredicateNode,BasePredicateNodeType, get_alpha_predicate_node_definition, \
@@ -609,7 +609,10 @@ def get_linked_conditions_instance(conds, kb, copy=False):
         if(conds.is_initialized): initialize_conditions(new_conds)
         conds = new_conds
 
-    conds.kb_ptr = _pointer_from_struct(kb)
+    #Note... maybe it's simpler to just make KB an optional(KBType)
+    old_ptr = conds.kb_ptr
+    conds.kb_ptr = _pointer_from_struct_incref(kb)
+    if(old_ptr != 0): _decref_pointer(old_ptr)
     return conds
 
 

@@ -85,7 +85,7 @@ class KnowledgeBaseContext(object):
     @classmethod
     def get_default_context(cls):
         df_c = os.environ.get("cre_DEFAULT_CONTEXT")
-        df_c = df_c if df_c else "cre"
+        df_c = df_c if df_c else "cre_default"
         return cls.get_context(df_c)
 
     @classmethod

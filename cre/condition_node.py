@@ -31,7 +31,7 @@ pterm_fields_dict = {
     "var_base_ptrs" : UniTuple(i8,2),
     "negated" : u1,
     "is_alpha" : u1,
-    "is_linked" : u1,
+    "kb_ptr" : i8,
     "link_data" : PredicateNodeLinkDataType
 }
 
@@ -74,7 +74,7 @@ def alpha_pterm_ctor(pn, left_var, op_str, right_var):
     st.var_base_ptrs = (left_var.base_ptr,0)
     st.negated = False
     st.is_alpha = True
-    st.is_linked = False
+    st.kb_ptr = 0
     return st
 
 @njit(cache=True)
@@ -85,7 +85,7 @@ def beta_pterm_ctor(pn, left_var, op_str, right_var):
     st.var_base_ptrs = (left_var.base_ptr,right_var.base_ptr)
     st.negated = False
     st.is_alpha = False
-    st.is_linked = False
+    st.kb_ptr = 0
     return st
 
 
@@ -180,8 +180,8 @@ def pterm_copy(self):
     st.var_base_ptrs = self.var_base_ptrs
     st.negated = self.negated
     st.is_alpha = self.is_alpha
-    st.is_linked = self.is_linked
-    if(self.is_linked):
+    st.kb_ptr = self.kb_ptr
+    if(self.kb_ptr):
         st.link_data = self.link_data
     return st
     
@@ -308,8 +308,9 @@ conditions_fields_dict = {
     # Wether or not the conditions object has been initialized
     'is_initialized' : u1,
 
-    # Wether or not the conditions object has been linked to a knowledge base
-    'is_linked' : u1,
+    # A pointer to the KnowledgeBase the Conditions object is linked to.
+    #   If the KnowledgeBase is not linked defaults to 0.
+    'kb_ptr' : i8,
 
     ### Fields that are filled in after initialization ### 
 
@@ -580,7 +581,7 @@ def link_pterm_instance(pterm, kb):
     link_data = generate_link_data(pterm.pred_node, kb)
     # if(copy): pterm = pterm_copy(pterm)
     pterm.link_data = link_data
-    pterm.is_linked = True
+    pterm.kb_ptr = _pointer_from_struct(kb)
     return pterm
 
 @njit(cache=True)
@@ -608,7 +609,7 @@ def get_linked_conditions_instance(conds, kb, copy=False):
         if(conds.is_initialized): initialize_conditions(new_conds)
         conds = new_conds
 
-    conds.is_linked = True
+    conds.kb_ptr = _pointer_from_struct(kb)
     return conds
 
 

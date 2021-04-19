@@ -104,8 +104,8 @@ PredicateNodeLinkData, PredicateNodeLinkDataType = define_structref("PredicateNo
 @njit(cache=True)
 def generate_link_data(pn, kb):
     '''Takes a prototype predicate node and a knowledge base and returns
-        a linked instance of that predicate node, which is either a copy
-        or an equivalent instance already linked to the knowledge base'''
+        a link_data instance for that predicate node.
+    '''
     link_data = new(PredicateNodeLinkDataType)
     # print(pn.left_fact_type_name)
     # print(kb.context_data.fact_to_t_id)

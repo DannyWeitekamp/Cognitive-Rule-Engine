@@ -46,19 +46,30 @@ def filter_beta(term, l_inds, r_inds):
 
 
 @njit(cache=True)
-def get_alpha_inds(alpha_conjuncts, conds):
+def get_alpha_inds(facts_per_var, alpha_conjuncts, conds):
     n_vars = len(conds.vars)
     # alpha_inds_list = List.empty_list(list_i8_arr)
     # for alpha_conjuncts, _, _ in conds.distr_dnf:
+
+    # kb = _struct_from_pointer(KnowledgeBaseType,conds.kb_ptr)
+    # kb_data = kb.kb_data
+    # # Using this dictionary might be a little slow, but it's low frequency
+    # t_id_map = kb.context_data.fact_to_t_id
+
+
     alpha_inds = List.empty_list(i8_arr)
-    for _ in range(n_vars):
-        alpha_inds.append(np.arange(5))
+    # for _ in range(n_vars):
+    #     alpha_inds.append(np.arange(5))
 
-    for i, alpha_conjunct in enumerate(alpha_conjuncts):
+    for i, (facts,alpha_conjunct) in enumerate(zip(facts_per_var,alpha_conjuncts)):
+        inds = np.arange(len(facts))
         for term in alpha_conjunct:
-            alpha_inds[i] = filter_alpha(term, alpha_inds[i])
+            inds = filter_alpha(term, inds)
+        
+        alpha_inds.append(inds)
 
-            print(i, alpha_inds[i])
+            # print(i, alpha_inds[i])
+    # print("alpha_inds", alpha_inds)
     # alpha_inds_list.append(alpha_inds)
     return alpha_inds
 
@@ -155,30 +166,76 @@ def fill_pairs_at(partial_matches, i, pair_matches):
         partial_matches = new_pms
     return partial_matches
 
+
 @njit(cache=True)
-def conditions_get_matches(conds):
-    if(not conds.is_linked): raise RuntimeError("Cannot match unlinked conditions object.")
+def _get_fact_vectors(conds):
+    n_vars = len(conds.vars)
+    kb = _struct_from_pointer(KnowledgeBaseType,conds.kb_ptr)
+    kb_data = kb.kb_data
+
+    # Using this dictionary might be a little slow, but it's low frequency
+    t_id_map = kb.context_data.fact_to_t_id
+
+    facts = List.empty_list(VectorType)    
+
+    for i in range(n_vars):
+        t_id = t_id_map[conds.vars[i].fact_type_name]
+        facts.append(facts_for_t_id(kb_data, t_id))
+    return facts
+
+@njit(cache=True)
+def get_pointer_matches_from_linked(conds):
+    '''Takes a linked Conditions object and gets sets of pointers to 
+       facts that match
+    '''
+    if(not conds.kb_ptr): raise RuntimeError("Cannot match unlinked conditions object.")
     if(not conds.is_initialized): initialize_conditions(conds)
 
     n_vars = len(conds.vars)
+    fact_vectors = _get_fact_vectors(conds)
 
     for alpha_conjuncts, beta_conjuncts, beta_inds in conds.distr_dnf:
-        alpha_inds =  get_alpha_inds(alpha_conjuncts, conds)
+        alpha_inds = get_alpha_inds(fact_vectors, alpha_conjuncts, conds)
         pair_matches = get_pair_matches(alpha_inds, beta_conjuncts, beta_inds, conds)
 
-        partial_matches = List()
+        partial_matches = List.empty_list(i8_arr)
         partial_matches.append(-np.ones((n_vars,),dtype=np.int64))
 
         for i in range(n_vars):
             partial_matches = fill_pairs_at(partial_matches,i,pair_matches)
-            print(partial_matches)
+
+    matching_fact_ptrs = np.empty((len(partial_matches),n_vars),dtype=np.int64)
+    for i,match in enumerate(partial_matches):
+        # print("match", match)
+        for j, ind in enumerate(match):
+            if(ind == -1):
+                return np.zeros((0,n_vars),dtype=np.int64)
+            matching_fact_ptrs[i][j] = fact_vectors[j][ind]
+
+
+    # print(matching_fact_ptrs)
+
+    return matching_fact_ptrs
 
 
 @njit(cache=True)
-def get_matches(conds,kb=None):
+def _get_matches(conds, fact_types, kb=None):
     if(kb is not None):
         conds = get_linked_conditions_instance(conds,kb, True)
-    return conditions_get_matches(conds)
+
+    kb = _struct_from_pointer(KnowledgeBase,conds.kb_ptr)
+    ptr_matches = get_pointer_matches_from_linked(conds)
+
+    # out = List()
+    # for ptr_set in ptr_matches:
+    #     for fact_type in fact_types:
+    #         _struct_from_pointer(fact_type,)
+
+
+    # for ptr_match in
+
+
+    return 
 
 
 

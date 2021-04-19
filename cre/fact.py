@@ -329,8 +329,13 @@ def define_fact(name : str, spec : dict, context=None):
     spec, inherit_from = _merge_spec_inheritance(spec,context)
 
     if(name in context.fact_types):
-        assert context.fact_types[name].spec != spec, \
+        print(str(context.fact_types[name].spec))
+        print(str(spec))
+        assert str(context.fact_types[name].spec) == str(spec), \
         f"Redefinition of fact '{name}' in context '{context.name}' not permitted"
+
+        print(f"FACT REDEFINITION: '{name}' in context '{context.name}' ")
+        return context.fact_ctors[name], context.fact_types[name]
 
     fact_ctor, fact_type = _fact_from_spec(name, spec, context=context)
     context._assert_flags(name,spec)

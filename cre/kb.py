@@ -345,9 +345,8 @@ def signal_subscribers_change(kb, idrec):
 
 @njit(cache=True)
 def declare_fact(kb,fact):
-    #Incref so that the fact is not garbage collected if this is the only reference
+    #Incref so that the fact is not freed if this is the only reference
     fact_ptr = _pointer_from_struct_incref(fact) #.4ms / 10000
-
 
     t_id = resolve_t_id(kb,fact)  #.1ms / 10000
     facts = facts_for_t_id(kb.kb_data,t_id) #negligible

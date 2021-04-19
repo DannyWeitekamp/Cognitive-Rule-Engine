@@ -325,12 +325,13 @@ def define_fact(name : str, spec : dict, context=None):
     '''Defines a new fact.'''
     context = kb_context(context)
 
-    if(name in context.fact_types):
-        assert context.fact_types[name].spec == spec, \
-        f"Redefinition of fact '{name}' in context '{context.name}' not permitted"
-
     spec = _standardize_spec(spec)
     spec, inherit_from = _merge_spec_inheritance(spec,context)
+
+    if(name in context.fact_types):
+        assert context.fact_types[name].spec != spec, \
+        f"Redefinition of fact '{name}' in context '{context.name}' not permitted"
+
     fact_ctor, fact_type = _fact_from_spec(name, spec, context=context)
     context._assert_flags(name,spec)
     # print("PASSING IN", inherit_from)

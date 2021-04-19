@@ -86,11 +86,11 @@ def get_pair_matches(alpha_inds, beta_conjuncts, beta_inds, conds):
                         _pair_set = Dict.empty(i8_x2, u1)
                         if(pair_set is None):
                             for pair in pairs:
-                                 _pair_set[(pair[0],pair[1])] = 1
+                                 _pair_set[(pair[0],pair[1])] = u1(1)
                         else:
                             for pair in pairs:
                                 t = (pair[0], pair[1])
-                                if(t in pair_set): _pair_set[t] = 1
+                                if(t in pair_set): _pair_set[t] = u1(1)
                         pair_set = _pair_set        
                     pairs = np.empty((len(pair_set),2),dtype=np.int64)        
                     for k,(a,b) in enumerate(pair_set.keys()):
@@ -119,34 +119,34 @@ def fill_pairs_at(partial_matches, i, pair_matches):
             altered = False
             already_consistent = False
             
-            #For each consistent pair (e_i, e_j) of elements matching concepts
+            # For each consistent pair (e_i, e_j) of elements matching concepts
             #   i and j respectively:
             for pair in pair_matches_i:
                 e_i, e_j = pair[0], pair[1]
                 okay = True
-                #Bind the pair to partial match "pm" if:                
-                #concept_i is unbound or concept_i is bound to e_i and concept_j is unbound
+                # Bind the pair to partial match "pm" if:                
+                #  var_i is unbound or var_i is bound to e_i and var_j is unbound
                 if(not (pm[i] == -1 or (pm[i] == e_i and pm[j] == -1))): okay = False
-                #and concept_j is unbound or concept_j is bound to e_j and concept_i is unbound
+                # and var_j is unbound or var_j is bound to e_j and var_i is unbound
                 if(not (pm[j] == -1 or (pm[j] == e_j and pm[i] == -1))): okay = False
                 
-                #and e_i and e_j are not bound elsewhere in partial match "pm"
+                # and e_i and e_j are not bound elsewhere in partial match "pm"
                 for p in range(len(pm)):
                     if(p != i and p != j and (pm[p] == e_i or pm[p] == e_j)):
                         okay = False; break;
 
-                #Mark the partial match as consistent for this iteration if it
+                # Mark the partial match as consistent for this iteration if it
                 #   is consistent with this pair.
                 if(pm[j] == e_j and pm[i] == e_i): already_consistent = True
                 
-                #Then append the new partial match to the set of partial matches
+                # Then append the new partial match to the set of partial matches
                 if(okay):
                     new_pm = pm.copy()
                     new_pm[i], new_pm[j] = e_i, e_j
                     new_pms.append(new_pm)
                     altered = True
 
-            #If partial match "pm" hasn't picked up any new bindings to concepts i and j
+            # If partial match "pm" hasn't picked up any new bindings to concepts i and j
             #   but at least one was not yet bound, then no further binding can be found 
             #   for "pm" and it is rejected. Otherwise as long as pm[i] is consistent 
             #   with pm[j] keep pm for the next iteration.
@@ -161,8 +161,6 @@ def conditions_get_matches(conds):
     if(not conds.is_initialized): initialize_conditions(conds)
 
     n_vars = len(conds.vars)
-
-    
 
     for alpha_conjuncts, beta_conjuncts, beta_inds in conds.distr_dnf:
         alpha_inds =  get_alpha_inds(alpha_conjuncts, conds)

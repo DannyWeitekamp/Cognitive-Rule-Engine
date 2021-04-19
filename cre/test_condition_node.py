@@ -4,7 +4,7 @@ from cre.context import kb_context
 from time import time_ns
 from cre.utils import  _pointer_from_struct
 
-# BOOP, BOOPType = define_fact("BOOP",{"A": "string", "B" : "number"})
+BOOP, BOOPType = define_fact("BOOP",{"A": "string", "B" : "number"})
 
 def test_aliasing():
     pass
@@ -19,7 +19,7 @@ def first_beta(c):
 
 def test_term():
     with kb_context("test_term"):
-        BOOP, BOOPType = define_fact("BOOP",{"A": "string", "B" : "number"})
+        # BOOP, BOOPType = define_fact("BOOP",{"A": "string", "B" : "number"})
         l1, l2 = Var(BOOPType,"l1"), Var(BOOPType,"l2")
         c1 = l1.B < 1
         print(first_alpha(c1))
@@ -34,7 +34,7 @@ def test_term():
 # @njit(cache=True)
 def test_build_conditions():
     with kb_context("test_build_conditions"):
-        BOOP, BOOPType = define_fact("BOOP",{"A": "string", "B" : "number"})
+        # BOOP, BOOPType = define_fact("BOOP",{"A": "string", "B" : "number"})
 
         l1, l2 = Var(BOOPType,"l1"), Var(BOOPType,"l2")
         r1, r2 = Var(BOOPType,"r1"), Var(BOOPType,"r2")
@@ -117,7 +117,7 @@ list_list_i8 = ListType(ListType(i8))
 def get_init_cond_sizes(conds):
     alpha_sizes = List.empty_list(list_i8)
     beta_sizes = List.empty_list(list_i8)
-    for alpha_conjucts, beta_conjucts in conds.distr_dnf:
+    for alpha_conjucts, beta_conjucts, beta_inds in conds.distr_dnf:
         alpha_sizes.append(List([len(conjunct) for conjunct in alpha_conjucts]))
         beta_sizes.append(List([len(conjunct) for conjunct in beta_conjucts]))
 
@@ -134,7 +134,7 @@ def cond_get_vars(cond):
 
 def test_initialize():
     with kb_context("test_initialize"):
-        BOOP, BOOPType = define_fact("BOOP",{"A": "string", "B" : "number"})
+        # BOOP, BOOPType = define_fact("BOOP",{"A": "string", "B" : "number"})
 
         l1, l2 = Var(BOOPType,"l1"), Var(BOOPType,"l2")
         r1, r2 = Var(BOOPType,"r1"), Var(BOOPType,"r2")
@@ -153,7 +153,7 @@ def test_initialize():
         print(alpha_sizes)
         print(beta_sizes)
         assert [list(x) for x in alpha_sizes] == [[2, 0, 0, 0], [0, 2, 0, 0], [0, 2, 0, 0]]
-        assert [list(x) for x in beta_sizes] == [[0, 1, 0, 1], [0, 1, 1, 0], [1, 1, 0, 0]]
+        assert [list(x) for x in beta_sizes] == [[1, 1], [1, 1], [1, 1]]
 
 
 @njit(cache=True)
@@ -161,8 +161,9 @@ def get_pointer(st):
     return _pointer_from_struct(st)
 
 def test_link():
-    with kb_context("test_link"):
-        BOOP, BOOPType = define_fact("BOOP",{"A": "string", "B" : "number"})
+    with kb_context() as context:
+        print(context.fact_types)
+        # BOOP, BOOPType = define_fact("BOOP",{"A": "string", "B" : "number"})
         
         l1, l2 = Var(BOOPType,"l1"), Var(BOOPType,"l2")
         r1, r2 = Var(BOOPType,"r1"), Var(BOOPType,"r2")
@@ -187,7 +188,7 @@ def test_link():
     
 
 if(__name__ == "__main__"):
-    # test_link()
+    test_link()
     test_initialize()
     # test_term()
     for i in range(10):

@@ -182,7 +182,8 @@ class KnowledgeBase(structref.StructRefProxy):
     def __new__(cls, context=None):
         context_data = KnowledgeBaseContext.get_context(context).context_data
         kb_data = init_kb_data(context_data)
-        self = structref.StructRefProxy.__new__(cls, kb_data, context_data)
+        self = kb_ctor(context_data,kb_data)
+        # self = structref.StructRefProxy.__new__(cls, context_data, kb_data)
         # _BaseContextful.__init__(self,context) #Maybe want this afterall
         self.kb_data = kb_data
         self.context_data = context_data
@@ -244,18 +245,28 @@ KnowledgeBaseType = KnowledgeBaseTypeTemplate(kb_fields)
 # KnowledgeBaseType = KnowledgeBaseTypeTemplate(fields=)
 
 @njit(cache=True)
-def kb_ctor(kb_data,context_data):
+def kb_ctor(context_data, kb_data=None):
     st = new(KnowledgeBaseType) 
-    st.kb_data = kb_data
     st.context_data = context_data
+    st.kb_data = kb_data if(kb_data is not None) else init_kb_data(context_data)
+    
     st.halt_flag = u1(0)
     st.backtrack_flag = u1(0)
     return st
 
 @overload(KnowledgeBase)
-def overload_KnowledgeBase(kb_data,context_data):
-    def impl(kb_data,context_data):
-        return kb_ctor(kb_data, context_data)
+def overload_KnowledgeBase(context_data=None, kb_data=None):
+    if(context_data is None):
+        print("WARNING: haven't figured out instantiating kb in njit context")
+        glb_context_data = KnowledgeBaseContext.get_context().context_data
+        def impl(context_data=None, kb_data=None):
+            return kb_ctor(glb_context_data, kb_data)
+
+    else:
+        return kb_ctor
+        # def impl(context_data=None, kb_data=None):
+        #     return kb_ctor(context_data, kb_data)
+
     return impl
 
 

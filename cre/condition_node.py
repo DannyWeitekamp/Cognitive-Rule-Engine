@@ -385,6 +385,40 @@ def new_dnf(n):
         dnf.append((List.empty_list(PTermType), List.empty_list(PTermType)) )
     return dnf
 
+@njit(cache=True)
+def _conditions_ctor_single_var(_vars,dnf=None):
+    st = new(ConditionsType)
+    st.vars = List.empty_list(GenericVarType)
+    st.vars.append(_struct_from_pointer(GenericVarType,_vars.base_ptr)) 
+    st.var_map = build_var_map(st.vars)
+    # print("A",st.var_map)
+    st.dnf = dnf if(dnf) else new_dnf(1)
+    st.is_initialized = False
+    return st
+
+@njit(cache=True)
+def _conditions_ctor_var_map(_vars,dnf=None):
+    st = new(ConditionsType)
+    st.vars = build_var_list(_vars)
+    st.var_map = _vars.copy() # is shallow copy
+    # print("B",st.var_map)
+    st.dnf = dnf if(dnf) else new_dnf(len(_vars))
+    st.is_initialized = False
+    return st
+
+@njit(cache=True)
+def _conditions_ctor_var_list(_vars,dnf=None):
+    st = new(ConditionsType)
+    st.vars = List.empty_list(GenericVarType)
+    for x in _vars:
+        st.vars.append(_struct_from_pointer(GenericVarType,x.base_ptr))
+    # st.vars = List([ for x in _vars])
+    st.var_map = build_var_map(st.vars)
+    # print("C",st.var_map)
+    st.dnf = dnf if(dnf) else new_dnf(len(_vars))
+    st.is_initialized = False
+    return st
+
 @generated_jit(cache=True)
 @overload(Conditions,strict=False)
 def conditions_ctor(_vars, dnf=None):
@@ -392,37 +426,15 @@ def conditions_ctor(_vars, dnf=None):
     if(isinstance(_vars,VarTypeTemplate)):
         # _vars is single Var
         def impl(_vars,dnf=None):
-            st = new(ConditionsType)
-            st.vars = List.empty_list(GenericVarType)
-            st.vars.append(_struct_from_pointer(GenericVarType,_vars.base_ptr)) 
-            st.var_map = build_var_map(st.vars)
-            # print("A",st.var_map)
-            st.dnf = dnf if(dnf) else new_dnf(1)
-            st.is_initialized = False
-            return st
+            return _conditions_ctor_single_var(_vars,dnf)
     elif(isinstance(_vars,DictType)):
          # _vars is a valid var_map dictionary
         def impl(_vars,dnf=None):
-            st = new(ConditionsType)
-            st.vars = build_var_list(_vars)
-            st.var_map = _vars.copy() # is shallow copy
-            # print("B",st.var_map)
-            st.dnf = dnf if(dnf) else new_dnf(len(_vars))
-            st.is_initialized = False
-            return st
+            return _conditions_ctor_var_map(_vars,dnf)
     elif(isinstance(_vars,ListType)):
-        # _vars is a list of Vars
         def impl(_vars,dnf=None):
-            st = new(ConditionsType)
-            st.vars = List.empty_list(GenericVarType)
-            for x in _vars:
-                st.vars.append(_struct_from_pointer(GenericVarType,x.base_ptr))
-            # st.vars = List([ for x in _vars])
-            st.var_map = build_var_map(st.vars)
-            # print("C",st.var_map)
-            st.dnf = dnf if(dnf) else new_dnf(len(_vars))
-            st.is_initialized = False
-            return st
+            return _conditions_ctor_var_list(_vars,dnf)
+            
 
     return impl
 
@@ -435,34 +447,36 @@ def _get_sig_str(conds):
     return s + ")"
 
 
-@overload(str)
-def str_cond(self):
-    if(not isinstance(self, ConditionsTypeTemplate)): return
-    def impl(self):
-        s = ""
-        # for j, v in enumerate(self.vars):
-        #     s += str(v)
-        #     if(j < len(self.vars)-1): s += ", "
-        # s += '\n'
-        for j, conjunct in enumerate(self.dnf):
-            alphas, betas = conjunct
-            for i, alpha_term in enumerate(alphas):
-                s += "~" if alpha_term.negated else ""
-                s += "(" + str(alpha_term) + ")" 
-                if(i < len(alphas)-1 or len(betas)): s += " & "
-
-            for i, beta_term in enumerate(betas):
-                s += "~" if beta_term.negated else ""
-                s += "(" + str(beta_term) + ")" 
-                if(i < len(betas)-1): s += " & "
-
-            if(j < len(self.dnf)-1): s += " |\\\n"
-        return s
-    return impl
-
 @njit(cache=True)
 def conditions_str(self):
-    return str(self)
+    s = ""
+    # for j, v in enumerate(self.vars):
+    #     s += str(v)
+    #     if(j < len(self.vars)-1): s += ", "
+    # s += '\n'
+    for j, conjunct in enumerate(self.dnf):
+        alphas, betas = conjunct
+        for i, alpha_term in enumerate(alphas):
+            s += "~" if alpha_term.negated else ""
+            s += "(" + str(alpha_term) + ")" 
+            if(i < len(alphas)-1 or len(betas)): s += " & "
+
+        for i, beta_term in enumerate(betas):
+            s += "~" if beta_term.negated else ""
+            s += "(" + str(beta_term) + ")" 
+            if(i < len(betas)-1): s += " & "
+
+        if(j < len(self.dnf)-1): s += " |\\\n"
+    return s
+
+@overload(str)
+def overload_conds_str(self):
+    if(not isinstance(self, ConditionsTypeTemplate)): return
+    def impl(self):
+        return conds_str(self)
+        
+    return impl
+
 
 
 # NOT(ab+c) = NOT(ab)+c = (a'+b')c' = a'c'+b'c'

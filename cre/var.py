@@ -183,33 +183,36 @@ def overload_Var(typ,alias=None):
 
     return impl
 
+@njit(cache=True)
+def repr_var(self):
+    alias_part = ", '" + self.alias + "'" if len(self.alias) > 0 else ""
+    s = "Var(" + self.fact_type_name + "Type" + alias_part + ")"
+    for attr in self.deref_attrs:
+        s += "." + attr
+    return s
+
 
 @overload(repr)
-def repr_var(self):
+def overload_repr_var(self):
     if(not isinstance(self, VarTypeTemplate)): return
-    # fact_name = self.field_dict['fact_type'].instance_type._fact_name
-    def impl(self):
-        alias_part = ", '" + self.alias + "'" if len(self.alias) > 0 else ""
-        s = "Var(" + self.fact_type_name + "Type" + alias_part + ")"
+    return lambda self: repr_var(self)
+    
+
+@njit(cache=True)
+def str_var(self):
+    s = self.alias
+    if (len(s) > 0):
         for attr in self.deref_attrs:
             s += "." + attr
         return s
+    else:
+        return repr(self)
 
-    return impl
 
 @overload(str)
-def str_var(self):
+def overload_str_var(self):
     if(not isinstance(self, VarTypeTemplate)): return
-    # fact_name = self.field_dict['fact_type'].instance_type._fact_name
-    def impl(self):
-        s = self.alias
-        if (len(s) > 0):
-            for attr in self.deref_attrs:
-                s += "." + attr
-            return s
-        else:
-            return repr(self)
-    return impl
+    return lambda self: str_var(self)
 
 
 

@@ -80,7 +80,8 @@ class ConflictSetIter(object):
         match = matches[self.m_n]
         return rule, match
             
-            
+from time import time_ns
+
 class RuleEngine(object):
     def __init__(self,kb, rule_classes):
         self.kb = kb
@@ -96,16 +97,20 @@ class RuleEngine(object):
         while True:
             conflict_set = []
             for rule in self.rules:
+                t0 = time_ns()
                 matches = get_pointer_matches_from_linked(rule.conds)
+                t1 = time_ns()
+                print("\tget_matches", (t1-t0)/1e6)
                 if(len(matches) > 0):
                     conflict_set.append((rule,matches))
 
             cs_iter = ConflictSetIter(conflict_set)
 
             rule, match = next(cs_iter)
-            
+            t0 = time_ns()
             rule.then_from_ptrs(self.kb, match)
-
+            t1 = time_ns()
+            print("\tthen", (t1-t0)/1e6)
             if(self.kb.halt_flag):
                 return
 

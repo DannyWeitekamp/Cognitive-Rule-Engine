@@ -85,7 +85,7 @@ def get_pair_matches(alpha_inds, beta_conjuncts, beta_inds, conds):
 
             if(beta_inds[i,j] != -1):
                 terms_ij = beta_conjuncts[beta_inds[i,j]]
-                print(len(terms_ij))
+                # print(len(terms_ij))
                 if(len(terms_ij) > 1):
                     # When two or more beta nodes act on the same pair of variables
                     #   we need to find the intersection of the pairs they form

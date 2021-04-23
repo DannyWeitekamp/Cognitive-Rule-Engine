@@ -147,8 +147,11 @@ def gen_fact_code(typ, fields, fact_num, ind='    '):
     str_temp = ", ".join([f'{k}={{self.{k}}}' for k,v in fields])
 
 
-    # t_id = lines_in_fact_registry()
-    # print("FEILD LIST", field_list)
+
+# The source code template for a user defined fact. Written to the
+#  system cache so it can be its own module. Doing so helps njit(cache=True)
+#  work when using user defined facts.
+
     code = \
 f'''
 import numpy as np
@@ -259,7 +262,7 @@ def define_attributes(struct_typeclass):
             idrec = getattr(dataval, "idrec")
             idrec_set = builder.icmp_signed('!=', idrec, idrec.type(-1))
             with builder.if_then(idrec_set):
-                msg =("Facts objects are immutable once defined. Use kb.modify instead.",)
+                msg =("Facts objects are immutable once declared. Use kb.modify instead.",)
                 context.call_conv.return_user_exc(builder, AttributeError, msg)
             
         # read old

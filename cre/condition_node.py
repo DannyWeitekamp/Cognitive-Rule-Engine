@@ -354,6 +354,18 @@ class Conditions(structref.StructRefProxy):
         from cre.matching import get_matches
         return get_matches(self,kb)
 
+    @property
+    def signature(self):
+        if(not hasattr(self,"_signature")):
+            context = kb_context()
+            sig_str = _get_sig_str(self)
+            fact_types = sig_str[1:-1].split(",")
+            self._signature = types.void(*[context.fact_types[x] for x in fact_types])            
+
+        return self._signature
+    
+    
+
 define_boxing(ConditionsTypeTemplate,Conditions)
 
 ConditionsType = ConditionsTypeTemplate(conditions_fields)
@@ -413,6 +425,15 @@ def conditions_ctor(_vars, dnf=None):
             return st
 
     return impl
+
+@njit(cache=True)
+def _get_sig_str(conds):
+    s = "("
+    for i, var in enumerate(conds.vars):
+        s += var.fact_type_name
+        if(i < len(conds.vars)-1): s += ","
+    return s + ")"
+
 
 @overload(str)
 def str_cond(self):
@@ -587,15 +608,13 @@ def link_pterm_instance(pterm, kb):
 @njit(cache=True)
 def dnf_copy(dnf,shallow=True):
     ndnf = new_dnf(len(dnf))
-    print(len(ndnf))
-    for i, conjunct in enumerate(dnf):
-        for alpha_terms, beta_terms in conjunct:
-            if(shallow):
-                ndnf[i][0].append(alpha_terms)
-                ndnf[i][1].append(beta_terms)
-            else:
-                ndnf[i][0].append(pterm_copy(alpha_terms))
-                ndnf[i][1].append(pterm_copy(beta_terms))
+    for i, (alpha_term, beta_term) in enumerate(dnf):
+        for alpha_literal in alpha_term:
+            new_alpha = alpha_literal if(shallow) else pterm_copy(alpha_literal)
+            ndnf[i][0].append(new_alpha)
+        for beta_literal in beta_term:
+            new_beta = beta_literal if(shallow) else pterm_copy(beta_literal)
+            ndnf[i][1].append(new_beta)
     return ndnf
 
 @njit(cache=True)

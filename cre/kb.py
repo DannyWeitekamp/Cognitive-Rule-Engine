@@ -7,8 +7,8 @@ from numba.typed import List, Dict
 from numba.core.types import DictType, ListType, unicode_type, float64, NamedTuple, NamedUniTuple, UniTuple, Tuple, Array, optional
 from numba.cpython.unicode import  _set_code_point
 from numba.experimental import structref
-from numba.experimental.structref import new
-from numba.extending import overload_method, intrinsic
+from numba.experimental.structref import new, define_boxing
+from numba.extending import overload_method, intrinsic, overload
 from cre.core import TYPE_ALIASES, REGISTERED_TYPES, JITSTRUCTS, py_type_map, numba_type_map, numpy_type_map
 from numba.core import types, cgutils
 from numba.core.errors import TypingError
@@ -203,21 +203,60 @@ class KnowledgeBase(structref.StructRefProxy):
     def modify(self, fact, attr, val):
         return modify(self,fact, attr, val)
 
+    @property
+    def halt_flag(self):
+        return get_halt_flag(self)
+
+    @property
+    def backtrack_flag(self):
+        return get_backtrack_flag(self)
+    
+
     def __del__(self):
         pass
         # kb_data_dtor(self.kb_data)
 
+@njit(cache=True)
+def get_halt_flag(self):
+    return self.halt_flag
 
+@njit(cache=True)
+def get_backtrack_flag(self):
+    return self.backtrack_flag
 
 @structref.register
 class KnowledgeBaseTypeTemplate(types.StructRef):
     def preprocess_fields(self, fields):
         return tuple((name, types.unliteral(typ)) for name, typ in fields)
 
-structref.define_proxy(KnowledgeBase, KnowledgeBaseTypeTemplate, ["kb_data", "context_data"])
-KnowledgeBaseType = KnowledgeBaseTypeTemplate(fields=[
+kb_fields = [
     ("kb_data",KnowledgeBaseDataType),
-    ("context_data" , KnowledgeBaseContextDataType)])
+    ("context_data" , KnowledgeBaseContextDataType),
+    ("halt_flag", u1),
+    ("backtrack_flag", u1)
+    ]
+
+
+define_boxing(KnowledgeBaseTypeTemplate,KnowledgeBase)
+
+KnowledgeBaseType = KnowledgeBaseTypeTemplate(kb_fields)
+# structref.define_proxy(KnowledgeBase, KnowledgeBaseTypeTemplate, [x[0] for x in kb_fields])
+# KnowledgeBaseType = KnowledgeBaseTypeTemplate(fields=)
+
+@njit(cache=True)
+def kb_ctor(kb_data,context_data):
+    st = new(KnowledgeBaseType) 
+    st.kb_data = kb_data
+    st.context_data = context_data
+    st.halt_flag = u1(0)
+    st.backtrack_flag = u1(0)
+    return st
+
+@overload(KnowledgeBase)
+def overload_KnowledgeBase(kb_data,context_data):
+    def impl(kb_data,context_data):
+        return kb_ctor(kb_data, context_data)
+    return impl
 
 
 @njit(cache=True)
@@ -435,6 +474,17 @@ def all_facts_of_type(kb,typ):
     return out
 
 #### KnowledgeBase Overloading #####
+@overload_method(KnowledgeBaseTypeTemplate, "halt")
+def kb_halt(self):
+    def impl(self):
+        self.halt_flag = u1(1)
+    return impl
+
+@overload_method(KnowledgeBaseTypeTemplate, "backtrack")
+def kb_backtrack(self):
+    def impl(self):
+        self.backtrack_flag = u1(1)
+    return impl
 
 @overload_method(KnowledgeBaseTypeTemplate, "add_subscriber")
 def kb_declare(self, subscriber):

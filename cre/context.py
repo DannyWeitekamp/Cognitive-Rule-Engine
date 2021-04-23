@@ -33,14 +33,14 @@ Dict_Unicode_to_Flags = DictType(unicode_type,u1[:])
 
 context_data_fields = [
     ("string_enums" , DictType(unicode_type,i8)),
-    ("number_enums" , DictType(i8,i8)),
+    ("number_enums" , DictType(f8,i8)),
     ("string_backmap" , DictType(i8,unicode_type)),
     ("number_backmap" , DictType(i8,f8)),
     ("enum_counter" , Array(i8, 0, "C")),
     ("attr_inds_by_type" , DictType(unicode_type,Dict_Unicode_to_i8)),
     ("spec_flags" , DictType(unicode_type,Dict_Unicode_to_Flags)),
     ("fact_to_t_id" , DictType(unicode_type,i8)),
-    ("fact_num_to_t_id" , i8[:]),#DictType(i8,i8)),
+    ("fact_num_to_t_id" , i8[::1]),#DictType(i8,i8)),
 ]
 
 KnowledgeBaseContextData, KnowledgeBaseContextDataType = define_structref("KnowledgeBaseContextData",context_data_fields)

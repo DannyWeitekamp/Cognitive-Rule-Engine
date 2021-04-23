@@ -69,7 +69,7 @@ def get_alpha_inds(facts_per_var, alpha_conjuncts, conds):
         alpha_inds.append(inds)
 
             # print(i, alpha_inds[i])
-    print("alpha_inds", alpha_inds)
+    # print("alpha_inds", alpha_inds)
     # alpha_inds_list.append(alpha_inds)
     return alpha_inds
 

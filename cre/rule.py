@@ -17,12 +17,13 @@ from numba.core.datamodel import default_manager, models
 from numba.core.typing.templates import AttributeTemplate
 from numba.core import types, cgutils
 from numba.np.arrayobj import _getitem_array_single_int, make_array
+from numba.experimental.structref import define_boxing, new
 from cre.caching import _UniqueHashable
 # from numba.core.extending import overload
 
 from cre.core import TYPE_ALIASES, REGISTERED_TYPES, JITSTRUCTS, py_type_map, numba_type_map, numpy_type_map
 from cre.gensource import assert_gen_source
-from cre.caching import unique_hash, source_to_cache, import_from_cached, source_in_cache, get_cache_path
+from cre.caching import unique_hash, source_to_cache, import_from_cached, source_in_cache, get_cache_path, cache_safe_exec
 from cre.structref import gen_structref_code, define_structref, define_structref_template
 from cre.context import kb_context
 from cre.utils import _cast_structref, _struct_from_pointer
@@ -31,6 +32,9 @@ from cre.fact import define_fact
 from cre.condition_node import get_linked_conditions_instance
 from cre.kb import KnowledgeBaseType
 from cre.matching import get_pointer_matches_from_linked
+from cre.condition_node import ConditionsType
+import inspect, dill, pickle
+from textwrap import dedent
 # from numba
 
 
@@ -108,7 +112,7 @@ class RuleEngine(object):
 
             rule, match = next(cs_iter)
             t0 = time_ns()
-            rule.then_from_ptrs(self.kb, match)
+            rule.apply_then_from_ptrs(self.kb, match)
             t1 = time_ns()
             print("\tthen", (t1-t0)/1e6)
             if(self.kb.halt_flag):
@@ -171,12 +175,42 @@ def _struct_tuple_from_pointer_arr(typingctx, struct_types, ptr_arr):
 
     return sig,codegen
 
-    
+def gen_rule_source(cls):
+    '''Generate source code for the relevant functions of a user defined rule.
+       Note: The jitted then() function is pickled, the bytes dumped into the 
+        source, and then reconstituted at runtime. This strategy seems to work
+        even if globals are used in the function. 
+    '''
+    arg_types = cls.sig.args
+    arg_imports = "\n".join([f"from cre_cache.{x._fact_name}._{x._hash_code} import {x._fact_name + 'Type'}" for x in arg_types])
+    source = \
+f'''from numba import njit
+from cre.rule import _struct_tuple_from_pointer_arr
+import pickle
+{arg_imports}
+arg_types = ({" ".join([x._fact_name +"Type," for x in arg_types])})
 
-class Rule(metaclass=RuleMeta):
-    def __init__(self, conds):
-        '''An instance of a rule has its conds linked to a KnowledgeBase'''
-        self.conds = conds
+
+then = pickle.loads({pickle.dumps(njit(cls.then_pyfunc))})
+then.enable_caching()
+
+@njit(cache=True)
+def apply_then_from_ptrs(kb,ptrs):
+    facts_tuple = _struct_tuple_from_pointer_arr(arg_types,ptrs)
+    then(kb,*facts_tuple)
+'''
+    return source
+
+
+class Rule(structref.StructRefProxy, metaclass=RuleMeta):
+    def __new__(self,conds=None):
+        
+        self = rule_ctor(conds if conds else self.conds, self._apply_then_from_ptrs)
+        if(conds is not None): self.conds = conds
+        return self
+    # def __init__(self, conds):
+    #     '''An instance of a rule has its conds linked to a KnowledgeBase'''
+    #     self.conds = conds
 
     def __init_subclass__(cls, **kwargs):
         ''' Define a rule, it must have when/conds and then defined'''
@@ -188,34 +222,79 @@ class Rule(metaclass=RuleMeta):
         assert hasattr(cls,"then"), "Rule must have then() defined"
 
         cls.sig = cls.conds.signature
-        print(cls.sig.args)
+
+        # print(types.void(*cls.sig.args))
+        # print(cls.sig.args)
         cls.then_pyfunc = cls.then
-        then = cls.then = njit(cls.then_pyfunc, cache=True)
+        # cls.then = njit(cls.then_pyfunc)
+        # cls.then_src = dedent(inspect.getsource(cls.then_pyfunc))
+        cls.then_src = dedent(inspect.getsource(cls.then_pyfunc))
+
         arg_types = cls.sig.args
 
-        @njit(cache=True)
-        def _then_from_ptrs(kb,ptrs):
-            facts_tuple = _struct_tuple_from_pointer_arr(arg_types,ptrs)
-            # for i,arg_type in enumerate(literal_unroll(arg_types)):
-            #     l.append(_struct_from_pointer(arg_type, ptrs[i]))
-            then(kb,*facts_tuple)
-            # then(*[_struct_from_pointer(arg_type, ptrs[i]) for i,arg_type in enumerate(literal_unroll(arg_types))])
+        name = cls.__name__
+        hash_code = unique_hash(list(arg_types)+[cls.then_src])
+        # print(hash_code)
+        if(not source_in_cache(name, hash_code) or getattr(cls,'cache_then',True) == False):
 
-        cls._then_from_ptrs = _then_from_ptrs
+            source = gen_rule_source(cls)
+            source_to_cache(name,hash_code,source)
+
+        l = import_from_cached(name, hash_code, ['then','apply_then_from_ptrs'])
+        # l,g = cache_safe_exec(source,gbls={'then':then, 'arg_types':arg_types})
+
+
+
+        # raise ValueError()
+        cls.then = l['then']
+        cls._apply_then_from_ptrs = l['apply_then_from_ptrs']
 
         # then_from_ptrs(cls.then, np.zeros(5,dtype=np.int64))
 
             
-        print("SURPRISE!")
-        print(cls.conds)
+        # print("SURPRISE!")
+        # print(cls.conds)
 
-    @classmethod
-    def then_from_ptrs(cls,kb,ptrs):
+    # @classmethod
+    def apply_then_from_ptrs(cls, kb, ptrs):
         '''Applies then() on a matching set of facts given as an array of pointers'''
-        return cls._then_from_ptrs(kb,ptrs)
+        return rule_apply_then_from_ptrs(cls, kb, ptrs)
+
+    # @property
+    # def conds(self):
+    #     return rule_get_conds(self)
 
 
+@njit(cache=True)
+def rule_apply_then_from_ptrs(self, kb, ptrs):
+    return self.apply_then_from_ptrs(kb,ptrs)
 
+@njit(cache=True) 
+def rule_get_conds(self):
+    return self.conds
+
+
+@structref.register
+class RuleTypeTemplate(types.StructRef):
+    def preprocess_fields(self, fields):
+        return tuple((name, types.unliteral(typ)) for name, typ in fields)
+
+rule_fields = [
+    ("conds" , ConditionsType),
+    ("apply_then_from_ptrs",types.FunctionType(types.void(KnowledgeBaseType,i8[::1]))),
+    ]
+
+
+define_boxing(RuleTypeTemplate,Rule)
+
+RuleType = RuleTypeTemplate(rule_fields)
+
+@njit(cache=True)
+def rule_ctor(conds, apply_then_from_ptrs):
+    st = new(RuleType)
+    st.conds = conds
+    st.apply_then_from_ptrs = apply_then_from_ptrs
+    return st
 
 
 

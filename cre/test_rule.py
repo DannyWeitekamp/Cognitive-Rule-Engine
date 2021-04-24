@@ -2,25 +2,28 @@ import time
 
 t0 = time.time_ns()
 
-# import numpy as np
+import numpy as np
 from numba import njit
-# from cre.fact import define_fact
-# from cre.rule import Rule, RuleEngine
-# from cre.kb import KnowledgeBase
-# from cre.var import Var
-# from cre.utils import _pointer_from_struct,_pointer_from_struct_incref
+from cre.fact import define_fact
+from cre.rule import Rule, RuleEngine
+from cre.kb import KnowledgeBase
+from cre.var import Var
+from cre.utils import _pointer_from_struct,_pointer_from_struct_incref
 
 t1 = time.time_ns()
 print("Import time:",(t1-t0)/1e6)
 
-raise ValueError()
+# raise ValueError()
 
 StopLight, StopLightType = define_fact("StopLight",{"color": "string"})
 
 t2 = time.time_ns()
 print("Define Fact time:",(t2-t1)/1e6)
 
+global_value = 11
+
 class GreenToYellow(Rule):
+    # cache_then = False
     def when():
         s = Var(StopLightType,"l1")
         c = (s.color == "green")
@@ -30,6 +33,7 @@ class GreenToYellow(Rule):
         b = s.color
         kb.modify(s,"color",'yellow')
         print(b+ "->" + s.color)
+        # print(np.abs(global_value))
         # kb.declare(BOOP("???",1000+r2.B))
         # kb.halt()
 

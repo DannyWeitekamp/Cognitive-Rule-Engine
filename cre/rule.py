@@ -61,6 +61,8 @@ class RuleMeta(type, _UniqueHashable):
 #     return impl
 
 
+
+
 class ConflictSetIter(object):
     def __init__(self, rule_match_pairs):
         self.rule_match_pairs = rule_match_pairs
@@ -86,37 +88,6 @@ class ConflictSetIter(object):
             
 from time import time_ns
 
-class RuleEngine(object):
-    def __init__(self,kb, rule_classes):
-        self.kb = kb
-        self.rule_classes = rule_classes
-        self.rules = []
-        for rule_cls in rule_classes:
-            conds =  get_linked_conditions_instance(rule_cls.conds, kb, copy=True) 
-            self.rules.append(rule_cls(conds))
-
-    def start(self):
-        stack = []
-
-        while True:
-            conflict_set = []
-            for rule in self.rules:
-                t0 = time_ns()
-                matches = get_pointer_matches_from_linked(rule.conds)
-                t1 = time_ns()
-                print("\tget_matches", (t1-t0)/1e6)
-                if(len(matches) > 0):
-                    conflict_set.append((rule,matches))
-
-            cs_iter = ConflictSetIter(conflict_set)
-
-            rule, match = next(cs_iter)
-            t0 = time_ns()
-            rule.apply_then_from_ptrs(self.kb, match)
-            t1 = time_ns()
-            print("\tthen", (t1-t0)/1e6)
-            if(self.kb.halt_flag):
-                return
 
 
                 
@@ -298,12 +269,89 @@ def rule_ctor(conds, apply_then_from_ptrs):
 
 
 
+rule_matches_tuple_type = types.Tuple((RuleType,i8[:,::1]))
+
+conflict_set_iter_fields = [
+    ("rule_match_pairs", types.ListType(rule_matches_tuple_type)),
+    ("r_n", i8),
+    ("m_n", i8),
+]
+
+ConflictSetIter, ConflictSetIterType = define_structref("ConflictSetIter", conflict_set_iter_fields)
+
+@njit(cache=True)
+def conflict_set_iter_ctor(rule_match_pairs):
+    st = new(ConflictSetIterType)
+    st.rule_match_pairs = rule_match_pairs
+    st.r_n = 0
+    st.m_n = 0
+    return st
+
+@njit(cache=True)
+def cs_iter_empty(self):
+    return self.r_n >= len(self.rule_match_pairs)
+
+@njit(cache=True)
+def cs_iter_next(self):
+    if(self.r_n >= len(self.rule_match_pairs)):
+        raise StopIteration()
+
+    rule, matches = self.rule_match_pairs[self.r_n]
+    if(self.m_n >= len(matches)):
+        self.r_n +=1
+        self.m_n = 0
+    
+    match = matches[self.m_n]
+    return rule, match
 
 
-        
-        
+class RuleEngine(object):
+    def __init__(self,kb, rule_classes):
+        self.kb = kb
+        self.rule_classes = rule_classes
+        self.rules = List.empty_list(RuleType)
+        for rule_cls in rule_classes:
+            conds =  get_linked_conditions_instance(rule_cls.conds, kb, copy=True) 
+            self.rules.append(rule_cls(conds))
+        # self.rules = List(self.rules)
 
+    def start(self):
+        rule_engine_start(self.kb,self.rules)
         
+            
+
+@njit(cache=True)
+def rule_engine_start(kb, rules):
+    stack = List.empty_list(ConflictSetIterType)
+
+    while True:
+        conflict_set = List.empty_list(rule_matches_tuple_type)
+        for rule in rules:
+            # t0 = time_ns()
+            matches = get_pointer_matches_from_linked(rule.conds)
+            # t1 = time_ns()
+            # print("\tget_matches", (t1-t0)/1e6)
+            if(len(matches) > 0):
+                conflict_set.append((rule,matches))
+
+        cs_iter = conflict_set_iter_ctor(conflict_set)
+
+        if(not cs_iter_empty(cs_iter)):
+            rule, match = cs_iter_next(cs_iter)
+            # t0 = time_ns()
+            rule.apply_then_from_ptrs(kb, match)
+            # t1 = time_ns()
+            # print("\tthen", (t1-t0)/1e6)
+            if(kb.halt_flag):
+                return
+
+            if(kb.backtrack_flag):
+                pass
+            else:
+                stack.append(cs_iter)
+        
+            
+
 
 
 

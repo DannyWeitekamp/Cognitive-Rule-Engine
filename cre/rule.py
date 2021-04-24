@@ -35,79 +35,12 @@ from cre.matching import get_pointer_matches_from_linked
 from cre.condition_node import ConditionsType
 import inspect, dill, pickle
 from textwrap import dedent
-# from numba
 
 
-# Rule, RuleTemplateType = define_structref("Rule")
-
+#### Rule ####
 
 class RuleMeta(type, _UniqueHashable):
     pass
-    # def __repr__(cls):
-    #     return cls.template.format(*(['?']*len(cls.arg_types)),name=cls.__name__)
-
-    # def get_hashable(cls):
-    #     d = {k: v for k,v in vars(cls).items() if k in cls.hash_on}
-    #     print("WHEE",d)
-    #     return d
-
-
-# @generated_jit(cache=True)
-# def then_from_ptrs(f,arg_types,ptrs):
-#     print(f.__dict__)
-#     def impl(f,ptrs):
-#         pass
-        
-#     return impl
-
-
-
-
-class ConflictSetIter(object):
-    def __init__(self, rule_match_pairs):
-        self.rule_match_pairs = rule_match_pairs
-        self.r_n = 0
-        self.m_n = 0
-    
-    def __iter__(self):
-        self.r_n = 0
-        self.m_n = 0
-        return self
-
-    def __next__(self):
-        if(self.r_n >= len(self.rule_match_pairs)):
-            raise StopIteration()
-
-        rule, matches = self.rule_match_pairs[self.r_n]
-        if(self.m_n >= len(matches)):
-            self.r_n +=1
-            self.m_n = 0
-        
-        match = matches[self.m_n]
-        return rule, match
-            
-from time import time_ns
-
-
-
-                
-
-            # print(rule.conds)
-
-
-# def gen_then_source(sig,arg_names):
-#     s = \
-# f'''
-
-# then = njit(rule_cls.then, cache=True)
-# @njit(cache=True)
-# def then(kb,{",".join(arg_names)}):
-#     {"\n".join()}
-
-
-
-# '''
-
 
 
 @intrinsic
@@ -267,7 +200,7 @@ def rule_ctor(conds, apply_then_from_ptrs):
     st.apply_then_from_ptrs = apply_then_from_ptrs
     return st
 
-
+#### ConflictSetItr ####
 
 rule_matches_tuple_type = types.Tuple((RuleType,i8[:,::1]))
 
@@ -280,7 +213,7 @@ conflict_set_iter_fields = [
 ConflictSetIter, ConflictSetIterType = define_structref("ConflictSetIter", conflict_set_iter_fields)
 
 @njit(cache=True)
-def conflict_set_iter_ctor(rule_match_pairs):
+def cs_iter_ctor(rule_match_pairs):
     st = new(ConflictSetIterType)
     st.rule_match_pairs = rule_match_pairs
     st.r_n = 0
@@ -304,6 +237,7 @@ def cs_iter_next(self):
     match = matches[self.m_n]
     return rule, match
 
+#### RuleEngine ####
 
 class RuleEngine(object):
     def __init__(self,kb, rule_classes):
@@ -334,7 +268,7 @@ def rule_engine_start(kb, rules):
             if(len(matches) > 0):
                 conflict_set.append((rule,matches))
 
-        cs_iter = conflict_set_iter_ctor(conflict_set)
+        cs_iter = cs_iter_ctor(conflict_set)
 
         if(not cs_iter_empty(cs_iter)):
             rule, match = cs_iter_next(cs_iter)

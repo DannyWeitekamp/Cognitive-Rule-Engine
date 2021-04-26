@@ -1,5 +1,5 @@
 from cre.fact import _fact_from_spec, _standardize_spec, _merge_spec_inheritance, \
-    define_fact, cast_fact, _cast_structref, BaseFact, BaseFactType
+     define_fact, cast_fact, _cast_structref, BaseFact, BaseFactType
 from cre.context import kb_context
 from cre.kb import KnowledgeBase
 from numba import njit, u8
@@ -206,6 +206,28 @@ def test_protected_mutability():
             edit_it(b1)
 
         
+#Work in progress...
+def _test_reference_type():
+    with kb_context("test_reference_type"):
+        spec = {"A" : "string", "B" : "number"}
+        BOOP, BOOPType = define_fact("BOOP", spec)
+
+        spec = {"name" : "string", "other" : "BOOP"}
+        TestRef, TestRefType = define_fact("TestRef", spec)
+
+        a = BOOP("A", 1)
+        b = TestRef("B", a)
+        print(a, b)
+        # print(a)
+
+
+        spec = {"name" : "string", "next" : "TestLL"}
+        TestLL, TestLLType = define_fact("TestLL", spec)
+
+        t1 = TestLL()
+        t2 = TestLL(next=t1)
+        print(t1,t2)
+
 
         
 
@@ -213,10 +235,14 @@ def test_protected_mutability():
 
 
 
+
+
 if __name__ == "__main__":
-    test__standardize_spec()
-    test__merge_spec_inheritance()
-    test_define_fact()
-    test_inheritence()
-    test_cast_fact()
-    test_protected_mutability()
+    # test__standardize_spec()
+    # test__merge_spec_inheritance()
+    # test_define_fact()
+    # test_inheritence()
+    # test_cast_fact()
+    # test_protected_mutability()
+
+    _test_reference_type()

@@ -28,7 +28,7 @@ from cre.structref import gen_structref_code, define_structref, define_structref
 from cre.context import kb_context
 from cre.utils import _cast_structref, _struct_from_pointer
 from cre.var import Var
-from cre.fact import define_fact
+from cre.fact import define_fact, gen_fact_import_str
 from cre.condition_node import get_linked_conditions_instance
 from cre.kb import KnowledgeBaseType
 from cre.matching import get_pointer_matches_from_linked
@@ -86,7 +86,7 @@ def gen_rule_source(cls):
         even if globals are used in the function. 
     '''
     arg_types = cls.sig.args
-    arg_imports = "\n".join([f"from cre_cache.{x._fact_name}._{x._hash_code} import {x._fact_name + 'Type'}" for x in arg_types])
+    arg_imports = "\n".join([gen_fact_import_str(x) for x in arg_types])
     source = \
 f'''from numba import njit
 from cre.rule import _struct_tuple_from_pointer_arr

@@ -278,7 +278,7 @@ def _struct_get_attr_offset(typingctx, inst, attr):
     sig = i8(inst,attr)
     return sig, codegen
 
-@njit(cache=True)
+@njit(cache=False)
 def struct_get_attr_offset(inst,attr):
     return _struct_get_attr_offset(inst,literally(attr))
 

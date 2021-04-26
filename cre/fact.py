@@ -30,22 +30,48 @@ GLOBAL_FACT_COUNT = -1
 SPECIAL_ATTRIBUTES = ["inherit_from"]
 
 ###### Fact Specification Preprocessing #######
+class DefferedFactRefType():
+    '''A placeholder type for when referencing a fact type that
+        is not defined yet.'''
+    def __init__(self,typ):
+        self._fact_name = typ._fact_name if isinstance(typ,types.StructRef) else typ 
+    def __equal__(self,other):
+        return isinstance(other,DefferedRefType) \
+               and self._fact_name == other._fact_name
+    def __str__(self):
+        return f"DefferedFactRefType[{self._fact_name}]"
 
-def _get_entry_type_flags(attr, v):
+
+def _get_type(typ, context, name='', attr=''):
+    '''Takes in a string or type and returns the type'''
+    if(isinstance(typ,str)):
+        typ_str = typ
+        if(typ_str.lower() in TYPE_ALIASES): 
+            typ = numba_type_map[TYPE_ALIASES[typ_str.lower()]]
+        elif(typ_str in context.fact_types):
+            typ = context.fact_types[typ_str]
+        elif(typ_str == name):
+            typ = DefferedFactRefType(name)
+        else:
+            raise TypeError(f"Spec attribute type '{typ_str}' not recognized" + 
+                f" on attr {attr}." if attr else ".")
+    if(hasattr(typ, "_fact_type")): typ = typ._fact_type
+    return typ
+
+
+def _get_attr_type_flags(attr, v, context, name=''):
     '''A helper function for _standardize_spec'''
-    if(isinstance(v,str)):
-        typ, flags = v.lower(), []
-    elif(isinstance(v,dict)):
+
+    # Extract typ_str + flags
+    
+    if(isinstance(v,dict)):
         assert "type" in v, "Attribute specifications must have 'type' property, got %s." % v
-        typ = v['type'].lower()
+        typ = _get_type(v['type'], context, name, attr)
         flags = [x.lower() for x in v.get('flags',[])]
     else:
-        raise ValueError(f"Spec attribute '{attr}' = '{v}' is not valid type with type {type(v)}.")
-
-    if(typ not in TYPE_ALIASES): 
-        raise TypeError(f"Spec attribute type {typ} not recognized on attribute {attr}")
-
-    typ = TYPE_ALIASES[typ]
+        typ, flags = _get_type(v, context, name, attr), []
+    
+    print(typ, flags)
 
     return typ, flags
 
@@ -78,13 +104,14 @@ def _merge_spec_inheritance(spec : dict, context):
     del spec['inherit_from']
     return {**inherit_spec, **spec}, inherit_from
 
-def _standardize_spec(spec : dict):
+def _standardize_spec(spec : dict, context, name=''):
     '''Takes in a spec and puts it in standard form'''
+
     out = {}
     for attr,v in spec.items():
         if(attr in SPECIAL_ATTRIBUTES): out[attr] = v; continue;
 
-        typ, flags = _get_entry_type_flags(attr,v)
+        typ, flags = _get_attr_type_flags(attr,v, context, name)
 
         #Strings are always nominal
         if(typ == 'unicode_type' and ('nominal' not in flags)): flags.append('nominal')
@@ -130,21 +157,76 @@ class FactProxy:
         """
         return self._type
 
+def gen_fact_import_str(t):
+    return f"from cre_cache.{t._fact_name}._{t._hash_code} import {t._fact_name + 'Type'}"
 
-from .structref import _gen_getter, _gen_getter_jit
+def _gen_getter_jit(f_typ,typ,attr):
+    if(isinstance(typ,(types.StructRef,DefferedFactRefType))):
+        return \
+f'''@njit(cache=True)
+def {f_typ}_get_{attr}_as_ptr(self):
+    return self.{attr}
+
+@njit(cache=True)
+def {f_typ}_get_{attr}(self):
+    return _struct_from_pointer({typ._fact_name}Type, self.{attr})
+'''
+    else:
+        return \
+f'''@njit(cache=True)
+def {f_typ}_get_{attr}(self):
+    return self.{attr}
+'''
+
+def _gen_getter(typ,attr):
+    return f'''    @property
+    def {attr}(self):
+        return {typ}_get_{attr}(self)
+    '''
+
+# from .structref import _gen_getter, _gen_getter_jit
+
+def get_type_default(t):
+    if(isinstance(t,(str,types.UnicodeType))):
+        return ""
+    elif(isinstance(t,(float,types.Float))):
+        return 0.0
+    elif(isinstance(t,(int,types.Integer))):
+        return 0
+    else:
+        return None
+
+
 def gen_fact_code(typ, fields, fact_num, ind='    '):
+    '''Generate the source code for a new fact '''
+    fact_imports = ""
+    for attr,t in fields:
+        if(isinstance(t,types.StructRef)):
+            fact_imports += f"{gen_fact_import_str(t)}\n"
+
+
     all_fields = base_fact_fields+fields
     getters = "\n".join([_gen_getter(typ,attr) for attr,t in all_fields])
-    getter_jits = "\n".join([_gen_getter_jit(typ,attr) for attr,t in all_fields])
+    getter_jits = "\n".join([_gen_getter_jit(typ,t,attr) for attr,t in all_fields])
     field_list = ",".join(["'%s'"%attr for attr,t in fields])
-    param_list = ",".join([attr for attr,t in fields])
+    param_list = ",".join([f"{attr}={get_type_default(t)!r}" for attr,t in fields])
     base_list = ",".join([f"'{k}'" for k,v in base_fact_fields])
     base_type_list = ",".join([str(v) for k,v in base_fact_fields])
-    field_type_list = ",".join([str(v) for k,v in fields])
 
-    init_fields = f'\n{ind}'.join([f"st.{k} = {k}" for k,v in fields])
+    fact_types = (types.StructRef, DefferedFactRefType)
 
-    str_temp = ", ".join([f'{k}={{self.{k}}}' for k,v in fields])
+    # To avoid various typing issues fact refs are just i8 (i.e. raw pointers)
+    typ_str = lambda x: f"int64" if isinstance(x,fact_types) else str(x)
+    field_type_list = ",".join([typ_str(v)  for k,v in fields])
+
+
+    assign_str = lambda a,t: f"st.{a} = " + (f"_pointer_from_struct_incref({a}) if ({a} is not None) else 0" \
+                            if isinstance(t,fact_types) else f"{a}")
+    init_fields = f'\n{ind}'.join([assign_str(k,v) for k,v in fields])
+
+    temp_str_f = lambda a, t: f'{a}=<{t._fact_name} at {{hex({typ}_get_{a}_as_ptr(self))}}>' \
+                            if(isinstance(t,fact_types))  else f'{a}={{repr(self.{a})}}' 
+    str_temp = ", ".join([temp_str_f(k,v) for k,v in fields])
 
 
 
@@ -163,11 +245,10 @@ from numba.experimental import structref
 from numba.experimental.structref import new, define_boxing
 from numba.core.extending import overload
 from cre.fact import _register_fact_structref, FactProxy
-from cre.utils import struct_get_attr_offset
+from cre.utils import struct_get_attr_offset, _pointer_from_struct_incref, _struct_from_pointer
+{fact_imports}
 
 attr_offsets = np.empty(({len(all_fields)},),dtype=np.int16)
-
-{getter_jits}
 
 @_register_fact_structref
 class {typ}TypeTemplate(types.StructRef):
@@ -195,6 +276,8 @@ def ctor({param_list}):
     {init_fields}
     return st
 
+{getter_jits}
+
 class {typ}(FactProxy):
     __numba_ctor = ctor
     _fact_type = {typ}Type
@@ -202,8 +285,8 @@ class {typ}(FactProxy):
     _fact_num = {fact_num}
     _attr_offsets = attr_offsets
 
-    def __new__(cls, *args):
-        return structref.StructRefProxy.__new__(cls, *args)
+    def __new__(cls, *args,**kwargs):
+        return ctor(*args,**kwargs)
 
     def __str__(self):
         return f'{typ}({str_temp})'
@@ -319,8 +402,8 @@ def _fact_from_fields(name, fields, context=None):
 
 def _fact_from_spec(name, spec, context=None):
     # assert parent_fact_type
-    fields = [(k,numba_type_map[v['type']]) for k, v in spec.items()]
-    return _fact_from_fields(name,fields)
+    fields = [(k,v['type']) for k, v in spec.items()]
+    return _fact_from_fields(name,fields,context=context)
 
     
 
@@ -328,7 +411,7 @@ def define_fact(name : str, spec : dict, context=None):
     '''Defines a new fact.'''
     context = kb_context(context)
 
-    spec = _standardize_spec(spec)
+    spec = _standardize_spec(spec,context,name)
     spec, inherit_from = _merge_spec_inheritance(spec,context)
 
     if(name in context.fact_types):

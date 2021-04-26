@@ -115,9 +115,6 @@ class Var(object):
 			return str(self.binding)
 
 
-
-
-
 class OperatorComposition(object):
 	def __init__(self,tup):
 		#Minimal initialization at instantiation to reduce overhead

@@ -1,5 +1,5 @@
 from cre.fact import _fact_from_spec, _standardize_spec, _merge_spec_inheritance, \
-     define_fact, cast_fact, _cast_structref, BaseFact, BaseFactType
+     define_fact, cast_fact, _cast_structref, BaseFact, BaseFactType, DefferedFactRefType
 from cre.context import kb_context
 from cre.kb import KnowledgeBase
 from numba import njit, u8
@@ -228,6 +228,7 @@ def _test_reference_type():
         t2 = TestLL(next=t1)
         print(t1,t2)
 
+        
 
         
 

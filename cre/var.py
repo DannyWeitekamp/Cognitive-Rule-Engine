@@ -102,7 +102,19 @@ class Var(structref.StructRefProxy):
     def __ge__(self,other): return self._cmp_helper(">=",other,False)
     def __eq__(self,other): return self._cmp_helper("==",other,False)
     def __ne__(self,other): return self._cmp_helper("==",other,True)
-        
+
+    def __and__(self, other):
+        from cre.condition_node import conditions_and
+        return conditions_and(self, other)
+
+    def __or__(self, other):
+        from cre.condition_node import conditions_or
+        return conditions_or(self, other)
+    
+
+
+
+
 
 def var_cmp_alpha(left_var, op_str, right_var,negated):
     from cre.condition_node import pt_to_cond, gen_pterm_ctor_alpha, gen_pterm_ctor_beta

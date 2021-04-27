@@ -17,8 +17,8 @@ def first_alpha(c):
 def first_beta(c):
     return c.dnf[0][1][0].is_alpha 
 
-def test_term():
-    with kb_context("test_term"):
+def test_literal():
+    with kb_context("test_literal"):
         # BOOP, BOOPType = define_fact("BOOP",{"A": "string", "B" : "number"})
         l1, l2 = Var(BOOPType,"l1"), Var(BOOPType,"l2")
         c1 = l1.B < 1
@@ -184,6 +184,17 @@ def test_link():
 
         
 
+def test_unconditioned():
+
+    l1, l2 = Var(BOOPType,"l1"), Var(BOOPType,"l2")
+
+    # c = var_and(l1,l2)
+
+    print(conditions_repr(l1 & l2,"c"))
+    print(conditions_repr((l1.B < 1) & l2, "c"))
+    print(conditions_repr(l1 & (l2.B > 1), "c"))
+    
+
 
     
 
@@ -195,6 +206,11 @@ if(__name__ == "__main__"):
         t0 = time_ns()
         test_build_conditions()
         print(f'{(time_ns()-t0)/1e6} ms')
+    for i in range(10):
+        t0 = time_ns()
+        test_unconditioned()
+        print(f'{(time_ns()-t0)/1e6} ms')
+    
 # # bar.py_func()
     # bar()
 

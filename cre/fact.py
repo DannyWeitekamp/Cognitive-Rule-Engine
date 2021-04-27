@@ -53,8 +53,8 @@ def _get_type(typ, context, name='', attr=''):
         elif(typ_str == name):
             typ = DefferedFactRefType(name)
         else:
-            raise TypeError(f"Spec attribute type '{typ_str}' not recognized" + 
-                f" on attr {attr}." if attr else ".")
+            raise TypeError(f"Attribute type {typ_str!r} not recognized in spec" + 
+                f" for attribute definition {attr!r}." if attr else ".")
     if(hasattr(typ, "_fact_type")): typ = typ._fact_type
     return typ
 
@@ -358,11 +358,13 @@ def define_attributes(struct_typeclass):
         setattr(dataval, attr, casted)
 
 
+# The fact registry is used to give a unique number to each fact definition
+#  it is just a text file with <Fact Name> <Hash Code> on each line
 def lines_in_fact_registry():
     global GLOBAL_FACT_COUNT
     if(GLOBAL_FACT_COUNT == -1):
         try:
-            with open(get_cache_path("fact_registry"),'r') as f:
+            with open(get_cache_path("fact_registry",suffix=''),'r') as f:
                 GLOBAL_FACT_COUNT = len([1 for line in f])
         except FileNotFoundError:
             GLOBAL_FACT_COUNT = 0
@@ -371,7 +373,7 @@ def lines_in_fact_registry():
 def add_to_fact_registry(name,hash_code):
     global GLOBAL_FACT_COUNT
     if(GLOBAL_FACT_COUNT == -1): lines_in_fact_registry()
-    with open(get_cache_path("fact_registry"),'a') as f:
+    with open(get_cache_path("fact_registry",suffix=''),'a') as f:
         f.write(f"{name} {hash_code} \n")
     GLOBAL_FACT_COUNT += 1
 

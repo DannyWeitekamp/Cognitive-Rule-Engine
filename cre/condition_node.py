@@ -334,7 +334,6 @@ class ConditionsTypeTemplate(types.StructRef):
 
 # Manually register the type to avoid automatic getattr overloading 
 # default_manager.register(VarTypeTemplate, models.StructRefModel)
-
 class Conditions(structref.StructRefProxy):
     def __new__(cls, _vars, dnf=None):
         # return structref.StructRefProxy.__new__(cls, *args)
@@ -363,8 +362,12 @@ class Conditions(structref.StructRefProxy):
             self._signature = types.void(*[context.fact_types[x] for x in fact_types])            
 
         return self._signature
-    
-    
+
+    def __str__(self):
+        return conditions_str(self)
+
+    def __repr__(self):
+        return conditions_repr(self)
 
 define_boxing(ConditionsTypeTemplate,Conditions)
 
@@ -446,27 +449,60 @@ def _get_sig_str(conds):
         if(i < len(conds.vars)-1): s += ","
     return s + ")"
 
+@njit(cache=True)
+def conditions_repr(self,alias=None):
+    s = ""
+    for j, v in enumerate(self.vars):
+        s += v.alias
+        if(j < len(self.vars)-1): s += ", "
+    s += " = "
+    for j, v in enumerate(self.vars):
+        s += "Var(" + v.fact_type_name + ")"
+        if(j < len(self.vars)-1): s += ", "
+    s += "\n"
+    if(alias is not None):
+        s += alias +" = "
+
+    s += conditions_str(self,add_non_conds=True)
+    return s
+
 
 @njit(cache=True)
-def conditions_str(self):
+def conditions_str(self,add_non_conds=False):
     s = ""
     # for j, v in enumerate(self.vars):
     #     s += str(v)
     #     if(j < len(self.vars)-1): s += ", "
     # s += '\n'
+    used_var_ptrs = Dict.empty(i8,u1)
     for j, conjunct in enumerate(self.dnf):
         alphas, betas = conjunct
-        for i, alpha_term in enumerate(alphas):
-            s += "~" if alpha_term.negated else ""
-            s += "(" + str(alpha_term) + ")" 
+        for i, alpha_lit in enumerate(alphas):
+            s += "~" if alpha_lit.negated else ""
+            s += "(" + str(alpha_lit) + ")" 
             if(i < len(alphas)-1 or len(betas)): s += " & "
+            if(add_non_conds): 
+                used_var_ptrs[alpha_lit.var_base_ptrs[0]] = u1(1)
 
-        for i, beta_term in enumerate(betas):
-            s += "~" if beta_term.negated else ""
-            s += "(" + str(beta_term) + ")" 
+        for i, beta_lit in enumerate(betas):
+            s += "~" if beta_lit.negated else ""
+            s += "(" + str(beta_lit) + ")" 
             if(i < len(betas)-1): s += " & "
+            if(add_non_conds): 
+                used_var_ptrs[beta_lit.var_base_ptrs[0]] = u1(1)
+                used_var_ptrs[beta_lit.var_base_ptrs[1]] = u1(1)
 
         if(j < len(self.dnf)-1): s += " |\\\n"
+
+    if(add_non_conds):
+        was_prev =  True if(len(used_var_ptrs) > 0) else False
+
+        for j, v in enumerate(self.vars):
+            if(v.base_ptr not in used_var_ptrs):
+                if(was_prev): s += " & "
+                s += v.alias
+                was_prev = True
+
     return s
 
 @overload(str)
@@ -514,11 +550,53 @@ def build_var_list(var_map):
 
 
 @njit(cache=True)
-def conditions_and(left,right):
+def _conditions_and(left,right):
     '''AND is distributive
     AND((ab+c), (de+f)) = abde+abf+cde+cf'''
     return Conditions(build_var_map(left.vars,right.vars),
                       dnf_and(left.dnf, right.dnf))
+
+# @njit(cache=True)
+# def conditions_and_var(left,right):
+#     right_c = _conditions_ctor_single_var(right)
+#     return conditions_and(left,right_c)
+
+# @njit(cache=True)
+# def var_and_conditions(left,right):
+#     left_c = _conditions_ctor_single_var(left)
+#     return conditions_and(left_c,right)
+
+# @njit(cache=True)
+# def var_and(left,right):
+#     left_c = _conditions_ctor_single_var(left)
+#     right_c = _conditions_ctor_single_var(right)
+#     return conditions_and(left_c,right_c)
+
+
+# @njit(cache=True)
+@generated_jit(cache=True)    
+def conditions_and(self,other):
+    if(isinstance(other, VarTypeTemplate)):
+        if(isinstance(self,VarTypeTemplate)):
+            def impl(self,other):
+                self_c = _conditions_ctor_single_var(self)
+                other_c = _conditions_ctor_single_var(other)
+                return _conditions_and(self_c,other_c)
+        else:
+            def impl(self,other):
+                other_c = _conditions_ctor_single_var(other)
+                return _conditions_and(self,other_c)
+    else:
+        if(isinstance(self,VarTypeTemplate)):
+            def impl(self,other):
+                self_c = _conditions_ctor_single_var(self)
+                return _conditions_and(self_c,other)
+        else:
+            def impl(self,other):
+                return _conditions_and(self,other)
+
+    return impl
+
 
 @njit(cache=True)
 def dnf_and(l_dnf, r_dnf):
@@ -536,11 +614,35 @@ def dnf_and(l_dnf, r_dnf):
 
 
 @njit(cache=True)
-def conditions_or(left,right):
+def _conditions_or(left,right):
     '''OR is additive like
     OR((ab+c), (de+f)) = ab+c+de+f'''
     return Conditions(build_var_map(left.vars,right.vars),
                       dnf_or(left.dnf, right.dnf))
+
+@generated_jit(cache=True)    
+def conditions_or(self,other):
+    if(isinstance(other, VarTypeTemplate)):
+        if(isinstance(self,VarTypeTemplate)):
+            def impl(self,other):
+                self_c = _conditions_ctor_single_var(self)
+                other_c = _conditions_ctor_single_var(other)
+                return _conditions_or(self_c,other_c)
+        else:
+            def impl(self,other):
+                other_c = _conditions_ctor_single_var(other)
+                return _conditions_or(self,other_c)
+    else:
+        if(isinstance(self,VarTypeTemplate)):
+            def impl(self,other):
+                self_c = _conditions_ctor_single_var(self)
+                return _conditions_or(self_c,other)
+        else:
+            def impl(self,other):
+                return _conditions_or(self,other)
+
+    return impl
+
 
 @njit(cache=True)
 def dnf_or(l_dnf, r_dnf):
@@ -622,11 +724,11 @@ def link_pterm_instance(pterm, kb):
 @njit(cache=True)
 def dnf_copy(dnf,shallow=True):
     ndnf = new_dnf(len(dnf))
-    for i, (alpha_term, beta_term) in enumerate(dnf):
-        for alpha_literal in alpha_term:
+    for i, (alpha_lit, beta_lit) in enumerate(dnf):
+        for alpha_literal in alpha_lit:
             new_alpha = alpha_literal if(shallow) else pterm_copy(alpha_literal)
             ndnf[i][0].append(new_alpha)
-        for beta_literal in beta_term:
+        for beta_literal in beta_lit:
             new_beta = beta_literal if(shallow) else pterm_copy(beta_literal)
             ndnf[i][1].append(new_beta)
     return ndnf

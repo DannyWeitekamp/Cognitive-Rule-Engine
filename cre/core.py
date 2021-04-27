@@ -22,8 +22,8 @@ def monkey_patch_caching(mod,exclude=[]):
 
 #They promised to fix this by 0.51.0, so we'll only run it if an earlier release
 # if(tuple([int(x) for x in numba.__version__.split('.')]) < (0,55,0)):
-monkey_patch_caching(tl_mod,['_sort'])
-monkey_patch_caching(td_mod)
+# monkey_patch_caching(tl_mod,['_sort'])
+# monkey_patch_caching(td_mod)
 
 
 #These will be filled in if the user registers a new type

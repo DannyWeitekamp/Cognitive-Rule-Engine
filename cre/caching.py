@@ -73,11 +73,11 @@ def unique_hash(stuff,hash_func='sha256'):
 	update_unique_hash(m,stuff)	
 	return m.hexdigest()
 
-def get_cache_path(name,hsh=None):
+def get_cache_path(name,hsh=None,suffix=".py"):
 	if(hsh is None):
-		return os.path.join(cache_dir,name+".py")
+		return os.path.join(cache_dir,name+suffix)
 	else:
-		return os.path.join(cache_dir,name,"_" + str(hsh) +".py")
+		return os.path.join(cache_dir,name,"_" + str(hsh) +suffix)
 
 def source_in_cache(name,hsh=None):
 	path = get_cache_path(name,hsh)

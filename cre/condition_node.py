@@ -512,6 +512,7 @@ def conditions_str(self,add_non_conds=False):
         was_prev =  True if(len(used_var_ptrs) > 0) else False
 
         for j, v in enumerate(self.vars):
+            print(v.base_ptr, used_var_ptrs)
             if(v.base_ptr not in used_var_ptrs):
                 if(was_prev): s += " & "
                 s += v.alias

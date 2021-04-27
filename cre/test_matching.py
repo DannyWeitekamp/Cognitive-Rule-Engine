@@ -79,6 +79,34 @@ def test_matching_unconditioned():
     Bs = boop_Bs_from_ptrs(get_pointer_matches_from_linked(cl))
     print("Bs", Bs)
 
+def test_ref_matching():
+    with kb_context("test_ref_matching"):
+        TestLL, TestLLType = define_fact("TestLL",{"name": "string", "B" :'number', "nxt" : "TestLL"})
+        kb = KnowledgeBase()
+        a = TestLL("A", B=0)
+        b = TestLL("B", B=1, nxt=a)
+        c = TestLL("C", B=2, nxt=b)
+        kb.declare(a)
+        kb.declare(b)
+        kb.declare(c)
+
+        print(a,b,c)
+
+        x1, x2 = Var(TestLL,"x1"), Var(TestLL,"x2")
+        c = x1.nxt == x2
+        print(c)
+
+        cl = get_linked_conditions_instance(c, kb)
+        print(get_pointer_matches_from_linked(cl))
+        # Bs = boop_Bs_from_ptrs(get_pointer_matches_from_linked(cl))
+
+        # print(Bs)
+
+
+
+
+
+
 
 @njit(cache=True)
 def apply_it(kb,l1,l2,r1):
@@ -130,7 +158,8 @@ def test_b_matching_1_t_4_lit(benchmark):
 
 
 if(__name__ == "__main__"):
-    test_matching_unconditioned()
     # test_applying()
     # test_matching()
+    # test_matching_unconditioned()
+    test_ref_matching()
     # test_b_matching_1_t_4_lit()

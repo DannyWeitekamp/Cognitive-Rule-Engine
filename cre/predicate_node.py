@@ -279,6 +279,8 @@ def init_alpha(st, left_fact_type_name, left_attr_offsets, right_val):
 @njit(cache=True)
 def deref_attrs(val_type, inst_ptr,attr_offsets):
     #TODO: Allow to deref arbitrary number of attributes
+    # print("attr_offsets", attr_offsets)
+    if(len(attr_offsets) == 0): return inst_ptr
     data_ptr = _pointer_to_data_pointer(inst_ptr)
     val = _load_pointer(val_type, data_ptr+attr_offsets[0])
     return val
@@ -400,6 +402,7 @@ def gen_alpha_source(left_type, op_str, right_type):
     # typ_name = f'{typ._fact_name}Type'
     # literal_type = types.literal(literal_val).literal_type
     if(isinstance(right_type,types.Integer)): right_type = types.float64
+    
     # fieldtype = typ.field_dict[attr]
     source = f'''import numba
 from numba import types, njit
@@ -459,6 +462,10 @@ def define_alpha_predicate_node(left_type, op_str, right_type):
     '''Generates or gets the cached definition for an AlphaPredicateNode with the given 
         types, attributes, and comparison op. '''
     name = "AlphaPredicate"
+    if(isinstance(left_type,types.StructRef)): 
+        left_type = types.int64
+        # Standardize so that it checks for null ptr instead of None
+        if(right_type is None): right_type = types.int64
     hash_code = unique_hash([left_type, op_str, right_type])
     if(not source_in_cache(name,hash_code)):
         source = gen_alpha_source(left_type, op_str, right_type)
@@ -524,6 +531,7 @@ def beta_eval_truth(pred_node, left_facts, right_facts, i, j):
     if(left_ptr != 0 and right_ptr != 0):
         left_val = deref_attrs(pred_node.left_type, left_ptr, pred_node.left_attr_offsets)
         right_val = deref_attrs(pred_node.right_type, right_ptr, pred_node.right_attr_offsets)
+        print(left_val, right_val)
         # left_inst = _struct_from_pointer(pred_node.left_type,left_ptr)
         # right_inst = _struct_from_pointer(pred_node.right_type,right_ptr)
         # left_val = lower_getattr(left_inst, pred_node.left_attr)
@@ -658,6 +666,7 @@ def gen_beta_source(left_type, op_str, right_type):
     # right_typ_name = f'{right_type._fact_name}Type'
     # left_fieldtype = left_type.field_dict[left_attr]
     # right_fieldtype = right_type.field_dict[right_attr]
+
     source = f'''
 from numba import types, njit
 from numba.experimental.structref import new
@@ -700,6 +709,8 @@ def define_beta_predicate_node(left_type, op_str, right_type):
     '''Generates or gets the cached definition for an AlphaPredicateNode with the given 
         types, attributes, and comparison op. '''
     name = "BetaPredicate"
+    if(isinstance(left_type,types.StructRef)): left_type = types.int64
+    if(isinstance(right_type,types.StructRef)): right_type = types.int64
     hash_code = unique_hash([left_type, op_str, right_type])
     if(not source_in_cache(name,hash_code)):
         source = gen_beta_source(left_type, op_str, right_type)

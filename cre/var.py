@@ -49,6 +49,9 @@ GenericVarType = VarTypeTemplate([(k,v) for k,v in var_fields_dict.items()])
 
 class Var(structref.StructRefProxy):
     def __new__(cls, typ, alias=None):
+        print(">>", typ)
+        if(not isinstance(typ, types.StructRef)): typ = typ.fact_type
+        print("==", typ)
         fact_type_name = typ._fact_name
         typ = types.TypeRef(typ)
         struct_type = get_var_definition(typ,typ)
@@ -71,6 +74,7 @@ class Var(structref.StructRefProxy):
         elif(attr == 'fact_type_name'):
             return var_get_fact_type_name(self)
         elif(True): 
+            print(attr)
             typ = self._numba_type_
             
             fact_type = typ.field_dict['fact_type'].instance_type 
@@ -187,6 +191,7 @@ def var_ctor(var_struct_type, fact_type_name, alias):
 
 @overload(Var,strict=False)
 def overload_Var(typ,alias=None):
+    print(">>", typ)
     fact_type = typ.instance_type
     fact_type_name = fact_type._fact_name
     struct_type = get_var_definition(typ,typ)

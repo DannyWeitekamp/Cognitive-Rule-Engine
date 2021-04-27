@@ -131,8 +131,8 @@ class KnowledgeBaseContext(object):
     def _register_fact_type(self, name, spec,
                             fact_ctor, fact_type, inherit_from=None):
         #Add attributes to the ctor and type objects
-        # fact_ctor.type = fact_type
-        # fact_type.ctor = fact_ctor
+        fact_ctor.fact_type = fact_type
+        fact_type.fact_ctor = fact_ctor
         
         self.fact_ctors[name] = fact_ctor
         self.fact_types[name] = fact_type

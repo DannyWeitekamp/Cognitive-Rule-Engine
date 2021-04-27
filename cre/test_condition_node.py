@@ -105,8 +105,6 @@ def test_build_conditions():
 (l1.B == ?) & (l1.B == ?) & (l1.B == l2.B) & ~(l1.B == l2.B)'''
         assert str(c3 | c4) == c3_or_c4_str
 
-def test_multiple_deref():
-    pass
     # l1, l2 = Var(BOOPType,"l1"), Var(BOOPType,"l2")
 
 
@@ -194,23 +192,35 @@ def test_unconditioned():
     print(conditions_repr((l1.B < 1) & l2, "c"))
     print(conditions_repr(l1 & (l2.B > 1), "c"))
     
+def test_multiple_deref():
+    with kb_context("test_ref_matching"):
+        TestLL, TestLLType = define_fact("TestLL",{"name": "string", "B" :'number', "nxt" : "TestLL"})
+
+        v1 = Var(TestLL,'v1')
+        v2 = Var(TestLL,'v2')
+        c = v1.nxt.nxt == v2.nxt.nxt
+        print(c)
+
+
+
+
 
 
     
 
 if(__name__ == "__main__"):
-    test_link()
-    test_initialize()
-    # test_term()
-    for i in range(10):
-        t0 = time_ns()
-        test_build_conditions()
-        print(f'{(time_ns()-t0)/1e6} ms')
-    for i in range(10):
-        t0 = time_ns()
-        test_unconditioned()
-        print(f'{(time_ns()-t0)/1e6} ms')
-    
+    # test_link()
+    # test_initialize()
+    # # test_term()
+    # for i in range(10):
+    #     t0 = time_ns()
+    #     test_build_conditions()
+    #     print(f'{(time_ns()-t0)/1e6} ms')
+    # for i in range(10):
+    #     t0 = time_ns()
+    #     test_unconditioned()
+    #     print(f'{(time_ns()-t0)/1e6} ms')
+    test_multiple_deref()
 # # bar.py_func()
     # bar()
 

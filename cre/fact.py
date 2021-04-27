@@ -425,7 +425,10 @@ def define_fact(name : str, spec : dict, context=None):
         print(f"FACT REDEFINITION: '{name}' in context '{context.name}' ")
         return context.fact_ctors[name], context.fact_types[name]
 
+
     fact_ctor, fact_type = _fact_from_spec(name, spec, context=context)
+    # for k,v in spec.items():
+    #     if(isinstance(v['type'],DefferedFactRefType)): spec[k]['type'] = fact_type
     context._assert_flags(name,spec)
     # print("PASSING IN", inherit_from)
     context._register_fact_type(name,spec,fact_ctor,fact_type,inherit_from=inherit_from)

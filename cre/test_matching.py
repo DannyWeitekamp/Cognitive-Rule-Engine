@@ -101,6 +101,44 @@ def test_ref_matching():
         # Bs = boop_Bs_from_ptrs(get_pointer_matches_from_linked(cl))
 
         # print(Bs)
+        c = x1.nxt == 0
+        print(c)
+
+        cl = get_linked_conditions_instance(c, kb)
+        print(get_pointer_matches_from_linked(cl))
+
+
+        c = x1.nxt == None
+        print(c)
+
+        cl = get_linked_conditions_instance(c, kb)
+        print(get_pointer_matches_from_linked(cl))
+
+def test_multiple_deref():
+    with kb_context("test_multiple_deref"):
+        TestLL, TestLLType = define_fact("TestLL",{"name": "string", "B" :'number', "nxt" : "TestLL"})
+        kb = KnowledgeBase()
+        a = TestLL("A", B=0)
+        b1 = TestLL("B1", B=1, nxt=a)
+        c1 = TestLL("C1", B=2, nxt=b1)
+        b2 = TestLL("B2", B=1, nxt=a)
+        c2 = TestLL("C2", B=2, nxt=b2)
+
+        kb.declare(a)
+        kb.declare(b1)
+        kb.declare(c1)
+        kb.declare(b2)
+        kb.declare(c2)
+
+        v1 = Var(TestLL,'v1')
+        v2 = Var(TestLL,'v2')
+        c = (v1.nxt.nxt == v2.nxt.nxt) & (v1.nxt.nxt != 0) & (v1 != v2)
+
+        cl = get_linked_conditions_instance(c, kb)
+        print(get_pointer_matches_from_linked(cl))
+
+
+
 
 
 
@@ -161,5 +199,6 @@ if(__name__ == "__main__"):
     # test_applying()
     # test_matching()
     # test_matching_unconditioned()
-    test_ref_matching()
+    # test_ref_matching()
+    test_multiple_deref()
     # test_b_matching_1_t_4_lit()

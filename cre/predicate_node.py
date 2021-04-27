@@ -407,7 +407,7 @@ def gen_alpha_source(left_type, op_str, right_type):
     source = f'''import numba
 from numba import types, njit
 from numba.experimental.structref import new
-from numba.types import float64, unicode_type
+from numba.types import *
 from cre.predicate_node import AlphaPredicateNodeTemplate, init_alpha, alpha_filter, alpha_predicate_node_field_dict
 from cre.subscriber import base_subscriber_fields, init_base_subscriber
 

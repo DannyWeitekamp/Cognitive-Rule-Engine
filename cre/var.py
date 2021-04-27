@@ -11,7 +11,7 @@ from cre.caching import gen_import_str, unique_hash,import_from_cached, source_t
 from cre.context import kb_context
 from cre.structref import define_structref, define_structref_template
 from cre.kb import KnowledgeBaseType, KnowledgeBase, facts_for_t_id, fact_at_f_id
-from cre.fact import define_fact, BaseFactType, cast_fact
+from cre.fact import define_fact, BaseFactType, cast_fact, DefferedFactRefType
 from cre.utils import _struct_from_meminfo, _meminfo_from_struct, _cast_structref, cast_structref, decode_idrec, lower_getattr, _struct_from_pointer,  lower_setattr, lower_getattr, _pointer_from_struct
 from cre.subscriber import base_subscriber_fields, BaseSubscriber, BaseSubscriberType, init_base_subscriber, link_downstream
 from cre.vector import VectorType
@@ -49,9 +49,7 @@ GenericVarType = VarTypeTemplate([(k,v) for k,v in var_fields_dict.items()])
 
 class Var(structref.StructRefProxy):
     def __new__(cls, typ, alias=None):
-        print(">>", typ)
         if(not isinstance(typ, types.StructRef)): typ = typ.fact_type
-        print("==", typ)
         fact_type_name = typ._fact_name
         typ = types.TypeRef(typ)
         struct_type = get_var_definition(typ,typ)
@@ -74,12 +72,14 @@ class Var(structref.StructRefProxy):
         elif(attr == 'fact_type_name'):
             return var_get_fact_type_name(self)
         elif(True): 
-            print(attr)
             typ = self._numba_type_
             
             fact_type = typ.field_dict['fact_type'].instance_type 
             fact_type_name = fact_type._fact_name
-            head_type = fact_type.field_dict[attr]
+            head_type = fact_type.spec[attr]['type']
+            if(isinstance(head_type,DefferedFactRefType)):
+                head_type = kb_context().fact_types[head_type._fact_name]
+            # head_type = fact_type.field_dict[attr]
 
             fd = fact_type.field_dict
             offset = fact_type._attr_offsets[list(fd.keys()).index(attr)]
@@ -89,7 +89,7 @@ class Var(structref.StructRefProxy):
             return new
 
     def __str__(self):
-        return ".".join([f'Var[{self.fact_type_name},{self.alias}]']+list(self.deref_attrs))
+        return ".".join([f'Var[{self.fact_type_name},{self.alias!r}]']+list(self.deref_attrs))
 
     def _cmp_helper(self,op_str,other,negate):
         check_legal_cmp(self, op_str, other)
@@ -122,7 +122,9 @@ class Var(structref.StructRefProxy):
 
 def var_cmp_alpha(left_var, op_str, right_var,negated):
     from cre.condition_node import pt_to_cond, gen_pterm_ctor_alpha, gen_pterm_ctor_beta
-    right_var_type = types.unliteral(types.literal(right_var))
+    # Treat None as 0 for comparing against a fact ref
+    if(right_var is None and isinstance(left_var.head_type, types.StructRef)): right_var = 0
+    right_var_type = types.unliteral(types.literal(right_var)) #if (isinstance(right_var, types.NoneType)) else types.int64
     ctor = gen_pterm_ctor_alpha(left_var._numba_type_, op_str, right_var_type)
     pt = ctor(left_var, op_str, right_var)
     lbv = cast_structref(GenericVarType,left_var)
@@ -183,7 +185,7 @@ def var_ctor(var_struct_type, fact_type_name, alias):
     st = new(var_struct_type)
     st.fact_type_name = fact_type_name
     st.base_ptr = _pointer_from_struct(st)
-    st.alias =  "boop" if(alias is  None) else alias
+    st.alias =  "" if(alias is  None) else alias
     st.deref_attrs = List.empty_list(unicode_type)
     st.deref_offsets = List.empty_list(i8)
     return st
@@ -191,7 +193,6 @@ def var_ctor(var_struct_type, fact_type_name, alias):
 
 @overload(Var,strict=False)
 def overload_Var(typ,alias=None):
-    print(">>", typ)
     fact_type = typ.instance_type
     fact_type_name = fact_type._fact_name
     struct_type = get_var_definition(typ,typ)

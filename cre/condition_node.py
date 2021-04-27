@@ -297,6 +297,8 @@ conditions_fields_dict = {
     # The variables used by the condition
     'vars': ListType(GenericVarType),
 
+    # 'not_vars' : ListType(GenericVarType),
+
     # The Disjunctive Normal Form of the condition but organized
     #  so that every conjunct has a seperate lists for alpha and 
     #  beta terms.
@@ -363,6 +365,11 @@ class Conditions(structref.StructRefProxy):
 
         return self._signature
 
+    @property
+    def vars(self):
+        return conds_get_vars(self)
+    
+
     def __str__(self):
         return conditions_str(self)
 
@@ -372,6 +379,11 @@ class Conditions(structref.StructRefProxy):
 define_boxing(ConditionsTypeTemplate,Conditions)
 
 ConditionsType = ConditionsTypeTemplate(conditions_fields)
+
+@njit(cache=True)
+def conds_get_vars(self):
+    return self.vars
+
 
 @overload_method(ConditionsTypeTemplate,'get_matches')
 def impl_get_matches(self,kb=None):
@@ -457,7 +469,9 @@ def conditions_repr(self,alias=None):
         if(j < len(self.vars)-1): s += ", "
     s += " = "
     for j, v in enumerate(self.vars):
-        s += "Var(" + v.fact_type_name + ")"
+        s_v = "Var(" + v.fact_type_name + ")"
+        if(v.is_not): s_v = "NOT(" + s_v +")"
+        s += s_v
         if(j < len(self.vars)-1): s += ", "
     s += "\n"
     if(alias is not None):
@@ -677,6 +691,112 @@ def dnf_not(c_dnf):
     for i in range(1,len(dnfs)):
         out_dnf = dnf_and(out_dnf,dnfs[i])
     return out_dnf
+
+
+@njit(GenericVarType(GenericVarType,),cache=True)
+def _build_var_conjugate(v):
+    if(v.conj_ptr == 0):
+        conj = new(GenericVarType)
+        var_memcopy(v,conj)
+        conj.is_not = u1(0) if v.is_not else u1(1)
+        conj.conj_ptr = _pointer_from_struct_incref(v)
+        v.conj_ptr = _pointer_from_struct_incref(conj)
+    else:
+        conj = _struct_from_pointer(GenericVarType, v.conj_ptr)
+    return conj
+
+
+
+@generated_jit(cache=True)
+def _var_NOT(c):
+    '''Implementation of NOT for Vars moved outside of NOT 
+        definition to avoid recursion issue'''
+    if(isinstance(c,VarTypeTemplate)):
+        st_typ = c
+        def impl(c):
+            if(c.conj_ptr == 0):
+                base = _struct_from_pointer(GenericVarType, c.base_ptr)
+
+                conj_base = _build_var_conjugate(base)
+                g_conj = _build_var_conjugate(_cast_structref(GenericVarType,c))
+
+                g_conj.base_ptr = _pointer_from_struct(conj_base)
+
+
+                # If the base Var doesn't have a conjugate then make one
+                # if(base.conj_ptr == 0):
+                #     conj_base = new(GenericVarType)
+                #     var_memcopy(base,conj_base)
+                #     conj_base.is_not = u1(0) if base.is_not else u1(1)
+                #     base.conj_ptr = _pointer_from_struct_incref(conj_base)
+                #     conj_base.conj_ptr = _pointer_from_struct_incref(base)
+
+                # Make the NOT conjugate for this Var
+                # skip if 'c' happened to be its own base
+                # if(c.conj_ptr == 0):   
+                #     st = new(st_typ)
+                #     var_memcopy(c,st)
+                #     st.base_ptr = base.conj_ptr
+                #     st.is_not = u1(0) if c.is_not else u1(1)
+                #     c.conj_ptr = _pointer_from_struct_incref(st)
+                #     st.conj_ptr = _pointer_from_struct_incref(c)
+            st = _struct_from_pointer(st_typ, c.conj_ptr)
+            return st
+        return impl
+
+
+@generated_jit(cache=True)
+def NOT(c):
+    ''' Applies existential NOT to Var or Conditions''' 
+    if(isinstance(c,ConditionsTypeTemplate)):
+        # When NOT() is applied to a Conditions object
+        #  apply NOT() to all vars and make sure the pointers
+        #  for the new vars are tracked in the dnf
+        def impl(c):
+            new_vars = List.empty_list(GenericVarType)
+            ptr_map = Dict.empty(i8,i8)
+            for var in c.vars:
+                new_var = _var_NOT(var)
+                print(">>",new_var.is_not)
+                ptr_map[_pointer_from_struct(var)]  = _pointer_from_struct(new_var)
+                new_vars.append(new_var)
+
+            dnf = dnf_copy(c.dnf)
+
+            for i, (alpha_conjuncts, beta_conjuncts) in enumerate(dnf):
+                for alpha_literal in alpha_conjuncts: 
+                    alpha_literal.var_base_ptrs = (ptr_map[alpha_literal.var_base_ptrs[0]],0)
+                for beta_literal in beta_conjuncts:
+                    t = (ptr_map[beta_literal.var_base_ptrs[0]], ptr_map[beta_literal.var_base_ptrs[1]])
+                    beta_literal.var_base_ptrs = t
+
+            return Conditions(new_vars, dnf)
+        return impl
+    elif(isinstance(c,VarTypeTemplate)):    
+        # Mark a var as NOT(v) meaning we test that nothing
+        #  binds to it. Return a new instance to maintain
+        #  value semantics.
+        def impl(c):
+            return _var_NOT(c)
+        return impl
+
+
+
+@generated_jit(cache=True)
+def conditions_not(c):
+    '''Defines ~x for Var and Conditions''' 
+    if(isinstance(c,ConditionsTypeTemplate)):
+        # ~ operation inverts the qualifiers and terms like
+        #  ~(ab+c) = ~(ab)c' = (a'+b')c' = a'c'+b'c'
+        def impl(c):
+            dnf = dnf_not(c.dnf)
+            return Conditions(c.var_map, dnf)
+    elif(isinstance(c,VarTypeTemplate)):
+        # If we applied to a var then serves as NOT()
+        def impl(c):
+            return _var_NOT(c)
+    return impl
+
 
 
 @njit(cache=True)

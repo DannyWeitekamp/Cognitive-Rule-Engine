@@ -27,10 +27,30 @@ from copy import copy
 
 
 var_fields_dict = {
+    # If true then instead of testing for the existence of the var
+    #  we test that the var does not exist.
+    'is_not' : u1,
+
+    # A pointer to the NOT() of this Var
+    'conj_ptr' : i8,
+
+    # The pointer of the Var instance before any attribute selection
+    #   e.g. if '''v = Var(Type); v_b = v.B;''' then v_b.base_ptr = &v
     'base_ptr' : i8,
+
+    # The name of the Var 
     'alias' : unicode_type,
+
+    # A list of attributes that have been dereferenced so far 
+    #  e.g. v.B.B.deref_attrs = ['B','B']
     'deref_attrs': ListType(unicode_type),
+
+    # The byte offsets for each attribute relative to the previous resolved
+    #  fact. E.g.  if attr "B" is at offset 10 in the type assigned to "B"
+    #  then v.B.B.deref_offsets = [10,10]
     'deref_offsets': ListType(i8),
+
+    # The name of the fact that the base var is meant to match.
     'fact_type_name': unicode_type,
     'fact_type': types.Any,
     'head_type': types.Any,
@@ -65,6 +85,8 @@ class Var(structref.StructRefProxy):
         elif(attr == 'head_type'):
             head_type = self._numba_type_.field_dict['head_type']
             return head_type.instance_type if(head_type != types.Any) else None
+        elif(attr == 'is_not'):
+            return var_get_is_not(self)
         elif(attr == 'deref_attrs'):
             return var_get_deref_attrs(self)
         elif(attr == 'alias'):
@@ -85,11 +107,15 @@ class Var(structref.StructRefProxy):
             offset = fact_type._attr_offsets[list(fd.keys()).index(attr)]
             struct_type = get_var_definition(types.TypeRef(fact_type), types.TypeRef(head_type))
             new = var_ctor(struct_type, fact_type_name, var_get_alias(self))
-            copy_and_append(self, new,attr, offset)
+            var_memcopy(self, new)
+            var_append_attr(new, attr, offset)
             return new
 
     def __str__(self):
-        return ".".join([f'Var[{self.fact_type_name},{self.alias!r}]']+list(self.deref_attrs))
+        s = ".".join([f'Var({self.fact_type_name},{self.alias!r})']+list(self.deref_attrs))
+        # print(self.is_not)
+        if(self.is_not): s = f'NOT({s})'
+        return s
 
     def _cmp_helper(self,op_str,other,negate):
         check_legal_cmp(self, op_str, other)
@@ -114,6 +140,10 @@ class Var(structref.StructRefProxy):
     def __or__(self, other):
         from cre.condition_node import conditions_or
         return conditions_or(self, other)
+
+    def __invert__(self):
+        from cre.condition_node import _var_NOT
+        return _var_NOT(self)
     
 
 
@@ -152,6 +182,9 @@ def check_legal_cmp(var, op_str, other_var):
             raise AttributeError("Inequality not valid comparitor for Fact types.")
 
 
+@njit(cache=True)
+def var_get_is_not(self):
+    return self.is_not
 
 @njit(cache=True)
 def var_get_deref_attrs(self):
@@ -183,6 +216,8 @@ def get_var_definition(fact_type, head_type):
 @njit(cache=True)
 def var_ctor(var_struct_type, fact_type_name, alias):
     st = new(var_struct_type)
+    st.is_not = u1(0)
+    st.conj_ptr = 0
     st.fact_type_name = fact_type_name
     st.base_ptr = _pointer_from_struct(st)
     st.alias =  "" if(alias is  None) else alias
@@ -264,19 +299,28 @@ class StructAttribute(AttributeTemplate):
 #### getattr and dereferencing ####
 
 @njit(cache=True)
-def copy_and_append(self,st,attr,offset):
+def var_memcopy(self,st):
     new_deref_attrs = List.empty_list(unicode_type)
     new_deref_offsets = List.empty_list(i8)
     for x in lower_getattr(self,"deref_attrs"):
         new_deref_attrs.append(x)
     for y in lower_getattr(self,"deref_offsets"):
         new_deref_offsets.append(y)
-    new_deref_attrs.append(attr)
-    new_deref_offsets.append(offset)
+    
+    lower_setattr(st,'is_not', lower_getattr(self,"is_not"))
     lower_setattr(st,'base_ptr',lower_getattr(self,"base_ptr"))
+    lower_setattr(st,'alias',lower_getattr(self,"alias"))
     lower_setattr(st,'deref_attrs',new_deref_attrs)
     lower_setattr(st,'deref_offsets',new_deref_offsets)
-    lower_setattr(st,'alias',self.alias)
+    lower_setattr(st,'fact_type_name',lower_getattr(self,"fact_type_name"))
+    
+    
+
+@njit(cache=True)
+def var_append_attr(self,attr,offset):
+    lower_getattr(self,"deref_attrs").append(attr)
+    lower_getattr(self,"deref_offsets").append(offset)
+    
 
 
 @lower_getattr_generic(VarTypeTemplate)
@@ -300,7 +344,8 @@ def var_getattr_impl(context, builder, typ, val, attr):
 
         def new_var_and_append(self):
             st = new(typ)
-            copy_and_append(self,st,attr,offset)
+            var_memcopy(self,st)
+            var_append_attr(st,attr,offset)
             return st
 
         ret = context.compile_internal(builder, new_var_and_append, typ(typ,), (st,))

@@ -23,12 +23,6 @@ def get_ptr(fact):
     return _pointer_from_struct(fact)
 
 
-
-
-
-
-
-
 def kb_w_n_boops(n):
     kb = KnowledgeBase()
     for i in range(n):
@@ -66,7 +60,24 @@ def test_matching():
     print("Bs", Bs)
 
 
+def test_matching_unconditioned():
+    kb = kb_w_n_boops(5)
 
+
+    l1, l2 = Var(BOOPType,"l1"), Var(BOOPType,"l2")
+    c = l1 & l2
+
+    cl = get_linked_conditions_instance(c, kb)
+    Bs = boop_Bs_from_ptrs(get_pointer_matches_from_linked(cl))
+    print("Bs", Bs)
+
+
+    l1, l2 = Var(BOOPType,"l1"), Var(BOOPType,"l2")
+    c = l1 & (l2.B < 3)
+
+    cl = get_linked_conditions_instance(c, kb)
+    Bs = boop_Bs_from_ptrs(get_pointer_matches_from_linked(cl))
+    print("Bs", Bs)
 
 
 @njit(cache=True)
@@ -118,18 +129,8 @@ def test_b_matching_1_t_4_lit(benchmark):
     benchmark.pedantic(check_twice,setup=matching_1_t_4_lit_setup, warmup_rounds=1)
 
 
-
-
-
-
-
-
-
-
-
-
-
 if(__name__ == "__main__"):
-    test_applying()
+    test_matching_unconditioned()
+    # test_applying()
     # test_matching()
     # test_b_matching_1_t_4_lit()

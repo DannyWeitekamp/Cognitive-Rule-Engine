@@ -93,6 +93,8 @@ class Var(structref.StructRefProxy):
             return var_get_alias(self)
         elif(attr == 'fact_type_name'):
             return var_get_fact_type_name(self)
+        elif(attr == 'base_ptr'):
+            return var_get_base_ptr(self)
         elif(True): 
             typ = self._numba_type_
             
@@ -106,6 +108,7 @@ class Var(structref.StructRefProxy):
             fd = fact_type.field_dict
             offset = fact_type._attr_offsets[list(fd.keys()).index(attr)]
             struct_type = get_var_definition(types.TypeRef(fact_type), types.TypeRef(head_type))
+            #CHECK THAT PTRS ARE SAME HERE
             new = var_ctor(struct_type, fact_type_name, var_get_alias(self))
             var_memcopy(self, new)
             var_append_attr(new, attr, offset)
@@ -193,6 +196,10 @@ def var_get_deref_attrs(self):
 @njit(cache=True)
 def var_get_alias(self):
     return self.alias
+
+@njit(cache=True)
+def var_get_base_ptr(self):
+    return self.base_ptr
 
 @njit(cache=True)
 def var_get_fact_type_name(self):
@@ -306,7 +313,7 @@ def var_memcopy(self,st):
         new_deref_attrs.append(x)
     for y in lower_getattr(self,"deref_offsets"):
         new_deref_offsets.append(y)
-    
+
     lower_setattr(st,'is_not', lower_getattr(self,"is_not"))
     lower_setattr(st,'base_ptr',lower_getattr(self,"base_ptr"))
     lower_setattr(st,'alias',lower_getattr(self,"alias"))

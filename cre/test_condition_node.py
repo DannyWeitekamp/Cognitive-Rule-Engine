@@ -202,16 +202,21 @@ def test_multiple_deref():
 
 def test_existential_not():
     l1, l2 = Var(BOOPType,"l1"), Var(BOOPType,"l2")
-    print(l1.B)
-    print(~l1)
-    print(NOT(l1).B)
-    print(NOT(l1.B))
-    c = (l1.B < 1) & (l2.B > 1)
+    # print(l1.B)
+    # print(~l1)
+    # print(NOT(l1).B)
+    # print(NOT(l1.B))
+    a = (l1.B < 1)
+    print(repr(a))
+    c = a & (l2.B > 1)
     c_n = NOT(c)
     print("c.vars",c.vars)
     print("c_n.vars", c_n.vars)
     print(repr(c))
     print(repr(c_n))
+
+    c2 = NOT(l1.B < l2.B)
+    print(repr(c2))
 
 
 if(__name__ == "__main__"):

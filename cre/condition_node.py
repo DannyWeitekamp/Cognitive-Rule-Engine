@@ -416,7 +416,6 @@ def _conditions_ctor_var_map(_vars,dnf=None):
     st = new(ConditionsType)
     st.vars = build_var_list(_vars)
     st.var_map = _vars.copy() # is shallow copy
-    # print("B",st.var_map)
     st.dnf = dnf if(dnf) else new_dnf(len(_vars))
     st.is_initialized = False
     return st
@@ -489,19 +488,19 @@ def conditions_str(self,add_non_conds=False):
     #     if(j < len(self.vars)-1): s += ", "
     # s += '\n'
     used_var_ptrs = Dict.empty(i8,u1)
-    for j, conjunct in enumerate(self.dnf):
-        alphas, betas = conjunct
-        for i, alpha_lit in enumerate(alphas):
+    for j, (alpha_conjunct, beta_conjunct) in enumerate(self.dnf):
+        for i, alpha_lit in enumerate(alpha_conjunct):
             s += "~" if alpha_lit.negated else ""
             s += "(" + str(alpha_lit) + ")" 
-            if(i < len(alphas)-1 or len(betas)): s += " & "
+            if(i < len(alpha_conjunct)-1 or
+                len(beta_conjunct)): s += " & "
             if(add_non_conds): 
                 used_var_ptrs[alpha_lit.var_base_ptrs[0]] = u1(1)
 
-        for i, beta_lit in enumerate(betas):
+        for i, beta_lit in enumerate(beta_conjunct):
             s += "~" if beta_lit.negated else ""
             s += "(" + str(beta_lit) + ")" 
-            if(i < len(betas)-1): s += " & "
+            if(i < len(beta_conjunct)-1): s += " & "
             if(add_non_conds): 
                 used_var_ptrs[beta_lit.var_base_ptrs[0]] = u1(1)
                 used_var_ptrs[beta_lit.var_base_ptrs[1]] = u1(1)
@@ -512,7 +511,6 @@ def conditions_str(self,add_non_conds=False):
         was_prev =  True if(len(used_var_ptrs) > 0) else False
 
         for j, v in enumerate(self.vars):
-            print(v.base_ptr, used_var_ptrs)
             if(v.base_ptr not in used_var_ptrs):
                 if(was_prev): s += " & "
                 s += v.alias
@@ -758,11 +756,10 @@ def NOT(c):
             ptr_map = Dict.empty(i8,i8)
             for var in c.vars:
                 new_var = _var_NOT(var)
-                print(">>",new_var.is_not)
                 ptr_map[_pointer_from_struct(var)]  = _pointer_from_struct(new_var)
                 new_vars.append(new_var)
 
-            dnf = dnf_copy(c.dnf)
+            dnf = dnf_copy(c.dnf,shallow=False)
 
             for i, (alpha_conjuncts, beta_conjuncts) in enumerate(dnf):
                 for alpha_literal in alpha_conjuncts: 

@@ -42,7 +42,7 @@ class DefferedFactRefType():
         return f"DefferedFactRefType[{self._fact_name}]"
 
     def __repr__(self):
-        return f"DefferedFactRefType({self._fact_name})"
+        return f"DefferedFactRefType({self._fact_name!r})"
 
 
 def _get_type(typ, context, name='', attr=''):
@@ -51,10 +51,10 @@ def _get_type(typ, context, name='', attr=''):
         typ_str = typ
         if(typ_str.lower() in TYPE_ALIASES): 
             typ = numba_type_map[TYPE_ALIASES[typ_str.lower()]]
-        elif(typ_str in context.fact_types):
-            typ = context.fact_types[typ_str]
         elif(typ_str == name):
             typ = DefferedFactRefType(name)
+        elif(typ_str in context.fact_types):
+            typ = context.fact_types[typ_str]
         else:
             raise TypeError(f"Attribute type {typ_str!r} not recognized in spec" + 
                 f" for attribute definition {attr!r}." if attr else ".")

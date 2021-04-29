@@ -8,7 +8,6 @@ from cre.matching import get_pointer_matches_from_linked
 from cre.utils import _struct_from_pointer, _pointer_from_struct
 
 BOOP, BOOPType = define_fact("BOOP",{"A": "string", "B" : "number"})
-TestLL, TestLLType = define_fact("TestLL",{"name": "string", "B" :'number', "nxt" : "TestLL"})
 
 @njit(cache=True)
 def boop_Bs_from_ptrs(ptr_matches):
@@ -81,66 +80,68 @@ def test_matching_unconditioned():
     print("Bs", Bs)
 
 def test_ref_matching():
-    
-    kb = KnowledgeBase()
-    a = TestLL("A", B=0)
-    b = TestLL("B", B=1, nxt=a)
-    c = TestLL("C", B=2, nxt=b)
-    kb.declare(a)
-    kb.declare(b)
-    kb.declare(c)
+    with kb_context("test_ref_matching"):
+        TestLL, TestLLType = define_fact("TestLL",{"name": "string", "B" :'number', "nxt" : "TestLL"})
+        kb = KnowledgeBase()
+        a = TestLL("A", B=0)
+        b = TestLL("B", B=1, nxt=a)
+        c = TestLL("C", B=2, nxt=b)
+        kb.declare(a)
+        kb.declare(b)
+        kb.declare(c)
 
-    print(a,b,c)
+        print(a,b,c)
 
-    x1, x2 = Var(TestLL,"x1"), Var(TestLL,"x2")
-    c = x1.nxt == x2
-    print(c)
+        x1, x2 = Var(TestLL,"x1"), Var(TestLL,"x2")
+        c = x1.nxt == x2
+        print(c)
 
-    cl = get_linked_conditions_instance(c, kb)
-    print(get_pointer_matches_from_linked(cl))
-    # Bs = boop_Bs_from_ptrs(get_pointer_matches_from_linked(cl))
+        cl = get_linked_conditions_instance(c, kb)
+        print(get_pointer_matches_from_linked(cl))
+        # Bs = boop_Bs_from_ptrs(get_pointer_matches_from_linked(cl))
 
-    # print(Bs)
-    c = x1.nxt == 0
-    print(c)
+        # print(Bs)
+        c = x1.nxt == 0
+        print(c)
 
-    cl = get_linked_conditions_instance(c, kb)
-    print(get_pointer_matches_from_linked(cl))
+        cl = get_linked_conditions_instance(c, kb)
+        print(get_pointer_matches_from_linked(cl))
 
 
-    c = x1.nxt == None
-    print(c)
+        c = x1.nxt == None
+        print(c)
 
-    cl = get_linked_conditions_instance(c, kb)
-    print(get_pointer_matches_from_linked(cl))
+        cl = get_linked_conditions_instance(c, kb)
+        print(get_pointer_matches_from_linked(cl))
 
 def test_multiple_deref():
-    TestLL, TestLLType = define_fact("TestLL",{"name": "string", "B" :'number', "nxt" : "TestLL"})
-    kb = KnowledgeBase()
+    with kb_context("test_multiple_deref"):
+        TestLL, TestLLType = define_fact("TestLL",{"name": "string", "B" :'number', "nxt" : "TestLL"})
+        kb = KnowledgeBase()
 
-    #    c1   c2
-    #     |   |
-    #    b1   b2
-    #       V
-    #       a
-    a = TestLL("A", B=0)
-    b1 = TestLL("B1", B=1, nxt=a)
-    c1 = TestLL("C1", B=2, nxt=b1)
-    b2 = TestLL("B2", B=1, nxt=a)
-    c2 = TestLL("C2", B=2, nxt=b2)
+        #    c1   c2
+        #     |   |
+        #    b1   b2
+        #       V
+        #       a
+        a = TestLL("A", B=0)
+        b1 = TestLL("B1", B=1, nxt=a)
+        c1 = TestLL("C1", B=2, nxt=b1)
+        b2 = TestLL("B2", B=1, nxt=a)
+        c2 = TestLL("C2", B=2, nxt=b2)
 
-    kb.declare(a)
-    kb.declare(b1)
-    kb.declare(c1)
-    kb.declare(b2)
-    kb.declare(c2)
+        kb.declare(a)
+        kb.declare(b1)
+        kb.declare(c1)
+        kb.declare(b2)
+        kb.declare(c2)
 
-    v1 = Var(TestLL,'v1')
-    v2 = Var(TestLL,'v2')
-    c = (v1.nxt.nxt == v2.nxt.nxt) & (v1.nxt.nxt != 0) & (v1 != v2)
+        v1 = Var(TestLL,'v1')
+        v2 = Var(TestLL,'v2')
+        c = (v1.nxt.nxt == v2.nxt.nxt) & (v1.nxt.nxt != 0) & (v1 != v2)
 
-    cl = get_linked_conditions_instance(c, kb)
-    print(get_pointer_matches_from_linked(cl))
+        cl = get_linked_conditions_instance(c, kb)
+        print(get_pointer_matches_from_linked(cl))
 
 
 

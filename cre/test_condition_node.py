@@ -207,32 +207,34 @@ def test_existential_not():
     # print(NOT(l1).B)
     # print(NOT(l1.B))
     a = (l1.B < 1)
-    print(repr(a))
+    # print(repr(a))
     c = a & (l2.B > 1)
     c_n = NOT(c)
-    print("c.vars",c.vars)
-    print("c_n.vars", c_n.vars)
-    print(repr(c))
-    print(repr(c_n))
+    # print("c.vars",c.vars)
+    # print("c_n.vars", c_n.vars)
+    # print(repr(c))
+    # print(repr(c_n))
+    assert repr(c) == 'l1, l2 = Var(BOOP), Var(BOOP)\n(l1.B < ?) & (l2.B > ?)'
+    assert repr(c_n) == 'l1, l2 = NOT(Var(BOOP)), NOT(Var(BOOP))\n(l1.B < ?) & (l2.B > ?)'
 
     c2 = NOT(l1.B < l2.B)
-    print(repr(c2))
+    assert repr(c2) == 'l1, l2 = NOT(Var(BOOP)), NOT(Var(BOOP))\n(l1.B < l2.B)'
+    # print(repr(c2))
 
 
 if(__name__ == "__main__"):
     # test_link()
     # test_initialize()
-    # # test_term()
     # for i in range(10):
     #     t0 = time_ns()
     #     test_build_conditions()
     #     print(f'{(time_ns()-t0)/1e6} ms')
-    # for i in range(10):
-    #     t0 = time_ns()
-    #     test_unconditioned()
-    #     print(f'{(time_ns()-t0)/1e6} ms')
+    for i in range(10):
+        t0 = time_ns()
+        test_unconditioned()
+        print(f'{(time_ns()-t0)/1e6} ms')
     # test_multiple_deref()
-    test_existential_not()
+    # test_existential_not()
 # # bar.py_func()
     # bar()
 

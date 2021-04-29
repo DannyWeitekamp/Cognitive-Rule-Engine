@@ -6,62 +6,68 @@ from numba import njit, u8
 import pytest
 
 def test__standardize_spec():
-    spec = {"A" : "string", "B" : "number"}
-    spec = _standardize_spec(spec)
+    with kb_context("test__standardize_spec") as context:
+        spec = {"A" : "string", "B" : "number"}
+        spec = _standardize_spec(spec, context,"BOOP")
+        print(spec)
 
-    #Standardized specs should at least have 'type'
-    assert spec['A']['type'] == 'unicode_type'
-    assert spec['B']['type'] == 'float64'
+        #Standardized specs should at least have 'type'
+        assert str(spec['A']['type']) == 'unicode_type'
+        assert str(spec['B']['type']) == 'float64'
 
-    #Strings must always be treated as nominal
-    assert 'nominal' in spec['A']['flags']
+        #Strings must always be treated as nominal
+        assert 'nominal' in spec['A']['flags']
     
 
 def test__merge_spec_inheritance():
-    context = kb_context("test__merge_spec_inheritance")
-    spec1 = {"A" : "string", "B" : "number"}
-    BOOP, BOOPType = define_fact("BOOP", spec1, context="test__merge_spec_inheritance")
+    with kb_context("test__merge_spec_inheritance") as context:
+        spec1 = {"A" : "string", "B" : "number"}
+        BOOP, BOOPType = define_fact("BOOP", spec1, context="test__merge_spec_inheritance")
 
-    #Should be able to inherit from ctor, type or type string
-    spec2 = {"inherit_from" : BOOP, "C" : "number"}
-    spec_out, inherit_from = _merge_spec_inheritance(spec2,context)
-    assert inherit_from._fact_name == "BOOP"
-    assert "inherit_from" not in spec_out
+        #Should be able to inherit from ctor, type or type string
+        spec2 = {"inherit_from" : BOOP, "C" : "number"}
+        spec_out, inherit_from = _merge_spec_inheritance(spec2,context)
+        assert inherit_from._fact_name == "BOOP"
+        assert "inherit_from" not in spec_out
 
-    spec2 = {"inherit_from" : BOOPType, "C" : "number"}
-    spec_out, inherit_from = _merge_spec_inheritance(spec2,context)
-    assert inherit_from._fact_name == "BOOP"
-    assert "inherit_from" not in spec_out
+        spec2 = {"inherit_from" : BOOPType, "C" : "number"}
+        spec_out, inherit_from = _merge_spec_inheritance(spec2,context)
+        assert inherit_from._fact_name == "BOOP"
+        assert "inherit_from" not in spec_out
 
-    spec2 = {"inherit_from" : "BOOP", "C" : "number"}
-    spec_out, inherit_from = _merge_spec_inheritance(spec2,context)
-    assert inherit_from._fact_name == "BOOP"
-    assert "inherit_from" not in spec_out
+        spec2 = {"inherit_from" : "BOOP", "C" : "number"}
+        spec_out, inherit_from = _merge_spec_inheritance(spec2,context)
+        assert inherit_from._fact_name == "BOOP"
+        assert "inherit_from" not in spec_out
 
-    assert "A" in spec_out
-    assert "B" in spec_out
+        assert "A" in spec_out
+        assert "B" in spec_out
 
-    #It is illegal to redefine an attribute to have a new type
-    with pytest.raises(TypeError):
-        spec2 = _standardize_spec({"inherit_from" : "BOOP", "B": "string", "C" : "string"})
+        #It is illegal to redefine an attribute to have a new type
+        with pytest.raises(TypeError):
+            spec2 = {"inherit_from" : "BOOP", "B": "string", "C" : "string"}
+            spec2 = _standardize_spec(spec2, context, "BOOP2")
+            spec_out, inherit_from = _merge_spec_inheritance(spec2, context)
+
+        #But okay to to redefine an attribute if the types match
+        spec2 = {"inherit_from" : "BOOP", "B": "number", "C" : "string"}
+        spec2 = _standardize_spec(spec2, context, "BOOP2")
         spec_out, inherit_from = _merge_spec_inheritance(spec2, context)
-
-    #But okay to to redefine an attribute if the types match
-    spec2 = _standardize_spec({"inherit_from" : "BOOP", "B": "number", "C" : "string"})
-    spec_out, inherit_from = _merge_spec_inheritance(spec2, context)
 
 
 def test_define_fact():
     spec = {"A" : "string", "B" : "number"}
-    ctor, typ1 = define_fact("BOOP", spec, context="test__fact_from_spec")
+    spec2 = {"A" : "string", "B" : "string"}
+    with kb_context("test_define_fact") as context:
+        
+        ctor, typ1 = define_fact("BOOP", spec)
+        #Redefinition illegal with new types
+        with pytest.raises(AssertionError):
+            define_fact("BOOP", spec2)
 
-    #Redefinition illegal
-    with pytest.raises(AssertionError):
-        define_fact("BOOP", spec, context="test__fact_from_spec")
-
-    #But is okay if using a new context
-    ctor, typ2 = define_fact("BOOP", spec, context="test__fact_from_spec2")
-    # assert str(typ1.context) != str(typ2.context)
+    with kb_context("test_define_fact2") as context:
+        #But is okay if defined under a different context
+        ctor, typ2 = define_fact("BOOP", spec2)
 
 
 def test_inheritence():
@@ -228,7 +234,7 @@ def _test_reference_type():
         t2 = TestLL(next=t1)
         print(t1,t2)
 
-        
+
 
         
 
@@ -239,7 +245,7 @@ def _test_reference_type():
 
 
 if __name__ == "__main__":
-    # test__standardize_spec()
+    test__standardize_spec()
     # test__merge_spec_inheritance()
     # test_define_fact()
     # test_inheritence()

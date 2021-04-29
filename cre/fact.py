@@ -114,7 +114,7 @@ def _standardize_spec(spec : dict, context, name=''):
         typ, flags = _get_attr_type_flags(attr,v, context, name)
 
         #Strings are always nominal
-        if(typ == 'unicode_type' and ('nominal' not in flags)): flags.append('nominal')
+        if(typ == unicode_type and ('nominal' not in flags)): flags.append('nominal')
 
         out[attr] = {"type": typ, "flags" : flags}
 

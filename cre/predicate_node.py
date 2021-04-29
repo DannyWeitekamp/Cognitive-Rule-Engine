@@ -276,14 +276,43 @@ def init_alpha(st, left_fact_type_name, left_attr_offsets, right_val):
     st.right_val = right_val
     
 
+# @njit(cache=True)
+
 @njit(cache=True)
-def deref_attrs(val_type, inst_ptr,attr_offsets):
-    #TODO: Allow to deref arbitrary number of attributes
-    # print("attr_offsets", attr_offsets)
-    if(len(attr_offsets) == 0): return inst_ptr
+def _deref_attrs(val_type, inst_ptr, attr_offsets):
+    '''Helper function for deref_attrs'''
     data_ptr = _pointer_to_data_pointer(inst_ptr)
     val = _load_pointer(val_type, data_ptr+attr_offsets[0])
     return val
+
+@generated_jit(cache=True)
+def deref_attrs(val_type, inst_ptr, attr_offsets):
+    print(">>", val_type)
+    if(val_type.instance_type == types.int64):
+        # If val_type is an int64 then it might be a fact reference
+        #  in which case we might be evaluating the fact itself
+        #  not a memeber of the facts.
+        def impl(val_type, inst_ptr, attr_offsets):
+            if(len(attr_offsets) == 0): return inst_ptr
+            return _deref_attrs(val_type, inst_ptr, attr_offsets)
+    else:
+        # If val_type is not an int64 then we don't need to check. 
+        #  If we did consider returning inst_ptr then the return type
+        #   would be ambiguous.
+        def impl(val_type, inst_ptr, attr_offsets):
+            return _deref_attrs(val_type, inst_ptr, attr_offsets)
+    return impl
+
+
+
+
+# def deref_attrs(val_type, inst_ptr,attr_offsets):
+#     #TODO: Allow to deref arbitrary number of attributes
+#     # print("attr_offsets", attr_offsets)
+#     if(len(attr_offsets) == 0): return inst_ptr
+#     data_ptr = _pointer_to_data_pointer(inst_ptr)
+#     val = _load_pointer(val_type, data_ptr+attr_offsets[0])
+#     return val
     
 
 
@@ -407,7 +436,7 @@ def gen_alpha_source(left_type, op_str, right_type):
     source = f'''import numba
 from numba import types, njit
 from numba.experimental.structref import new
-from numba.types import *
+from numba.types import int64, float64, unicode_type
 from cre.predicate_node import AlphaPredicateNodeTemplate, init_alpha, alpha_filter, alpha_predicate_node_field_dict
 from cre.subscriber import base_subscriber_fields, init_base_subscriber
 
@@ -670,7 +699,7 @@ def gen_beta_source(left_type, op_str, right_type):
     source = f'''
 from numba import types, njit
 from numba.experimental.structref import new
-from numba.types import *
+from numba.types import int64, float64, unicode_type
 from cre.predicate_node import BetaPredicateNodeTemplate, init_beta, beta_filter, beta_predicate_node_field_dict
 from cre.subscriber import base_subscriber_fields, init_base_subscriber
 

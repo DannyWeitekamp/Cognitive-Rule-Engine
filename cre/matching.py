@@ -1,6 +1,6 @@
 import operator
 import numpy as np
-from numba import types, njit, i8, u8, i4, u1, i8, literally, generated_jit
+from numba import types, njit, i8, u8, i4, u1, i8, literally, generated_jit, literal_unroll
 from numba.typed import List, Dict
 from numba.types import ListType, DictType, unicode_type, void, Tuple, UniTuple, optional
 from numba.experimental import structref
@@ -9,7 +9,7 @@ from numba.extending import overload_method, intrinsic, overload_attribute, intr
 from numba.core.typing.templates import AttributeTemplate
 from cre.utils import _struct_from_meminfo, _meminfo_from_struct, _cast_structref, cast_structref, decode_idrec, lower_getattr, _struct_from_pointer,  lower_setattr, lower_getattr, _pointer_from_struct
 from cre.caching import gen_import_str, unique_hash,import_from_cached, source_to_cache, source_in_cache
-from cre.condition_node import Conditions, ConditionsType, initialize_conditions
+from cre.condition_node import Conditions, ConditionsType, initialize_conditions, get_linked_conditions_instance
 
 from cre.var import *
 from cre.predicate_node import GenericAlphaPredicateNodeType, GenericBetaPredicateNodeType
@@ -203,8 +203,8 @@ def _get_fact_vectors(conds):
         facts.append(facts_for_t_id(kb_data, t_id))
     return facts
 
-@njit(cache=True)
-def get_pointer_matches_from_linked(conds):
+@njit(i8[:,::1](ConditionsType),cache=True)
+def _get_ptr_matches(conds):
     '''Takes a linked Conditions object and gets sets of pointers to 
        facts that match
     '''
@@ -248,23 +248,49 @@ def get_pointer_matches_from_linked(conds):
 
 
 @njit(cache=True)
-def _get_matches(conds, fact_types, kb=None):
-    if(kb is not None):
+def ensure_linked(conds, kb=None):
+    if(conds.kb_ptr == 0):
+        if(kb is None):
+            raise RuntimeError("Cannot match Condtions that are not yet linked to a KnowledgeBase.")
         conds = get_linked_conditions_instance(conds,kb, True)
+    return conds
 
-    kb = _struct_from_pointer(KnowledgeBase,conds.kb_ptr)
-    ptr_matches = get_pointer_matches_from_linked(conds)
-
-    # out = List()
-    # for ptr_set in ptr_matches:
-    #     for fact_type in fact_types:
-    #         _struct_from_pointer(fact_type,)
+@njit(cache=True)
+def get_ptr_matches(conds, kb=None):
+    conds = ensure_linked(conds,kb)
+    return _get_ptr_matches(conds)
 
 
-    # for ptr_match in
+from cre.rule import _struct_tuple_from_pointer_arr
+# @generated_jit(cache=True,nopython=True)
+# def _get_matches(conds, struct_types, kb=None):
+#     print(type(struct_types))
+#     print(struct_types)
+#     if(isinstance(struct_types, UniTuple)):
+#         typs = tuple([struct_types.dtype.instance_type] * struct_types.count)
+#         out_type =  UniTuple(struct_types.dtype.instance_type,struct_types.count)
+#     else:
+#         raise NotImplemented("Need to write intrinsic for multi-type ")
 
+    # print(typs)
+@njit(cache=True, locals={"ptr_set" : i8[::1]})
+def _get_matches(conds, struct_types, kb=None):
+    
 
-    return 
+    
+    ptr_matches = get_ptr_matches(conds)
+
+    out = List()
+
+    for i in range(len(ptr_matches)):
+        ptr_set = ptr_matches[i]
+        facts = _struct_tuple_from_pointer_arr(struct_types,ptr_set)
+        out.append(facts)
+        # for i,fact_type in enumerate(literal_unroll(fact_types)):
+        #     _struct_from_pointer(fact_type,ptr_set[i])
+    return out
+
+    # return impl
 
 
 

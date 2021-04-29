@@ -294,6 +294,9 @@ class {typ}(FactProxy):
     def __str__(self):
         return f'{typ}({str_temp})'
 
+    def __repr__(self):
+        return str(self)
+
 {getters}
 
 @overload({typ})

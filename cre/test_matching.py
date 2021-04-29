@@ -4,10 +4,17 @@ from numba.typed import List
 from cre.condition_node import *
 from cre.kb import KnowledgeBase
 from cre.context import kb_context
-from cre.matching import get_pointer_matches_from_linked
+from cre.matching import get_ptr_matches,_get_matches
 from cre.utils import _struct_from_pointer, _pointer_from_struct
 
-BOOP, BOOPType = define_fact("BOOP",{"A": "string", "B" : "number"})
+# with kb_context("test_matching"):
+    
+
+def match_names(c,kb):
+    out = []
+    for m in c.get_matches(kb):
+        out.append([x.name for x in m])
+    return out
 
 @njit(cache=True)
 def boop_Bs_from_ptrs(ptr_matches):
@@ -32,52 +39,56 @@ def kb_w_n_boops(n):
 
 
 def test_matching():
-    # with kb_context("test_link"):
-    # BOOP, BOOPType = define_fact("BOOP",{"A": "string", "B" : "number"})
-    kb = kb_w_n_boops(5)
+    with kb_context("test_matching_unconditioned"):
+        BOOP, BOOPType = define_fact("BOOP",{"name": "string", "B" : "number"})
+        # with kb_context("test_link"):
+        # BOOP, BOOPType = define_fact("BOOP",{"A": "string", "B" : "number"})
+        kb = kb_w_n_boops(5)
 
 
-    l1, l2 = Var(BOOPType,"l1"), Var(BOOPType,"l2")
-    r1, r2 = Var(BOOPType,"r1"), Var(BOOPType,"r2")
+        l1, l2 = Var(BOOPType,"l1"), Var(BOOPType,"l2")
+        r1, r2 = Var(BOOPType,"r1"), Var(BOOPType,"r2")
 
-    c = (l1.B > 0) & (l1.B != 3) & (l1.B < 4) & (l2.B != 3) | \
-        (l1.B == 3) 
+        c = (l1.B > 0) & (l1.B != 3) & (l1.B < 4) & (l2.B != 3) | \
+            (l1.B == 3) 
 
-    print(c)
+        print(c)
 
-    cl = get_linked_conditions_instance(c, kb)
+        cl = get_linked_conditions_instance(c, kb)
 
-    Bs = boop_Bs_from_ptrs(get_pointer_matches_from_linked(cl))
-    print("Bs", Bs)
+        Bs = boop_Bs_from_ptrs(get_ptr_matches(cl))
+        print("Bs", Bs)
 
-    print("----------")
+        print("----------")
 
-    c = (l1.B <= 1) & (l1.B < l2.B) & (l2.B <= r1.B)
+        c = (l1.B <= 1) & (l1.B < l2.B) & (l2.B <= r1.B)
 
-    cl = get_linked_conditions_instance(c, kb)
+        cl = get_linked_conditions_instance(c, kb)
 
-    Bs = boop_Bs_from_ptrs(get_pointer_matches_from_linked(cl))
-    print("Bs", Bs)
+        Bs = boop_Bs_from_ptrs(get_ptr_matches(cl))
+        print("Bs", Bs)
 
 
 def test_matching_unconditioned():
-    kb = kb_w_n_boops(5)
+    with kb_context("test_matching_unconditioned"):
+        BOOP, BOOPType = define_fact("BOOP",{"name": "string", "B" : "number"})
+        kb = kb_w_n_boops(5)
 
 
-    l1, l2 = Var(BOOPType,"l1"), Var(BOOPType,"l2")
-    c = l1 & l2
+        l1, l2 = Var(BOOPType,"l1"), Var(BOOPType,"l2")
+        c = l1 & l2
 
-    cl = get_linked_conditions_instance(c, kb)
-    Bs = boop_Bs_from_ptrs(get_pointer_matches_from_linked(cl))
-    print("Bs", Bs)
+        cl = get_linked_conditions_instance(c, kb)
+        Bs = boop_Bs_from_ptrs(get_ptr_matches(cl))
+        print("Bs", Bs)
 
 
-    l1, l2 = Var(BOOPType,"l1"), Var(BOOPType,"l2")
-    c = l1 & (l2.B < 3)
+        l1, l2 = Var(BOOPType,"l1"), Var(BOOPType,"l2")
+        c = l1 & (l2.B < 3)
 
-    cl = get_linked_conditions_instance(c, kb)
-    Bs = boop_Bs_from_ptrs(get_pointer_matches_from_linked(cl))
-    print("Bs", Bs)
+        cl = get_linked_conditions_instance(c, kb)
+        Bs = boop_Bs_from_ptrs(get_ptr_matches(cl))
+        print("Bs", Bs)
 
 def test_ref_matching():
     with kb_context("test_ref_matching"):
@@ -97,22 +108,22 @@ def test_ref_matching():
         print(c)
 
         cl = get_linked_conditions_instance(c, kb)
-        print(get_pointer_matches_from_linked(cl))
-        # Bs = boop_Bs_from_ptrs(get_pointer_matches_from_linked(cl))
+        print(get_ptr_matches(cl))
+        # Bs = boop_Bs_from_ptrs(get_ptr_matches(cl))
 
         # print(Bs)
         c = x1.nxt == 0
         print(c)
 
         cl = get_linked_conditions_instance(c, kb)
-        print(get_pointer_matches_from_linked(cl))
+        print(get_ptr_matches(cl))
 
 
         c = x1.nxt == None
         print(c)
 
         cl = get_linked_conditions_instance(c, kb)
-        print(get_pointer_matches_from_linked(cl))
+        print(get_ptr_matches(cl))
 
 def test_multiple_deref():
     with kb_context("test_multiple_deref"):
@@ -141,14 +152,16 @@ def test_multiple_deref():
         c = (v1.nxt.nxt == v2.nxt.nxt) & (v1.nxt.nxt != 0) & (v1 != v2)
 
         cl = get_linked_conditions_instance(c, kb)
-        print(get_pointer_matches_from_linked(cl))
+        print(get_ptr_matches(cl))
+
+        print(match_names(c,kb))
 
 
 
 
 
-
-
+with kb_context("test_matching_benchmarks"):
+    BOOP, BOOPType = define_fact("BOOP",{"name": "string", "B" : "number"})
 
 
 
@@ -160,7 +173,7 @@ def apply_it(kb,l1,l2,r1):
 @njit(cache=True)
 def apply_all_matches(c, f, kb):
     cl = get_linked_conditions_instance(c, kb)
-    ptr_matches = get_pointer_matches_from_linked(cl)
+    ptr_matches = get_ptr_matches(cl)
     for match in ptr_matches:
         arg0 = _struct_from_pointer(BOOPType,match[0]) 
         arg1 = _struct_from_pointer(BOOPType,match[1]) 
@@ -169,32 +182,34 @@ def apply_all_matches(c, f, kb):
 
 
 def test_applying():
-    kb = kb_w_n_boops(5)
-    l1, l2 = Var(BOOPType,"l1"), Var(BOOPType,"l2")
-    r1, r2 = Var(BOOPType,"r1"), Var(BOOPType,"r2")
-    c = (l1.B <= 1) & (l1.B < l2.B) & (l2.B <= r1.B)
-    apply_all_matches(c,apply_it,kb)
-    apply_all_matches(c,apply_it,kb)
+    with kb_context("test_matching_benchmarks"):
+        kb = kb_w_n_boops(5)
+        l1, l2 = Var(BOOPType,"l1"), Var(BOOPType,"l2")
+        r1, r2 = Var(BOOPType,"r1"), Var(BOOPType,"r2")
+        c = (l1.B <= 1) & (l1.B < l2.B) & (l2.B <= r1.B)
+        apply_all_matches(c,apply_it,kb)
+        apply_all_matches(c,apply_it,kb)
 
 
 
 def matching_1_t_4_lit_setup():
-    kb = kb_w_n_boops(100)
+    with kb_context("test_matching_benchmarks"):
+        kb = kb_w_n_boops(100)
 
-    l1, l2 = Var(BOOPType,"l1"), Var(BOOPType,"l2")
-    r1, r2 = Var(BOOPType,"r1"), Var(BOOPType,"r2")
+        l1, l2 = Var(BOOPType,"l1"), Var(BOOPType,"l2")
+        r1, r2 = Var(BOOPType,"r1"), Var(BOOPType,"r2")
 
-    c = (l1.B > 0) & (l1.B != 3) & (l1.B < 4) & (l2.B != 3) 
+        c = (l1.B > 0) & (l1.B != 3) & (l1.B < 4) & (l2.B != 3) 
 
-    cl = get_linked_conditions_instance(c, kb)
+        cl = get_linked_conditions_instance(c, kb)
 
-    # Bs = boop_Bs_from_ptrs(get_pointer_matches_from_linked(cl))
-    return (cl,), {}
+        # Bs = boop_Bs_from_ptrs(get_ptr_matches(cl))
+        return (cl,), {}
 
 @njit(cache=True)
 def check_twice(cl):
-    get_pointer_matches_from_linked(cl)
-    # get_pointer_matches_from_linked(cl)
+    get_ptr_matches(cl)
+    # get_ptr_matches(cl)
 
 
 def test_b_matching_1_t_4_lit(benchmark):
@@ -205,6 +220,7 @@ if(__name__ == "__main__"):
     # test_applying()
     # test_matching()
     # test_matching_unconditioned()
-    test_ref_matching()
-    test_multiple_deref()
-    # test_b_matching_1_t_4_lit()
+    # test_ref_matching()
+    # test_multiple_deref()
+    # import pytest.__main__.benchmark
+    matching_1_t_4_lit_setup()

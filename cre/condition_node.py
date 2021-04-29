@@ -351,9 +351,15 @@ class Conditions(structref.StructRefProxy):
     def __invert__(self):
         return conditions_not(self)
 
+    def get_ptr_matches(self,kb=None):
+        from cre.matching import get_ptr_matches
+        return get_ptr_matches(self,kb)
+
     def get_matches(self, kb=None):
-        from cre.matching import get_matches
-        return get_matches(self,kb)
+        from cre.matching import _get_matches
+        context = kb_context()
+        fact_types = tuple([context.fact_types[x.fact_type_name] for x in self.vars])
+        return _get_matches(self, fact_types, kb)
 
     @property
     def signature(self):

@@ -31,7 +31,7 @@ from cre.var import Var
 from cre.fact import define_fact, gen_fact_import_str
 from cre.condition_node import get_linked_conditions_instance
 from cre.kb import KnowledgeBaseType
-from cre.matching import get_pointer_matches_from_linked
+from cre.matching import _get_ptr_matches
 from cre.condition_node import ConditionsType
 import inspect, dill, pickle
 from textwrap import dedent
@@ -47,11 +47,13 @@ class RuleMeta(type, _UniqueHashable):
 def _struct_tuple_from_pointer_arr(typingctx, struct_types, ptr_arr):
     ''' Takes a tuple of fact types and a ptr_array i.e. an i8[::1] and outputs 
         the facts pointed to, casted to the appropriate types '''
+    print(">>",struct_types)
     if(isinstance(struct_types, UniTuple)):
         typs = tuple([struct_types.dtype.instance_type] * struct_types.count)
         out_type =  UniTuple(struct_types.dtype.instance_type,struct_types.count)
     else:
         raise NotImplemented("Need to write intrinsic for multi-type ")
+    print(out_type)
     
     sig = out_type(struct_types,i8[::1])
     def codegen(context, builder, sig, args):
@@ -262,7 +264,7 @@ def rule_engine_start(kb, rules):
         conflict_set = List.empty_list(rule_matches_tuple_type)
         for rule in rules:
             # t0 = time_ns()
-            matches = get_pointer_matches_from_linked(rule.conds)
+            matches = _get_ptr_matches(rule.conds)
             # t1 = time_ns()
             # print("\tget_matches", (t1-t0)/1e6)
             if(len(matches) > 0):

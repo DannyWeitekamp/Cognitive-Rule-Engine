@@ -398,20 +398,15 @@ def signal_subscribers_change(kb, idrec):
 def declare_fact(kb,fact):
     #Incref so that the fact is not freed if this is the only reference
     fact_ptr = _pointer_from_struct_incref(fact) #.4ms / 10000
-    print("A")
 
     t_id = resolve_t_id(kb,fact)  #.1ms / 10000
-    print("B")
     facts = facts_for_t_id(kb.kb_data,t_id) #negligible
-    print("C")
     f_id = next_empty_f_id(kb.kb_data,facts,t_id) # .5ms / 10000
 
-    print("A2")
 
     idrec = encode_idrec(t_id,f_id,0) #negligable
     fact.idrec = idrec #negligable
 
-    print("A3")
 
     if(f_id < len(facts)): # .2ms / 10000
         facts.data[f_id] = fact_ptr

@@ -9,7 +9,7 @@ from cre.predicate_node import get_alpha_predicate_node, get_beta_predicate_node
 from cre.predicate_node import get_alpha_predicate_node_definition, get_beta_predicate_node_definition
 from cre.test_kb import _delcare_10000, _retract_10000
 import pytest
-numpy.set_printoptions(threshold=20)
+np.set_printoptions(threshold=np.inf)
 
 @njit
 def njit_update(pt):
@@ -183,6 +183,8 @@ def test_beta_predicate_node_1_typed():
         # print(inds)
         assert np.array_equal(inds,[[0,1],[0,2],[2,1],[3,0],[3,1],
                 [3,2],[4,0],[4,1],[4,2],[4,3],[4,5],[5,0],[5,1],[5,2],[5,3]])
+        # print(inds)
+        # print((ld.truth_values[:6,:6]==1).astype(np.int64))
         # njit_update(pn)
         # print(ld.truth_values[:6,:6])
         assert all(ld.truth_values[0,:6] == [0,1,1,0,0,0])
@@ -196,31 +198,36 @@ def test_beta_predicate_node_1_typed():
         kb.modify(y,"B", 0)
 
         inds = filter_beta(pn, ld, np.arange(6), np.arange(6))
+        true_parts = (ld.truth_values[:6,:6]==1).astype(np.int64)
+        # print(inds)
+        # print()
 
         # njit_update(pn)
         # print(ld.truth_values[:6,:6])
-        assert all(ld.truth_values[0,:6] == [0,0,1,0,0,0])
-        assert all(ld.truth_values[1,:6] == [1,0,1,0,0,0])
-        assert all(ld.truth_values[2,:6] == [0,0,0,0,0,0])
-        assert all(ld.truth_values[3,:6] == [1,1,1,0,1,0])
-        assert all(ld.truth_values[4,:6] == [1,0,1,0,0,0])
-        assert all(ld.truth_values[5,:6] == [1,1,1,1,1,0])
+        assert all(true_parts[0,:6] == [0,0,1,0,0,0])
+        assert all(true_parts[1,:6] == [1,0,1,0,0,0])
+        assert all(true_parts[2,:6] == [0,0,0,0,0,0])
+        assert all(true_parts[3,:6] == [1,1,1,0,1,0])
+        assert all(true_parts[4,:6] == [1,0,1,0,0,0])
+        assert all(true_parts[5,:6] == [1,1,1,1,1,0])
 
         kb.retract(r)
         kb.retract(y)
 
         inds = filter_beta(pn, ld, np.arange(6), np.arange(6))
+        true_parts = (ld.truth_values[:6,:6]==1).astype(np.int64)
 
-        print(ld.truth_values)
+        # print(inds)
+        # print((ld.truth_values[:6,:6]==1).astype(np.int64))
 
         # njit_update(pn)
         # print(ld.truth_values[:6,:6])
-        assert all(ld.truth_values[0,:6] == [0,0,1,0,0,0])
-        assert all(ld.truth_values[1,:6] == [0,0,0,0,0,0])
-        assert all(ld.truth_values[2,:6] == [0,0,0,0,0,0])
-        assert all(ld.truth_values[3,:6] == [1,0,1,0,0,0])
-        assert all(ld.truth_values[4,:6] == [0,0,0,0,0,0])
-        assert all(ld.truth_values[5,:6] == [1,0,1,1,0,0])
+        assert all(true_parts[0,:6] == [0,0,1,0,0,0])
+        assert all(true_parts[1,:6] == [0,0,0,0,0,0])
+        assert all(true_parts[2,:6] == [0,0,0,0,0,0])
+        assert all(true_parts[3,:6] == [1,0,1,0,0,0])
+        assert all(true_parts[4,:6] == [0,0,0,0,0,0])
+        assert all(true_parts[5,:6] == [1,0,1,1,0,0])
 
 
 def test_beta_predicate_node_2_typed():
@@ -276,28 +283,30 @@ def test_beta_predicate_node_2_typed():
         kb.modify(y1,"A", 0); kb.modify(y2,"B", 0)
 
         inds = filter_beta(pn, ld, np.arange(6), np.arange(6))
+        true_parts = (ld.truth_values[:6,:6]==1).astype(np.int64)
         # print(ld.truth_values[:6,:6])
-        assert all(ld.truth_values[0,:6] == [1,0,1,0,0,0])
-        assert all(ld.truth_values[1,:6] == [1,0,1,0,0,0])
-        assert all(ld.truth_values[2,:6] == [0,0,0,0,0,0])
-        assert all(ld.truth_values[3,:6] == [1,1,1,0,1,0])
-        assert all(ld.truth_values[4,:6] == [1,0,1,0,0,0])
-        assert all(ld.truth_values[5,:6] == [1,1,1,1,1,0])
+        assert all(true_parts[0,:6] == [1,0,1,0,0,0])
+        assert all(true_parts[1,:6] == [1,0,1,0,0,0])
+        assert all(true_parts[2,:6] == [0,0,0,0,0,0])
+        assert all(true_parts[3,:6] == [1,1,1,0,1,0])
+        assert all(true_parts[4,:6] == [1,0,1,0,0,0])
+        assert all(true_parts[5,:6] == [1,1,1,1,1,0])
 
         kb.retract(r1); kb.retract(r2)
         kb.retract(y1); kb.retract(y2)
         
         inds = filter_beta(pn, ld, np.arange(6), np.arange(6))
-        print(ld.truth_values)
+        true_parts = (ld.truth_values[:6,:6]==1).astype(np.int64)
+        # print(ld.truth_values)
         # print(ld.truth_values[:6,:6])
-        assert all(ld.truth_values[0,:6] == [1,0,1,0,0,0])
-        assert all(ld.truth_values[1,:6] == [0,0,0,0,0,0])
-        assert all(ld.truth_values[2,:6] == [0,0,0,0,0,0])
-        assert all(ld.truth_values[3,:6] == [1,0,1,0,0,0])
-        assert all(ld.truth_values[4,:6] == [0,0,0,0,0,0])
-        assert all(ld.truth_values[5,:6] == [1,0,1,1,0,0])
+        assert all(true_parts[0,:6] == [1,0,1,0,0,0])
+        assert all(true_parts[1,:6] == [0,0,0,0,0,0])
+        assert all(true_parts[2,:6] == [0,0,0,0,0,0])
+        assert all(true_parts[3,:6] == [1,0,1,0,0,0])
+        assert all(true_parts[4,:6] == [0,0,0,0,0,0])
+        assert all(true_parts[5,:6] == [1,0,1,1,0,0])
 
-        print(ld.truth_values)
+        # print(ld.truth_values)
 
 
 

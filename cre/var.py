@@ -181,8 +181,8 @@ def check_legal_cmp(var, op_str, other_var):
         other_head_type = None
         if(isinstance(other_var, (VarTypeTemplate,Var))):
             other_head_type = other_var.field_dict['head_type'].instance_type
-        if(hasattr(head_type, '_fact_name') or hasattr(other_head_type, '_fact_name')):
-            raise AttributeError("Inequality not valid comparitor for Fact types.")
+        # if(hasattr(head_type, '_fact_name') or hasattr(other_head_type, '_fact_name')):
+        #     raise AttributeError("Inequality not valid comparitor for Fact types.")
 
 
 @njit(cache=True)

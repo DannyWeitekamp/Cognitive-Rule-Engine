@@ -10,7 +10,7 @@ from cre.utils import _struct_from_pointer, _pointer_from_struct
 # with kb_context("test_matching"):
     
 
-def match_names(c,kb):
+def match_names(c,kb=None):
     out = []
     for m in c.get_matches(kb):
         out.append([x.name for x in m])
@@ -147,14 +147,55 @@ def test_multiple_deref():
         kb.declare(b2)
         kb.declare(c2)
 
+        # print(get_ptr(a))
+        # print(get_ptr(b1))
+        # print(get_ptr(b2))
+        # print(get_ptr(c1))
+        # print(get_ptr(c2))
+
         v1 = Var(TestLL,'v1')
         v2 = Var(TestLL,'v2')
-        c = (v1.nxt.nxt == v2.nxt.nxt) & (v1.nxt.nxt != 0) & (v1 != v2)
 
-        cl = get_linked_conditions_instance(c, kb)
-        print(get_ptr_matches(cl))
+        # One Deep check same fact instance
+        c = (v1.nxt != 0) & (v1.nxt == v2.nxt) & (v1 != v2)
+        assert match_names(c, kb) == [['B1', 'B2'], ['B2', 'B1']]
 
-        print(match_names(c,kb))
+        # One Deep check same B value
+        c = (v1.nxt != 0) & (v1.nxt.B == v2.nxt.B) & (v1 != v2)
+        names = match_names(c, kb) 
+        print(names)
+        assert names == [['B1', 'B2'], ['C1', 'C2'], ['B2', 'B1'], ['C2', 'C1']]
+
+        # Two Deep w/ Permutions
+        c = (v1.nxt.nxt != 0) & (v1.nxt.nxt == v2.nxt.nxt) & (v1 != v2)
+        assert match_names(c, kb) == [['C1', 'C2'], ['C2', 'C1']]
+
+        # Two Deep w/o Permutions. 
+        # NOTE: v1 < v2 compares ptrs, can't guarentee order 
+        c = (v1.nxt.nxt != 0) & (v1.nxt.nxt == v2.nxt.nxt) & (v1 < v2)
+        names = match_names(c, kb)
+        assert names == [['C1', 'C2']] or names == [['C2', 'C1']]
+
+        kb.declare(TestLL("D1", B=3, nxt=c1))
+        kb.declare(TestLL("D2", B=3, nxt=c2))
+
+        # Three Deep (use None) -- helps check that dereference errors 
+        #  are treated internally as errors instead evaluating to 0.
+        c = (v1.nxt.nxt.nxt != 0) & (v1.nxt.nxt.nxt == v2.nxt.nxt.nxt) & (v1 != v2)
+        names = match_names(c, kb) 
+        print(names)
+        assert names == [['D1', 'D2'], ['D2', 'D1']]
+
+
+
+        
+
+
+        # c.link(kb)
+        # cl = get_linked_conditions_instance(c, kb)
+        # print(get_ptr_matches(cl))
+
+        
 
 
 
@@ -221,6 +262,6 @@ if(__name__ == "__main__"):
     # test_matching()
     # test_matching_unconditioned()
     # test_ref_matching()
-    # test_multiple_deref()
+    test_multiple_deref()
     # import pytest.__main__.benchmark
-    matching_1_t_4_lit_setup()
+    # matching_1_t_4_lit_setup()

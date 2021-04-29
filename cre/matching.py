@@ -257,7 +257,7 @@ def ensure_linked(conds, kb=None):
 
 @njit(cache=True)
 def get_ptr_matches(conds, kb=None):
-    conds = ensure_linked(conds,kb)
+    conds = ensure_linked(conds, kb)
     return _get_ptr_matches(conds)
 
 
@@ -278,7 +278,7 @@ def _get_matches(conds, struct_types, kb=None):
     
 
     
-    ptr_matches = get_ptr_matches(conds)
+    ptr_matches = get_ptr_matches(conds, kb)
 
     out = List()
 

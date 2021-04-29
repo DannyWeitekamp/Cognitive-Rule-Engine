@@ -281,13 +281,19 @@ def init_alpha(st, left_fact_type_name, left_attr_offsets, right_val):
 @njit(cache=True)
 def _deref_attrs(val_type, inst_ptr, attr_offsets):
     '''Helper function for deref_attrs'''
+
+    for offset in attr_offsets[:-1]:
+        if(inst_ptr == 0): raise Exception()
+        data_ptr = _pointer_to_data_pointer(inst_ptr)
+        inst_ptr = _load_pointer(i8,data_ptr+offset)
+        
+    if(inst_ptr == 0): raise Exception()
     data_ptr = _pointer_to_data_pointer(inst_ptr)
-    val = _load_pointer(val_type, data_ptr+attr_offsets[0])
+    val = _load_pointer(val_type, data_ptr+attr_offsets[-1])
     return val
 
 @generated_jit(cache=True)
 def deref_attrs(val_type, inst_ptr, attr_offsets):
-    print(">>", val_type)
     if(val_type.instance_type == types.int64):
         # If val_type is an int64 then it might be a fact reference
         #  in which case we might be evaluating the fact itself
@@ -321,7 +327,10 @@ def alpha_eval_truth(facts, f_id, pred_node):
     '''Updates an AlphaPredicateNode with fact at f_id'''
     inst_ptr = facts.data[i8(f_id)]
     if(inst_ptr != 0):
-        val = deref_attrs(pred_node.left_type, inst_ptr, pred_node.left_attr_offsets)
+        try:
+            val = deref_attrs(pred_node.left_type, inst_ptr, pred_node.left_attr_offsets)
+        except Exception:
+            return 0xFF
         return exec_op(pred_node.op_str, val, pred_node.right_val)
     else:
         return 0xFF
@@ -372,7 +381,7 @@ def alpha_filter(pnode_type, pred_meminfo, link_data, inds, negated):
     new_inds = np.empty(len(inds),dtype=np.int64)
     n = 0
     for ind in inds:
-        if((link_data.truth_values[ind,0]==1) ^ negated):
+        if((link_data.truth_values[ind,0] == (1 ^ negated)) ):
             new_inds[n] = ind
             n += 1
 
@@ -385,12 +394,12 @@ def alpha_ctor(left_fact_type, left_type, l_offsets, op_str, right_val):
     if(not isinstance(l_offsets, types.Array)):
         raise ValueError(f"AlphaPredicateNode left_attr_offsets must be array, got {left_attr_offsets}.")
 
-    print("---------")
-    print(left_fact_type)
-    print(left_type) 
-    print(l_offsets)
-    print(op_str)
-    print(right_val)
+    # print("---------")
+    # print(left_fact_type)
+    # print(left_type) 
+    # print(l_offsets)
+    # print(op_str)
+    # print(right_val)
     if(hasattr(right_val,"_fact_name")): raise ValueError("Alpha instantiated, but is a Beta")
     ctor, pnode_type = define_alpha_predicate_node(left_type.instance_type, op_str, right_val)
     left_fact_type_name = left_fact_type.instance_type._fact_name
@@ -558,16 +567,22 @@ def beta_eval_truth(pred_node, left_facts, right_facts, i, j):
     right_ptr = right_facts.data[j]
 
     if(left_ptr != 0 and right_ptr != 0):
-        left_val = deref_attrs(pred_node.left_type, left_ptr, pred_node.left_attr_offsets)
-        right_val = deref_attrs(pred_node.right_type, right_ptr, pred_node.right_attr_offsets)
-        print(left_val, right_val)
+        try:
+            left_val = deref_attrs(pred_node.left_type, left_ptr, pred_node.left_attr_offsets)
+            right_val = deref_attrs(pred_node.right_type, right_ptr, pred_node.right_attr_offsets)
+        except Exception:
+            return 0xFF
+
+        # If either dereference chain failed then return error byte 0xFF
+        # if(left_val is None or right_val == None): return 0xFF
+        # print(left_val, right_val)
         # left_inst = _struct_from_pointer(pred_node.left_type,left_ptr)
         # right_inst = _struct_from_pointer(pred_node.right_type,right_ptr)
         # left_val = lower_getattr(left_inst, pred_node.left_attr)
         # right_val = lower_getattr(right_inst, pred_node.right_attr)
         return exec_op(pred_node.op_str, left_val, right_val)
     else:
-        return 0#0xFF
+        return 0xFF
 
 
 @njit(cache=True,inline='always')
@@ -651,7 +666,7 @@ def beta_filter(pnode_type, pred_meminfo, link_data, left_inds, right_inds, nega
         if(l_ind >= len(left_facts.data)): continue
         for r_ind in right_inds:
             if(r_ind >= len(left_facts.data)): continue
-            if(link_data.truth_values[l_ind,r_ind] == 1):
+            if(link_data.truth_values[l_ind,r_ind] == (1 ^ negated)):
                 out.add(l_ind)
                 out.add(r_ind)
     return out.data[:out.head].reshape(out.head >> 1, 2)

@@ -210,6 +210,8 @@ def test_beta_predicate_node_1_typed():
 
         inds = filter_beta(pn, ld, np.arange(6), np.arange(6))
 
+        print(ld.truth_values)
+
         # njit_update(pn)
         # print(ld.truth_values[:6,:6])
         assert all(ld.truth_values[0,:6] == [0,0,1,0,0,0])
@@ -285,6 +287,7 @@ def test_beta_predicate_node_2_typed():
         kb.retract(y1); kb.retract(y2)
         
         inds = filter_beta(pn, ld, np.arange(6), np.arange(6))
+        print(ld.truth_values)
         # print(ld.truth_values[:6,:6])
         assert all(ld.truth_values[0,:6] == [1,0,1,0,0,0])
         assert all(ld.truth_values[1,:6] == [0,0,0,0,0,0])
@@ -292,6 +295,8 @@ def test_beta_predicate_node_2_typed():
         assert all(ld.truth_values[3,:6] == [1,0,1,0,0,0])
         assert all(ld.truth_values[4,:6] == [0,0,0,0,0,0])
         assert all(ld.truth_values[5,:6] == [1,0,1,1,0,0])
+
+        print(ld.truth_values)
 
 
 
@@ -423,6 +428,6 @@ def test_b_beta_update_100x100(benchmark):
 if __name__ == "__main__":
     test_predicate_node_sanity()
     # test_alpha_predicate_node()
-    # test_beta_predicate_node_1_typed()
-    # test_beta_predicate_node_2_typed()
+    test_beta_predicate_node_1_typed()
+    test_beta_predicate_node_2_typed()
 

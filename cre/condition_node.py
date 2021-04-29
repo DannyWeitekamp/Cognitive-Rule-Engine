@@ -359,7 +359,10 @@ class Conditions(structref.StructRefProxy):
         from cre.matching import _get_matches
         context = kb_context()
         fact_types = tuple([context.fact_types[x.fact_type_name] for x in self.vars])
-        return _get_matches(self, fact_types, kb)
+        return _get_matches(self, fact_types, kb=kb)
+
+    def link(self,kb):
+        get_linked_conditions_instance(self,kb,copy=False)
 
     @property
     def signature(self):
@@ -442,7 +445,7 @@ def _conditions_ctor_var_list(_vars,dnf=None):
 @generated_jit(cache=True)
 @overload(Conditions,strict=False)
 def conditions_ctor(_vars, dnf=None):
-    print("CONDITIONS CONSTRUCTOR", _vars, dnf)
+    print("CONDITIONS CONSTRUCTOR")#, _vars, dnf)
     if(isinstance(_vars,VarTypeTemplate)):
         # _vars is single Var
         def impl(_vars,dnf=None):

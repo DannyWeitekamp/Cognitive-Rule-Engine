@@ -9,6 +9,7 @@ from cre.predicate_node import get_alpha_predicate_node, get_beta_predicate_node
 from cre.predicate_node import get_alpha_predicate_node_definition, get_beta_predicate_node_definition
 from cre.test_kb import _delcare_10000, _retract_10000
 import pytest
+numpy.set_printoptions(threshold=20)
 
 @njit
 def njit_update(pt):

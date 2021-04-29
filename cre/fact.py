@@ -41,6 +41,9 @@ class DefferedFactRefType():
     def __str__(self):
         return f"DefferedFactRefType[{self._fact_name}]"
 
+    def __repr__(self):
+        return f"DefferedFactRefType({self._fact_name})"
+
 
 def _get_type(typ, context, name='', attr=''):
     '''Takes in a string or type and returns the type'''

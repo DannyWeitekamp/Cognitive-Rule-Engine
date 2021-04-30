@@ -195,7 +195,16 @@ def test_NOT():
         kb = kb_w_n_boops(3)
 
         x1,x2,x3 = Var(BOOP,'x1'), Var(BOOP,'x2'), Var(BOOP,'x3')
-        c = (x1.B > 1) & (x2.B < 1) & NOT(x3.B > 1000) 
+        c = (x1.B > 1) & (x2.B < 1) & NOT(x3.B > 9000) 
+
+        assert match_names(c,kb) == [['2','0']]
+
+        over_9000 = BOOP("over_9000", 9001)
+        kb.declare(over_9000)
+
+        assert match_names(c,kb) == []
+
+        kb.retract(over_9000)
 
         assert match_names(c,kb) == [['2','0']]
 

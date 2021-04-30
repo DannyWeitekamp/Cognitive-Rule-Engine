@@ -226,14 +226,11 @@ def _get_ptr_matches(conds):
     # partial_matches_set = Dict(i8_arr)
     for alpha_conjuncts, beta_conjuncts, beta_inds in conds.distr_dnf:
         alpha_inds = get_alpha_inds(fact_vectors, alpha_conjuncts, conds)
-        print(alpha_inds)
         pair_matches = get_pair_matches(alpha_inds, beta_conjuncts, beta_inds, conds)
-        print(pair_matches)
 
         partial_matches = List.empty_list(i8_arr)
         partial_matches.append(-np.ones((n_vars,),dtype=np.int64))
 
-        print(partial_matches)
 
         for i in range(n_vars):
             partial_matches = fill_pairs_at(partial_matches,i,pair_matches)
@@ -241,17 +238,11 @@ def _get_ptr_matches(conds):
         for i in range(n_vars):
             if(len(pair_matches[i]) == 0):
                 partial_matches = fill_singles_at(partial_matches,i,alpha_inds[i], is_not[i])
-                print("YEEP", partial_matches)
-    print(partial_matches)
-
-
 
     #Turn indicies into fact pointers 
     # Time Negligible
     matching_fact_ptrs = np.empty((len(partial_matches),n_vars-np.sum(is_not)),dtype=np.int64)
-    print(matching_fact_ptrs.shape)
     for i,match in enumerate(partial_matches):
-        # print("match", match)
         j = 0
         for k, ind in enumerate(match):
             if(not is_not[k]):
@@ -259,10 +250,6 @@ def _get_ptr_matches(conds):
                     return np.zeros((0,n_vars),dtype=np.int64)
                 matching_fact_ptrs[i][j] = fact_vectors[k][ind]
                 j +=1
-
-
-
-    print(matching_fact_ptrs)
 
     return matching_fact_ptrs
 

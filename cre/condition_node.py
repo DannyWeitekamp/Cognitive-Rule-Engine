@@ -368,6 +368,7 @@ class Conditions(structref.StructRefProxy):
     def signature(self):
         if(not hasattr(self,"_signature")):
             context = kb_context()
+            # print(self)
             sig_str = _get_sig_str(self)
             fact_types = sig_str[1:-1].split(",")
             self._signature = types.void(*[context.fact_types[x] for x in fact_types])            
@@ -445,7 +446,7 @@ def _conditions_ctor_var_list(_vars,dnf=None):
 @generated_jit(cache=True)
 @overload(Conditions,strict=False)
 def conditions_ctor(_vars, dnf=None):
-    print("CONDITIONS CONSTRUCTOR")#, _vars, dnf)
+    print("CONDITIONS CONSTRUCTOR", _vars, dnf)
     if(isinstance(_vars,VarTypeTemplate)):
         # _vars is single Var
         def impl(_vars,dnf=None):
@@ -464,8 +465,10 @@ def conditions_ctor(_vars, dnf=None):
 @njit(cache=True)
 def _get_sig_str(conds):
     s = "("
+    print("HERE")
     for i, var in enumerate(conds.vars):
-        s += var.fact_type_name
+        # print(var.fact_type_name)
+        s += var_get_fact_type_name(var)#.fact_type_name
         if(i < len(conds.vars)-1): s += ","
     return s + ")"
 

@@ -47,6 +47,8 @@ class DefferedFactRefType():
 
 def _get_type(typ, context, name='', attr=''):
     '''Takes in a string or type and returns the type'''
+    if(isinstance(typ, type)):
+        typ = typ.__name__
     if(isinstance(typ,str)):
         typ_str = typ
         if(typ_str.lower() in TYPE_ALIASES): 
@@ -58,6 +60,7 @@ def _get_type(typ, context, name='', attr=''):
         else:
             raise TypeError(f"Attribute type {typ_str!r} not recognized in spec" + 
                 f" for attribute definition {attr!r}." if attr else ".")
+
     if(hasattr(typ, "_fact_type")): typ = typ._fact_type
     return typ
 

@@ -31,55 +31,16 @@ from cre.var import Var
 from cre.fact import define_fact, gen_fact_import_str
 from cre.condition_node import get_linked_conditions_instance
 from cre.kb import KnowledgeBaseType
-from cre.matching import _get_ptr_matches
+from cre.matching import _get_ptr_matches, _struct_tuple_from_pointer_arr
 from cre.condition_node import ConditionsType
 import inspect, dill, pickle
 from textwrap import dedent
-
 
 #### Rule ####
 
 class RuleMeta(type, _UniqueHashable):
     pass
 
-
-@intrinsic
-def _struct_tuple_from_pointer_arr(typingctx, struct_types, ptr_arr):
-    ''' Takes a tuple of fact types and a ptr_array i.e. an i8[::1] and outputs 
-        the facts pointed to, casted to the appropriate types '''
-    print(">>",struct_types)
-    if(isinstance(struct_types, UniTuple)):
-        typs = tuple([struct_types.dtype.instance_type] * struct_types.count)
-        out_type =  UniTuple(struct_types.dtype.instance_type,struct_types.count)
-    else:
-        raise NotImplemented("Need to write intrinsic for multi-type ")
-    print(out_type)
-    
-    sig = out_type(struct_types,i8[::1])
-    def codegen(context, builder, sig, args):
-        _,ptrs = args
-
-        vals = []
-        ary = make_array(i8[::1])(context, builder, value=ptrs)
-        for i, inst_type in enumerate(typs):
-            i_val = context.get_constant(types.intp, i)
-
-            # Same as _struct_from_pointer
-            raw_ptr = _getitem_array_single_int(context,builder,i8,i8[::1],ary,i_val)
-            meminfo = builder.inttoptr(raw_ptr, cgutils.voidptr_t)
-
-            st = cgutils.create_struct_proxy(inst_type)(context, builder)
-            st.meminfo = meminfo
-
-            context.nrt.incref(builder, types.MemInfoPointer(types.voidptr), meminfo)
-
-            vals.append(st._getvalue())
-
-
-        
-        return context.make_tuple(builder,out_type,vals)
-
-    return sig,codegen
 
 def gen_rule_source(cls):
     '''Generate source code for the relevant functions of a user defined rule.
@@ -91,7 +52,7 @@ def gen_rule_source(cls):
     arg_imports = "\n".join([gen_fact_import_str(x) for x in arg_types])
     source = \
 f'''from numba import njit
-from cre.rule import _struct_tuple_from_pointer_arr
+from cre.matching import _struct_tuple_from_pointer_arr
 import pickle
 {arg_imports}
 arg_types = ({" ".join([x._fact_name +"Type," for x in arg_types])})
@@ -195,7 +156,7 @@ define_boxing(RuleTypeTemplate,Rule)
 
 RuleType = RuleTypeTemplate(rule_fields)
 
-@njit(cache=True)
+@njit(cache=False)
 def rule_ctor(conds, apply_then_from_ptrs):
     st = new(RuleType)
     st.conds = conds
@@ -248,6 +209,7 @@ class RuleEngine(object):
         self.rules = List.empty_list(RuleType)
         for rule_cls in rule_classes:
             conds =  get_linked_conditions_instance(rule_cls.conds, kb, copy=True) 
+            print(rule_cls)
             self.rules.append(rule_cls(conds))
         # self.rules = List(self.rules)
 
@@ -255,12 +217,13 @@ class RuleEngine(object):
         rule_engine_start(self.kb,self.rules)
         
             
+MAX_CYCLES = 100
 
 @njit(cache=True)
 def rule_engine_start(kb, rules):
     stack = List.empty_list(ConflictSetIterType)
 
-    while True:
+    for cycles in range(MAX_CYCLES):
         conflict_set = List.empty_list(rule_matches_tuple_type)
         for rule in rules:
             # t0 = time_ns()
@@ -285,6 +248,10 @@ def rule_engine_start(kb, rules):
                 pass
             else:
                 stack.append(cs_iter)
+        else:
+            break
+
+    if(cycles >= MAX_CYCLES-1): raise RuntimeError("Exceeded max cycles.")
         
             
 

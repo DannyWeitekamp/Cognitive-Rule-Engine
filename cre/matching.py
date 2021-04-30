@@ -1,5 +1,6 @@
 import operator
 import numpy as np
+from numba.np.arrayobj import _getitem_array_single_int, make_array
 from numba import types, njit, i8, u8, i4, u1, i8, literally, generated_jit, literal_unroll
 from numba.typed import List, Dict
 from numba.types import ListType, DictType, unicode_type, void, Tuple, UniTuple, optional
@@ -268,7 +269,47 @@ def get_ptr_matches(conds, kb=None):
     return _get_ptr_matches(conds)
 
 
-from cre.rule import _struct_tuple_from_pointer_arr
+
+@intrinsic
+def _struct_tuple_from_pointer_arr(typingctx, struct_types, ptr_arr):
+    ''' Takes a tuple of fact types and a ptr_array i.e. an i8[::1] and outputs 
+        the facts pointed to, casted to the appropriate types '''
+    print(">>",struct_types)
+    if(isinstance(struct_types, UniTuple)):
+        typs = tuple([struct_types.dtype.instance_type] * struct_types.count)
+        out_type =  UniTuple(struct_types.dtype.instance_type,struct_types.count)
+    else:
+        print(struct_types.__dict__)
+        typs = tuple([x.instance_type for x in struct_types.types])
+        out_type =  Tuple(typs)
+    print(out_type)
+    
+    sig = out_type(struct_types,i8[::1])
+    def codegen(context, builder, sig, args):
+        _,ptrs = args
+
+        vals = []
+        ary = make_array(i8[::1])(context, builder, value=ptrs)
+        for i, inst_type in enumerate(typs):
+            i_val = context.get_constant(types.intp, i)
+
+            # Same as _struct_from_pointer
+            raw_ptr = _getitem_array_single_int(context,builder,i8,i8[::1],ary,i_val)
+            meminfo = builder.inttoptr(raw_ptr, cgutils.voidptr_t)
+
+            st = cgutils.create_struct_proxy(inst_type)(context, builder)
+            st.meminfo = meminfo
+
+            context.nrt.incref(builder, types.MemInfoPointer(types.voidptr), meminfo)
+
+            vals.append(st._getvalue())
+
+
+        
+        return context.make_tuple(builder,out_type,vals)
+
+    return sig,codegen
+
 # @generated_jit(cache=True,nopython=True)
 # def _get_matches(conds, struct_types, kb=None):
 #     print(type(struct_types))

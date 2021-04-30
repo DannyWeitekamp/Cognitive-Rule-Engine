@@ -243,6 +243,18 @@ def _decref_pointer(typingctx, raw_ptr):
     sig = void(raw_ptr)
     return sig, codegen
 
+@intrinsic
+def _incref_pointer(typingctx, raw_ptr):
+    def codegen(context, builder, sig, args):
+        raw_ptr, = args
+        meminfo = builder.inttoptr(raw_ptr, cgutils.voidptr_t)
+        context.nrt.incref(builder, types.MemInfoPointer(types.voidptr), meminfo)
+
+
+    sig = void(raw_ptr)
+    return sig, codegen
+
+
 
 #### Anonymous Structrefs Member Access #### 
 

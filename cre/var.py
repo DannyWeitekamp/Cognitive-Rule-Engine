@@ -12,7 +12,7 @@ from cre.context import kb_context
 from cre.structref import define_structref, define_structref_template
 from cre.kb import KnowledgeBaseType, KnowledgeBase, facts_for_t_id, fact_at_f_id
 from cre.fact import define_fact, BaseFactType, cast_fact, DefferedFactRefType
-from cre.utils import _struct_from_meminfo, _meminfo_from_struct, _cast_structref, cast_structref, decode_idrec, lower_getattr, _struct_from_pointer,  lower_setattr, lower_getattr, _pointer_from_struct
+from cre.utils import _struct_from_meminfo, _meminfo_from_struct, _cast_structref, cast_structref, decode_idrec, lower_getattr, _struct_from_pointer,  lower_setattr, lower_getattr, _pointer_from_struct, _decref_pointer, _incref_pointer, _incref_structref
 from cre.subscriber import base_subscriber_fields, BaseSubscriber, BaseSubscriberType, init_base_subscriber, link_downstream
 from cre.vector import VectorType
 from cre.predicate_node import BasePredicateNode,BasePredicateNodeType, get_alpha_predicate_node_definition, \
@@ -71,9 +71,11 @@ class Var(structref.StructRefProxy):
     def __new__(cls, typ, alias=None):
         if(not isinstance(typ, types.StructRef)): typ = typ.fact_type
         fact_type_name = typ._fact_name
+        print(repr(fact_type_name))
         typ = types.TypeRef(typ)
         struct_type = get_var_definition(typ,typ)
         st = var_ctor(struct_type, fact_type_name, alias)
+        print("after")
         return st
         # return structref.StructRefProxy.__new__(cls, *args)
 
@@ -109,9 +111,10 @@ class Var(structref.StructRefProxy):
             offset = fact_type._attr_offsets[list(fd.keys()).index(attr)]
             struct_type = get_var_definition(types.TypeRef(fact_type), types.TypeRef(head_type))
             #CHECK THAT PTRS ARE SAME HERE
-            new = var_ctor(struct_type, fact_type_name, var_get_alias(self))
-            var_memcopy(self, new)
-            var_append_attr(new, attr, offset)
+            new = new_appended_var(struct_type, self, attr, offset)
+            # new = var_ctor(struct_type, str(fact_type_name), var_get_alias(self))
+            # var_memcopy(self, new)
+            # var_append_attr(new, attr, offset)
             return new
 
     def __str__(self):
@@ -221,7 +224,7 @@ def get_var_definition(fact_type, head_type):
         return var_type_cache[t]
 
 @njit(cache=True)
-def var_ctor(var_struct_type, fact_type_name, alias):
+def var_ctor(var_struct_type, fact_type_name="", alias=""):
     st = new(var_struct_type)
     st.is_not = u1(0)
     st.conj_ptr = 0
@@ -306,6 +309,15 @@ class StructAttribute(AttributeTemplate):
 #### getattr and dereferencing ####
 
 @njit(cache=True)
+def new_appended_var(struct_type, base_var, attr, offset):
+    _incref_structref(base_var)
+    st = new(struct_type)
+    var_memcopy(base_var,st)
+    var_append_attr(st,attr,offset)
+    return st
+
+
+@njit(cache=True)
 def var_memcopy(self,st):
     new_deref_attrs = List.empty_list(unicode_type)
     new_deref_offsets = List.empty_list(i8)
@@ -319,7 +331,9 @@ def var_memcopy(self,st):
     lower_setattr(st,'alias',lower_getattr(self,"alias"))
     lower_setattr(st,'deref_attrs',new_deref_attrs)
     lower_setattr(st,'deref_offsets',new_deref_offsets)
-    lower_setattr(st,'fact_type_name',lower_getattr(self,"fact_type_name"))
+    fact_type_name = lower_getattr(self,"fact_type_name")
+    print(">>",fact_type_name)
+    lower_setattr(st,'fact_type_name',str(fact_type_name))
     
     
 
@@ -350,10 +364,11 @@ def var_getattr_impl(context, builder, typ, val, attr):
         st = ctor(context, builder, value=val)._getvalue()
 
         def new_var_and_append(self):
-            st = new(typ)
-            var_memcopy(self,st)
-            var_append_attr(st,attr,offset)
-            return st
+            return new_appended_var(typ,self,attr,offset)
+            # st = new(typ)
+            # var_memcopy(self,st)
+            # var_append_attr(st,attr,offset)
+            # return st
 
         ret = context.compile_internal(builder, new_var_and_append, typ(typ,), (st,))
         context.nrt.incref(builder, typ, ret)

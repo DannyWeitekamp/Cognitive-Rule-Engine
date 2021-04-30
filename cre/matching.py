@@ -167,22 +167,27 @@ def fill_pairs_at(partial_matches, i, pair_matches):
     return partial_matches
 
 @njit(nogil=False, parallel=False,fastmath=False,cache=True)
-def fill_singles_at(partial_matches,i, candidate_inds):
+def fill_singles_at(partial_matches,i, candidate_inds, is_not):
     '''
     For var_i which is free floating and without any beta
     constraints, bind the candidates for this variable
     to every partial match in partial_matches. 
     '''
-    new_pms = List()
+
+    new_pms = List.empty_list(i8_arr)
     for pm in partial_matches:
-        if(pm[i] == -1):
-            for ind in candidate_inds:
-                # if(not (inds == pm).any()):
-                new_pm = pm.copy()
-                new_pm[i] = ind
-                new_pms.append(new_pm)
+        if(is_not):
+            if(len(candidate_inds) == 0 and pm[i] == -1):
+                new_pms.append(pm)
         else:
-            new_pms.append(pm)
+            if(pm[i] == -1):
+                for ind in candidate_inds:
+                    # if(not (inds == pm).any()):
+                    new_pm = pm.copy()
+                    new_pm[i] = ind
+                    new_pms.append(new_pm)
+            else:
+                new_pms.append(pm)
     return new_pms
 
 
@@ -214,35 +219,50 @@ def _get_ptr_matches(conds):
     n_vars = len(conds.vars)
     fact_vectors = _get_fact_vectors(conds)
 
+    is_not = np.empty(n_vars,dtype=np.uint8)
+    for i in range(n_vars): 
+        is_not[i] = conds.vars[i].is_not
+
     # partial_matches_set = Dict(i8_arr)
     for alpha_conjuncts, beta_conjuncts, beta_inds in conds.distr_dnf:
         alpha_inds = get_alpha_inds(fact_vectors, alpha_conjuncts, conds)
+        print(alpha_inds)
         pair_matches = get_pair_matches(alpha_inds, beta_conjuncts, beta_inds, conds)
+        print(pair_matches)
 
         partial_matches = List.empty_list(i8_arr)
         partial_matches.append(-np.ones((n_vars,),dtype=np.int64))
+
+        print(partial_matches)
 
         for i in range(n_vars):
             partial_matches = fill_pairs_at(partial_matches,i,pair_matches)
 
         for i in range(n_vars):
             if(len(pair_matches[i]) == 0):
-                partial_matches = fill_singles_at(partial_matches,i,alpha_inds[i])
+                partial_matches = fill_singles_at(partial_matches,i,alpha_inds[i], is_not[i])
+                print("YEEP", partial_matches)
+    print(partial_matches)
 
 
 
     #Turn indicies into fact pointers 
     # Time Negligible
-    matching_fact_ptrs = np.empty((len(partial_matches),n_vars),dtype=np.int64)
+    matching_fact_ptrs = np.empty((len(partial_matches),n_vars-np.sum(is_not)),dtype=np.int64)
+    print(matching_fact_ptrs.shape)
     for i,match in enumerate(partial_matches):
         # print("match", match)
-        for j, ind in enumerate(match):
-            if(ind == -1):
-                return np.zeros((0,n_vars),dtype=np.int64)
-            matching_fact_ptrs[i][j] = fact_vectors[j][ind]
+        j = 0
+        for k, ind in enumerate(match):
+            if(not is_not[k]):
+                if(ind == -1):
+                    return np.zeros((0,n_vars),dtype=np.int64)
+                matching_fact_ptrs[i][j] = fact_vectors[k][ind]
+                j +=1
 
 
-    # print(matching_fact_ptrs)
+
+    print(matching_fact_ptrs)
 
     return matching_fact_ptrs
 

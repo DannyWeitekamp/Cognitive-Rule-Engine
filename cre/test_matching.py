@@ -188,14 +188,18 @@ def test_multiple_deref():
 
 
 
-        
+def test_NOT():
+    with kb_context("test_NOT"):
+        BOOP, BOOPType = define_fact("BOOP",{"name": "string", "B" : "number"})
 
+        kb = kb_w_n_boops(3)
 
-        # c.link(kb)
-        # cl = get_linked_conditions_instance(c, kb)
-        # print(get_ptr_matches(cl))
+        x1,x2,x3 = Var(BOOP,'x1'), Var(BOOP,'x2'), Var(BOOP,'x3')
+        c = (x1.B > 1) & (x2.B < 1) & NOT(x3.B > 1000) 
 
-        
+        assert match_names(c,kb) == [['2','0']]
+
+        #TODO: Make sure NOT() works on betas
 
 
 
@@ -262,6 +266,7 @@ if(__name__ == "__main__"):
     # test_matching()
     # test_matching_unconditioned()
     # test_ref_matching()
-    test_multiple_deref()
+    # test_multiple_deref()
     # import pytest.__main__.benchmark
     # matching_1_t_4_lit_setup()
+    test_NOT()

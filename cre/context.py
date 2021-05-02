@@ -79,6 +79,13 @@ def grow_fact_num_to_t_id(cd, new_size):
     cd.fact_num_to_t_id = new_fact_num_to_t_id
     return new_fact_num_to_t_id
 
+@njit(cache=True)
+def assign_name_num_to_t_id(context_data, name, fact_num, t_id):
+    context_data.fact_to_t_id[name] = t_id 
+    if(fact_num >= len(context_data.fact_num_to_t_id)):
+        context_data.fact_num_to_t_id = grow_fact_num_to_t_id(context_data, fact_num*2)
+    context_data.fact_num_to_t_id[fact_num] = t_id 
+
 class KnowledgeBaseContext(object):
     _contexts = {}
 
@@ -141,10 +148,8 @@ class KnowledgeBaseContext(object):
 
         #Map to t_ids
         t_id = len(self.fact_types)
-        self.fact_to_t_id[name] = t_id 
-        if(fact_type._fact_num >= len(self.fact_num_to_t_id)):
-            self.fact_num_to_t_id = grow_fact_num_to_t_id(self.context_data, fact_type._fact_num*2)
-        self.fact_num_to_t_id[fact_type._fact_num] = t_id 
+        assign_name_num_to_t_id(self.context_data,name,fact_type._fact_num, t_id)
+        
         # fact_type._t_id = t_id
 
         # self.fact_to_t_id[fact_ctor] = t_id 

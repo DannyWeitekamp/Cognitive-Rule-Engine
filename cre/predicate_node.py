@@ -449,6 +449,7 @@ from numba.types import int64, float64, unicode_type
 from cre.predicate_node import AlphaPredicateNodeTemplate, init_alpha, alpha_filter, alpha_predicate_node_field_dict
 from cre.subscriber import base_subscriber_fields, init_base_subscriber
 
+
 specialization_dict = {{
     'op_str' : types.literal('{op_str}'),
     'left_type' : types.TypeRef({left_type}),

@@ -24,6 +24,7 @@ from numba.core.datamodel import default_manager, models
 
 from operator import itemgetter
 from copy import copy
+from os import getenv
 # import inspect
 
 
@@ -71,15 +72,23 @@ default_manager.register(VarTypeTemplate, models.StructRefModel)
 GenericVarType = VarTypeTemplate([(k,v) for k,v in var_fields_dict.items()])
 
 class Var(structref.StructRefProxy):
-    def __new__(cls, typ, alias=None):
+    def __new__(cls, typ, alias=None, skip_assign_alias=False):
         if(not isinstance(typ, types.StructRef)): typ = typ.fact_type
         fact_type_name = typ._fact_name
         print(repr(fact_type_name))
-        typ = types.TypeRef(typ)
-        struct_type = get_var_definition(typ,typ)
-        st = var_ctor(struct_type, fact_type_name, alias)
+        typ_ref = types.TypeRef(typ)
 
-        assign_to_alias_in_parent_frame(st,alias)
+        if(getenv("CRE_SPECIALIZE_VAR_TYPE",default=False)):
+            struct_type = get_var_definition(typ_ref,typ_ref)
+        else:
+            struct_type = GenericVarType
+
+        st = var_ctor(struct_type, fact_type_name, alias)
+        st._fact_type = typ
+        st._head_type = typ
+
+        if(not skip_assign_alias):
+            assign_to_alias_in_parent_frame(st,alias)
 
 
         # print("after")
@@ -88,12 +97,23 @@ class Var(structref.StructRefProxy):
 
     def __getattr__(self, attr):
         # print("DEREF", attr)
+        if(attr in ['_head_type', '_fact_type']): return None
         if(attr == 'fact_type'):
-            fact_type = self._numba_type_.field_dict['fact_type']
-            return fact_type.instance_type if(fact_type != types.Any) else None
+            fact_type_ref = self._numba_type_.field_dict['fact_type']
+            if(fact_type_ref != types.Any):
+                # If the Var is type specialize then grab its fact_type
+                return fact_type_ref.instance_type 
+            else:
+                # Otherwise we need to resolve the type from the current context
+                return self._fact_type
+                # return kb_context().fact_types[self.fact_type_name]
         elif(attr == 'head_type'):
-            head_type = self._numba_type_.field_dict['head_type']
-            return head_type.instance_type if(head_type != types.Any) else None
+            head_type_ref = self._numba_type_.field_dict['head_type']
+            if(head_type_ref != types.Any):
+                return fact_type_ref.instance_type 
+            else:
+                return self._head_type
+                # return head_type.instance_type if(head_type != types.Any) else None
         elif(attr == 'is_not'):
             return var_get_is_not(self)
         elif(attr == 'deref_attrs'):
@@ -105,9 +125,8 @@ class Var(structref.StructRefProxy):
         elif(attr == 'base_ptr'):
             return var_get_base_ptr(self)
         elif(True): 
-            typ = self._numba_type_
-            
-            fact_type = typ.field_dict['fact_type'].instance_type 
+            fact_type = self.fact_type
+
             fact_type_name = fact_type._fact_name
             head_type = fact_type.spec[attr]['type']
             if(isinstance(head_type,DefferedFactRefType)):
@@ -116,9 +135,15 @@ class Var(structref.StructRefProxy):
 
             fd = fact_type.field_dict
             offset = fact_type._attr_offsets[list(fd.keys()).index(attr)]
-            struct_type = get_var_definition(types.TypeRef(fact_type), types.TypeRef(head_type))
+
+            if(getenv("CRE_SPECIALIZE_VAR_TYPE",default=False)):
+                struct_type = get_var_definition(types.TypeRef(fact_type), types.TypeRef(head_type))
+            else:
+                struct_type = GenericVarType
             #CHECK THAT PTRS ARE SAME HERE
             new = new_appended_var(struct_type, self, attr, offset)
+            new._fact_type = fact_type
+            new._head_type = head_type
             # new = var_ctor(struct_type, str(fact_type_name), var_get_alias(self))
             # var_memcopy(self, new)
             # var_append_attr(new, attr, offset)
@@ -173,7 +198,7 @@ def var_cmp_alpha(left_var, op_str, right_var,negated):
     # Treat None as 0 for comparing against a fact ref
     if(right_var is None and isinstance(left_var.head_type, types.StructRef)): right_var = 0
     right_var_type = types.unliteral(types.literal(right_var)) #if (isinstance(right_var, types.NoneType)) else types.int64
-    ctor = gen_pterm_ctor_alpha(left_var._numba_type_, op_str, right_var_type)
+    ctor = gen_pterm_ctor_alpha(left_var, op_str, right_var_type)
     pt = ctor(left_var, op_str, right_var)
     lbv = cast_structref(GenericVarType,left_var)
     return pt_to_cond(pt, lbv, None, negated)
@@ -181,7 +206,7 @@ def var_cmp_alpha(left_var, op_str, right_var,negated):
 
 def var_cmp_beta(left_var, op_str, right_var, negated):
     from cre.condition_node import pt_to_cond, gen_pterm_ctor_alpha, gen_pterm_ctor_beta
-    ctor = gen_pterm_ctor_beta(left_var._numba_type_, op_str, right_var._numba_type_)
+    ctor = gen_pterm_ctor_beta(left_var, op_str, right_var)
     pt = ctor(left_var, op_str, right_var)
     lbv = cast_structref(GenericVarType,left_var)
     rbv = cast_structref(GenericVarType,right_var)
@@ -189,13 +214,14 @@ def var_cmp_beta(left_var, op_str, right_var, negated):
 
 
 def check_legal_cmp(var, op_str, other_var):
-    if(isinstance(var,Var)): var = var._numba_type_
-    if(isinstance(other_var,Var)): other_var = other_var._numba_type_
+    # if(isinstance(var,Var)): var = var
+    # if(isinstance(other_var,Var)): other_var = other_var
     if(op_str != "=="):
-        head_type = var.field_dict['head_type'].instance_type
+        head_type = var.head_type
         other_head_type = None
         if(isinstance(other_var, (VarTypeTemplate,Var))):
-            other_head_type = other_var.field_dict['head_type'].instance_type
+            other_head_type = other_var.head_type
+
         # if(hasattr(head_type, '_fact_name') or hasattr(other_head_type, '_fact_name')):
         #     raise AttributeError("Inequality not valid comparitor for Fact types.")
 
@@ -344,7 +370,6 @@ def var_memcopy(self,st):
     lower_setattr(st,'deref_attrs',new_deref_attrs)
     lower_setattr(st,'deref_offsets',new_deref_offsets)
     fact_type_name = lower_getattr(self,"fact_type_name")
-    print(">>",fact_type_name)
     lower_setattr(st,'fact_type_name',str(fact_type_name))
     
     

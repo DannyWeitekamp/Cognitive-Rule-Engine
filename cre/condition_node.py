@@ -90,32 +90,39 @@ def beta_pterm_ctor(pn, left_var, op_str, right_var):
     return st
 
 
-pnode_dat_cache = {}
-def get_alpha_pnode_ctor(left_var, op_str, right_var):
-    t = ("alpha",str(left_var), op_str, right_var)
-    if(t not in pnode_dat_cache):
-        left_fact_type = left_var.field_dict['fact_type'].instance_type
-        left_type = left_var.field_dict['head_type'].instance_type
-        left_fact_type_name = left_fact_type._fact_name
+def _resolve_var_types(var):
+    # In the python context the Var instance is passed instead of the type,
+    #  because if "CRE_SPECIALIZE_VAR_TYPE"==False all Vars are GenericVarType.
+    # print(type(var))
+    if(isinstance(var,Var)):
+        fact_type = var.fact_type
+        head_type = var.head_type
+        # var = var._numba_type_
+    else:
+        fact_type = var.field_dict['fact_type'].instance_type
+        head_type = var.field_dict['head_type'].instance_type
+    return fact_type, head_type
 
-        ctor, _ = define_alpha_predicate_node(left_type, op_str, right_var)
-        pnode_dat_cache[t] = (ctor, left_fact_type_name)
+
+pnode_dat_cache = {}
+def get_alpha_pnode_ctor(l_var, op_str, r_var):
+    l_fact_type, l_type  = _resolve_var_types(l_var)
+
+    t = ("alpha",str(l_fact_type), str(l_type), op_str, r_var)
+    if(t not in pnode_dat_cache):
+        ctor, _ = define_alpha_predicate_node(l_type, op_str, r_var)
+        pnode_dat_cache[t] = (ctor, l_fact_type._fact_name)
     return pnode_dat_cache[t]
 
 
-def get_beta_pnode_ctor(left_var, op_str, right_var):
-    t = ("beta",str(left_var), op_str,str(right_var))
+def get_beta_pnode_ctor(l_var, op_str, r_var):
+    l_fact_type, l_type  = _resolve_var_types(l_var)
+    r_fact_type, r_type  = _resolve_var_types(r_var)
+
+    t = ("beta", str(l_fact_type), str(l_type), op_str,str(r_fact_type), str(r_type))
     if(t not in pnode_dat_cache):
-        left_fact_type = left_var.field_dict['fact_type'].instance_type
-        left_type = left_var.field_dict['head_type'].instance_type
-        left_fact_type_name = left_fact_type._fact_name
-
-        right_fact_type = right_var.field_dict['fact_type'].instance_type
-        right_type = right_var.field_dict['head_type'].instance_type
-        right_fact_type_name = right_fact_type._fact_name
-
-        ctor, _ = define_beta_predicate_node(left_type, op_str, right_type)
-        pnode_dat_cache[t] = (ctor, left_fact_type_name, right_fact_type_name)
+        ctor, _ = define_beta_predicate_node(l_type, op_str, r_type)
+        pnode_dat_cache[t] = (ctor, l_fact_type._fact_name, r_fact_type._fact_name)
     return pnode_dat_cache[t]
 
 @njit(cache=True)
@@ -781,7 +788,10 @@ def NOT(c, alias=None):
     elif(hasattr(c,'fact_type') or hasattr(c,'fact_ctor')):
         # 
         c = getattr(c, 'fact_type',c)
-        out = _var_NOT(Var(c,alias))
+        var = Var(c,alias,skip_assign_alias=True)
+        out = _var_NOT(var)
+        out._fact_type = var._fact_type
+        out._head_type = var._head_type
         assign_to_alias_in_parent_frame(out,alias)
         return out
 

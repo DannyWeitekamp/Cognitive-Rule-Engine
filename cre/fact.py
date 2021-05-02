@@ -77,7 +77,6 @@ def _get_attr_type_flags(attr, v, context, name=''):
     else:
         typ, flags = _get_type(v, context, name, attr), []
     
-    print(typ, flags)
 
     return typ, flags
 
@@ -253,10 +252,10 @@ def gen_fact_code(typ, fields, fact_num, ind='    '):
                             if(isinstance(t,fact_types))  else f'{a}={{repr(self.{a})}}' 
     str_temp = ", ".join([temp_str_f(k,v) for k,v in fields])
 
-    print(base_fact_fields+fields)
+    # print(base_fact_fields+fields)
     attr_offsets = get_offsets_from_member_types(base_fact_fields+fields)
-    print(typ, attr_offsets)
-    print(typ, base_list,field_list)
+    # print(typ, attr_offsets)
+    # print(typ, base_list,field_list)
 
 # The source code template for a user defined fact. Written to the
 #  system cache so it can be its own module. Doing so helps njit(cache=True)
@@ -443,12 +442,12 @@ def define_fact(name : str, spec : dict, context=None):
     spec, inherit_from = _merge_spec_inheritance(spec,context)
 
     if(name in context.fact_types):
-        print(str(context.fact_types[name].spec))
-        print(str(spec))
+        # print(str(context.fact_types[name].spec))
+        # print(str(spec))
         assert str(context.fact_types[name].spec) == str(spec), \
         f"Redefinition of fact '{name}' in context '{context.name}' not permitted"
 
-        print(f"FACT REDEFINITION: '{name}' in context '{context.name}' ")
+        # print(f"FACT REDEFINITION: '{name}' in context '{context.name}' ")
         return context.fact_ctors[name], context.fact_types[name]
 
 

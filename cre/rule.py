@@ -26,7 +26,7 @@ from cre.gensource import assert_gen_source
 from cre.caching import unique_hash, source_to_cache, import_from_cached, source_in_cache, get_cache_path, cache_safe_exec
 from cre.structref import gen_structref_code, define_structref, define_structref_template
 from cre.context import kb_context
-from cre.utils import _cast_structref, _struct_from_pointer
+from cre.utils import _cast_structref, _struct_from_pointer, _func_from_address
 from cre.var import Var
 from cre.fact import define_fact, gen_fact_import_str
 from cre.condition_node import get_linked_conditions_instance
@@ -47,32 +47,40 @@ def gen_rule_source(cls):
        Note: The jitted then() function is pickled, the bytes dumped into the 
         source, and then reconstituted at runtime. This strategy seems to work
         even if globals are used in the function. 
+       Note: apply_then_from_ptrs is reconstituted in rule_ctor() from it's address
+         which is aquired via _get_wrapper_address on import.
     '''
     arg_types = cls.sig.args
     arg_imports = "\n".join([gen_fact_import_str(x) for x in arg_types])
     source = \
 f'''from numba import njit
+from numba.experimental.function_type import _get_wrapper_address
 from cre.matching import _struct_tuple_from_pointer_arr
+from cre.rule import rule_ctor, atfp_type
+from cre.utils import _func_from_address
 import pickle
 {arg_imports}
 arg_types = ({" ".join([x._fact_name +"Type," for x in arg_types])})
 
-
 then = pickle.loads({pickle.dumps(njit(cls.then_pyfunc))})
 then.enable_caching()
 
-@njit(cache=True)
+@njit(atfp_type.signature, cache=True)
 def apply_then_from_ptrs(kb,ptrs):
     facts_tuple = _struct_tuple_from_pointer_arr(arg_types,ptrs)
     then(kb,*facts_tuple)
+
+atfp_addr = _get_wrapper_address(apply_then_from_ptrs, atfp_type.signature)
+
 '''
     return source
 
 
 class Rule(structref.StructRefProxy, metaclass=RuleMeta):
-    def __new__(self,conds=None):
-        
-        self = rule_ctor(conds if conds else self.conds, self._apply_then_from_ptrs)
+    def __new__(cls,conds=None):
+        # self = cls._ctor(conds if conds else cls.conds)
+        self = rule_ctor(conds if conds else cls.conds, cls._atfp_addr)#, self._apply_then_from_ptrs)
+        # self.apply_then_from_ptrs = apply_then_from_ptrs_type(cls._apply_then_from_ptrs)
         if(conds is not None): self.conds = conds
         return self
     # def __init__(self, conds):
@@ -107,7 +115,7 @@ class Rule(structref.StructRefProxy, metaclass=RuleMeta):
             source = gen_rule_source(cls)
             source_to_cache(name,hash_code,source)
 
-        l = import_from_cached(name, hash_code, ['then','apply_then_from_ptrs'])
+        l = import_from_cached(name, hash_code, ['then','apply_then_from_ptrs', 'atfp_addr'])
         # l,g = cache_safe_exec(source,gbls={'then':then, 'arg_types':arg_types})
 
 
@@ -115,6 +123,8 @@ class Rule(structref.StructRefProxy, metaclass=RuleMeta):
         # raise ValueError()
         cls.then = l['then']
         cls._apply_then_from_ptrs = l['apply_then_from_ptrs']
+        cls._atfp_addr = l['atfp_addr']
+        # cls._ctor = l['ctor']
 
         # then_from_ptrs(cls.then, np.zeros(5,dtype=np.int64))
 
@@ -146,21 +156,24 @@ class RuleTypeTemplate(types.StructRef):
     def preprocess_fields(self, fields):
         return tuple((name, types.unliteral(typ)) for name, typ in fields)
 
+apply_then_from_ptrs_type = types.FunctionType(types.void(KnowledgeBaseType,i8[::1]))
+
 rule_fields = [
     ("conds" , ConditionsType),
-    ("apply_then_from_ptrs",types.FunctionType(types.void(KnowledgeBaseType,i8[::1]))),
+    ("apply_then_from_ptrs", apply_then_from_ptrs_type),
     ]
 
 
 define_boxing(RuleTypeTemplate,Rule)
 
 RuleType = RuleTypeTemplate(rule_fields)
+atfp_type = types.FunctionType(types.void(KnowledgeBaseType,i8[::1]))
 
 @njit(cache=False)
-def rule_ctor(conds, apply_then_from_ptrs):
+def rule_ctor(conds, atfp_addr):
     st = new(RuleType)
     st.conds = conds
-    st.apply_then_from_ptrs = apply_then_from_ptrs
+    st.apply_then_from_ptrs = _func_from_address(atfp_type, atfp_addr)
     return st
 
 #### ConflictSetItr ####
@@ -202,15 +215,24 @@ def cs_iter_next(self):
 
 #### RuleEngine ####
 
+# Cache these two to avoid recompile
+@njit(cache=True)
+def _new_rule_list():
+    return List.empty_list(RuleType)
+
+@njit(cache=True)
+def _append_list(l,x):
+    return l.append(x)
+
 class RuleEngine(object):
     def __init__(self,kb, rule_classes):
         self.kb = kb
         self.rule_classes = rule_classes
-        self.rules = List.empty_list(RuleType)
+        self.rules = _new_rule_list()
         for rule_cls in rule_classes:
             conds =  get_linked_conditions_instance(rule_cls.conds, kb, copy=True) 
             print(rule_cls)
-            self.rules.append(rule_cls(conds))
+            _append_list(self.rules, rule_cls(conds))
         # self.rules = List(self.rules)
 
     def start(self):

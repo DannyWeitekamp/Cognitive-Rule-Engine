@@ -13,6 +13,7 @@ from cre.structref import define_structref, define_structref_template
 from cre.kb import KnowledgeBaseType, KnowledgeBase, facts_for_t_id, fact_at_f_id
 from cre.fact import define_fact, BaseFactType, cast_fact
 from cre.utils import _struct_from_meminfo, _meminfo_from_struct, _cast_structref, cast_structref, decode_idrec, lower_getattr, _struct_from_pointer,  lower_setattr, lower_getattr, _pointer_from_struct, _pointer_from_struct_incref, _decref_pointer
+from cre.utils import assign_to_alias_in_parent_frame
 from cre.subscriber import base_subscriber_fields, BaseSubscriber, BaseSubscriberType, init_base_subscriber, link_downstream
 from cre.vector import VectorType
 from cre.predicate_node import BasePredicateNode,BasePredicateNodeType, get_alpha_predicate_node_definition, \
@@ -371,6 +372,7 @@ class Conditions(structref.StructRefProxy):
             # print(self)
             sig_str = _get_sig_str(self)
             fact_types = sig_str[1:-1].split(",")
+            print(fact_types)
             self._signature = types.void(*[context.fact_types[x] for x in fact_types])            
 
         return self._signature
@@ -467,9 +469,11 @@ def _get_sig_str(conds):
     s = "("
     print("HERE")
     for i, var in enumerate(conds.vars):
+        if(var.is_not): continue
+        if(len(s) > 1): s += ","
         # print(var.fact_type_name)
         s += var_get_fact_type_name(var)#.fact_type_name
-        if(i < len(conds.vars)-1): s += ","
+        # if(i < len(conds.vars)-1): s += ","
     return s + ")"
 
 @njit(cache=True)
@@ -480,8 +484,9 @@ def conditions_repr(self,alias=None):
         if(j < len(self.vars)-1): s += ", "
     s += " = "
     for j, v in enumerate(self.vars):
-        s_v = "Var(" + v.fact_type_name + ")"
-        if(v.is_not): s_v = "NOT(" + s_v +")"
+        prefix = "NOT" if(v.is_not) else "Var"
+        s_v = prefix + "(" + v.fact_type_name + ")"
+        # : s_v = "NOT(" + s_v +")"
         s += s_v
         if(j < len(self.vars)-1): s += ", "
     s += "\n"
@@ -733,62 +738,73 @@ def _var_NOT(c):
 
                 g_conj.base_ptr = _pointer_from_struct(conj_base)
 
-
-                # If the base Var doesn't have a conjugate then make one
-                # if(base.conj_ptr == 0):
-                #     conj_base = new(GenericVarType)
-                #     var_memcopy(base,conj_base)
-                #     conj_base.is_not = u1(0) if base.is_not else u1(1)
-                #     base.conj_ptr = _pointer_from_struct_incref(conj_base)
-                #     conj_base.conj_ptr = _pointer_from_struct_incref(base)
-
-                # Make the NOT conjugate for this Var
-                # skip if 'c' happened to be its own base
-                # if(c.conj_ptr == 0):   
-                #     st = new(st_typ)
-                #     var_memcopy(c,st)
-                #     st.base_ptr = base.conj_ptr
-                #     st.is_not = u1(0) if c.is_not else u1(1)
-                #     c.conj_ptr = _pointer_from_struct_incref(st)
-                #     st.conj_ptr = _pointer_from_struct_incref(c)
             st = _struct_from_pointer(st_typ, c.conj_ptr)
             return st
         return impl
 
+@njit(cache=True)
+def _conditions_NOT(c):
+    new_vars = List.empty_list(GenericVarType)
+    ptr_map = Dict.empty(i8,i8)
+    for var in c.vars:
+        new_var = _var_NOT(var)
+        ptr_map[_pointer_from_struct(var)]  = _pointer_from_struct(new_var)
+        new_vars.append(new_var)
 
-@generated_jit(cache=True)
-def NOT(c):
-    ''' Applies existential NOT to Var or Conditions''' 
-    if(isinstance(c,ConditionsTypeTemplate)):
+    dnf = dnf_copy(c.dnf,shallow=False)
+
+    for i, (alpha_conjuncts, beta_conjuncts) in enumerate(dnf):
+        for alpha_literal in alpha_conjuncts: 
+            alpha_literal.var_base_ptrs = (ptr_map[alpha_literal.var_base_ptrs[0]],0)
+        for beta_literal in beta_conjuncts:
+            t = (ptr_map[beta_literal.var_base_ptrs[0]], ptr_map[beta_literal.var_base_ptrs[1]])
+            beta_literal.var_base_ptrs = t
+
+    return Conditions(new_vars, dnf)
+
+
+def NOT(c, alias=None):
+    ''' Applies existential NOT in python context)''' 
+    if(isinstance(c, (ConditionsTypeTemplate, Conditions))):
         # When NOT() is applied to a Conditions object
         #  apply NOT() to all vars and make sure the pointers
         #  for the new vars are tracked in the dnf
-        def impl(c):
-            new_vars = List.empty_list(GenericVarType)
-            ptr_map = Dict.empty(i8,i8)
-            for var in c.vars:
-                new_var = _var_NOT(var)
-                ptr_map[_pointer_from_struct(var)]  = _pointer_from_struct(new_var)
-                new_vars.append(new_var)
-
-            dnf = dnf_copy(c.dnf,shallow=False)
-
-            for i, (alpha_conjuncts, beta_conjuncts) in enumerate(dnf):
-                for alpha_literal in alpha_conjuncts: 
-                    alpha_literal.var_base_ptrs = (ptr_map[alpha_literal.var_base_ptrs[0]],0)
-                for beta_literal in beta_conjuncts:
-                    t = (ptr_map[beta_literal.var_base_ptrs[0]], ptr_map[beta_literal.var_base_ptrs[1]])
-                    beta_literal.var_base_ptrs = t
-
-            return Conditions(new_vars, dnf)
-        return impl
-    elif(isinstance(c,VarTypeTemplate)):    
+        return _conditions_NOT(c)            
+    elif(isinstance(c, (VarTypeTemplate, Var))):    
         # Mark a var as NOT(v) meaning we test that nothing
         #  binds to it. Return a new instance to maintain
         #  value semantics.
-        def impl(c):
+        out = _var_NOT(c)
+        assign_to_alias_in_parent_frame(out,out.alias)
+        return out
+        
+    elif(hasattr(c,'fact_type') or hasattr(c,'fact_ctor')):
+        # 
+        c = getattr(c, 'fact_type',c)
+        out = _var_NOT(Var(c,alias))
+        assign_to_alias_in_parent_frame(out,alias)
+        return out
+
+
+@overload(NOT)
+def overload_NOT(c, alias=None):
+    ''' Applies existential NOT in numba context -- works same as above''' 
+    if(isinstance(c,ConditionsTypeTemplate)):
+        def impl(c,alias=None):
+            return _conditions_NOT(c)
+        return impl
+    elif(isinstance(c,VarTypeTemplate)):
+        #TODO: Possible to assign to alias in parent in jit context?
+        def impl(c,alias=None):
             return _var_NOT(c)
         return impl
+    elif(hasattr(c,'fact_type') or hasattr(c,'fact_ctor')):
+        #TODO: Possible to assign to alias in parent in jit context?
+        raise NotImplemented()
+        c = getattr(c, 'fact_type',c)
+        def impl(c, alias=None):
+            return None
+
 
 
 

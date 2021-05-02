@@ -215,10 +215,10 @@ def test_existential_not():
     # print(repr(c))
     # print(repr(c_n))
     assert repr(c) == 'l1, l2 = Var(BOOP), Var(BOOP)\n(l1.B < ?) & (l2.B > ?)'
-    assert repr(c_n) == 'l1, l2 = NOT(Var(BOOP)), NOT(Var(BOOP))\n(l1.B < ?) & (l2.B > ?)'
+    assert repr(c_n) == 'l1, l2 = NOT(BOOP), NOT(BOOP)\n(l1.B < ?) & (l2.B > ?)'
 
     c2 = NOT(l1.B < l2.B)
-    assert repr(c2) == 'l1, l2 = NOT(Var(BOOP)), NOT(Var(BOOP))\n(l1.B < l2.B)'
+    assert repr(c2) == 'l1, l2 = NOT(BOOP), NOT(BOOP)\n(l1.B < l2.B)'
     # print(repr(c2))
 
 

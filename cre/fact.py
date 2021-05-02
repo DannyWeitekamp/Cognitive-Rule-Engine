@@ -22,7 +22,7 @@ from cre.gensource import assert_gen_source
 from cre.caching import unique_hash, source_to_cache, import_from_cached, source_in_cache, get_cache_path
 from cre.structref import gen_structref_code, define_structref
 from cre.context import kb_context
-from cre.utils import _cast_structref
+from cre.utils import _cast_structref, struct_get_attr_offset
 
 import numpy as np
 
@@ -203,6 +203,25 @@ def get_type_default(t):
         return None
 
 
+def get_offsets_from_member_types(fields):
+    #Replace fact references with int64
+    fact_types = (types.StructRef, DefferedFactRefType)
+    fields = [(a,types.int64 if isinstance(t,fact_types) else t) for a,t in fields]
+
+    class TempTypeTemplate(types.StructRef):
+        pass
+
+    default_manager.register(TempTypeTemplate, models.StructRefModel)
+
+    TempType = TempTypeTemplate(fields)
+
+    return [struct_get_attr_offset(TempType,attr) for attr, _ in fields]
+
+
+
+
+
+
 def gen_fact_code(typ, fields, fact_num, ind='    '):
     '''Generate the source code for a new fact '''
     fact_imports = ""
@@ -234,7 +253,10 @@ def gen_fact_code(typ, fields, fact_num, ind='    '):
                             if(isinstance(t,fact_types))  else f'{a}={{repr(self.{a})}}' 
     str_temp = ", ".join([temp_str_f(k,v) for k,v in fields])
 
-
+    print(base_fact_fields+fields)
+    attr_offsets = get_offsets_from_member_types(base_fact_fields+fields)
+    print(typ, attr_offsets)
+    print(typ, base_list,field_list)
 
 # The source code template for a user defined fact. Written to the
 #  system cache so it can be its own module. Doing so helps njit(cache=True)
@@ -254,7 +276,7 @@ from cre.fact import _register_fact_structref, FactProxy
 from cre.utils import struct_get_attr_offset, _pointer_from_struct_incref, _struct_from_pointer
 {fact_imports}
 
-attr_offsets = np.empty(({len(all_fields)},),dtype=np.int16)
+attr_offsets = np.array({attr_offsets!r},dtype=np.int16)
 
 @_register_fact_structref
 class {typ}TypeTemplate(types.StructRef):
@@ -268,11 +290,6 @@ class {typ}TypeTemplate(types.StructRef):
         return tuple((name, types.unliteral(typ)) for name, typ in fields)
 
 {typ}Type = {typ}TypeTemplate(list(zip([{base_list},{field_list}], [{base_type_list},{field_type_list}])))
-
-
-#TODO: This is an expensive operation, ~5ms/iter, consider combining
-for i,attr in enumerate([{base_list},{field_list}]):
-    attr_offsets[i] = struct_get_attr_offset({typ}Type,attr)
 
 @njit(cache=True)
 def ctor({param_list}):

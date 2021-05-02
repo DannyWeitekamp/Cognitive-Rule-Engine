@@ -13,6 +13,7 @@ from cre.structref import define_structref, define_structref_template
 from cre.kb import KnowledgeBaseType, KnowledgeBase, facts_for_t_id, fact_at_f_id
 from cre.fact import define_fact, BaseFactType, cast_fact, DefferedFactRefType
 from cre.utils import _struct_from_meminfo, _meminfo_from_struct, _cast_structref, cast_structref, decode_idrec, lower_getattr, _struct_from_pointer,  lower_setattr, lower_getattr, _pointer_from_struct, _decref_pointer, _incref_pointer, _incref_structref
+from cre.utils import assign_to_alias_in_parent_frame
 from cre.subscriber import base_subscriber_fields, BaseSubscriber, BaseSubscriberType, init_base_subscriber, link_downstream
 from cre.vector import VectorType
 from cre.predicate_node import BasePredicateNode,BasePredicateNodeType, get_alpha_predicate_node_definition, \
@@ -23,6 +24,8 @@ from numba.core.datamodel import default_manager, models
 
 from operator import itemgetter
 from copy import copy
+# import inspect
+
 
 
 
@@ -75,7 +78,11 @@ class Var(structref.StructRefProxy):
         typ = types.TypeRef(typ)
         struct_type = get_var_definition(typ,typ)
         st = var_ctor(struct_type, fact_type_name, alias)
-        print("after")
+
+        assign_to_alias_in_parent_frame(st,alias)
+
+
+        # print("after")
         return st
         # return structref.StructRefProxy.__new__(cls, *args)
 
@@ -118,15 +125,20 @@ class Var(structref.StructRefProxy):
             return new
 
     def __str__(self):
-        s = ".".join([f'Var({self.fact_type_name},{self.alias!r})']+list(self.deref_attrs))
+        prefix = "NOT" if(self.is_not) else "Var"
+        s = ".".join([f'{prefix}({self.fact_type_name},{self.alias!r})']+list(self.deref_attrs))
         # print(self.is_not)
-        if(self.is_not): s = f'NOT({s})'
+         # s = f'NOT({s})'
         return s
 
     def _cmp_helper(self,op_str,other,negate):
         check_legal_cmp(self, op_str, other)
         opt_str = types.literal(types.unliteral(op_str))
+        # print(other)
+        
         if(not isinstance(other,(VarTypeTemplate,Var))):
+            print("other",other)
+            if(isinstance(other,(bool,))): other = int(other)
             return var_cmp_alpha(self,op_str,other, negate)
         else:
             return var_cmp_beta(self,op_str,other, negate)

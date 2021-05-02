@@ -133,6 +133,8 @@ class KnowledgeBaseContext(object):
         #Add attributes to the ctor and type objects
         fact_ctor.fact_type = fact_type
         fact_type.fact_ctor = fact_ctor
+        # fact_ctor.fact_name = name
+        # fact_type.fact_name = name
         
         self.fact_ctors[name] = fact_ctor
         self.fact_types[name] = fact_type
@@ -168,6 +170,7 @@ class KnowledgeBaseContext(object):
 
 
     def _assert_flags(self,name,spec):
+        return #TODO: Need to rewrite this so it doesn't trigger typed container overloads
         for flag in itertools.chain(*[x['flags'] for atrr,x in spec.items()]):
             if flag not in self.spec_flags:
                 self._register_flag(flag)

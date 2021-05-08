@@ -153,14 +153,16 @@ class Add2(Rule):
     def when():
         ph = Var(PhaseHandler,"ph")
         sel, arg0, arg1 = Var(TextField,'sel'), Var(TextField,'arg1'), Var(TextField,'arg2')
-        c = ph & \
-            (sel.enabled == True) & \
-            (arg0.enabled == True) & (arg0.value != "") & \
-            (arg1.enabled == True) & (arg1.value != "") & \
-            (sel.above == arg1) & \
-            (arg0.below == arg1) & \
-            (arg1.above == arg0) & \
+        c = (
+            ph & 
+            (sel.enabled == True) & 
+            (arg0.enabled == True) & (arg0.value != "") & 
+            (arg1.enabled == True) & (arg1.value != "") & 
+            (sel.above == arg1) & 
+            (arg0.below == arg1) &
+            (arg1.above == arg0) & 
             (arg1.below == sel)
+        )
         return c
 
     def then(kb, ph, sel, arg0, arg1):
@@ -178,16 +180,14 @@ class resolveAdd2(Rule):
     def when():
         match = Var(Match,'match')
         sel = Var(TextField,'sel')
-        # sel_r = NOT(Var(TextField,'sel_r'))
-        # m1 = NOT(Var(Match,'m1'))
-        # m2 = NOT(Var(Match,'m2'))
-        # m3 = NOT(Var(Match,'m3'))
-        c = (match.rhs == "Add2") & (match.full_fired == False) & \
-            (match.sel == sel.name) & \
-            NOT(TextField,'sel_r') & (sel.to_right == sel_r) & (sel_r.enabled == True) & \
-            NOT(Match,'m1') & (m1.rhs == "Carry2") & (m1.sel == sel.above.above.above.name) & (m1.input == "1") & \
-            NOT(Match,'m2') & (m2.rhs == "Carry3") & (m2.sel == sel.above.above.above.name) & (m2.input == "1") & \
+        c = (
+            (match.rhs == "Add2") & (match.full_fired == False) & 
+            (match.sel == sel.name) & 
+            NOT(TextField,'sel_r') & (sel.to_right == sel_r) & (sel_r.enabled == True) & 
+            NOT(Match,'m1') & (m1.rhs == "Carry2") & (m1.sel == sel.above.above.above.name) & (m1.input == "1") & 
+            NOT(Match,'m2') & (m2.rhs == "Carry3") & (m2.sel == sel.above.above.above.name) & (m2.input == "1") & 
             NOT(Match,'m3') & (m3.rhs == "Add3") & (m3.input == "1")#(m3.sel == sel.above.above.above) & 
+        )
         print(repr(c))
         print([ptr(var) for var in c.vars])
         return c
@@ -195,8 +195,54 @@ class resolveAdd2(Rule):
     def then(kb, match, sel):
         kb.modify(match,"full_fired",1)
         print("ResolveAdd2")
+print("B")        
 
+class Add3(Rule):
+    def when():
+        c = (
+            Var(PhaseHandler,'ph') & 
+            # Sel editable, args not editable or empty
+            Var(TextField,'sel') & (sel.enabled == True) & 
+            Var(TextField,'arg0') & (arg0.enabled == False) & (arg0.value != "") & 
+            Var(TextField,'arg1') & (arg1.enabled == False) & (arg1.value != "") & 
+            Var(TextField,'arg2') & (arg2.enabled == False) & (arg2.value != "") &
+            # Arranged vertically w/ sel on bottom
+            (arg0.below == arg1) & (arg1.above == arg0) & 
+            (arg1.below == arg2) & (arg2.above == arg1) & 
+            (sel.above == arg2) & (arg2.below == sel)
+        )
 
+        return c
+
+    def then(kb, ph, sel, arg0, arg1, arg2):
+        v = "?"#String((Number(arg0.value) + Number(arg1.value) + Number(arg2.value)) % 10);
+        # if(!isNaN(v)){
+        #     console.log("Add3", v, sel.name, arg0.name, arg1.name, arg2.name);
+        #     match = new Match("Add3","Add3", sel.name, "UpdateTextField",
+        #                  v,[arg0.name,arg1.name,arg2.name]);
+        #     assert(match);
+        # }
+        match = Match("Add3","Add3", sel.name, "UpdateTextField",
+                     v,
+                     # [arg0.name,arg1.name]);
+                     arg0.name + "," + arg1.name)
+        kb.declare(match);
+print("C")        
+        
+class ResolveAdd3(Rule):
+    def when():
+        c = (
+            Var(Match,'match') & (match.rhs == "Add3") & (match.full_fired == False) & 
+            Var(TextField,'sel') & (match.sel == sel.name) & 
+            NOT(TextField, 'sel_r') & (sel.to_right == sel_r) & (sel_r.enabled == True)
+        )
+        return c
+
+    def then(kb, match, sel):
+        kb.modify(match,'full_fired', 1)
+
+        
+print("D")
 
 
 def bootstrap():

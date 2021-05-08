@@ -104,26 +104,35 @@ def test_ref_matching():
         print(a,b,c)
 
         x1, x2 = Var(TestLL,"x1"), Var(TestLL,"x2")
-        c = x1.nxt == x2
+        c = (x1.nxt == x2)
+        # assert str(c) == '(x1.nxt == x2)'
         print(c)
+        # print(match_names(c,kb))
 
-        cl = get_linked_conditions_instance(c, kb)
-        print(get_ptr_matches(cl))
+        assert sorted(match_names(c,kb)) == [['B','A'],['C','B']]
+        # cl = get_linked_conditions_instance(c, kb)
+        # print(get_ptr_matches(cl))
         # Bs = boop_Bs_from_ptrs(get_ptr_matches(cl))
 
         # print(Bs)
         c = x1.nxt == 0
+        # assert str(c) == '(x1.nxt == None)'
         print(c)
 
-        cl = get_linked_conditions_instance(c, kb)
-        print(get_ptr_matches(cl))
+        assert match_names(c,kb) == [['A']]
+
+        # cl = get_linked_conditions_instance(c, kb)
+        # print(get_ptr_matches(cl))
 
 
         c = x1.nxt == None
+        # assert str(c) == '(x1.nxt == None)'
         print(c)
 
-        cl = get_linked_conditions_instance(c, kb)
-        print(get_ptr_matches(cl))
+        assert match_names(c,kb) == [['A']]
+
+        # cl = get_linked_conditions_instance(c, kb)
+        # print(get_ptr_matches(cl))
 
 def test_multiple_deref():
     with kb_context("test_multiple_deref"):
@@ -146,12 +155,6 @@ def test_multiple_deref():
         kb.declare(c1)
         kb.declare(b2)
         kb.declare(c2)
-
-        # print(get_ptr(a))
-        # print(get_ptr(b1))
-        # print(get_ptr(b2))
-        # print(get_ptr(c1))
-        # print(get_ptr(c2))
 
         v1 = Var(TestLL,'v1')
         v2 = Var(TestLL,'v2')
@@ -274,8 +277,8 @@ if(__name__ == "__main__"):
     # test_applying()
     # test_matching()
     # test_matching_unconditioned()
-    # test_ref_matching()
+    test_ref_matching()
     # test_multiple_deref()
     # import pytest.__main__.benchmark
     # matching_1_t_4_lit_setup()
-    test_NOT()
+    # test_NOT()

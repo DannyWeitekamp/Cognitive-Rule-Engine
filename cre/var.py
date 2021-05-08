@@ -31,11 +31,11 @@ from os import getenv
 
 
 var_fields_dict = {
-    # If true then instead of testing for the existence of the var
-    #  we test that the var does not exist.
+    # If true then instead of testing for the existence of the Var
+    #  we test that the Var does not exist.
     'is_not' : u1,
 
-    # A pointer to the NOT() of this Var
+    # A pointer to the Var instance which is the NOT() of this Var
     'conj_ptr' : i8,
 
     # The pointer of the Var instance before any attribute selection
@@ -54,7 +54,7 @@ var_fields_dict = {
     #  then v.B.B.deref_offsets = [10,10]
     'deref_offsets': ListType(i8),
 
-    # The name of the fact that the base var is meant to match.
+    # The name of the fact that the base Var is meant to match.
     'fact_type_name': unicode_type,
     'fact_type': types.Any,
     'head_type': types.Any,
@@ -128,6 +128,8 @@ class Var(structref.StructRefProxy):
             fact_type = self.fact_type
 
             fact_type_name = fact_type._fact_name
+            # print("<<",fact_type_name)
+            # print("<<",fact_type.spec)
             head_type = fact_type.spec[attr]['type']
             if(isinstance(head_type,DefferedFactRefType)):
                 head_type = kb_context().fact_types[head_type._fact_name]
@@ -162,7 +164,7 @@ class Var(structref.StructRefProxy):
         # print(other)
         
         if(not isinstance(other,(VarTypeTemplate,Var))):
-            print("other",other)
+            # print("other",other)
             if(isinstance(other,(bool,))): other = int(other)
             return var_cmp_alpha(self,op_str,other, negate)
         else:

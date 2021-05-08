@@ -153,7 +153,7 @@ class Add2(Rule):
     def when():
         ph = Var(PhaseHandler,"ph")
         sel, arg0, arg1 = Var(TextField,'sel'), Var(TextField,'arg1'), Var(TextField,'arg2')
-        c = (
+        return (
             ph & 
             (sel.enabled == True) & 
             (arg0.enabled == True) & (arg0.value != "") & 
@@ -163,7 +163,6 @@ class Add2(Rule):
             (arg1.above == arg0) & 
             (arg1.below == sel)
         )
-        return c
 
     def then(kb, ph, sel, arg0, arg1):
         v = "?"#str((float(arg0.value) + float(arg1.value)) % 10);
@@ -180,7 +179,7 @@ class resolveAdd2(Rule):
     def when():
         match = Var(Match,'match')
         sel = Var(TextField,'sel')
-        c = (
+        return (
             (match.rhs == "Add2") & (match.full_fired == False) & 
             (match.sel == sel.name) & 
             NOT(TextField,'sel_r') & (sel.to_right == sel_r) & (sel_r.enabled == True) & 
@@ -188,8 +187,6 @@ class resolveAdd2(Rule):
             NOT(Match,'m2') & (m2.rhs == "Carry3") & (m2.sel == sel.above.above.above.name) & (m2.input == "1") & 
             NOT(Match,'m3') & (m3.rhs == "Add3") & (m3.input == "1")#(m3.sel == sel.above.above.above) & 
         )
-        print(repr(c))
-        print([ptr(var) for var in c.vars])
         return c
 
     def then(kb, match, sel):
@@ -199,7 +196,7 @@ print("B")
 
 class Add3(Rule):
     def when():
-        c = (
+        return (
             Var(PhaseHandler,'ph') & 
             # Sel editable, args not editable or empty
             Var(TextField,'sel') & (sel.enabled == True) & 
@@ -211,8 +208,6 @@ class Add3(Rule):
             (arg1.below == arg2) & (arg2.above == arg1) & 
             (sel.above == arg2) & (arg2.below == sel)
         )
-
-        return c
 
     def then(kb, ph, sel, arg0, arg1, arg2):
         v = "?"#String((Number(arg0.value) + Number(arg1.value) + Number(arg2.value)) % 10);

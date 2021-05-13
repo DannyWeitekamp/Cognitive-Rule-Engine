@@ -3,6 +3,7 @@ from cre.fact import _fact_from_spec, _standardize_spec, _merge_spec_inheritance
 from cre.context import kb_context
 from cre.kb import KnowledgeBase
 from numba import njit, u8
+from numba.typed import List
 import pytest
 
 def test__standardize_spec():
@@ -211,6 +212,27 @@ def test_protected_mutability():
             print("RUNTIME_NB", b1.B)
             edit_it(b1)
 
+
+def test_list_type():
+    with kb_context("test_list_type"):
+        spec = {"A" : "string", "B" : "number"}
+        BOOP, BOOPType = define_fact("BOOP", spec)
+
+        spec = {"items" : "ListType(BOOP)"}
+        BOOPList, BOOPListType = define_fact("BOOPList", spec)
+
+        a = BOOP("A",0)
+        b = BOOP("B",1)
+
+        bl = BOOPList(List([a,b]))
+        print(bl)
+
+
+
+
+
+
+
         
 #Work in progress...
 def _test_reference_type():
@@ -245,11 +267,12 @@ def _test_reference_type():
 
 
 if __name__ == "__main__":
-    test__standardize_spec()
+    test_list_type()
+    # test__standardize_spec()
     # test__merge_spec_inheritance()
     # test_define_fact()
     # test_inheritence()
     # test_cast_fact()
     # test_protected_mutability()
 
-    _test_reference_type()
+    # _test_reference_type()

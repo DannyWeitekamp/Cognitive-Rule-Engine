@@ -187,7 +187,6 @@ class resolveAdd2(Rule):
             NOT(Match,'m2') & (m2.rhs == "Carry3") & (m2.sel == sel.above.above.above.name) & (m2.input == "1") & 
             NOT(Match,'m3') & (m3.rhs == "Add3") & (m3.input == "1")#(m3.sel == sel.above.above.above) & 
         )
-        return c
 
     def then(kb, match, sel):
         kb.modify(match,"full_fired",1)
@@ -226,12 +225,11 @@ print("C")
         
 class ResolveAdd3(Rule):
     def when():
-        c = (
+        return (
             Var(Match,'match') & (match.rhs == "Add3") & (match.full_fired == False) & 
             Var(TextField,'sel') & (match.sel == sel.name) & 
             NOT(TextField, 'sel_r') & (sel.to_right == sel_r) & (sel_r.enabled == True)
         )
-        return c
 
     def then(kb, match, sel):
         kb.modify(match,'full_fired', 1)

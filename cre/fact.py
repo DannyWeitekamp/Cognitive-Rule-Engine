@@ -15,6 +15,7 @@ from numba.core.extending import (
 from numba.core.datamodel import default_manager, models
 from numba.core.typing.templates import AttributeTemplate
 from numba.core import types, cgutils
+from numba.types import ListType
 # from numba.core.extending import overload
 
 from cre.core import TYPE_ALIASES, REGISTERED_TYPES, JITSTRUCTS, py_type_map, numba_type_map, numpy_type_map
@@ -51,6 +52,9 @@ def _get_type(typ, context, name='', attr=''):
         typ = typ.__name__
     if(isinstance(typ,str)):
         typ_str = typ
+        is_list = typ_str.lower().startswith("list")
+        if(is_list): typ_str = typ_str.split("(")[1][:-1]
+
         if(typ_str.lower() in TYPE_ALIASES): 
             typ = numba_type_map[TYPE_ALIASES[typ_str.lower()]]
         elif(typ_str == name):
@@ -60,6 +64,8 @@ def _get_type(typ, context, name='', attr=''):
         else:
             raise TypeError(f"Attribute type {typ_str!r} not recognized in spec" + 
                 f" for attribute definition {attr!r}." if attr else ".")
+
+        if(is_list): typ = ListType(typ)
 
     if(hasattr(typ, "_fact_type")): typ = typ._fact_type
     return typ
@@ -216,8 +222,26 @@ def get_offsets_from_member_types(fields):
 
     return [struct_get_attr_offset(TempType,attr) for attr, _ in fields]
 
+fact_types = (types.StructRef, DefferedFactRefType)
 
+def repr_type(typ):
+    # To avoid various typing issues fact refs are just i8 (i.e. raw pointers)
+    if(isinstance(typ,fact_types)):
+        return 'int64'
+    elif(isinstance(typ, ListType)):
+        dt = typ.dtype
+        dtype_repr = f'{dt._fact_name}Type' if(isinstance(dt,fact_types)) else repr(dt)
+        return f'ListType({dtype_repr})'
+    else:
+        return repr(typ)
 
+def gen_repr_attr_code(a,t):
+    if(isinstance(t,fact_types)):
+        return f'{a}=<{t._fact_name} at {{hex({typ}_get_{a}_as_ptr(self))}}>'
+    elif(isinstance(t,ListType)):
+        return f'{a}=List([{{", ".join([repr(x) for x in self.{a}])}}])'
+    else:
+        return f'{a}={{repr(self.{a})}}' 
 
 
 
@@ -227,6 +251,8 @@ def gen_fact_code(typ, fields, fact_num, ind='    '):
     for attr,t in fields:
         if(isinstance(t,types.StructRef)):
             fact_imports += f"{gen_fact_import_str(t)}\n"
+        elif(isinstance(t,types.ListType) and isinstance(t.dtype,types.StructRef)):
+            fact_imports += f"{gen_fact_import_str(t.dtype)}\n"
 
 
     all_fields = base_fact_fields+fields
@@ -239,18 +265,19 @@ def gen_fact_code(typ, fields, fact_num, ind='    '):
 
     fact_types = (types.StructRef, DefferedFactRefType)
 
-    # To avoid various typing issues fact refs are just i8 (i.e. raw pointers)
-    typ_str = lambda x: f"int64" if isinstance(x,fact_types) else str(x)
-    field_type_list = ",".join([typ_str(v)  for k,v in fields])
+    
+    # typ_str = lambda x: f"int64" if isinstance(x,fact_types) else str(x)
+    field_type_list = ",".join([repr_type(v) for k,v in fields])
 
 
     assign_str = lambda a,t: f"st.{a} = " + (f"_pointer_from_struct_incref({a}) if ({a} is not None) else 0" \
                             if isinstance(t,fact_types) else f"{a}")
     init_fields = f'\n{ind}'.join([assign_str(k,v) for k,v in fields])
 
-    temp_str_f = lambda a, t: f'{a}=<{t._fact_name} at {{hex({typ}_get_{a}_as_ptr(self))}}>' \
-                            if(isinstance(t,fact_types))  else f'{a}={{repr(self.{a})}}' 
-    str_temp = ", ".join([temp_str_f(k,v) for k,v in fields])
+    # temp_str_f = lambda a, t: f'{a}=<{t._fact_name} at {{hex({typ}_get_{a}_as_ptr(self))}}>' \
+    #                         if(isinstance(t,fact_types))  else f'{a}={{repr(self.{a})}}' 
+    print([gen_repr_attr_code(k,v) for k,v in fields])
+    str_temp = ", ".join([gen_repr_attr_code(k,v) for k,v in fields])
 
     # print(base_fact_fields+fields)
     attr_offsets = get_offsets_from_member_types(base_fact_fields+fields)
@@ -267,7 +294,7 @@ import numpy as np
 from numba.core import types
 from numba import njit
 from numba.core.types import *
-from numba.core.types import unicode_type
+from numba.core.types import unicode_type, ListType
 from numba.experimental import structref
 from numba.experimental.structref import new, define_boxing
 from numba.core.extending import overload

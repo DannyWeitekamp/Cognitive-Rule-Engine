@@ -25,6 +25,7 @@ meminfo_type = types.MemInfoPointer(types.voidptr)
 
 @intrinsic
 def lower_setattr(typingctx, inst_type, attr_type, val_type):
+    print("KK", isinstance(inst_type, types.StructRef), inst_type, attr_type)
     if (isinstance(attr_type, types.Literal) and 
         isinstance(inst_type, types.StructRef)):
         
@@ -104,6 +105,18 @@ def _meminfo_from_struct(typingctx, val):
     sig = meminfo_type(val,)
     return sig, codegen
 
+def _obj_cast_codegen(context, builder, val, frmty, toty, incref=True):
+    ctor = cgutils.create_struct_proxy(frmty)
+    dstruct = ctor(context, builder, value=val)
+    meminfo = dstruct.meminfo
+    if(incref):
+        context.nrt.incref(builder, types.MemInfoPointer(types.voidptr), meminfo)
+
+    st = cgutils.create_struct_proxy(toty)(context, builder)
+    st.meminfo = meminfo
+    
+    return st._getvalue()
+
 
 @intrinsic
 def _cast_structref(typingctx, cast_type_ref, inst_type):
@@ -111,15 +124,16 @@ def _cast_structref(typingctx, cast_type_ref, inst_type):
     def codegen(context, builder, sig, args):
         _,d = args
 
-        ctor = cgutils.create_struct_proxy(inst_type)
-        dstruct = ctor(context, builder, value=d)
-        meminfo = dstruct.meminfo
-        context.nrt.incref(builder, types.MemInfoPointer(types.voidptr), meminfo)
+        # ctor = cgutils.create_struct_proxy(inst_type)
+        # dstruct = ctor(context, builder, value=d)
+        # meminfo = dstruct.meminfo
+        # context.nrt.incref(builder, types.MemInfoPointer(types.voidptr), meminfo)
 
-        st = cgutils.create_struct_proxy(cast_type)(context, builder)
-        st.meminfo = meminfo
+        # st = cgutils.create_struct_proxy(cast_type)(context, builder)
+        # st.meminfo = meminfo
         
-        return st._getvalue()
+        # return st._getvalue()
+        return _obj_cast_codegen(context, builder, d, inst_type, cast_type)
     sig = cast_type(cast_type_ref, inst_type)
     return sig, codegen
 
@@ -151,19 +165,28 @@ def _struct_from_pointer(typingctx, struct_type, raw_ptr):
     sig = inst_type(struct_type, raw_ptr)
     return sig, codegen
 
+
+
+def _pointer_from_struct_codegen(context, builder, val, td,incref=True):
+    ctor = cgutils.create_struct_proxy(td)
+    dstruct = ctor(context, builder, value=val)
+    meminfo = dstruct.meminfo
+
+    if(incref):
+        context.nrt.incref(builder, types.MemInfoPointer(types.voidptr), meminfo)
+
+    return builder.ptrtoint(dstruct.meminfo, cgutils.intp_t)
+
+
 @intrinsic
 def _pointer_from_struct(typingctx, val):
     def codegen(context, builder, sig, args):
         [td] = sig.args
         [d] = args
 
-        ctor = cgutils.create_struct_proxy(td)
-        dstruct = ctor(context, builder, value=d)
-        meminfo = dstruct.meminfo
+        return _pointer_from_struct_codegen(context, builder, d, td, False)
 
-        res = builder.ptrtoint(dstruct.meminfo, cgutils.intp_t)
-
-        return res
+        # return res
         
     sig = i8(val,)
     return sig, codegen
@@ -174,16 +197,7 @@ def _pointer_from_struct_incref(typingctx, val):
         [td] = sig.args
         [d] = args
 
-        ctor = cgutils.create_struct_proxy(td)
-        dstruct = ctor(context, builder, value=d)
-        meminfo = dstruct.meminfo
-
-        #Incref to prevent struct from being freed
-        context.nrt.incref(builder, types.MemInfoPointer(types.voidptr), meminfo)
-
-        res = builder.ptrtoint(dstruct.meminfo, cgutils.intp_t)
-
-        return res
+        return _pointer_from_struct_codegen(context, builder, d, td, True)
         
     sig = i8(val,)
     return sig, codegen

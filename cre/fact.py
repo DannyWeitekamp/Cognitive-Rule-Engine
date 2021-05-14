@@ -23,7 +23,7 @@ from cre.gensource import assert_gen_source
 from cre.caching import unique_hash, source_to_cache, import_from_cached, source_in_cache, get_cache_path
 from cre.structref import gen_structref_code, define_structref
 from cre.context import kb_context
-from cre.utils import _cast_structref, struct_get_attr_offset
+from cre.utils import _cast_structref, struct_get_attr_offset, _obj_cast_codegen, _pointer_from_struct_codegen, _pointer_from_struct
 from numba.core.typeconv import Conversion
 
 import numpy as np
@@ -61,6 +61,7 @@ class Fact(types.StructRef):
 
 class FactModel(models.StructRefModel):
     pass
+
 
 
 ###### Fact Specification Preprocessing #######
@@ -209,11 +210,12 @@ def _gen_getter_jit(f_typ,typ,attr):
         return \
 f'''@njit(cache=True)
 def {f_typ}_get_{attr}_as_ptr(self):
-    return self.{attr}
+    return _pointer_from_struct(self.{attr})
 
 @njit(cache=True)
 def {f_typ}_get_{attr}(self):
-    return _struct_from_pointer({typ._fact_name}Type, self.{attr})
+    return self.{attr}
+    #_struct_from_pointer({typ._fact_name}Type, self.{attr})
 '''
     else:
         return \
@@ -244,7 +246,7 @@ def get_type_default(t):
 def get_offsets_from_member_types(fields):
     #Replace fact references with int64
     fact_types = (types.StructRef, DefferedFactRefType)
-    fields = [(a,types.int64 if isinstance(t,fact_types) else t) for a,t in fields]
+    fields = [(a,BaseFactType if isinstance(t,fact_types) else t) for a,t in fields]
 
     class TempTypeTemplate(types.StructRef):
         pass
@@ -263,7 +265,7 @@ def repr_type(typ):
     
     if(isinstance(typ,fact_types)):
         # To avoid various typing issues fact refs are just i8 (i.e. raw pointers)
-        return 'int64'
+        return 'BaseFactType'
     elif(isinstance(typ, ListType)):
         # To avoid various typing issues lists of facts are stored with dtype BaseFactType
         dt = typ.dtype
@@ -278,20 +280,26 @@ def gen_repr_attr_code(a,t,typ_name):
         return f'{a}=<{t._fact_name} at {{hex({typ_name}_get_{a}_as_ptr(self))}}>'
     elif(isinstance(t,ListType)):
         # TODO : might want to print lists like reference where just the address is printed
-        return f'{a}=List([{{", ".join([repr(x) for x in self.{a}])}}])'
+        if(isinstance(t.dtype,fact_types)):
+            s = f'f"<{t.dtype._fact_name} at {{hex(fact_to_ptr(x))}}>"'
+            return f'{a}=List([{{", ".join([{s} for x in self.{a}])}}])'
+        else:
+            return f'{a}=List([{{", ".join([repr(x) for x in self.{a}])}}])'
     else:
         return f'{a}={{repr(self.{a})}}' 
 
 def gen_assign_str(a,t):
-    if(isinstance(t,fact_types)):
-        s = f"st.{a} = " +f"_pointer_from_struct_incref({a}) if ({a} is not None) else 0"
-    elif(isinstance(t,ListType) and isinstance(t.dtype,fact_types)):
-        s = f"{a}_c = _cast_list(base_list_type,{a})\n    "
-        s += f"st.{a} = {a}_c" 
-    else:
-        s = f"st.{a} = " +f"{a}"
+    # if(isinstance(t,fact_types)):
+        # s = f"_pointer_from_struct_incref({a}) if ({a} is not None) else 0"
+    # elif(isinstance(t,ListType) and isinstance(t.dtype,fact_types)):
+    #     # s = f"{a}_c = _cast_list(base_list_type,{a})\n    "
+    #     # s += f"st.{a} = {a}_c" 
+    #     # s = f"st.{a} = _cast_list(base_list_type,{a})" 
+    #     s = f"st.{a} = {a}"
+    # else:
+    s = f"{a}"
 
-    return s
+    return f"st.{a} = " + s
 
 
 def gen_fact_code(typ, fields, fact_num, ind='    '):
@@ -339,8 +347,8 @@ from numba.core.types import unicode_type, ListType
 from numba.experimental import structref
 from numba.experimental.structref import new, define_boxing
 from numba.core.extending import overload
-from cre.fact import _register_fact_structref, FactProxy, Fact{", BaseFactType, base_list_type" if typ != "BaseFact" else ""}
-from cre.utils import struct_get_attr_offset, _pointer_from_struct_incref, _struct_from_pointer, _cast_list
+from cre.fact import _register_fact_structref, FactProxy, Fact{", BaseFactType, base_list_type, fact_to_ptr" if typ != "BaseFact" else ""}
+from cre.utils import struct_get_attr_offset, _pointer_from_struct,  _pointer_from_struct_incref, _struct_from_pointer, _cast_list
 {fact_imports}
 
 attr_offsets = np.array({attr_offsets!r},dtype=np.int16)
@@ -401,6 +409,44 @@ define_boxing({typ}TypeTemplate,{typ})
 #     typ.spec[attr]
 
 
+@intrinsic
+def fact_lower_setattr(typingctx, inst_type, attr_type, val_type):
+    print("BB", isinstance(inst_type, types.StructRef), inst_type, attr_type)
+    if (isinstance(attr_type, types.Literal) and 
+        isinstance(inst_type, types.StructRef)):
+        
+        attr = attr_type.literal_value
+        def codegen(context, builder, sig, args):
+            [instance, attr_v, val] = args
+
+            utils = _Utils(context, builder, inst_type)
+            dataval = utils.get_data_struct(instance)
+            # cast val to the correct type
+            field_type = inst_type.field_dict[attr]
+
+            if(hasattr(inst_type,'spec') and attr in inst_type.spec):
+                spec_type = inst_type.spec[attr]['type']
+                if(isinstance(spec_type, (ListType,Fact))):
+                    casted = _obj_cast_codegen(context, builder, val, val_type, field_type)
+                # elif(isinstance(spec_type, Fact)):
+                #     casted = _pointer_from_struct_codegen(context, builder, val, val_type)
+                else:
+                    casted = context.cast(builder, val, val_type, field_type)
+            else:
+                casted = context.cast(builder, val, val_type, field_type)
+
+            # read old
+            old_value = getattr(dataval, attr)
+            # incref new value
+            context.nrt.incref(builder, val_type, casted)
+            # decref old value (must be last in case new value is old value)
+            context.nrt.decref(builder, val_type, old_value)
+            # write new
+            setattr(dataval, attr, casted)
+        sig = types.void(inst_type, types.literal(attr), val_type)
+        print(sig)
+        return sig, codegen
+
 
 from numba.experimental.structref import _Utils, imputils
 def define_attributes(struct_typeclass):
@@ -412,57 +458,60 @@ def define_attributes(struct_typeclass):
         key = struct_typeclass
 
         def generic_resolve(self, typ, attr):
-            if attr in typ.spec:
+            if (hasattr(typ,'spec') and attr in typ.spec):
                 attrty = typ.spec[attr]['type']
-                print(">>",attrty)
+                print(">>",attr, attrty)
 
                 return attrty
             elif attr in typ.field_dict:
                 attrty = typ.field_dict[attr]
-                print("<<",attrty)
+                print("<<",attr, attrty)
                 return attrty
 
     @lower_getattr_generic(struct_typeclass)
     def struct_getattr_impl(context, builder, typ, val, attr):
-        field_type = typ.spec[attr]['type']
-        store_type = typ.field_dict[attr]
+        
+        field_type = typ.field_dict[attr]
 
         utils = _Utils(context, builder, typ)
         dataval = utils.get_data_struct(val)
         ret = getattr(dataval, attr)
 
-        if(isinstance(field_type, ListType)):
-            # utils = _Utils(context, builder, store_type)
-            # dataval = utils.get_data_struct(ret)
-            # ret = context.cast(builder, dataval, store_type, fieldtype)
+        if(hasattr(typ,'spec')):
+            spec_type = typ.spec[attr]['type']
+            if(isinstance(spec_type, (ListType,Fact))):
+                # utils = _Utils(context, builder, field_type)
+                # dataval = utils.get_data_struct(ret)
+                # ret = context.cast(builder, dataval, field_type, fieldtype)
+                ret = _obj_cast_codegen(context, builder, ret, field_type, spec_type)
 
-            ctor = cgutils.create_struct_proxy(store_type)
-            dstruct = ctor(context, builder, value=ret)
-            meminfo = dstruct.meminfo
-            # context.nrt.incref(builder, types.MemInfoPointer(types.voidptr), meminfo)
+            # ctor = cgutils.create_struct_proxy(field_type)
+            # dstruct = ctor(context, builder, value=ret)
+            # meminfo = dstruct.meminfo
+            # # context.nrt.incref(builder, types.MemInfoPointer(types.voidptr), meminfo)
 
-            st = cgutils.create_struct_proxy(field_type)(context, builder)
-            st.meminfo = meminfo
-            ret = st._getvalue()
+            # st = cgutils.create_struct_proxy(spec_type)(context, builder)
+            # st.meminfo = meminfo
+            # ret = st._getvalue()
         
         # return st._getvalue()
         
 
-        if(isinstance(field_type,types.StructRef)):
-            meminfo = builder.inttoptr(ret, cgutils.voidptr_t)
-            st = cgutils.create_struct_proxy(field_type)(context, builder)
-            st.meminfo = meminfo
-            # context.nrt.incref(builder, types.MemInfoPointer(types.voidptr), meminfo)
-            ret = st._getvalue()
+        # if(isinstance(spec_type,types.StructRef)):
+        #     meminfo = builder.inttoptr(ret, cgutils.voidptr_t)
+        #     st = cgutils.create_struct_proxy(spec_type)(context, builder)
+        #     st.meminfo = meminfo
+        #     # context.nrt.incref(builder, types.MemInfoPointer(types.voidptr), meminfo)
+        #     ret = st._getvalue()
         # elif(isinstance(typ,ListType) and isinstance(typ.dtype,types.StructRef)):
 
             
 
-        print("^^^", store_type)
-        print("VVVV", field_type)
+        # print("^^^", field_type)
+        # print("VVVV", spec_type)
         # if()
 
-        return imputils.impl_ret_borrowed(context, builder, field_type, ret)
+        return imputils.impl_ret_borrowed(context, builder, spec_type, ret)
 
     @lower_setattr_generic(struct_typeclass)
     def struct_setattr_impl(context, builder, sig, args, attr):
@@ -471,8 +520,26 @@ def define_attributes(struct_typeclass):
         utils = _Utils(context, builder, inst_type)
         dataval = utils.get_data_struct(instance)
         # cast val to the correct type
-        field_type = inst_type.spec[attr]['type']
-        casted = context.cast(builder, val, val_type, field_type)
+        # field_type = inst_type.spec[attr]['type'] if attr in inst_type.spec else inst_type.field_dict[attr]
+        
+        field_type = inst_type.field_dict[attr]
+        
+        # print("val_type", val_type)
+        # print("field_type",field_type)
+        # Casting lists requires reassigning the meminfo to a new struct type
+        if(hasattr(inst_type,'spec') and attr in inst_type.spec):
+            spec_type = inst_type.spec[attr]['type']
+            if(isinstance(spec_type, (ListType,Fact))):
+                casted = _obj_cast_codegen(context, builder, val, val_type, field_type)
+            # elif(isinstance(spec_type, Fact)):
+            #     casted = _pointer_from_struct_codegen(context, builder, val, val_type)
+            else:
+                casted = context.cast(builder, val, val_type, field_type)
+        else:
+            casted = context.cast(builder, val, val_type, field_type)
+            
+
+        
 
         pyapi = context.get_python_api(builder)
 
@@ -592,6 +659,14 @@ base_fact_fields = [
 
 BaseFact, BaseFactType = _fact_from_fields("BaseFact", [])
 base_list_type = ListType(BaseFactType)
+
+@njit(cache=True)
+def fact_to_ptr(fact):
+    return _pointer_from_struct(fact)
+
+@njit(cache=True)
+def fact_to_ptr_incref(fact):
+    return _pointer_from_struct_incref(fact)
 ###### Fact Casting #######
 
 

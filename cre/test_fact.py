@@ -218,14 +218,17 @@ def _test_list_type():
         spec = {"A" : "string", "B" : "number"}
         BOOP, BOOPType = define_fact("BOOP", spec)
 
-        spec = {"items" : "ListType(BOOP)"}
+        spec = {"items" : "ListType(BOOP)","other" : "BOOP"}
         BOOPList, BOOPListType = define_fact("BOOPList", spec)
 
         a = BOOP("A",0)
         b = BOOP("B",1)
+        c = BOOP("C",2)
 
-        bl = BOOPList(List([a,b]))
+        bl = BOOPList(List([a,b]),c)
         # assert str(bl) == "BOOPList(items=List([BOOP(A='A', B=0.0), BOOP(A='B', B=1.0)]))"
+        print(bl.other)
+        print(bl)
         print(bl.items)
 
         spec = {"items" : "ListType(SelfRefList)"}

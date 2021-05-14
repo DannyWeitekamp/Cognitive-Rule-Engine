@@ -29,7 +29,7 @@ from cre.transform import infer_type
 
 from cre.subscriber import BaseSubscriberType
 from cre.structref import define_structref
-from cre.fact import BaseFact,BaseFactType, cast_fact
+from cre.fact import BaseFact,BaseFactType, cast_fact, fact_lower_setattr
 from cre.utils import lower_setattr, _cast_structref, _meminfo_from_struct, decode_idrec, encode_idrec, \
  _pointer_from_struct, _pointer_from_struct_incref, _struct_from_pointer, _decref_pointer
 from cre.vector import new_vector, VectorType
@@ -456,7 +456,7 @@ def retract(kb,identifier):
 
 @njit(cache=True)
 def modify_by_fact(kb,fact,attr,val):
-    lower_setattr(fact,literally(attr),val)
+    fact_lower_setattr(fact,literally(attr),val)
     #TODO signal_subscribers w/ idrec w/ attr_ind
     # signal_subscribers_change(kb, fact.idrec)
     kb.kb_data.change_queue.add(fact.idrec)

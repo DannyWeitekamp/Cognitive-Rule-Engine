@@ -107,6 +107,9 @@ def _meminfo_from_struct(typingctx, val):
 
 def _obj_cast_codegen(context, builder, val, frmty, toty, incref=True):
     ctor = cgutils.create_struct_proxy(frmty)
+    # if(isinstance(frmty,types.Optional)):
+    #     val = val.data
+    # print(frmty, ":::",toty)
     dstruct = ctor(context, builder, value=val)
     meminfo = dstruct.meminfo
     if(incref):

@@ -237,6 +237,7 @@ def _test_list_type():
         # assert str(bl) == "BOOPList(items=List([BOOP(A='A', B=0.0), BOOP(A='B', B=1.0)]))"
         set_it(bl,"other",a)
         set_it(bl,"name","BOB")
+        print(bl.idrec)
         print(bl.other)
         print(bl)
         print(bl.items)
@@ -263,15 +264,21 @@ def _test_reference_type():
         a = BOOP("A", 1)
         b = TestRef("B", a)
         print(a, b)
-        # print(a)
+        print(a)
+
+        print(TestRef("B"))
 
 
         spec = {"name" : "string", "next" : "TestLL"}
         TestLL, TestLLType = define_fact("TestLL", spec)
 
-        t1 = TestLL()
-        t2 = TestLL(next=t1)
-        print(t1,t2)
+        print(TestLLType.name)
+
+        t1 = TestLL("A")
+        t2 = TestLL("B",next=t1)
+
+        # print(t2.next)
+        # print(t1,t2)
 
 
 
@@ -285,7 +292,9 @@ def _test_reference_type():
 
 if __name__ == "__main__":
     # test_list_type()
-    _test_list_type()
+
+    # _test_list_type()
+    _test_reference_type()
     # test__standardize_spec()
     # test__merge_spec_inheritance()
     # test_define_fact()

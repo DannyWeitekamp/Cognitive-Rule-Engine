@@ -23,8 +23,9 @@ from cre.gensource import assert_gen_source
 from cre.caching import unique_hash, source_to_cache, import_from_cached, source_in_cache, get_cache_path
 from cre.structref import gen_structref_code, define_structref
 from cre.context import kb_context
-from cre.utils import _cast_structref, struct_get_attr_offset, _obj_cast_codegen, _pointer_from_struct_codegen, _pointer_from_struct
+from cre.utils import _struct_from_pointer, _cast_structref, struct_get_attr_offset, _obj_cast_codegen, _pointer_from_struct_codegen, _pointer_from_struct
 from numba.core.typeconv import Conversion
+from numba.typed.typedobjectutils import _nonoptional
 
 import numpy as np
 
@@ -32,13 +33,17 @@ GLOBAL_FACT_COUNT = -1
 SPECIAL_ATTRIBUTES = ["inherit_from"]
 
 class Fact(types.StructRef):
+    def __init__(self, fields):
+        super().__init__(fields)
+        print("NAAAAA", self.name)
+
     def can_convert_to(self, typingctx, other):
         """
         Convert this Record to the *other*.
         This method only implements width subtyping for records.
         """
         from numba.core.errors import NumbaExperimentalFeatureWarning
-        print(other.__dict__)
+        # print(other.__dict__)
         if isinstance(other, Fact):
             if len(other._fields) > len(self._fields):
                 return
@@ -65,11 +70,12 @@ class FactModel(models.StructRefModel):
 
 
 ###### Fact Specification Preprocessing #######
-class DefferedFactRefType():
+class DefferedFactRefType(deferred_type):
     '''A placeholder type for when referencing a fact type that
         is not defined yet.'''
     def __init__(self,typ):
         self._fact_name = typ._fact_name if isinstance(typ, types.StructRef) else typ 
+        super(DefferedFactRefType,self).__init__()
     def __equal__(self,other):
         return isinstance(other,DefferedRefType) \
                and self._fact_name == other._fact_name
@@ -210,7 +216,7 @@ def _gen_getter_jit(f_typ,typ,attr):
         return \
 f'''@njit(cache=True)
 def {f_typ}_get_{attr}_as_ptr(self):
-    return _pointer_from_struct(self.{attr})
+    return get_fact_attr_ptr(self, '{attr}')
 
 @njit(cache=True)
 def {f_typ}_get_{attr}(self):
@@ -244,7 +250,7 @@ def get_type_default(t):
 
 
 def get_offsets_from_member_types(fields):
-    #Replace fact references with int64
+    #Replace fact references with BaseFactType
     fact_types = (types.StructRef, DefferedFactRefType)
     fields = [(a,BaseFactType if isinstance(t,fact_types) else t) for a,t in fields]
 
@@ -347,7 +353,7 @@ from numba.core.types import unicode_type, ListType
 from numba.experimental import structref
 from numba.experimental.structref import new, define_boxing
 from numba.core.extending import overload
-from cre.fact import _register_fact_structref, FactProxy, Fact{", BaseFactType, base_list_type, fact_to_ptr" if typ != "BaseFact" else ""}
+from cre.fact import get_fact_attr_ptr, _register_fact_structref, FactProxy, Fact{", BaseFactType, base_list_type, fact_to_ptr" if typ != "BaseFact" else ""}
 from cre.utils import struct_get_attr_offset, _pointer_from_struct,  _pointer_from_struct_incref, _struct_from_pointer, _cast_list
 {fact_imports}
 
@@ -409,12 +415,79 @@ define_boxing({typ}TypeTemplate,{typ})
 #     typ.spec[attr]
 
 
+def resolve_fact_getattr_type(typ, attr):
+    if (hasattr(typ,'spec') and attr in typ.spec):
+        attrty = typ.spec[attr]['type']
+        if(isinstance(attrty,DefferedFactRefType)):
+            attrty = attrty.get()
+        if(isinstance(attrty,Fact)):
+            attrty = types.optional(attrty)
+        print(">>",attr, attrty)
+
+        return attrty
+    if attr in typ.field_dict:
+        attrty = typ.field_dict[attr]
+        print("<<",attr, attrty)
+        return attrty
+
+
+
+# @intrinsic
+@njit(cache=True)
+def safe_get_fact_ptr(fact):
+    if(fact is None):
+        return 0
+    else:
+        return _pointer_from_struct(_nonoptional(fact))
+
+@intrinsic
+def get_fact_attr_ptr(typingctx, inst_type, attr_type):
+    attr = attr_type.literal_value
+    def codegen(context, builder, sig, args):
+        val, _ = args
+        typ, _ = sig.args
+
+        print(typ,attr)
+        field_type = typ.field_dict[attr]
+        # ret_type = resolve_fact_getattr_type(typ, attr)
+        # print(ret_type)
+
+        if(not isinstance(field_type, (Fact))):
+            raise ValueError()
+
+        utils = _Utils(context, builder, typ)
+        dataval = utils.get_data_struct(val)
+        ret = getattr(dataval, attr)
+
+        ret = _pointer_from_struct_codegen(context,builder,ret, field_type, False)
+
+        # ctor = cgutils.create_struct_proxy(td)
+        # dstruct = ctor(context, builder, value=ret)
+        # meminfo = dstruct.meminfo
+
+        # if(incref):
+        #     context.nrt.incref(builder, types.MemInfoPointer(types.voidptr), meminfo)
+
+        # return builder.ptrtoint(dstruct.meminfo, cgutils.intp_t)
+
+        return ret
+    return u8(inst_type,attr_type), codegen
+
+
+
+        # if(hasattr(typ,'spec') and attr in typ.spec):
+        #     ret_type = spec_type = typ.spec[attr]['type']
+        
+
+
+
+
 @intrinsic
 def fact_lower_setattr(typingctx, inst_type, attr_type, val_type):
     
     if (isinstance(attr_type, types.Literal) and 
         isinstance(inst_type, types.StructRef)):
-        print("BB", isinstance(inst_type, types.StructRef), inst_type, attr_type)
+        # print("BB", isinstance(inst_type, types.StructRef), inst_type, attr_type)
         
         attr = attr_type.literal_value
         def codegen(context, builder, sig, args):
@@ -426,7 +499,12 @@ def fact_lower_setattr(typingctx, inst_type, attr_type, val_type):
             field_type = inst_type.field_dict[attr]
 
             if(hasattr(inst_type,'spec') and attr in inst_type.spec and
-                isinstance(field_type, (ListType,Fact))):
+                isinstance(field_type, (ListType,Fact,types.Optional))):
+
+                # print(":::>", isinstance(val_type,types.Optional))
+                val_type = val_type.typ if isinstance(val_type,types.Optional) else val_type
+                val = _nonoptional(val)
+
                 casted = _obj_cast_codegen(context, builder, val, val_type, field_type,False)
             else:
                 casted = context.cast(builder, val, val_type, field_type)
@@ -444,7 +522,6 @@ def fact_lower_setattr(typingctx, inst_type, attr_type, val_type):
         # print(sig)
         return sig, codegen
 
-
 from numba.experimental.structref import _Utils, imputils
 def define_attributes(struct_typeclass):
     """
@@ -455,31 +532,34 @@ def define_attributes(struct_typeclass):
         key = struct_typeclass
 
         def generic_resolve(self, typ, attr):
-            if (hasattr(typ,'spec') and attr in typ.spec):
-                attrty = typ.spec[attr]['type']
-                print(">>",attr, attrty)
-
-                return attrty
-            if attr in typ.field_dict:
-                attrty = typ.field_dict[attr]
-                print("<<",attr, attrty)
-                return attrty
+            return resolve_fact_getattr_type(typ, attr)
 
     @lower_getattr_generic(struct_typeclass)
     def struct_getattr_impl(context, builder, typ, val, attr):
         
         field_type = typ.field_dict[attr]
+        ret_type = resolve_fact_getattr_type(typ,attr)
 
         utils = _Utils(context, builder, typ)
         dataval = utils.get_data_struct(val)
         ret = getattr(dataval, attr)
 
-        if(hasattr(typ,'spec')):
-            spec_type = typ.spec[attr]['type']
-            if(isinstance(spec_type, (ListType,Fact))):
-                ret = _obj_cast_codegen(context, builder, ret, field_type, spec_type, False)
+        # if(hasattr(typ,'spec') and attr in typ.spec):
+        #     ret_type = spec_type = typ.spec[attr]['type']
+        if(isinstance(ret_type, (ListType,Fact))):
+            if(isinstance(ret_type, Fact)):
+                def cast_obj(x):
+                    if(_pointer_from_struct(x) != 0):
+                        return _cast_structref(ret_type, x)
+                    return None
+            else:
+                def cast_obj(x):
+                    return _cast_structref(ret_type,x)
 
-        return imputils.impl_ret_borrowed(context, builder, spec_type, ret)
+            ret = context.compile_internal(builder, cast_obj, ret_type(field_type,), (ret,))
+            # ret = _obj_cast_codegen(context, builder, ret, field_type, ret_type, False)
+
+        return imputils.impl_ret_borrowed(context, builder, ret_type, ret)
 
     @lower_setattr_generic(struct_typeclass)
     def struct_setattr_impl(context, builder, sig, args, attr):
@@ -491,10 +571,30 @@ def define_attributes(struct_typeclass):
         # field_type = inst_type.spec[attr]['type'] if attr in inst_type.spec else inst_type.field_dict[attr]
         
         field_type = inst_type.field_dict[attr]
+
+        print(field_type, ":::", val_type)
         
-        if(hasattr(inst_type,'spec') and attr in inst_type.spec and
-            isinstance(field_type, (ListType,Fact))):
-            casted = _obj_cast_codegen(context, builder, val, val_type, field_type, False),
+        # if(hasattr(inst_type,'spec') and attr in inst_type.spec and
+        if(isinstance(field_type, (ListType,Fact))):
+            # print(context.nrt.get_meminfos(builder,val_type,val))
+            # print(":::>", isinstance(val_type,types.Optional))
+            
+            # print(attr)
+            if(isinstance(field_type, Fact)):
+                def cast_obj(x):
+                    if(x is None):
+                        return _struct_from_pointer(BaseFactType,0)
+                    return _cast_structref(BaseFactType, _nonoptional(x))
+            else:
+                def cast_obj(x):
+                    return _cast_structref(field_type,x) 
+
+            casted = context.compile_internal(builder, cast_obj, field_type(val_type,), (val,))
+            # val_type = val_type.type if isinstance(val_type,types.Optional) else val_type
+            # print("SMOOSH", casted)
+            # casted = _obj_cast_codegen(context, builder, val, val_type, field_type,False)
+
+            # casted = _obj_cast_codegen(context, builder, val, val_type, field_type, False)
         else:
             casted = context.cast(builder, val, val_type, field_type)
             
@@ -515,9 +615,9 @@ def define_attributes(struct_typeclass):
         # read old
         old_value = getattr(dataval, attr)
         # incref new value
-        context.nrt.incref(builder, val_type, casted)
+        context.nrt.incref(builder, field_type, casted)
         # decref old value (must be last in case new value is old value)
-        context.nrt.decref(builder, val_type, old_value)
+        context.nrt.decref(builder, field_type, old_value)
         # write new
         setattr(dataval, attr, casted)
 
@@ -591,6 +691,12 @@ def define_fact(name : str, spec : dict, context=None):
 
 
     fact_ctor, fact_type = _fact_from_spec(name, spec, context=context)
+
+    # If a deffered type was used on specialization then define it
+    for attr,d in spec.items():
+        dt = d.get('type',None)
+        if(isinstance(dt,DefferedFactRefType) and dt._fact_name == name):
+            d['type'].define(fact_type)
     # for k,v in spec.items():
     #     if(isinstance(v['type'],DefferedFactRefType)): spec[k]['type'] = fact_type
     context._assert_flags(name,spec)

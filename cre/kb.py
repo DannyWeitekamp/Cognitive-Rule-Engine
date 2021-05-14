@@ -542,7 +542,7 @@ def kb_modify(self, fact, attr, val):
     if(not isinstance(fact,types.StructRef)): 
         raise TypingError(f"Modify requires a fact instance, got instance of'{type(fact)}'.")
     def impl(self, fact, attr, val):
-        return modify_by_fact(self, fact, attr, val)
+        modify_by_fact(self, fact, attr, val)
     return impl
 
 @overload_method(KnowledgeBaseTypeTemplate, "all_facts_of_type")

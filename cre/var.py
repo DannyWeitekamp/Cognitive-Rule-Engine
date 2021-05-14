@@ -11,7 +11,7 @@ from cre.caching import gen_import_str, unique_hash,import_from_cached, source_t
 from cre.context import kb_context
 from cre.structref import define_structref, define_structref_template
 from cre.kb import KnowledgeBaseType, KnowledgeBase, facts_for_t_id, fact_at_f_id
-from cre.fact import define_fact, BaseFactType, cast_fact, DefferedFactRefType
+from cre.fact import define_fact, BaseFactType, cast_fact, DefferedFactRefType, Fact
 from cre.utils import _struct_from_meminfo, _meminfo_from_struct, _cast_structref, cast_structref, decode_idrec, lower_getattr, _struct_from_pointer,  lower_setattr, lower_getattr, _pointer_from_struct, _decref_pointer, _incref_pointer, _incref_structref
 from cre.utils import assign_to_alias_in_parent_frame
 from cre.subscriber import base_subscriber_fields, BaseSubscriber, BaseSubscriberType, init_base_subscriber, link_downstream
@@ -198,6 +198,7 @@ class Var(structref.StructRefProxy):
 def var_cmp_alpha(left_var, op_str, right_var,negated):
     from cre.condition_node import pt_to_cond, gen_pterm_ctor_alpha, gen_pterm_ctor_beta
     # Treat None as 0 for comparing against a fact ref
+    print("***", isinstance(left_var.head_type, Fact),isinstance(left_var.head_type, types.StructRef), left_var.head_type)
     if(right_var is None and isinstance(left_var.head_type, types.StructRef)): right_var = 0
     right_var_type = types.unliteral(types.literal(right_var)) #if (isinstance(right_var, types.NoneType)) else types.int64
     ctor = gen_pterm_ctor_alpha(left_var, op_str, right_var_type)

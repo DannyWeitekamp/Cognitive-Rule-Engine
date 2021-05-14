@@ -154,9 +154,19 @@ class KnowledgeBaseContext(object):
 
         # self.fact_to_t_id[fact_ctor] = t_id 
         # self.fact_to_t_id[fact_type] = t_id 
+        from numba.core.typeconv.rules import TypeCastingRules, default_type_manager as tm
+        # from numba.core.typeconv.rules import 
+        from cre.fact import BaseFactType
+        # tcr = TypeCastingRules(tm)
 
         ft_str = str(fact_type)
         if_str = str(inherit_from)
+        if(inherit_from): tm.set_safe_convert(fact_type, inherit_from)
+        
+        tm.set_safe_convert(fact_type, BaseFactType)
+        # tm.safe(fact_type, BaseFactType)
+
+
         #Track in heritence structure
         i_name = inherit_from._fact_name if inherit_from else None
         self.parents_of[name] = self.parents_of.get(i_name,[]) + [i_name] if i_name else []

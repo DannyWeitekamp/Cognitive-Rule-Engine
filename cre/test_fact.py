@@ -213,7 +213,7 @@ def test_protected_mutability():
             edit_it(b1)
 
 
-def test_list_type():
+def _test_list_type():
     with kb_context("test_list_type"):
         spec = {"A" : "string", "B" : "number"}
         BOOP, BOOPType = define_fact("BOOP", spec)
@@ -225,7 +225,11 @@ def test_list_type():
         b = BOOP("B",1)
 
         bl = BOOPList(List([a,b]))
-        print(bl)
+        # assert str(bl) == "BOOPList(items=List([BOOP(A='A', B=0.0), BOOP(A='B', B=1.0)]))"
+        print(bl.items)
+
+        spec = {"items" : "ListType(SelfRefList)"}
+        SelfRefList, SelfRefListType = define_fact("SelfRefList", spec)
 
 
 
@@ -267,7 +271,8 @@ def _test_reference_type():
 
 
 if __name__ == "__main__":
-    test_list_type()
+    # test_list_type()
+    _test_list_type()
     # test__standardize_spec()
     # test__merge_spec_inheritance()
     # test_define_fact()

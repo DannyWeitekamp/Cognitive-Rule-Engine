@@ -212,21 +212,31 @@ def test_protected_mutability():
             print("RUNTIME_NB", b1.B)
             edit_it(b1)
 
+from cre.utils import lower_setattr
+from cre.fact import fact_lower_setattr
+from numba import literally
+@njit
+def set_it(self,attr,other):
+    fact_lower_setattr(self,literally(attr),other)
+    # self.other = other
+
 
 def _test_list_type():
     with kb_context("test_list_type"):
         spec = {"A" : "string", "B" : "number"}
         BOOP, BOOPType = define_fact("BOOP", spec)
 
-        spec = {"items" : "ListType(BOOP)","other" : "BOOP"}
+        spec = {"name":"string","items" : "ListType(BOOP)","other" : "BOOP"}
         BOOPList, BOOPListType = define_fact("BOOPList", spec)
 
         a = BOOP("A",0)
         b = BOOP("B",1)
         c = BOOP("C",2)
 
-        bl = BOOPList(List([a,b]),c)
+        bl = BOOPList("L",List([a,b]),c)
         # assert str(bl) == "BOOPList(items=List([BOOP(A='A', B=0.0), BOOP(A='B', B=1.0)]))"
+        set_it(bl,"other",a)
+        set_it(bl,"name","BOB")
         print(bl.other)
         print(bl)
         print(bl.items)

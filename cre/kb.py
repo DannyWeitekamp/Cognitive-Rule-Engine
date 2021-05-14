@@ -202,7 +202,7 @@ class KnowledgeBase(structref.StructRefProxy):
         return all_facts_of_type(self,typ)
 
     def modify(self, fact, attr, val):
-        return modify(self,fact, attr, val)
+        return modify(self,fact, literally(attr), val)
 
     @property
     def halt_flag(self):

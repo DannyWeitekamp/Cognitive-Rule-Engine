@@ -411,9 +411,10 @@ define_boxing({typ}TypeTemplate,{typ})
 
 @intrinsic
 def fact_lower_setattr(typingctx, inst_type, attr_type, val_type):
-    print("BB", isinstance(inst_type, types.StructRef), inst_type, attr_type)
+    
     if (isinstance(attr_type, types.Literal) and 
         isinstance(inst_type, types.StructRef)):
+        print("BB", isinstance(inst_type, types.StructRef), inst_type, attr_type)
         
         attr = attr_type.literal_value
         def codegen(context, builder, sig, args):
@@ -424,16 +425,12 @@ def fact_lower_setattr(typingctx, inst_type, attr_type, val_type):
             # cast val to the correct type
             field_type = inst_type.field_dict[attr]
 
-            if(hasattr(inst_type,'spec') and attr in inst_type.spec):
-                spec_type = inst_type.spec[attr]['type']
-                if(isinstance(spec_type, (ListType,Fact))):
-                    casted = _obj_cast_codegen(context, builder, val, val_type, field_type)
-                # elif(isinstance(spec_type, Fact)):
-                #     casted = _pointer_from_struct_codegen(context, builder, val, val_type)
-                else:
-                    casted = context.cast(builder, val, val_type, field_type)
+            if(hasattr(inst_type,'spec') and attr in inst_type.spec and
+                isinstance(field_type, (ListType,Fact))):
+                casted = _obj_cast_codegen(context, builder, val, val_type, field_type,False)
             else:
                 casted = context.cast(builder, val, val_type, field_type)
+            
 
             # read old
             old_value = getattr(dataval, attr)
@@ -444,7 +441,7 @@ def fact_lower_setattr(typingctx, inst_type, attr_type, val_type):
             # write new
             setattr(dataval, attr, casted)
         sig = types.void(inst_type, types.literal(attr), val_type)
-        print(sig)
+        # print(sig)
         return sig, codegen
 
 
@@ -463,7 +460,7 @@ def define_attributes(struct_typeclass):
                 print(">>",attr, attrty)
 
                 return attrty
-            elif attr in typ.field_dict:
+            if attr in typ.field_dict:
                 attrty = typ.field_dict[attr]
                 print("<<",attr, attrty)
                 return attrty
@@ -480,36 +477,7 @@ def define_attributes(struct_typeclass):
         if(hasattr(typ,'spec')):
             spec_type = typ.spec[attr]['type']
             if(isinstance(spec_type, (ListType,Fact))):
-                # utils = _Utils(context, builder, field_type)
-                # dataval = utils.get_data_struct(ret)
-                # ret = context.cast(builder, dataval, field_type, fieldtype)
-                ret = _obj_cast_codegen(context, builder, ret, field_type, spec_type)
-
-            # ctor = cgutils.create_struct_proxy(field_type)
-            # dstruct = ctor(context, builder, value=ret)
-            # meminfo = dstruct.meminfo
-            # # context.nrt.incref(builder, types.MemInfoPointer(types.voidptr), meminfo)
-
-            # st = cgutils.create_struct_proxy(spec_type)(context, builder)
-            # st.meminfo = meminfo
-            # ret = st._getvalue()
-        
-        # return st._getvalue()
-        
-
-        # if(isinstance(spec_type,types.StructRef)):
-        #     meminfo = builder.inttoptr(ret, cgutils.voidptr_t)
-        #     st = cgutils.create_struct_proxy(spec_type)(context, builder)
-        #     st.meminfo = meminfo
-        #     # context.nrt.incref(builder, types.MemInfoPointer(types.voidptr), meminfo)
-        #     ret = st._getvalue()
-        # elif(isinstance(typ,ListType) and isinstance(typ.dtype,types.StructRef)):
-
-            
-
-        # print("^^^", field_type)
-        # print("VVVV", spec_type)
-        # if()
+                ret = _obj_cast_codegen(context, builder, ret, field_type, spec_type, False)
 
         return imputils.impl_ret_borrowed(context, builder, spec_type, ret)
 
@@ -524,17 +492,9 @@ def define_attributes(struct_typeclass):
         
         field_type = inst_type.field_dict[attr]
         
-        # print("val_type", val_type)
-        # print("field_type",field_type)
-        # Casting lists requires reassigning the meminfo to a new struct type
-        if(hasattr(inst_type,'spec') and attr in inst_type.spec):
-            spec_type = inst_type.spec[attr]['type']
-            if(isinstance(spec_type, (ListType,Fact))):
-                casted = _obj_cast_codegen(context, builder, val, val_type, field_type)
-            # elif(isinstance(spec_type, Fact)):
-            #     casted = _pointer_from_struct_codegen(context, builder, val, val_type)
-            else:
-                casted = context.cast(builder, val, val_type, field_type)
+        if(hasattr(inst_type,'spec') and attr in inst_type.spec and
+            isinstance(field_type, (ListType,Fact))):
+            casted = _obj_cast_codegen(context, builder, val, val_type, field_type, False),
         else:
             casted = context.cast(builder, val, val_type, field_type)
             

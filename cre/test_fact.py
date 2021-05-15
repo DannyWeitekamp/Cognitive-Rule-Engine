@@ -235,8 +235,10 @@ def _test_list_type():
 
         bl = BOOPList("L",List([a,b]),c)
         # assert str(bl) == "BOOPList(items=List([BOOP(A='A', B=0.0), BOOP(A='B', B=1.0)]))"
-        set_it(bl,"other",a)
-        set_it(bl,"name","BOB")
+        bl.other = a
+        bl.name = "BOB"
+        # set_it(bl,"other",a)
+        # set_it(bl,"name","BOB")
         print(bl.idrec)
         print(bl.other)
         print(bl)
@@ -293,7 +295,7 @@ def _test_reference_type():
 if __name__ == "__main__":
     # test_list_type()
 
-    # _test_list_type()
+    _test_list_type()
     _test_reference_type()
     # test__standardize_spec()
     # test__merge_spec_inheritance()

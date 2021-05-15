@@ -27,7 +27,6 @@ from cre.structref import gen_structref_code, define_structref
 from cre.context import kb_context
 from cre.utils import _struct_from_pointer, _cast_structref, struct_get_attr_offset, _obj_cast_codegen, _pointer_from_struct_codegen, _pointer_from_struct
 from numba.core.typeconv import Conversion
-from numba.typed.typedobjectutils import _nonoptional
 
 import numpy as np
 
@@ -221,7 +220,7 @@ class FactProxy:
     '''Essentially the same as numba.experimental.structref.StructRefProxy 0.51.2
         except that __new__ is not defined to statically define the constructor.
     '''
-    __slots__ = ('_type', '_meminfo')
+    __slots__ = ('_fact_type', '_meminfo')
 
     @classmethod
     def _numba_box_(cls, mi):
@@ -253,6 +252,11 @@ class FactProxy:
         """
         return self._fact_type
 
+    # def __setattr__(self,attr,val):
+    #     from cre.fact_intrinsics import fact_lower_setattr
+    #     fact_lower_setattr(self,attr,val)
+
+
 def gen_fact_import_str(t):
     return f"from cre_cache.{t._fact_name}._{t._hash_code} import {t._fact_name + 'Type'}"
 
@@ -275,11 +279,8 @@ def {f_typ}_get_{attr}(self):
     return self.{attr}
 '''
 
-def _gen_getter(typ,attr):
-    return f'''    @property
-    def {attr}(self):
-        return {typ}_get_{attr}(self)
-    '''
+def _gen_props(typ,attr):
+    return f'''    {attr} = property({typ}_get_{attr},lambda s,v : lower_setattr(s,"{attr}",v))'''
 
 # from .structref import _gen_getter, _gen_getter_jit
 
@@ -389,7 +390,7 @@ def gen_fact_code(typ, fields, fact_num, ind='    '):
 
 
     all_fields = base_fact_fields+fields
-    getters = "\n".join([_gen_getter(typ,attr) for attr,t in all_fields])
+    properties = "\n".join([_gen_props(typ,attr) for attr,t in all_fields])
     getter_jits = "\n".join([_gen_getter_jit(typ,t,attr) for attr,t in all_fields])
     field_list = ",".join(["'%s'"%attr for attr,t in fields])
     param_list = ",".join([f"{attr}={get_type_default(t)!r}" for attr,t in fields])
@@ -417,13 +418,13 @@ def gen_fact_code(typ, fields, fact_num, ind='    '):
 f'''
 import numpy as np
 from numba.core import types
-from numba import njit
+from numba import njit, literally
 from numba.core.types import *
 from numba.core.types import unicode_type, ListType
 from numba.experimental import structref
 from numba.experimental.structref import new#, define_boxing
 from numba.core.extending import overload
-from cre.fact_intrinsics import define_boxing, get_fact_attr_ptr, _register_fact_structref
+from cre.fact_intrinsics import define_boxing, get_fact_attr_ptr, _register_fact_structref, fact_lower_setattr
 from cre.fact import repr_list_attr, repr_fact_attr,  FactProxy, Fact{", BaseFactType, base_list_type, fact_to_ptr" if typ != "BaseFact" else ""}
 from cre.utils import struct_get_attr_offset, _pointer_from_struct,  _pointer_from_struct_incref, _struct_from_pointer, _cast_list
 {fact_imports}
@@ -453,6 +454,10 @@ def ctor({param_list}):
 
 {getter_jits}
 
+@njit(cache=True)
+def lower_setattr(self,attr,val):
+    fact_lower_setattr(self,literally(attr),val)
+        
 class {typ}(FactProxy):
     __numba_ctor = ctor
     _fact_type = {typ}Type
@@ -469,7 +474,15 @@ class {typ}(FactProxy):
     def __repr__(self):
         return str(self)
 
-{getters}
+    # def __setattr__(self,attr,val):
+    #     if(attr == '_meminfo'):  
+    #         print({typ}.__dict__)
+    #         {typ}.__dict__[attr].__set__(self, val)
+    #     else:
+    #         lower_setattr(self,attr,val)
+    
+
+{properties}
 
 @overload({typ})
 def _ctor(*args):

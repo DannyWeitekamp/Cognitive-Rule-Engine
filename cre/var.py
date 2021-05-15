@@ -11,7 +11,7 @@ from cre.caching import gen_import_str, unique_hash,import_from_cached, source_t
 from cre.context import kb_context
 from cre.structref import define_structref, define_structref_template
 from cre.kb import KnowledgeBaseType, KnowledgeBase, facts_for_t_id, fact_at_f_id
-from cre.fact import define_fact, BaseFactType, cast_fact, DefferedFactRefType, Fact
+from cre.fact import define_fact, BaseFactType, cast_fact, DeferredFactRefType, Fact
 from cre.utils import _struct_from_meminfo, _meminfo_from_struct, _cast_structref, cast_structref, decode_idrec, lower_getattr, _struct_from_pointer,  lower_setattr, lower_getattr, _pointer_from_struct, _decref_pointer, _incref_pointer, _incref_structref
 from cre.utils import assign_to_alias_in_parent_frame
 from cre.subscriber import base_subscriber_fields, BaseSubscriber, BaseSubscriberType, init_base_subscriber, link_downstream
@@ -131,7 +131,7 @@ class Var(structref.StructRefProxy):
             # print("<<",fact_type_name)
             # print("<<",fact_type.spec)
             head_type = fact_type.spec[attr]['type']
-            if(isinstance(head_type,DefferedFactRefType)):
+            if(isinstance(head_type,DeferredFactRefType)):
                 head_type = kb_context().fact_types[head_type._fact_name]
             # head_type = fact_type.field_dict[attr]
 

@@ -29,7 +29,8 @@ from cre.transform import infer_type
 
 from cre.subscriber import BaseSubscriberType
 from cre.structref import define_structref
-from cre.fact import BaseFact,BaseFactType, cast_fact, fact_lower_setattr
+from cre.fact import BaseFact,BaseFactType, cast_fact
+from cre.fact_intrinsics import fact_lower_setattr
 from cre.utils import lower_setattr, _cast_structref, _meminfo_from_struct, decode_idrec, encode_idrec, \
  _pointer_from_struct, _pointer_from_struct_incref, _struct_from_pointer, _decref_pointer
 from cre.vector import new_vector, VectorType
@@ -541,8 +542,12 @@ def kb_retract(self, identifier):
 def kb_modify(self, fact, attr, val):
     if(not isinstance(fact,types.StructRef)): 
         raise TypingError(f"Modify requires a fact instance, got instance of'{type(fact)}'.")
+    print("&&", attr)
+    # if(isinstance(attr, types.Literal)):
     def impl(self, fact, attr, val):
         modify_by_fact(self, fact, attr, val)
+        # fact_lower_setattr(fact, attr, val)
+
     return impl
 
 @overload_method(KnowledgeBaseTypeTemplate, "all_facts_of_type")

@@ -91,7 +91,10 @@ class FactModel(models.StructRefModel):
 ###### Fact Specification Preprocessing #######
 class DeferredFactRefType():
     '''A placeholder type for when referencing a fact type that
-        is not defined yet.'''
+        is not defined yet. Note: Sort of mimics deferred_type but
+         doesn't subclass because would use special numba pickling,
+         which I haven't quite figured out.
+    '''
     def __init__(self,typ):
         self._fact_name = typ._fact_name if isinstance(typ, types.StructRef) else typ 
         super(DeferredFactRefType,self).__init__()
@@ -322,17 +325,42 @@ def repr_type(typ):
     else:
         return repr(typ)
 
+def repr_fact_attr(inst,fact_name,get_ptr=None):
+    # if(isinstance(val,Fact)):
+    ptr = get_ptr(inst)
+    if(ptr != 0):
+        return f'<{fact_name} at {hex(ptr)}'
+    else:
+        return 'None'
+
+def repr_list_attr(val,dtype_name=None):
+    # if(isinstance(val,Fact)):
+    # ptr = get_ptr(val)
+    if(val is not None):
+        if(dtype_name is not None):
+            return f'List([{", ".join([f"<{dtype_name} at {hex(fact_to_ptr(x))}>" for x in val])}])'
+        else:
+            return f'List([{", ".join([repr(x) for x in val])}])'
+    else:
+        return 'None'
+
+
+
 def gen_repr_attr_code(a,t,typ_name):
     '''Helper function for generating code for the repr/str of the fact'''
     if(isinstance(t,fact_types)):
-        return f'{a}=<{t._fact_name} at {{hex({typ_name}_get_{a}_as_ptr(self))}}>'
+        return f'{a}={{repr_fact_attr(self,"{t._fact_name}",{typ_name}_get_{a}_as_ptr)}}'
+        # return f'{a}=<{t._fact_name} at {{hex({typ_name}_get_{a}_as_ptr(self))}}>'
     elif(isinstance(t,ListType)):
         # TODO : might want to print lists like reference where just the address is printed
-        if(isinstance(t.dtype,fact_types)):
-            s = f'f"<{t.dtype._fact_name} at {{hex(fact_to_ptr(x))}}>"'
-            return f'{a}=List([{{", ".join([{s} for x in self.{a}])}}])'
-        else:
-            return f'{a}=List([{{", ".join([repr(x) for x in self.{a}])}}])'
+        # if():
+        s = ", " + f'"{t.dtype._fact_name}"' if isinstance(t.dtype,fact_types) else ""
+        print("FN!!", t.dtype._fact_name)
+        return f'{a}={{repr_list_attr(self.{a}{s})}}'
+            # s = f'f"<{t.dtype._fact_name} at {{hex(fact_to_ptr(x))}}>"'
+            # return f'{a}={{"List([" + ", ".join([{s} for x in self.{a}]) + "])" if self.{a} is not None else "None"}}'
+        # else:
+            # return f'{a}=List([{{", ".join([repr(x) for x in self.{a}])}}])'
     else:
         return f'{a}={{repr(self.{a})}}' 
 
@@ -396,7 +424,7 @@ from numba.experimental import structref
 from numba.experimental.structref import new#, define_boxing
 from numba.core.extending import overload
 from cre.fact_intrinsics import define_boxing, get_fact_attr_ptr, _register_fact_structref
-from cre.fact import  FactProxy, Fact{", BaseFactType, base_list_type, fact_to_ptr" if typ != "BaseFact" else ""}
+from cre.fact import repr_list_attr, repr_fact_attr,  FactProxy, Fact{", BaseFactType, base_list_type, fact_to_ptr" if typ != "BaseFact" else ""}
 from cre.utils import struct_get_attr_offset, _pointer_from_struct,  _pointer_from_struct_incref, _struct_from_pointer, _cast_list
 {fact_imports}
 
@@ -528,8 +556,9 @@ def define_fact(name : str, spec : dict, context=None):
     # If a deffered type was used on specialization then define it
     for attr,d in spec.items():
         dt = d.get('type',None)
+        if(isinstance(dt,ListType)): dt = dt.dtype
         if(isinstance(dt,DeferredFactRefType) and dt._fact_name == name):
-            d['type'].define(fact_type)
+            dt.define(fact_type)
     # for k,v in spec.items():
     #     if(isinstance(v['type'],DeferredFactRefType)): spec[k]['type'] = fact_type
     context._assert_flags(name,spec)

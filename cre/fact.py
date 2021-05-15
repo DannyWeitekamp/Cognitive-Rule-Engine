@@ -472,15 +472,7 @@ class {typ}(FactProxy):
         return f'{typ}({str_temp})'
 
     def __repr__(self):
-        return str(self)
-
-    # def __setattr__(self,attr,val):
-    #     if(attr == '_meminfo'):  
-    #         print({typ}.__dict__)
-    #         {typ}.__dict__[attr].__set__(self, val)
-    #     else:
-    #         lower_setattr(self,attr,val)
-    
+        return str(self)    
 
 {properties}
 

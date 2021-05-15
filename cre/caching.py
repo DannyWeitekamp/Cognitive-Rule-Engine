@@ -7,6 +7,7 @@ from types import FunctionType
 import os
 import time
 from pathlib import Path
+import shutil
 # from cre.caching import cache_dir
 
 from numba.misc.appdirs import AppDirs
@@ -25,6 +26,9 @@ if not os.path.exists(cache_dir):
 #Add cre_cache to path
 sys.path.insert(0, appdirs.user_cache_dir)
 
+def clear_cache():
+	shutil.rmtree(os.path.abspath(os.path.join(cache_dir,"../")))
+	print("Cache Cleared!")
 
 import linecache
 def cache_safe_exec(source,lcs=None,gbls=None,cache_name='cache-safe'):

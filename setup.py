@@ -20,6 +20,12 @@ setup(
         # entry_points ={ 
             
         # }, 
+        entry_points={
+            "console_scripts": [
+                "cre = cre.command_line:main"
+            ]
+        },
+
         classifiers =( 
             "Programming Language :: Python :: 3", 
             "License :: OSI Approved :: MIT License", 

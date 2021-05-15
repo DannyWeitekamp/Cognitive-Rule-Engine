@@ -215,9 +215,11 @@ def test_protected_mutability():
 from cre.utils import lower_setattr
 from cre.fact_intrinsics import fact_lower_setattr
 from numba import literally
-@njit
-def set_it(self,attr,other):
-    fact_lower_setattr(self,literally(attr),other)
+
+
+# @njit
+# def set_it(self,attr,other):
+#     fact_lower_setattr(self,literally(attr),other)
     # self.other = other
 
 
@@ -265,6 +267,8 @@ def _test_reference_type():
 
         a = BOOP("A", 1)
         b = TestRef("B", a)
+
+        # assert str(a) == 
         print(a, b)
         print(a)
 
@@ -305,3 +309,30 @@ if __name__ == "__main__":
     # test_protected_mutability()
 
     # _test_reference_type()
+
+
+
+
+
+##### NOTES NOTES NOTES ####
+'''
+[] Need a way to organize tests -> need to have some standard types:
+    -TObj = {"name" : "string", "value" : "number"}
+    -TRef = {"name" : "string", "other" : "TestObj"}
+    -TLL = {"name" : "string", "next" : "TLL"}
+    -TList = {"name" : "string", "items" : "ListType("string")"}
+    -TSelfList = {"name" : "string", "items" : "ListType("TSelfList")"}
+    -TObjList = {"name" : "string", "items" : "ListType("TObj")"}
+
+[] Should test alternative definition patterns
+    -string vs type obj
+    
+[] For each type need to test:
+    -getattr, setattr, str 
+    -kb.modify
+    -matching
+
+
+
+
+'''

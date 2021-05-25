@@ -221,18 +221,28 @@ def test_existential_not():
     assert repr(c2) == 'l1, l2 = NOT(BOOP), NOT(BOOP)\n(l1.B < l2.B)'
     # print(repr(c2))
 
+def _test_list_operations():
+    with kb_context("test_list_operations"):
+        TList,TListType = define_fact("TList",{"name" : "string", "items" : "ListType(string)"})
+        v = Var(TList,"v")
+        print(v.items[0])
+
+
+
+
 
 if(__name__ == "__main__"):
+    _test_list_operations()
     # test_link()
     # test_initialize()
     # for i in range(10):
     #     t0 = time_ns()
     #     test_build_conditions()
     #     print(f'{(time_ns()-t0)/1e6} ms')
-    for i in range(10):
-        t0 = time_ns()
-        test_unconditioned()
-        print(f'{(time_ns()-t0)/1e6} ms')
+    # for i in range(10):
+    #     t0 = time_ns()
+    #     test_unconditioned()
+    #     print(f'{(time_ns()-t0)/1e6} ms')
     # test_multiple_deref()
     # test_existential_not()
 # # bar.py_func()

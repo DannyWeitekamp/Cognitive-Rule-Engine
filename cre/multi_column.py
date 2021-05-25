@@ -185,7 +185,7 @@ class resolveAdd2(Rule):
             NOT(TextField,'sel_r') & (sel.to_right == sel_r) & (sel_r.enabled == True) & 
             NOT(Match,'m1') & (m1.rhs == "Carry2") & (m1.sel == sel.above.above.above.name) & (m1.input == "1") & 
             NOT(Match,'m2') & (m2.rhs == "Carry3") & (m2.sel == sel.above.above.above.name) & (m2.input == "1") & 
-            NOT(Match,'m3') & (m3.rhs == "Add3") & (m3.input == "1")#(m3.sel == sel.above.above.above) & 
+            NOT(Match,'m3') & (m3.rhs == "Add3") #& (m3.args[0] == sel.above.above.above.name)#(m3.sel == sel.above.above.above) & 
         )
 
     def then(kb, match, sel):

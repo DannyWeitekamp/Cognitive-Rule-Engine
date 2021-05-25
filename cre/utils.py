@@ -25,7 +25,7 @@ meminfo_type = types.MemInfoPointer(types.voidptr)
 
 @intrinsic
 def lower_setattr(typingctx, inst_type, attr_type, val_type):
-    print("KK", isinstance(inst_type, types.StructRef), inst_type, attr_type)
+    # print("KK", isinstance(inst_type, types.StructRef), inst_type, attr_type)
     if (isinstance(attr_type, types.Literal) and 
         isinstance(inst_type, types.StructRef)):
         

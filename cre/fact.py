@@ -356,7 +356,7 @@ def gen_repr_attr_code(a,t,typ_name):
         # TODO : might want to print lists like reference where just the address is printed
         # if():
         s = ", " + f'"{t.dtype._fact_name}"' if isinstance(t.dtype,fact_types) else ""
-        print("FN!!", t.dtype._fact_name)
+        # print("FN!!", t.dtype._fact_name)
         return f'{a}={{repr_list_attr(self.{a}{s})}}'
             # s = f'f"<{t.dtype._fact_name} at {{hex(fact_to_ptr(x))}}>"'
             # return f'{a}={{"List([" + ", ".join([{s} for x in self.{a}]) + "])" if self.{a} is not None else "None"}}'

@@ -114,7 +114,6 @@ class Var(structref.StructRefProxy):
             assert isinstance(self.head_type, ListType), \
                 f'__getitem__() not supported for Var with head_type {type(self.head_type)}'
 
-            print(self.head_type.__dict__)
             head_type = self.head_type.item_type
 
             attr = str(attr_or_ind)
@@ -340,8 +339,13 @@ def overload_repr_var(self):
 def str_var(self):
     s = self.alias
     if (len(s) > 0):
-        for attr in self.deref_attrs:
-            s += "." + attr
+        for i in range(len(self.deref_offsets)):
+            attr = self.deref_attrs[i]
+            deref = self.deref_offsets[i]
+            if(deref.type == OFFSET_TYPE_ATTR):
+                s += "." + attr
+            else:
+                s += "[" + str(int(deref.offset)) + "]"
         return s
     else:
         return repr(self)

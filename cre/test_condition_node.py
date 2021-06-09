@@ -226,6 +226,11 @@ def _test_list_operations():
         TList,TListType = define_fact("TList",{"name" : "string", "items" : "ListType(string)"})
         v = Var(TList,"v")
         print(v.items[0])
+        print()
+
+        c = v.items[0] != v.items[1]
+        print(c)
+
 
 
 

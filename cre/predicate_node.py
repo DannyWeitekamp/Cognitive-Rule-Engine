@@ -31,6 +31,7 @@ from cre.utils import _struct_from_meminfo, _meminfo_from_struct, _cast_structre
  _load_pointer, _pointer_to_data_pointer
 from cre.subscriber import base_subscriber_fields, BaseSubscriber, BaseSubscriberType, init_base_subscriber, link_downstream
 from cre.vector import VectorType, new_vector
+from cre.utils import deref_type, OFFSET_TYPE_ATTR, OFFSET_TYPE_LIST
 from copy import copy
 from operator import itemgetter
 
@@ -173,7 +174,7 @@ base_predicate_node_field_dict = {
     "right_fact_type_name" : unicode_type,
 
     
-    "left_attr_offsets" : i8[::1],#types.Any,
+    "left_attr_offsets" : deref_type[::1],#types.Any,
     # "filter_func" : filter_func_type,
     "op_str" : types.literal('=='),
     
@@ -221,7 +222,7 @@ beta_predicate_node_field_dict = {
 
     #### Attributes filled in at definition time ###
     "filter_func" : beta_filter_func_type,
-    "right_attr_offsets" : i8[:],
+    "right_attr_offsets" : deref_type[::1],
     "left_type" : types.TypeRef(BaseFactType), #<- Filled in at definition
     "right_type" : types.TypeRef(BaseFactType),
     
@@ -282,14 +283,14 @@ def init_alpha(st, left_fact_type_name, left_attr_offsets, right_val):
 def _deref_attrs(val_type, inst_ptr, attr_offsets):
     '''Helper function for deref_attrs'''
 
-    for offset in attr_offsets[:-1]:
+    for dref in attr_offsets[:-1]:
         if(inst_ptr == 0): raise Exception()
         data_ptr = _pointer_to_data_pointer(inst_ptr)
-        inst_ptr = _load_pointer(i8,data_ptr+offset)
+        inst_ptr = _load_pointer(i8,data_ptr+dref.offset)
         
     if(inst_ptr == 0): raise Exception()
     data_ptr = _pointer_to_data_pointer(inst_ptr)
-    val = _load_pointer(val_type, data_ptr+attr_offsets[-1])
+    val = _load_pointer(val_type, data_ptr+attr_offsets[-1].offset)
     return val
 
 @generated_jit(cache=True)
@@ -485,14 +486,17 @@ def ctor(left_fact_type_name, attr_offsets, literal_val):
 
 
 def resolve_deref(typ,attr_chain):
-    offsets = np.empty((len(attr_chain),),dtype=np.int64)
+    print(type(deref_type.dtype),deref_type.dtype)
+    offsets = np.empty((len(attr_chain),),dtype=deref_type.dtype)
+    print(offsets)
     out_type = typ 
     for i, attr in enumerate(attr_chain):
         if(not hasattr(out_type,'field_dict')): 
             attr_chain_str = ".".join(attr_chain)
             raise AttributeError(f"Invalid dereference {typ}.{attr_chain_str}. {out_type} has no attribute '{attr}'.")
         fd = out_type.field_dict
-        offsets[i] = out_type._attr_offsets[list(fd.keys()).index(attr)]  #struct_get_attr_offset(out_type,attr) #For some reason ~4.6ms
+        offsets[i][0] = OFFSET_TYPE_ATTR
+        offsets[i][1] = out_type._attr_offsets[list(fd.keys()).index(attr)]  #struct_get_attr_offset(out_type,attr) #For some reason ~4.6ms
         out_type = fd[attr]
 
     return out_type, offsets

@@ -1,5 +1,6 @@
 import operator
 import numpy as np
+import numba
 from numba import types, njit, i8, u8, i4, u1, i8, literally, generated_jit
 from numba.typed import List
 from numba.types import ListType, unicode_type, void, Tuple
@@ -25,8 +26,8 @@ from numba.core.datamodel import default_manager, models
 from operator import itemgetter
 from copy import copy
 from os import getenv
+from cre.utils import deref_type, OFFSET_TYPE_ATTR, OFFSET_TYPE_LIST
 # import inspect
-
 
 
 
@@ -52,7 +53,7 @@ var_fields_dict = {
     # The byte offsets for each attribute relative to the previous resolved
     #  fact. E.g.  if attr "B" is at offset 10 in the type assigned to "B"
     #  then v.B.B.deref_offsets = [10,10]
-    'deref_offsets': ListType(i8),
+    'deref_offsets': deref_type[::1],
 
     # The name of the fact that the base Var is meant to match.
     'fact_type_name': unicode_type,
@@ -143,12 +144,12 @@ class Var(structref.StructRefProxy):
             else:
                 struct_type = GenericVarType
             #CHECK THAT PTRS ARE SAME HERE
-            new = new_appended_var(struct_type, self, attr, offset)
+            new = new_appended_var(struct_type, self, attr, offset,'attr')
             new._fact_type = fact_type
             new._head_type = head_type
             # new = var_ctor(struct_type, str(fact_type_name), var_get_alias(self))
             # var_memcopy(self, new)
-            # var_append_attr(new, attr, offset)
+            # var_append_deref(new, attr, offset)
             return new
 
     def __str__(self):
@@ -273,7 +274,7 @@ def var_ctor(var_struct_type, fact_type_name="", alias=""):
     st.base_ptr = _pointer_from_struct(st)
     st.alias =  "" if(alias is  None) else alias
     st.deref_attrs = List.empty_list(unicode_type)
-    st.deref_offsets = List.empty_list(i8)
+    st.deref_offsets = np.empty(0,dtype=deref_type)
     return st
 
 
@@ -350,38 +351,49 @@ class StructAttribute(AttributeTemplate):
 #### getattr and dereferencing ####
 
 @njit(cache=True)
-def new_appended_var(struct_type, base_var, attr, offset):
+def new_appended_var(struct_type, base_var, attr, offset,typ='attr'):
     _incref_structref(base_var)
     st = new(struct_type)
     var_memcopy(base_var,st)
-    var_append_attr(st,attr,offset)
+    var_append_deref(st,attr,offset,typ)
     return st
 
 
 @njit(cache=True)
 def var_memcopy(self,st):
     new_deref_attrs = List.empty_list(unicode_type)
-    new_deref_offsets = List.empty_list(i8)
+    # new_deref_offsets = np.empty(len(),dtype=deref_type)
     for x in lower_getattr(self,"deref_attrs"):
         new_deref_attrs.append(x)
-    for y in lower_getattr(self,"deref_offsets"):
-        new_deref_offsets.append(y)
+    # old_deref_offsets
+    # for i,y in enumerate(lower_getattr(self,"deref_offsets")):
+    #     new_deref_offsets[i] = y
 
     lower_setattr(st,'is_not', lower_getattr(self,"is_not"))
     lower_setattr(st,'base_ptr',lower_getattr(self,"base_ptr"))
     lower_setattr(st,'alias',lower_getattr(self,"alias"))
     lower_setattr(st,'deref_attrs',new_deref_attrs)
-    lower_setattr(st,'deref_offsets',new_deref_offsets)
+    lower_setattr(st,'deref_offsets',lower_getattr(self,"deref_offsets").copy())
     fact_type_name = lower_getattr(self,"fact_type_name")
     lower_setattr(st,'fact_type_name',str(fact_type_name))
     
     
 
 @njit(cache=True)
-def var_append_attr(self,attr,offset):
+def var_append_deref(self,attr,offset,typ='attr'):
     lower_getattr(self,"deref_attrs").append(attr)
-    lower_getattr(self,"deref_offsets").append(offset)
-    
+    old_deref_offsets = lower_getattr(self,"deref_offsets")
+    L = len(old_deref_offsets)
+    new_deref_offsets = np.empty(L+1,dtype=deref_type)
+    new_deref_offsets[:L] = old_deref_offsets
+    if(typ == 'attr'):
+        new_deref_offsets[L].type = u1(OFFSET_TYPE_ATTR)
+    elif(typ == 'list'):
+        new_deref_offsets[L].type = u1(OFFSET_TYPE_LIST)
+
+    new_deref_offsets[L].offset = i8(offset)
+
+    lower_setattr(self,'deref_offsets', new_deref_offsets)
 
 
 @lower_getattr_generic(VarTypeTemplate)
@@ -404,10 +416,10 @@ def var_getattr_impl(context, builder, typ, val, attr):
         st = ctor(context, builder, value=val)._getvalue()
 
         def new_var_and_append(self):
-            return new_appended_var(typ,self,attr,offset)
+            return new_appended_var(typ, self, attr, offset,'attr')
             # st = new(typ)
             # var_memcopy(self,st)
-            # var_append_attr(st,attr,offset)
+            # var_append_deref(st,attr,offset)
             # return st
 
         ret = context.compile_internal(builder, new_var_and_append, typ(typ,), (st,))

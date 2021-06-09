@@ -127,9 +127,9 @@ def get_beta_pnode_ctor(l_var, op_str, r_var):
 
 @njit(cache=True)
 def cpy_derefs(var):
-    offsets = np.empty((len(var.deref_offsets),),dtype=np.int64)
-    for i,x in enumerate(var.deref_offsets): offsets[i] = x
-    return offsets
+    # offsets = np.empty((len(var.deref_offsets),),dtype=np.int64)
+    # for i,x in enumerate(var.deref_offsets): offsets[i] = x
+    return var.deref_offsets.copy()
 
 # @njit(cache=True)
 # def cast_pn_to_base(pn):

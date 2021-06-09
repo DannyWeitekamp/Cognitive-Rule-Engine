@@ -5,7 +5,16 @@ from numba.extending import intrinsic
 from numba.core import cgutils
 from llvmlite.ir import types as ll_types
 import inspect
+import numpy as np 
+import numba
 
+#### deref_type ####
+
+_deref_type = np.dtype([('type', np.uint8), ('offset', np.int64)])
+deref_type = numba.from_dtype(_deref_type)
+
+OFFSET_TYPE_ATTR = 0
+OFFSET_TYPE_LIST = 1 
 
 #### idrec encoding ####
 

@@ -232,9 +232,9 @@ def _test_list_operations():
 
 
 if(__name__ == "__main__"):
-    # _test_list_operations()
-    test_link()
-    test_initialize()
+    _test_list_operations()
+    # test_link()
+    # test_initialize()
     # for i in range(10):
     #     t0 = time_ns()
     #     test_build_conditions()

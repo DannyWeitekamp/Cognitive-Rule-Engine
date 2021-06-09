@@ -96,6 +96,49 @@ class Var(structref.StructRefProxy):
         return st
         # return structref.StructRefProxy.__new__(cls, *args)
 
+    def _handle_deref(self, attr_or_ind):
+        '''Helper function that... '''
+        fact_type = self.fact_type
+        fact_type_name = fact_type._fact_name
+
+        if(isinstance(attr_or_ind, str)):
+            attr = attr_or_ind
+            fd = fact_type.field_dict
+            head_type = fact_type.spec[attr]['type']
+            if(isinstance(head_type,DeferredFactRefType)):
+                head_type = kb_context().fact_types[head_type._fact_name]
+            # head_type = fact_type.field_dict[attr]
+            offset = fact_type._attr_offsets[list(fd.keys()).index(attr)]
+            deref_type = 'attr'
+        else:
+            assert isinstance(self.head_type, ListType), \
+                f'__getitem__() not supported for Var with head_type {type(self.head_type)}'
+
+            print(self.head_type.__dict__)
+            head_type = self.head_type.item_type
+
+            attr = str(attr_or_ind)
+            offset = int(attr_or_ind)
+            deref_type = 'list'
+
+        if(getenv("CRE_SPECIALIZE_VAR_TYPE",default=False)):
+            if(deref_type == 'attr'):
+                struct_type = get_var_definition(types.TypeRef(fact_type), types.TypeRef(head_type))
+            else:
+                raise NotImplemented("Haven't implemented getitem() when CRE_SPECIALIZE_VAR_TYPE=true.")
+        else:
+            struct_type = GenericVarType
+        #CHECK THAT PTRS ARE SAME HERE
+        new = new_appended_var(struct_type, self, attr, offset, deref_type)
+        new._fact_type = fact_type
+        new._head_type = head_type
+        # new = var_ctor(struct_type, str(fact_type_name), var_get_alias(self))
+        # var_memcopy(self, new)
+        # var_append_deref(new, attr, offset)
+        return new
+
+
+
     def __getattr__(self, attr):
         # print("DEREF", attr)
         if(attr in ['_head_type', '_fact_type']): return None
@@ -119,6 +162,8 @@ class Var(structref.StructRefProxy):
             return var_get_is_not(self)
         elif(attr == 'deref_attrs'):
             return var_get_deref_attrs(self)
+        elif(attr == 'deref_offsets'):
+            return var_get_deref_offsets(self)
         elif(attr == 'alias'):
             return var_get_alias(self)
         elif(attr == 'fact_type_name'):
@@ -126,35 +171,19 @@ class Var(structref.StructRefProxy):
         elif(attr == 'base_ptr'):
             return var_get_base_ptr(self)
         elif(True): 
-            fact_type = self.fact_type
+            return self._handle_deref(attr)
 
-            fact_type_name = fact_type._fact_name
-            # print("<<",fact_type_name)
-            # print("<<",fact_type.spec)
-            head_type = fact_type.spec[attr]['type']
-            if(isinstance(head_type,DeferredFactRefType)):
-                head_type = kb_context().fact_types[head_type._fact_name]
-            # head_type = fact_type.field_dict[attr]
+    def __getitem__(self,ind):
+        return self._handle_deref(ind)
 
-            fd = fact_type.field_dict
-            offset = fact_type._attr_offsets[list(fd.keys()).index(attr)]
 
-            if(getenv("CRE_SPECIALIZE_VAR_TYPE",default=False)):
-                struct_type = get_var_definition(types.TypeRef(fact_type), types.TypeRef(head_type))
-            else:
-                struct_type = GenericVarType
-            #CHECK THAT PTRS ARE SAME HERE
-            new = new_appended_var(struct_type, self, attr, offset,'attr')
-            new._fact_type = fact_type
-            new._head_type = head_type
-            # new = var_ctor(struct_type, str(fact_type_name), var_get_alias(self))
-            # var_memcopy(self, new)
-            # var_append_deref(new, attr, offset)
-            return new
 
     def __str__(self):
         prefix = "NOT" if(self.is_not) else "Var"
-        s = ".".join([f'{prefix}({self.fact_type_name},{self.alias!r})']+list(self.deref_attrs))
+        base = f'{prefix}({self.fact_type_name},{self.alias!r})'
+        deref_strs = [f"[{a}]" if t==OFFSET_TYPE_LIST else "." + a 
+                for (t,_), a in zip(self.deref_offsets, self.deref_attrs)]
+        s = base + "".join(deref_strs)
         # print(self.is_not)
          # s = f'NOT({s})'
         return s
@@ -237,6 +266,10 @@ def var_get_is_not(self):
 @njit(cache=True)
 def var_get_deref_attrs(self):
     return self.deref_attrs
+
+@njit(cache=True)
+def var_get_deref_offsets(self):
+    return self.deref_offsets
 
 @njit(cache=True)
 def var_get_alias(self):

@@ -221,23 +221,18 @@ def test_existential_not():
     assert repr(c2) == 'l1, l2 = NOT(BOOP), NOT(BOOP)\n(l1.B < l2.B)'
     # print(repr(c2))
 
-def _test_list_operations():
+def test_list_operations():
     with kb_context("test_list_operations"):
-        TList,TListType = define_fact("TList",{"name" : "string", "items" : "ListType(string)"})
+        TList, TListType = define_fact("TList",{"name" : "string", "items" : "ListType(string)"})
         v = Var(TList,"v")
-        print(v.items[0])
-        print()
+        assert str(v.items[0]) == "Var(TList,'v').items[0]"
 
         c = v.items[0] != v.items[1]
-        print(c)
-
-
-
-
+        assert str(c) == "~(v.items[0] == v.items[1])"
 
 
 if(__name__ == "__main__"):
-    _test_list_operations()
+    test_list_operations()
     # test_link()
     # test_initialize()
     # for i in range(10):

@@ -1,16 +1,18 @@
 from cre.fact import define_fact
 from cre.structref import define_structref
 from numba import njit,literally
-from numba.types import unicode_type, f8, i8
+from numba.types import unicode_type, f8, i8, ListType
+from numba.typed import List
 from numba.experimental.structref import new
 import logging
 import numpy as np
 import pytest
 
-from cre.utils import _incref_structref, _decref_structref, \
-         _meminfo_from_struct, _struct_from_meminfo, _pointer_from_struct, \
-         _struct_from_pointer, encode_idrec, decode_idrec, _struct_get_attr_offset, \
-         _struct_get_data_pointer, _load_pointer, struct_get_attr_offset
+from cre.utils import (_incref_structref, _decref_structref, 
+         _meminfo_from_struct, _struct_from_meminfo, _pointer_from_struct, 
+         _struct_from_pointer, encode_idrec, decode_idrec, _struct_get_attr_offset, 
+         _struct_get_data_pointer, _load_pointer, struct_get_attr_offset, 
+         _listtype_sizeof_item, _pointer_from_struct_incref, _list_base_from_ptr)
 from numba.core.runtime.nrt import rtsys
 
 BOOP, BOOPType = define_structref("BOOP", [("A", unicode_type), ("B", i8)])
@@ -143,6 +145,73 @@ def test_direct_member_access():
     load_offset(unicode_type,b2,offset) == "b2"
 
 
+@njit
+def listtype_sizeof(lst_typ):
+    return _listtype_sizeof_item(lst_typ)
+
+@njit
+def get_3(ptr,typ,lst_typ):
+    item_size = _listtype_sizeof_item(lst_typ)
+    base_ptr = _list_base_from_ptr(ptr)
+    a = _load_pointer(typ,base_ptr)
+    b = _load_pointer(typ,base_ptr+item_size*1)
+    c = _load_pointer(typ,base_ptr+item_size*2)
+    return a,b,c
+
+unc_lst = ListType(unicode_type)
+@njit
+def _test_list_getitem_intrinsic_unicode_type():
+    l = List.empty_list(unicode_type)
+    l.append("A")
+    l.append("B")
+    l.append("C")
+    ptr = _pointer_from_struct_incref(l)
+    a,b,c = get_3(ptr,unicode_type,unc_lst)
+    return a, b, c
+
+f8_lst = ListType(f8)
+@njit
+def _test_list_getitem_intrinsic_f8():
+    l = List.empty_list(f8)
+    l.append(1)
+    l.append(2)
+    l.append(3)
+    ptr = _pointer_from_struct_incref(l)
+    a,b,c = get_3(ptr,f8,f8_lst)
+    return a, b, c
+
+BOOP_lst = ListType(BOOPType)
+@njit
+def _test_list_getitem_intrinsic_BOOP():
+    l = List.empty_list(BOOPType)
+    l.append(BOOP("A",1))
+    l.append(BOOP("B",2))
+    l.append(BOOP("C",3))
+    ptr = _pointer_from_struct_incref(l)
+    a,b,c = get_3(ptr,BOOPType,BOOP_lst)
+    return a, b, c
+    
+def test_list_intrinsics():
+    assert listtype_sizeof(unc_lst) == 48 
+    assert listtype_sizeof(f8_lst) == 8 
+    assert listtype_sizeof(BOOP_lst) == 8 #should be ptr width
+
+    assert _test_list_getitem_intrinsic_unicode_type() == ("A","B","C")
+    assert _test_list_getitem_intrinsic_f8() == (1,2,3)
+    assert [x.A for x in _test_list_getitem_intrinsic_BOOP()] == ["A","B","C"]
+
+
+
+
+
+
+
+
+# print(_test_list_intrinsics_unicode())
+# print(_test_list_intrinsics_f8())
+
+
+
 
 
 
@@ -157,7 +226,8 @@ def test_direct_member_access():
 if __name__ == "__main__":
     # test_structref_to_meminfo()
     # test_structref_to_pointer()
-    test_direct_member_access()
+    # test_direct_member_access()
+    test_list_intrinsics()
 
 
 

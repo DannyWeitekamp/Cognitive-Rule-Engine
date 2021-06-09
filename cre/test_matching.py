@@ -213,6 +213,27 @@ def test_NOT():
 
         #TODO: Make sure NOT() works on betas
 
+def test_list():
+    with kb_context("test_list"):
+        TList, TListType = define_fact("TList",{"name" : "string", "items" : "ListType(string)"})
+        v1 = Var(TList,"v1")
+        v2 = Var(TList,"v2")
+
+        kb = KnowledgeBase()
+        kb.declare(TList("A", List(["x","a"])))
+        kb.declare(TList("B", List(["x","b"])))
+
+        c = (v1 != v2) & (v1.items[0] == v2.items[0])
+
+        x = (v1.items[0])
+        print(x.deref_offsets)        
+        print(x.head_type)        
+        print(c.get_matches(kb))
+
+
+
+
+
 
 
 
@@ -277,8 +298,9 @@ if(__name__ == "__main__"):
     # test_applying()
     # test_matching()
     # test_matching_unconditioned()
-    test_ref_matching()
-    test_multiple_deref()
+    # test_ref_matching()
+    # test_multiple_deref()
+    test_list()
     # import pytest.__main__.benchmark
     # matching_1_t_4_lit_setup()
     # test_NOT()

@@ -1,12 +1,14 @@
 from numba import types, njit, u1,u2,u4,u8, i8,i2, literally
-from numba.types import Tuple, void
+from numba.types import Tuple, void, ListType
 from numba.experimental.structref import _Utils, imputils
 from numba.extending import intrinsic
 from numba.core import cgutils
 from llvmlite.ir import types as ll_types
+from llvmlite import ir
 import inspect
 import numpy as np 
 import numba
+from numba.typed.typedobjectutils import _container_get_data
 
 #### deref_type ####
 
@@ -379,6 +381,98 @@ def _func_from_address(typingctx, func_type_ref, addr):
     return sig, codegen
 
 
+
+
+
+#### List Intrisics ####
+
+ll_list_type = cgutils.voidptr_t
+ll_listiter_type = cgutils.voidptr_t
+ll_voidptr_type = cgutils.voidptr_t
+ll_status = cgutils.int32_t
+ll_ssize_t = cgutils.intp_t
+ll_bytes = cgutils.voidptr_t
+
+
+def base_ptr_from_container_data(builder,cd):
+    fnty = ir.FunctionType(
+        ll_voidptr_type,
+        [ll_list_type],
+    )
+    fname = 'numba_list_base_ptr'
+    fn = builder.module.get_or_insert_function(fnty, fname)
+    fn.attributes.add('alwaysinline')
+    fn.attributes.add('nounwind')
+    fn.attributes.add('readonly')
+
+    base_ptr = builder.call(
+            fn,
+            [cd,],
+        )
+    return base_ptr
+
+# def filter_l_ty(l_ty):
+
+
+@intrinsic
+def _list_base(typingctx, l_ty):#, w_ty, index_ty):
+    is_none = isinstance(l_ty.item_type, types.NoneType)
+    sig = i8(l_ty,)
+    def codegen(context, builder, sig, args):
+        # [tl,] = sig.args
+        [l, ] = args
+        #The type can be anything for the sake of getting the base ptr
+        tl = ListType(i8) 
+        lp = _container_get_data(context, builder, tl, l)
+
+        base_ptr = base_ptr_from_container_data(builder, lp)
+
+        out = builder.ptrtoint(base_ptr, cgutils.intp_t)
+
+        return out
+    return sig, codegen
+
+@intrinsic
+def _list_base_from_ptr(typingctx, ptr_ty):#, w_ty, index_ty):
+    # is_none = isinstance(l_ty.item_type, types.NoneType)
+    sig = i8(i8,)
+    def codegen(context, builder, sig, args):
+        # [tl,] = sig.args
+        [ptr, ] = args
+
+        typ = ListType(i8) 
+
+        mi = builder.inttoptr(ptr, cgutils.voidptr_t)
+
+        ctor = cgutils.create_struct_proxy(typ)
+        dstruct = ctor(context, builder)
+# 
+        data_ptr = context.nrt.meminfo_data(builder, mi)
+        data_ptr = builder.bitcast(data_ptr, ll_list_type.as_pointer())
+
+        data = builder.load(data_ptr)
+        base_ptr = base_ptr_from_container_data(builder, data)
+        out = builder.ptrtoint(base_ptr, cgutils.intp_t)
+
+        return out
+    return sig, codegen
+
+@intrinsic
+def _listtype_sizeof_item(typingctx, l_ty):
+    sig = i8(l_ty,)
+    tl = l_ty.instance_type
+    def codegen(context, builder, sig, args):
+        llty = context.get_data_type(tl.item_type)
+        return cgutils.sizeof(builder,llty.as_pointer())
+    return sig, codegen
+
+
+@njit
+def listtype_sizeof_item(lt):
+    return _listtype_sizeof_item(lt)
+
+
+#### Automatic Variable Aliasing ####
 
 def assign_to_alias_in_parent_frame(x,alias):
     if(alias is not None): 

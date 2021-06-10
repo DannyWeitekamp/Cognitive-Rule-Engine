@@ -225,6 +225,8 @@ def test_list_operations():
     with kb_context("test_list_operations"):
         TList, TListType = define_fact("TList",{"name" : "string", "items" : "ListType(string)"})
         v = Var(TList,"v")
+        print(v.items[0])
+        print(v.items[0] != v.items[1])
         assert str(v.items[0]) == "Var(TList,'v').items[0]"
 
         c = v.items[0] != v.items[1]

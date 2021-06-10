@@ -1,5 +1,6 @@
 import numpy as np
 from numba import njit
+from numba.typed import List
 from cre.fact import define_fact
 from cre.rule import Rule, RuleEngine
 from cre.kb import KnowledgeBase
@@ -38,10 +39,11 @@ Match, MatchType = define_fact("Match", {
     "sel" : str,
     "action" : str,
     "input" : str,
-    "args" : str, # < Should be list
+    "args" : "ListType(str)", # < Should be list
     "full_fired" : float,
     "is_correct" : float,
 })
+print(Match.spec)
 
 ConflictSet, ConflictSetType = define_fact("ConflictSet", {
     "conflict_set" : float, # < Should be list
@@ -175,7 +177,7 @@ class Add2(Rule):
             kb.declare(match);
 
 
-class resolveAdd2(Rule):
+class ResolveAdd2(Rule):
     def when():
         match = Var(Match,'match')
         sel = Var(TextField,'sel')
@@ -218,8 +220,8 @@ class Add3(Rule):
         # }
         match = Match("Add3","Add3", sel.name, "UpdateTextField",
                      v,
-                     # [arg0.name,arg1.name]);
-                     arg0.name + "," + arg1.name)
+                     List([arg0.name,arg1.name]));
+                     # arg0.name + "," + arg1.name)
         kb.declare(match);
 print("C")        
         
@@ -245,5 +247,28 @@ def bootstrap():
     return kb
 
 kb = bootstrap()
-r_eng = RuleEngine(kb,[startMatching,startResolving,startChecking,reportCorrectness,resetting,Add2, resolveAdd2])
+r_eng = RuleEngine(kb,[startMatching, startResolving, startChecking, reportCorrectness, resetting,
+                        Add2, ResolveAdd2, Add3, ResolveAdd3])
 r_eng.start()
+
+
+# Mod10(Add(X1,X2))
+
+# Y1 = Add(X1,X2)
+# output = Mod10(Y1)
+
+
+# Y1 = Number(X1) + Number(X2)
+# output = Y1 % 10
+
+
+
+
+
+
+# @custom_condition((TextField,))
+# def is_prime(a):
+#     ...
+
+
+# is_prime(x) && (x > 1)

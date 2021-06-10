@@ -28,7 +28,7 @@ from cre.kb import KnowledgeBaseType, KnowledgeBase, facts_for_t_id, fact_at_f_i
 from cre.fact import define_fact, BaseFactType, cast_fact
 from cre.utils import _struct_from_meminfo, _meminfo_from_struct, _cast_structref, \
  decode_idrec, lower_getattr, _struct_from_pointer, struct_get_attr_offset, _struct_get_data_pointer, \
- _load_pointer, _pointer_to_data_pointer
+ _load_pointer, _pointer_to_data_pointer, _list_base_from_ptr
 from cre.subscriber import base_subscriber_fields, BaseSubscriber, BaseSubscriberType, init_base_subscriber, link_downstream
 from cre.vector import VectorType, new_vector
 from cre.utils import deref_type, OFFSET_TYPE_ATTR, OFFSET_TYPE_LIST
@@ -279,7 +279,7 @@ def init_alpha(st, left_fact_type_name, left_attr_offsets, right_val):
 
 # @njit(cache=True)
 
-@njit(cache=True)
+@njit(cache=True,locals={"data_ptr":i8, "inst_ptr":i8})
 def _deref_attrs(val_type, inst_ptr, attr_offsets):
     '''Helper function for deref_attrs'''
 
@@ -287,17 +287,17 @@ def _deref_attrs(val_type, inst_ptr, attr_offsets):
         if(inst_ptr == 0): raise Exception()
         if(deref.type == u1(OFFSET_TYPE_ATTR)):
             data_ptr = _pointer_to_data_pointer(inst_ptr)
-            inst_ptr = _load_pointer(i8,data_ptr+deref.offset)
         else:
-            inst_ptr = 0
+            data_ptr = _list_base_from_ptr(inst_ptr)
+        inst_ptr = _load_pointer(i8,data_ptr+deref.offset)
         
     if(inst_ptr == 0): raise Exception()
     deref = attr_offsets[-1]
     if(deref.type == u1(OFFSET_TYPE_ATTR)):
         data_ptr = _pointer_to_data_pointer(inst_ptr)
-        val = _load_pointer(val_type, data_ptr+deref.offset)
     else:
-        raise Exception()
+        data_ptr = i8(_list_base_from_ptr(inst_ptr))
+    val = _load_pointer(val_type, data_ptr+deref.offset)
 
     return val
 

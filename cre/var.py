@@ -26,7 +26,7 @@ from numba.core.datamodel import default_manager, models
 from operator import itemgetter
 from copy import copy
 from os import getenv
-from cre.utils import deref_type, OFFSET_TYPE_ATTR, OFFSET_TYPE_LIST
+from cre.utils import deref_type, OFFSET_TYPE_ATTR, OFFSET_TYPE_LIST, listtype_sizeof_item
 # import inspect
 
 
@@ -102,6 +102,7 @@ class Var(structref.StructRefProxy):
         fact_type_name = fact_type._fact_name
 
         if(isinstance(attr_or_ind, str)):
+            # ATTR case
             attr = attr_or_ind
             fd = fact_type.field_dict
             head_type = fact_type.spec[attr]['type']
@@ -111,13 +112,14 @@ class Var(structref.StructRefProxy):
             offset = fact_type._attr_offsets[list(fd.keys()).index(attr)]
             deref_type = 'attr'
         else:
+            # LIST case
             assert isinstance(self.head_type, ListType), \
                 f'__getitem__() not supported for Var with head_type {type(self.head_type)}'
 
             head_type = self.head_type.item_type
 
             attr = str(attr_or_ind)
-            offset = int(attr_or_ind)
+            offset = int(attr_or_ind)*listtype_sizeof_item(self.head_type)
             deref_type = 'list'
 
         if(getenv("CRE_SPECIALIZE_VAR_TYPE",default=False)):

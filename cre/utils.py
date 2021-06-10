@@ -435,7 +435,7 @@ def _list_base(typingctx, l_ty):#, w_ty, index_ty):
 @intrinsic
 def _list_base_from_ptr(typingctx, ptr_ty):#, w_ty, index_ty):
     # is_none = isinstance(l_ty.item_type, types.NoneType)
-    sig = i8(i8,)
+    sig = i8(ptr_ty,)
     def codegen(context, builder, sig, args):
         # [tl,] = sig.args
         [ptr, ] = args

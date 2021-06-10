@@ -224,14 +224,13 @@ def test_list():
         kb.declare(TList("B", List(["x","b"])))
 
         c = (v1 != v2) & (v1.items[0] == v2.items[0])
+        assert match_names(c, kb) == [['A','B'],['B','A']]
 
-        x = (v1.items[0])
-        print(x.deref_offsets)        
-        print(x.head_type)        
-        print(c.get_matches(kb))
+        c = (v1 != v2) & (v1.items[1] != v2.items[1])
+        assert match_names(c, kb) == [['A','B'],['B','A']]
 
-
-
+        #TODO: Self-Beta-like conditions
+        # c = v1.items[0] != v1.items[1]
 
 
 

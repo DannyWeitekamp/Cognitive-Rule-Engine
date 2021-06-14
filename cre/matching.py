@@ -118,6 +118,8 @@ def get_pair_matches(alpha_inds, beta_conjuncts, beta_inds, conds):
                     # print(pairs)
 
                 pair_matches_i.append((j, pairs))
+
+    # print(pair_matches)
     return pair_matches
 
 
@@ -232,13 +234,15 @@ def _get_ptr_matches(conds):
         partial_matches = List.empty_list(i8_arr)
         partial_matches.append(-np.ones((n_vars,),dtype=np.int64))
 
-
+        # print("A")
         for i in range(n_vars):
             partial_matches = fill_pairs_at(partial_matches,i,pair_matches)
 
+        # print("B")
         for i in range(n_vars):
             if(len(pair_matches[i]) == 0):
                 partial_matches = fill_singles_at(partial_matches,i,alpha_inds[i], is_not[i])
+        # print("C", partial_matches)
 
     #Turn indicies into fact pointers 
     # Time Negligible
@@ -251,7 +255,7 @@ def _get_ptr_matches(conds):
                     return np.zeros((0,n_vars),dtype=np.int64)
                 matching_fact_ptrs[i][j] = fact_vectors[k][ind]
                 j +=1
-
+    print("D", matching_fact_ptrs)
     return matching_fact_ptrs
 
 
@@ -333,9 +337,11 @@ def _get_matches(conds, struct_types, kb=None):
     for i in range(len(ptr_matches)):
         ptr_set = ptr_matches[i]
         facts = _struct_tuple_from_pointer_arr(struct_types,ptr_set)
+        # print("Z")
         out.append(facts)
         # for i,fact_type in enumerate(literal_unroll(fact_types)):
         #     _struct_from_pointer(fact_type,ptr_set[i])
+
     return out
 
     # return impl

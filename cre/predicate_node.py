@@ -70,6 +70,7 @@ def exec_op(op_str,a,b):
     elif(op_str == ">="):
         return a >= b
     elif(op_str == "=="):
+        print("equal", a,b, a==b)
         return a == b
     # GT, op_str == GT)
     raise ValueError("Unrecognized op_str.")

@@ -79,7 +79,9 @@ atfp_addr = _get_wrapper_address(apply_then_from_ptrs, atfp_type.signature)
 class Rule(structref.StructRefProxy, metaclass=RuleMeta):
     def __new__(cls,conds=None):
         # self = cls._ctor(conds if conds else cls.conds)
-        self = rule_ctor(conds if conds else cls.conds, cls._atfp_addr)#, self._apply_then_from_ptrs)
+        self = rule_ctor(cls.__name__,
+                         conds if conds else cls.conds,
+                        cls._atfp_addr)#, self._apply_then_from_ptrs)
         # self.apply_then_from_ptrs = apply_then_from_ptrs_type(cls._apply_then_from_ptrs)
         if(conds is not None): self.conds = conds
         return self
@@ -137,6 +139,11 @@ class Rule(structref.StructRefProxy, metaclass=RuleMeta):
         '''Applies then() on a matching set of facts given as an array of pointers'''
         return rule_apply_then_from_ptrs(cls, kb, ptrs)
 
+    def __str__(self):
+        return str_rule(self)
+
+    def __repr__(self):
+        return str(self)
     # @property
     # def conds(self):
     #     return rule_get_conds(self)
@@ -159,6 +166,7 @@ class RuleTypeTemplate(types.StructRef):
 apply_then_from_ptrs_type = types.FunctionType(types.void(KnowledgeBaseType,i8[::1]))
 
 rule_fields = [
+    ('name', unicode_type),
     ("conds" , ConditionsType),
     ("apply_then_from_ptrs", apply_then_from_ptrs_type),
     ]
@@ -170,11 +178,18 @@ RuleType = RuleTypeTemplate(rule_fields)
 atfp_type = types.FunctionType(types.void(KnowledgeBaseType,i8[::1]))
 
 @njit(cache=False)
-def rule_ctor(conds, atfp_addr):
+def rule_ctor(name, conds, atfp_addr):
     st = new(RuleType)
+    st.name = name
     st.conds = conds
     st.apply_then_from_ptrs = _func_from_address(atfp_type, atfp_addr)
     return st
+
+@njit(cache=True)
+@overload(str)
+def str_rule(self):
+    return "Rule[" + self.name + "]"
+
 
 #### ConflictSetItr ####
 
@@ -206,11 +221,13 @@ def cs_iter_next(self):
         raise StopIteration()
 
     rule, matches = self.rule_match_pairs[self.r_n]
-    if(self.m_n >= len(matches)):
-        self.r_n +=1
-        self.m_n = 0
-    
     match = matches[self.m_n]
+    self.m_n +=1 
+
+    if(self.m_n >= len(matches)):
+        self.r_n += 1
+        self.m_n = 0 
+    
     return rule, match
 
 #### RuleEngine ####
@@ -255,23 +272,26 @@ def rule_engine_start(kb, rules):
             if(len(matches) > 0):
                 conflict_set.append((rule,matches))
 
+        print(conflict_set)
         cs_iter = cs_iter_ctor(conflict_set)
 
-        if(not cs_iter_empty(cs_iter)):
+        while(not cs_iter_empty(cs_iter)):
             rule, match = cs_iter_next(cs_iter)
             # t0 = time_ns()
+            # print(rule, match)
             rule.apply_then_from_ptrs(kb, match)
             # t1 = time_ns()
             # print("\tthen", (t1-t0)/1e6)
             if(kb.halt_flag):
+                print("HALT")
                 return
 
-            if(kb.backtrack_flag):
-                pass
-            else:
-                stack.append(cs_iter)
-        else:
-            break
+            # if(kb.backtrack_flag):
+            #     pass
+            # else:
+            #     stack.append(cs_iter)
+        # else:
+        #     break
 
     if(cycles >= MAX_CYCLES-1): raise RuntimeError("Exceeded max cycles.")
         

@@ -330,7 +330,7 @@ def repr_fact_attr(inst,fact_name,get_ptr=None):
     # if(isinstance(val,Fact)):
     ptr = get_ptr(inst)
     if(ptr != 0):
-        return f'<{fact_name} at {hex(ptr)}'
+        return f'<{fact_name} at {hex(ptr)}>'
     else:
         return 'None'
 
@@ -393,7 +393,10 @@ def gen_fact_code(typ, fields, fact_num, ind='    '):
     properties = "\n".join([_gen_props(typ,attr) for attr,t in all_fields])
     getter_jits = "\n".join([_gen_getter_jit(typ,t,attr) for attr,t in all_fields])
     field_list = ",".join(["'%s'"%attr for attr,t in fields])
-    param_list = ",".join([f"{attr}={get_type_default(t)!r}" for attr,t in fields])
+
+    param_defaults_list = ",".join([f"{attr}={get_type_default(t)!r}" for attr,t in fields])
+    param_list = ",".join([f"{attr}" for attr,t in fields])
+
     base_list = ",".join([f"'{k}'" for k,v in base_fact_fields])
     base_type_list = ",".join([str(v) for k,v in base_fact_fields])
 
@@ -445,7 +448,7 @@ class {typ}TypeTemplate(Fact):
 {typ}Type = {typ}TypeTemplate(list(zip([{base_list},{field_list}], [{base_type_list},{field_type_list}])))
 
 @njit(cache=True)
-def ctor({param_list}):
+def ctor({param_defaults_list}):
     st = new({typ}Type)
     st.idrec = -1
     st.fact_num = {fact_num}
@@ -477,9 +480,9 @@ class {typ}(FactProxy):
 {properties}
 
 @overload({typ})
-def _ctor(*args):
-    def impl(*args):
-        return ctor(*args)
+def _ctor({param_defaults_list}):
+    def impl({param_defaults_list}):
+        return ctor({param_list})
     return impl
 
 define_boxing({typ}TypeTemplate,{typ})

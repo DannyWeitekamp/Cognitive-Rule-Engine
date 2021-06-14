@@ -13,7 +13,9 @@ from cre.utils import _struct_from_pointer, _pointer_from_struct
 def match_names(c,kb=None):
     out = []
     for m in c.get_matches(kb):
+        print(m)
         out.append([x.name for x in m])
+        # print("X")
     return out
 
 @njit(cache=True)
@@ -230,7 +232,8 @@ def test_list():
         assert match_names(c, kb) == [['A','B'],['B','A']]
 
         #TODO: Self-Beta-like conditions
-        # c = v1.items[0] != v1.items[1]
+        c = v1.items[0] != v1.items[1]
+        match_names(c, kb)
 
 
 

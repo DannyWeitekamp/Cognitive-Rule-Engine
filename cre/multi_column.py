@@ -97,7 +97,7 @@ class startMatching(Rule):
 
     def then(kb, ph):
         # TODO: clear conflict set
-        print("START MATCHING")
+        print("START MATCHING",ph.phase)
         # kb.focus("phase1")
         kb.modify(ph, "phase", 1)   
 
@@ -156,10 +156,10 @@ class Add2(Rule):
         ph = Var(PhaseHandler,"ph")
         sel, arg0, arg1 = Var(TextField,'sel'), Var(TextField,'arg1'), Var(TextField,'arg2')
         return (
-            ph & 
+            (ph.phase == 1) & 
             (sel.enabled == True) & 
-            (arg0.enabled == True) & (arg0.value != "") & 
-            (arg1.enabled == True) & (arg1.value != "") & 
+            (arg0.enabled == False) & (arg0.value != "") & 
+            (arg1.enabled == False) & (arg1.value != "") & 
             (sel.above == arg1) & 
             (arg0.below == arg1) &
             (arg1.above == arg0) & 
@@ -167,32 +167,36 @@ class Add2(Rule):
         )
 
     def then(kb, ph, sel, arg0, arg1):
+        # print("APPLESAUCE")
         v = "?"#str((float(arg0.value) + float(arg1.value)) % 10);
         if(True): # used to check for NaN?
             print("Add2", v, sel.name, arg0.name, arg1.name);
-            match = Match("Add2","Add2", sel.name, "UpdateTextField",
-                         v,
-                         # [arg0.name,arg1.name]);
-                         arg0.name + "," + arg1.name)
+            match = Match(skill="Add2",rhs="Add2", sel=sel.name, action="UpdateTextField",
+                         input=v,
+                         args=List([arg0.name,arg1.name]),
+                         full_fired=False);
+                         # arg0.name + "," + arg1.name)
             kb.declare(match);
 
 
 class ResolveAdd2(Rule):
     def when():
+        ph = Var(PhaseHandler,"ph")
         match = Var(Match,'match')
         sel = Var(TextField,'sel')
         return (
+            (ph.phase == 2) & match & sel & 
             (match.rhs == "Add2") & (match.full_fired == False) & 
-            (match.sel == sel.name) & 
-            NOT(TextField,'sel_r') & (sel.to_right == sel_r) & (sel_r.enabled == True) & 
-            NOT(Match,'m1') & (m1.rhs == "Carry2") & (m1.sel == sel.above.above.above.name) & (m1.input == "1") & 
-            NOT(Match,'m2') & (m2.rhs == "Carry3") & (m2.sel == sel.above.above.above.name) & (m2.input == "1") & 
-            NOT(Match,'m3') & (m3.rhs == "Add3") #& (m3.args[0] == sel.above.above.above.name)#(m3.sel == sel.above.above.above) & 
+            (match.sel == sel.name) #& 
+            # NOT(TextField,'sel_r') & (sel.to_right == sel_r) & (sel_r.enabled == True) & 
+            # NOT(Match,'m1') & (m1.rhs == "Carry2") & (m1.sel == sel.above.above.above.name) & (m1.input == "1") & 
+            # NOT(Match,'m2') & (m2.rhs == "Carry3") & (m2.sel == sel.above.above.above.name) & (m2.input == "1") & 
+            # NOT(Match,'m3') & (m3.rhs == "Add3") #& (m3.args[0] == sel.above.above.above.name)#(m3.sel == sel.above.above.above) & 
         )
 
-    def then(kb, match, sel):
-        kb.modify(match,"full_fired",1)
-        print("ResolveAdd2")
+    def then(kb, ph, match, sel):
+        kb.modify(match,"full_fired",True)
+        print("ResolveAdd2", match.sel, sel.name)
 print("B")        
 
 class Add3(Rule):
@@ -218,9 +222,9 @@ class Add3(Rule):
         #                  v,[arg0.name,arg1.name,arg2.name]);
         #     assert(match);
         # }
-        match = Match("Add3","Add3", sel.name, "UpdateTextField",
-                     v,
-                     List([arg0.name,arg1.name]));
+        match = Match(skill="Add3",rhs="Add3", sel=sel.name, action="UpdateTextField",
+                     input=v,
+                     args=List([arg0.name,arg1.name]));
                      # arg0.name + "," + arg1.name)
         kb.declare(match);
 print("C")        
@@ -239,17 +243,64 @@ class ResolveAdd3(Rule):
         
 print("D")
 
+#######
+## C3 C2 C1 C0
+## A3 A2 A1 A0
+## B3 B2 B1 B0
+## O3 O2 O1 O0
+
+
 
 def bootstrap():
     kb = KnowledgeBase()
     kb.declare(PhaseHandler())
     kb.declare(ConflictSet())
+
+    row_names = ["C","A","B","O"]
+    enabled_rows = [True,False,False,True]
+    MAX_LEN = 4
+    rows = []
+    for i in range(MAX_LEN):
+        row_i = []
+        for j in range(len(row_names)):
+            row_i.append(TextField(**{
+                "name" : row_names[j] + str((MAX_LEN-1) - i),
+                # "type" : "TextField",
+                "value" : "" if enabled_rows[j] else "7",
+                "enabled" : enabled_rows[j]
+            }))
+        rows.append(row_i)
+    for i in range(MAX_LEN):
+        for j in range(len(row_names)):
+            if(i-1 >= 0): 
+                rows[i][j].to_left = rows[i-1][j]
+                rows[i-1][j].to_right = rows[i][j]
+            if(j-1 >= 0): 
+                rows[i][j].above = rows[i][j-1]
+                rows[i][j-1].below = rows[i][j]
+
+    for i in range(MAX_LEN):
+        for j in range(len(row_names)):
+            e = rows[i][j]
+            print(rows[i][j].name, 
+                "to_left", e.to_left.name if e.to_left else "", ',',
+                "to_right", e.to_right.name if e.to_right else "", ',',
+                "above", e.above.name if e.above else "", ',',
+                "below", e.below.name if e.below else "",
+                )
+            kb.declare(rows[i][j])
+
+
     return kb
 
 kb = bootstrap()
-r_eng = RuleEngine(kb,[startMatching, startResolving, startChecking, reportCorrectness, resetting,
-                        Add2, ResolveAdd2, Add3, ResolveAdd3])
+r_eng = RuleEngine(kb,[Add2, ResolveAdd2, Add3, ResolveAdd3,
+    startMatching, startResolving, startChecking, reportCorrectness, resetting])
 r_eng.start()
+
+
+
+
 
 
 # Mod10(Add(X1,X2))

@@ -175,6 +175,7 @@ class Add2(Rule):
                          input=v,
                          args=List([arg0.name,arg1.name]),
                          full_fired=False);
+            print("M",match)
                          # arg0.name + "," + arg1.name)
             kb.declare(match);
 

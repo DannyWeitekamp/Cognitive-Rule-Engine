@@ -232,8 +232,35 @@ def test_list():
         assert match_names(c, kb) == [['A','B'],['B','A']]
 
         #TODO: Self-Beta-like conditions
-        c = v1.items[0] != v1.items[1]
-        match_names(c, kb)
+        # c = v1.items[0] != v1.items[1]
+        # match_names(c, kb)
+
+def test_multiple_types():
+    with kb_context("test_multiple_types"):
+        BOOP, BOOPType = define_fact("BOOP",{"name": "string", "B" : "number"})
+        TList, TListType = define_fact("TList",{"name" : "string", "items" : "ListType(string)"})
+
+        b = Var(BOOP,"b")
+        t = Var(TList,"t")
+
+        kb = KnowledgeBase()
+        kb.declare(BOOP("A", 0))
+        kb.declare(BOOP("B", 1))
+        kb.declare(TList("A", List(["x","a"])))
+        kb.declare(TList("B", List(["x","b"])))
+
+        c = (t.name == b.name)
+        assert match_names(c,kb) == [["A","A"], ["B","B"]]
+
+        c = (b.name == t.name)
+        assert match_names(c,kb) == [["A","A"], ["B","B"]]
+
+
+
+
+
+
+
 
 
 
@@ -303,6 +330,7 @@ if(__name__ == "__main__"):
     # test_ref_matching()
     # test_multiple_deref()
     test_list()
+    # test_multiple_types()
     # import pytest.__main__.benchmark
     # matching_1_t_4_lit_setup()
     # test_NOT()

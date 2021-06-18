@@ -573,6 +573,7 @@ def init_beta(st, left_fact_type_name, left_attr_offsets, right_fact_type_name, 
     # st.right_t_id = -1
     st.right_fact_type_name = right_fact_type_name
     st.right_attr_offsets = right_attr_offsets
+    # print(">>",st.left_fact_type_name,st.left_attr_offsets,st.right_fact_type_name, st.right_attr_offsets)
     
 
 @njit(cache=True)

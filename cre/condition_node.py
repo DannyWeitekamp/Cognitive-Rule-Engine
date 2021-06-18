@@ -118,6 +118,7 @@ def get_alpha_pnode_ctor(l_var, op_str, r_var):
 def get_beta_pnode_ctor(l_var, op_str, r_var):
     l_fact_type, l_type  = _resolve_var_types(l_var)
     r_fact_type, r_type  = _resolve_var_types(r_var)
+    # print(">>>",l_fact_type._fact_name, r_fact_type._fact_name)
 
     t = ("beta", str(l_fact_type), str(l_type), op_str,str(r_fact_type), str(r_type))
     if(t not in pnode_dat_cache):
@@ -153,7 +154,7 @@ def gen_pterm_ctor_beta(left_var, op_str, right_var):
     def impl(left_var, op_str, right_var):
         l_offsets = cpy_derefs(left_var)
         r_offsets = cpy_derefs(right_var)
-        apn = ctor(str(left_fact_type_name), l_offsets, str(left_fact_type_name), r_offsets)
+        apn = ctor(str(left_fact_type_name), l_offsets, str(right_fact_type_name), r_offsets)
         pn = cast_structref(BasePredicateNodeType, apn) 
         lvb = cast_structref(GenericVarType, left_var)
         rvb = cast_structref(GenericVarType, right_var)

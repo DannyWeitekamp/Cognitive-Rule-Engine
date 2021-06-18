@@ -88,6 +88,10 @@ Skill, SkillType = define_fact("Skill",{
     "category" : str,
 })
 
+# match = Var(Match,'match')
+# sel = Var(TextField,'sel')
+# (match.sel == sel.name)
+# raise ValueError()
 
 # Phase Control flow: 0)Start-> 1)Match-> 2)Resolve-> 3)Check-> 4)Report-> Reset
 class startMatching(Rule):
@@ -175,7 +179,6 @@ class Add2(Rule):
                          input=v,
                          args=List([arg0.name,arg1.name]),
                          full_fired=False);
-            print("M",match)
                          # arg0.name + "," + arg1.name)
             kb.declare(match);
 
@@ -188,17 +191,16 @@ class ResolveAdd2(Rule):
         return (
             (ph.phase == 2) & match & sel & 
             (match.rhs == "Add2") & (match.full_fired == False) & 
-            (match.sel == sel.name) #& 
-            # NOT(TextField,'sel_r') & (sel.to_right == sel_r) & (sel_r.enabled == True) & 
-            # NOT(Match,'m1') & (m1.rhs == "Carry2") & (m1.sel == sel.above.above.above.name) & (m1.input == "1") & 
-            # NOT(Match,'m2') & (m2.rhs == "Carry3") & (m2.sel == sel.above.above.above.name) & (m2.input == "1") & 
-            # NOT(Match,'m3') & (m3.rhs == "Add3") #& (m3.args[0] == sel.above.above.above.name)#(m3.sel == sel.above.above.above) & 
+            (match.sel == sel.name) & 
+            NOT(TextField,'sel_r') & (sel.to_right == sel_r) & (sel_r.enabled == True) & 
+            NOT(Match,'m1') & (m1.rhs == "Carry2") & (m1.sel == sel.above.above.above.name) & (m1.input == "1") & 
+            NOT(Match,'m2') & (m2.rhs == "Carry3") & (m2.sel == sel.above.above.above.name) & (m2.input == "1") & 
+            NOT(Match,'m3') & (m3.rhs == "Add3") #& (m3.args[0] == sel.above.above.above.name)#(m3.sel == sel.above.above.above) & 
         )
 
     def then(kb, ph, match, sel):
         kb.modify(match,"full_fired",True)
         print("ResolveAdd2", match.sel, sel.name)
-print("B")        
 
 class Add3(Rule):
     def when():
@@ -241,8 +243,69 @@ class ResolveAdd3(Rule):
     def then(kb, match, sel):
         kb.modify(match,'full_fired', 1)
 
-        
-print("D")
+class Carry2_1(Rule):
+    def when():
+        return (
+            Var(PhaseHandler, "ph") & (ph.phase == 1) & 
+            Var(TextField, "sel")  & (sel.enabled == True) & 
+            Var(TextField, "arg0") & (sel.enabled == False) & (arg0.value != "") & 
+            Var(TextField, "arg1") & (sel.enabled == False) & (arg1.value != "") &
+            Var(TextField, "neigh0") & (neigh0.value != "") & 
+            (sel.to_right == neigh0) & 
+            (neigh0.below == arg0) & 
+            (arg0.above == neigh0) & 
+            (arg0.below == arg1) & 
+            (arg1.above == arg0) #& 
+            # NOT()
+        )
+    def then(kb,ph,sel, arg0, arg1, neigh0):
+        v = "?"
+        if(True):
+            match = Match(skill="Carry2",rhs="Carry2", sel=sel.name, action="UpdateTextField",
+                     input=v,
+                     args=List([arg0.name,arg1.name]));
+            kb.declare(match);
+
+
+class ResolveCarry2(Rule):
+    def when():
+        return (
+            Var(Match,'match') & (match.rhs == "Carry2") & (match.full_fired == False) & 
+            Var(TextField,'sel') & (match.sel == sel.name) & 
+            (match.input != "0") & 
+            # ()
+            # TODO: Maybe add exists
+        )
+    def then(kb, match, sel):
+        kb.modify("full_fired", True)
+        print("RESOLVE Carry2", match.sel)
+
+
+class Carry3(Rule):
+    def when():
+        return (
+            Var(PhaseHandler, "ph") & (ph.phase == 1) & 
+            Var(TextField, "sel")  & (sel.enabled == True) & 
+            Var(TextField, "arg0") & (sel.enabled == False) & (arg0.value != "") & 
+            Var(TextField, "arg1") & (sel.enabled == False) & (arg1.value != "") &
+            Var(TextField, "arg2") & (sel.enabled == False) & #(arg2.value != "") &
+            Var(TextField, "neigh0") & (neigh0.value != "") & 
+            (sel.to_right == arg0) & 
+            (arg0.below == arg1) & 
+            (arg0.above == arg0) & 
+            (arg1.below == arg2) & 
+            (arg2.above == arg1)# & 
+            # (arg1.above == arg0) #& 
+            # NOT()
+        )
+    def then(kb,ph,sel, arg0, arg1, neigh0):
+        v = "?"
+        if(True):
+            match = Match(skill="Carry2",rhs="Carry2", sel=sel.name, action="UpdateTextField",
+                     input=v,
+                     args=List([arg0.name,arg1.name]));
+            kb.declare(match);
+# print("D")
 
 #######
 ## C3 C2 C1 C0
@@ -280,6 +343,10 @@ def bootstrap():
                 rows[i][j].above = rows[i][j-1]
                 rows[i][j-1].below = rows[i][j]
 
+
+    rows[0][2].value = "1"
+    rows[0][2].enabled = False
+
     for i in range(MAX_LEN):
         for j in range(len(row_names)):
             e = rows[i][j]
@@ -290,6 +357,7 @@ def bootstrap():
                 "below", e.below.name if e.below else "",
                 )
             kb.declare(rows[i][j])
+
 
 
     return kb

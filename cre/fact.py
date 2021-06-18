@@ -15,7 +15,7 @@ from numba.core.extending import (
     unbox,
     NativeValue
 )
-from numba.core.datamodel import default_manager, models
+from numba.core.datamodel import models
 from numba.core import types, cgutils
 from numba.types import ListType
 # from numba.core.extending import overload
@@ -25,7 +25,8 @@ from cre.gensource import assert_gen_source
 from cre.caching import unique_hash, source_to_cache, import_from_cached, source_in_cache, get_cache_path
 from cre.structref import gen_structref_code, define_structref
 from cre.context import kb_context
-from cre.utils import _struct_from_pointer, _cast_structref, struct_get_attr_offset, _obj_cast_codegen, _pointer_from_struct_codegen, _pointer_from_struct
+from cre.utils import (_struct_from_pointer, _cast_structref, struct_get_attr_offset, _obj_cast_codegen,
+                       _pointer_from_struct_codegen, _pointer_from_struct, get_offsets_from_member_types)
 from numba.core.typeconv import Conversion
 
 import numpy as np
@@ -295,19 +296,6 @@ def get_type_default(t):
         return None
 
 
-def get_offsets_from_member_types(fields):
-    #Replace fact references with BaseFactType
-    fact_types = (types.StructRef, DeferredFactRefType)
-    fields = [(a,BaseFactType if isinstance(t,fact_types) else t) for a,t in fields]
-
-    class TempTypeTemplate(types.StructRef):
-        pass
-
-    default_manager.register(TempTypeTemplate, FactModel)
-
-    TempType = TempTypeTemplate(fields)
-
-    return [struct_get_attr_offset(TempType,attr) for attr, _ in fields]
 
 fact_types = (types.StructRef, DeferredFactRefType)
 

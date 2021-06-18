@@ -9,6 +9,7 @@ import inspect
 import numpy as np 
 import numba
 from numba.typed.typedobjectutils import _container_get_data
+from numba.core.datamodel import default_manager, models
 
 #### deref_type ####
 
@@ -381,9 +382,6 @@ def _func_from_address(typingctx, func_type_ref, addr):
     return sig, codegen
 
 
-
-
-
 #### List Intrisics ####
 
 ll_list_type = cgutils.voidptr_t
@@ -480,3 +478,21 @@ def assign_to_alias_in_parent_frame(x,alias):
         #  so that it is bound to a variable named whatever alias was set to
         inspect.stack()[2][0].f_globals[alias] = x
 
+
+#### Resolving Byte Offsets of Struct Members ####
+
+def get_offsets_from_member_types(fields):
+    from cre.fact import fact_types, FactModel, BaseFactType
+    if(isinstance(fields, dict)): fields = [(k,v) for k,v in fields.items()]
+    #Replace fact references with BaseFactType
+    # fact_types = (types.StructRef, DeferredFactRefType)
+    fields = [(a,BaseFactType if isinstance(t,fact_types) else t) for a,t in fields]
+
+    class TempTypeTemplate(types.StructRef):
+        pass
+
+    default_manager.register(TempTypeTemplate, FactModel)
+
+    TempType = TempTypeTemplate(fields)
+
+    return [struct_get_attr_offset(TempType,attr) for attr, _ in fields]

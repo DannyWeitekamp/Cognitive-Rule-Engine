@@ -13,11 +13,13 @@ from cre.context import kb_context
 from cre.structref import define_structref, define_structref_template
 from cre.kb import KnowledgeBaseType, KnowledgeBase, facts_for_t_id, fact_at_f_id
 from cre.fact import define_fact, BaseFactType, cast_fact, DeferredFactRefType, Fact
-from cre.utils import _struct_from_meminfo, _meminfo_from_struct, _cast_structref, cast_structref, decode_idrec, lower_getattr, _struct_from_pointer,  lower_setattr, lower_getattr, _pointer_from_struct, _decref_pointer, _incref_pointer, _incref_structref
+from cre.utils import (_struct_from_meminfo, _meminfo_from_struct, _cast_structref, cast_structref, decode_idrec, lower_getattr, _struct_from_pointer,  lower_setattr, lower_getattr,
+                       _pointer_from_struct, _decref_pointer, _incref_pointer, _incref_structref, get_offsets_from_member_types)
 from cre.utils import assign_to_alias_in_parent_frame
 from cre.subscriber import base_subscriber_fields, BaseSubscriber, BaseSubscriberType, init_base_subscriber, link_downstream
 from cre.vector import VectorType
 from cre.fact import Fact, gen_fact_import_str
+from cre.var import Var
 from cre.predicate_node import BasePredicateNode,BasePredicateNodeType, get_alpha_predicate_node_definition, \
  get_beta_predicate_node_definition, deref_attrs, define_alpha_predicate_node, define_beta_predicate_node, AlphaPredicateNode, BetaPredicateNode
 from numba.core import imputils, cgutils
@@ -41,10 +43,16 @@ def gen_op_source(cls):
     arg_types = cls.signature.args
     print(cls.signature.return_type)
     # arg_imports = "\n".join([gen_fact_import_str(x) for x in arg_types if isinstance(x,Fact)])
+    field_dict = {**op_fields_dict,**{f"arg{i}" : t for i,t in enumerate(arg_types)}}
+
+    offsets = get_offsets_from_member_types(field_dict)
+    arg_offsets = offsets[len(op_fields_dict):]
+
     source = \
-f'''from numba import njit
+f'''from numba import njit, void, u1
 from numba.experimental.function_type import _get_wrapper_address
 from cre.utils import _func_from_address
+from cre.op import op_fields_dict, OpTypeTemplate
 import pickle
 
 call_sig = pickle.loads({pickle.dumps(cls.signature)})
@@ -54,10 +62,17 @@ print(call)
 call_addr = _get_wrapper_address(call, call_sig)
 '''
     if(hasattr(cls,"check_pyfunc")):
-        source += \
-f'''check = pickle.loads({pickle.dumps(njit(cls.check_pyfunc, numba.void(*arg_types)))})
+        source += f'''
+check_sig = pickle.loads({pickle.dumps(cls.signature)})
+check = pickle.loads({pickle.dumps(njit(u1(*arg_types))(cls.check_pyfunc))})
 check.enable_caching()
-check_addr = _get_wrapper_address(check, check.signatures[0])
+check_addr = _get_wrapper_address(check, check_sig)
+'''
+
+    source += f'''
+arg_offsets = {str(arg_offsets)}
+field_dict = {{**op_fields_dict,**{{f"arg{{i}}" : t for i,t in enumerate(call_sig.args)}}}}
+{cls.__name__+'Type'} = OpTypeTemplate([(k,v) for k,v in field_dict.items()]) 
 '''
     return source
 
@@ -68,30 +83,17 @@ op_fields_dict = {
     "condition_ptr" : i8,
     "arg_types" : types.Any,
     "out_type" : types.Any,
+    "is_const" : i8[::1]
 }
-
-op_fields =  [(k,v) for k,v, in op_fields_dict.items()]
-
 
 @structref.register
 class OpTypeTemplate(types.StructRef):
     def preprocess_fields(self, fields):
         return tuple((name, types.unliteral(typ)) for name, typ in fields)
 
+GenericOpType = OpTypeTemplate([(k,v) for k,v in op_fields_dict.items()])
 
 class Op(structref.StructRefProxy):
-    def __new__(cls,conds=None):
-        # self = cls._ctor(conds if conds else cls.conds)
-        self = rule_ctor(cls.__name__,
-                         conds if conds else cls.conds,
-                        cls._atfp_addr)#, self._apply_then_from_ptrs)
-        # self.apply_then_from_ptrs = apply_then_from_ptrs_type(cls._apply_then_from_ptrs)
-        if(conds is not None): self.conds = conds
-        return self
-    # def __init__(self, conds):
-    #     '''An instance of a rule has its conds linked to a KnowledgeBase'''
-    #     self.conds = conds
-
     def __init_subclass__(cls, **kwargs):
         ''' Define a rule, it must have when/conds and then defined'''
         super().__init_subclass__(**kwargs)
@@ -123,38 +125,24 @@ class Op(structref.StructRefProxy):
         if(has_check): to_import += ['check', 'check_addr']
         l = import_from_cached(name, hash_code, to_import)
 
-        # l,g = cache_safe_exec(source,gbls={'then':then, 'arg_types':arg_types})
-
-
-        print(l)
-        # raise ValueError()
         cls.call = l['call']
         cls._call_addr = l['call_addr']
         if(has_check):
             cls.check = l['check']
             cls._check_addr = l['check_addr']
-        
-        # cls._ctor = l['ctor']
 
-        # then_from_ptrs(cls.then, np.zeros(5,dtype=np.int64))
-
+    def __new__(self,*args):
+        is_const = [isinstance(x,Var) for x in args]
+        if(all(is_const)):
+            return self.call(*args)
+            # self = rule_ctor(cls.__name__,
+            #              conds if conds else cls.conds,
+            #             cls._atfp_addr)#, self._apply_then_from_ptrs)
+            # # self.apply_then_from_ptrs = apply_then_from_ptrs_type(cls._apply_then_from_ptrs)
+            # if(conds is not None): self.conds = conds
             
-        # print("SURPRISE!")
-        # print(cls.conds)
-
-    # @classmethod
-    def apply_then_from_ptrs(cls, kb, ptrs):
-        '''Applies then() on a matching set of facts given as an array of pointers'''
-        return rule_apply_then_from_ptrs(cls, kb, ptrs)
-
-    def __str__(self):
-        return str_rule(self)
-
-    def __repr__(self):
-        return str(self)
-    # @property
-    # def conds(self):
-    #     return rule_get_conds(self)
+        else:   
+            return 1
 
 
 

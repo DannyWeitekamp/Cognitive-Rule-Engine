@@ -23,6 +23,15 @@ print("%s: %.4f ms" % ("def Add:", time2-time1))
 v1 = Var(float,'v1')
 v2 = Var(float,'v2')
 a = Add(v1,v2)
+
+one = 1
+class AddOne(Op):
+    signature = f8(f8,f8)
+    def check(a,b):
+        return a > 0
+    def call(a,b):
+        return a + one
+print(AddOne(1))
 # print(a(1))
 
 

@@ -2,8 +2,8 @@ import operator
 import numpy as np
 import numba
 from numba import types, njit, i8, u8, i4, u1, i8, literally, generated_jit
-from numba.typed import List
-from numba.types import ListType, unicode_type, void, Tuple
+from numba.typed import List, Dict
+from numba.types import ListType, DictType, unicode_type, void, Tuple
 from numba.experimental import structref
 from numba.experimental.structref import new, define_boxing, define_attributes, _Utils
 from numba.extending import overload_method, intrinsic, overload_attribute, intrinsic, lower_getattr_generic, overload, infer_getattr, lower_setattr_generic
@@ -86,11 +86,13 @@ def call_intrinsic(typingctx, {[f"a{i}" for i in range(n_args)]}):
 '''
     return source
 
-
+from cre.var import GenericVarType
 
 op_fields_dict = {
     "name" : unicode_type,
-    "arg_type_names" : ListType(unicode_type),
+    # Mapping variable ptrs to aliases
+    "var_map" : DictType(i8, unicode_type),
+    "inv_var_map" : DictType(unicode_type, i8),
     "return_type_name" : unicode_type,
     "call_ptr" : i8,
     "call_multi_ptr" : i8,
@@ -130,11 +132,14 @@ def intr_call(typingctx, {",".join([f'a{i}' for i in range(len(sig.args))])}):
 ''',g,l)
     return l['intr_call']
         
+class OpMeta(type):
+    def __repr__(cls):
+        return cls.__name__ + f'({",".join(["?"] * len(cls.signature.args))})'
 
 
-class Op(structref.StructRefProxy):
+class Op(structref.StructRefProxy,metaclass=OpMeta):
     @classmethod
-    def jit_translate_method(cls,name,sig):
+    def jit_method(cls,name,sig):
         py_func = getattr(cls,name)
         setattr(cls, name+"_pyfunc", py_func)
         setattr(cls, name+"_sig", sig)
@@ -156,13 +161,11 @@ class Op(structref.StructRefProxy):
             assert hasattr(cls.check, '__call__'), "check() must be a function"
 
         time1 = time.time_ns()/float(1e6)
-        cls.jit_translate_method("call", cls.signature)
+        cls.jit_method("call", cls.signature)
         
         if(has_check):
             check_sig = u1(*cls.signature.args)
-            cls.jit_translate_method("check", check_sig)
-
-        
+            cls.jit_method("check", check_sig)        
 
         time2 = time.time_ns()/float(1e6)
         print(f'2: {time2-time1} ms')
@@ -181,38 +184,60 @@ class Op(structref.StructRefProxy):
         # l = import_from_cached(name, hash_code, to_import)
 
     def __new__(cls,*py_args):
-        is_const = [not isinstance(x,Var) for x in py_args]
-        if(len(py_args) == len(cls.signature.args) and all(is_const)):
-            return cls.call(*py_args)            
-        elif(len(py_args) > 0 and any(is_const)):   
-            # If any constants are passed then redefine a jitted
-            #   function where the constants are injected into the llvm. 
-            sig, codegen = cls.gen_sig_codegen(py_args)
-            print(sig)
-            py_args = None
-            call_intr = dynam_gen_intrinsic(sig, codegen)
-            l = {}
-            cache_safe_exec(f'''
-@njit(sig,cache=False)
-def call(a):
-    return call_intr(a)
-                ''', l, {"njit": njit, "sig":sig, "call_intr": call_intr}
-            )
-            call = l['call']
-            
-            call_addr = 0#_get_wrapper_address(call, sig)
-            # self.call = call
-        else:
-            # Otherwise 
-            sig, codegen = cls.signature, None
-            call_addr = cls.call_addr
 
-        st = op_ctor(cls.__name__,
-                    str(sig.return_type),
-                    List([str(x) for x in sig.args]),
-                    call_addr)
-        st.call = call
-        return st
+        return OpComp(cls,*py_args)
+        # _vars = set()
+        # var_map = {}
+        # all_const = True
+        # # any_const = True
+        # # var_map = Dict.empty(i8, unicode_type)
+        # unrolled_vars = []
+        # for x in py_args:
+        #     if(isinstance(x,Var)):
+        #         unrolled_vars.append(x)
+        #         var_map[x] = x.alias
+        #         all_const = False
+        #     elif(isinstance(x,Op)):
+        #         unrolled_vars += [x for x in x.var_map.values()]
+
+
+        # print(_vars)
+
+        # is_const = [not isinstance(x,Var) ]
+        # assert len(py_args) == len(cls.signature.args)
+        # if(all_const):
+        #     return cls.call(*py_args)
+        # else:
+        #     return        
+# #         elif(any(is_const)):   
+# #             # If any constants are passed then redefine a jitted
+# #             #   function where the constants are injected into the llvm. 
+# #             sig, codegen = cls.gen_sig_codegen(py_args)
+# #             print(sig)
+# #             py_args = None
+# #             call_intr = dynam_gen_intrinsic(sig, codegen)
+# #             l = {}
+# #             cache_safe_exec(f'''
+# # @njit(sig,cache=False)
+# # def call(a):
+# #     return call_intr(a)
+# #                 ''', l, {"njit": njit, "sig":sig, "call_intr": call_intr}
+# #             )
+# #             call = l['call']
+            
+# #             call_addr = 0#_get_wrapper_address(call, sig)
+# #             # self.call = call
+#         else:
+#             # Otherwise 
+#             sig, codegen = cls.signature, None
+#             call_addr = cls.call_addr
+
+#         st = op_ctor(cls.__name__,
+#                     str(sig.return_type),
+#                     List([str(x) for x in sig.args]),
+#                     call_addr)
+#         st.call = call
+#         return st
 
     def __call__(self,*args):
         return self.call(*args)
@@ -231,7 +256,9 @@ def call(a):
         def codegen(context, builder, _sig, _args):
             args = []; i = 0;
             for typ, py_arg in zip(arg_types, py_args):
-                if(isinstance(py_arg, Var)):
+                if(isinstance(py_arg, Op)):
+                    args.append(_args[i]); i += 1;
+                elif(isinstance(py_arg, Var)):
                     args.append(_args[i]); i += 1;
                 else:
                     args.append(context.get_constant_generic(builder, typ, py_arg))
@@ -242,8 +269,98 @@ def call(a):
             return ret
         return sig, codegen
 
+    def __repr__(self):
+        return 
+
 
 define_boxing(OpTypeTemplate,Op)   
+
+class OpComp():
+    def __init__(self,op,*py_args):
+        _vars = {}
+        constants = {}
+        instructions = {}
+        for i, x in enumerate(py_args):
+            if(isinstance(x,OpComp)):
+                for v in x.vars:
+                    _vars[v] = op.signature.args[i]
+                for c in x.constants:
+                    constants[c] = op.signature.args[i]
+                for op_comp in x.instructions:
+                    instructions[op_comp] = op_comp.op.signature
+            else:
+                if(isinstance(x,Var)):
+                    _vars[x] = True
+                else:
+                    constants[x] = True
+
+
+        self.name = f"{op.__name__}({', '.join([repr(x) for x in py_args])})"  
+        instructions[self] = op.signature
+
+        self.op = op
+        self.vars = _vars
+        self.args = py_args
+        self.constants = constants
+        self.instructions = instructions
+        # print("-----START------")
+        # print(list(self.vars.keys()))
+        # print(list(self.constants.keys()))
+        # print(list(self.instructions.keys()))
+        # print("-----END------")
+    def gen_intrinsic_source(self,ind='    '):
+        names = {} 
+        body = ''
+        for i,(c,t) in enumerate(self.constants.items()):
+            names[c] = f'c{i}'
+            body +=  ind+f'c{i} = context.get_constant_generic(builder, {t}, {repr(c)})\n'
+
+        var_names = []
+        for i,(v,t) in enumerate(self.vars.items()):
+            names[v] = f'v{i}'
+            var_names.append(f'v{i}')
+        var_names = ",".join(var_names)
+
+        for i,instr in enumerate(self.instructions):
+            names[instr] = f'i{i}'
+
+            body += \
+f'''{ind}o{i} = instrs[{i}].op
+{ind}i{i} = context.call_internal(builder, o{i}.call_fndesc, o{i}.signature, ({", ".join([names[x] for x in instr.args])}))
+'''
+
+        source = f'''
+from numba import float64, int64, njit
+from numba.types import unicode_type
+from numba.extending import intrinsic
+
+def codegen(context, builder, sig, args):
+    [{var_names}] = args
+{body}
+{ind}return i{len(self.instructions)-1}
+
+@intrinsic
+def call_intr(ctx, {var_names}):
+    return sig, codegen
+
+@njit(sig)
+def call({var_names}):
+    return call_intr({var_names})
+'''
+        return source
+
+
+
+
+
+    def __hash__(self):
+        return hash(self.name)
+
+    def __str__(self):
+        return self.name
+
+    def __repr__(self):
+        return self.name
 
 
 

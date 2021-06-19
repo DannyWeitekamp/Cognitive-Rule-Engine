@@ -127,8 +127,8 @@ class DeferredFactRefType():
 
 
 
-def _get_type(typ, context, name='', attr=''):
-    '''Takes in a string or type and returns the type'''
+def _standardize_type(typ, context, name='', attr=''):
+    '''Takes in a string or type and returns the standardized type'''
     if(isinstance(typ, type)):
         typ = typ.__name__
     if(isinstance(typ,str)):
@@ -159,10 +159,10 @@ def _get_attr_type_flags(attr, v, context, name=''):
     
     if(isinstance(v,dict)):
         assert "type" in v, "Attribute specifications must have 'type' property, got %s." % v
-        typ = _get_type(v['type'], context, name, attr)
+        typ = _standardize_type(v['type'], context, name, attr)
         flags = [x.lower() for x in v.get('flags',[])]
     else:
-        typ, flags = _get_type(v, context, name, attr), []
+        typ, flags = _standardize_type(v, context, name, attr), []
     
 
     return typ, flags

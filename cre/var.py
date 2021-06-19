@@ -12,8 +12,8 @@ from cre.caching import gen_import_str, unique_hash,import_from_cached, source_t
 from cre.context import kb_context
 from cre.structref import define_structref, define_structref_template
 from cre.kb import KnowledgeBaseType, KnowledgeBase, facts_for_t_id, fact_at_f_id
-from cre.fact import define_fact, BaseFactType, cast_fact, DeferredFactRefType, Fact
-from cre.utils import _struct_from_meminfo, _meminfo_from_struct, _cast_structref, cast_structref, decode_idrec, lower_getattr, _struct_from_pointer,  lower_setattr, lower_getattr, _pointer_from_struct, _decref_pointer, _incref_pointer, _incref_structref
+from cre.fact import define_fact, BaseFactType, cast_fact, DeferredFactRefType, Fact, _standardize_type
+from cre.utils import _struct_from_meminfo, _meminfo_from_struct, _cast_structref, cast_structref, decode_idrec, lower_getattr, _struct_from_pointer,  lower_setattr, lower_getattr, _pointer_from_struct, _decref_pointer, _incref_pointer, _incref_structref, pointer_from_struct
 from cre.utils import assign_to_alias_in_parent_frame
 from cre.subscriber import base_subscriber_fields, BaseSubscriber, BaseSubscriberType, init_base_subscriber, link_downstream
 from cre.vector import VectorType
@@ -74,7 +74,9 @@ GenericVarType = VarTypeTemplate([(k,v) for k,v in var_fields_dict.items()])
 
 class Var(structref.StructRefProxy):
     def __new__(cls, typ, alias=None, skip_assign_alias=False):
-        if(not isinstance(typ, types.StructRef)): typ = typ.fact_type
+        # if(not isinstance(typ, types.StructRef)): typ = typ.fact_type
+        typ = _standardize_type(typ, kb_context())
+        # if(hasattr(typ,'fact_type')): typ = typ.fact_type
         if(isinstance(typ, Fact)): 
             type_name = typ._fact_name
         else:
@@ -185,13 +187,19 @@ class Var(structref.StructRefProxy):
 
     def __str__(self):
         prefix = "NOT" if(self.is_not) else "Var"
-        base = f'{prefix}({self.type_name},{self.alias!r})'
+        if(self.alias != ""):
+            base = f'{prefix}({self.type_name},{self.alias!r})'
+        else: 
+            base = f'{prefix}({self.type_name})'
+
         deref_strs = [f"[{a}]" if t==OFFSET_TYPE_LIST else "." + a 
                 for (t,_), a in zip(self.deref_offsets, self.deref_attrs)]
         s = base + "".join(deref_strs)
         # print(self.is_not)
          # s = f'NOT({s})'
         return s
+    def __repr__(self):
+        return str(self)
 
     def _cmp_helper(self,op_str,other,negate):
         check_legal_cmp(self, op_str, other)
@@ -230,8 +238,14 @@ class Var(structref.StructRefProxy):
         return self.__dict__
     def __setstate__(self, d):
         self.__dict__ = d
-        
 
+    def __hash__(self):
+        ptr = get_var_ptr(self)
+        return get_var_ptr(self)
+
+@njit(cache=True)    
+def get_var_ptr(self):
+    return _pointer_from_struct(self)
 
 
 

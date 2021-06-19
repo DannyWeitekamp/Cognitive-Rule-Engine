@@ -206,6 +206,10 @@ def _pointer_from_struct(typingctx, val):
     sig = i8(val,)
     return sig, codegen
 
+@njit
+def pointer_from_struct(self):
+    return _pointer_from_struct(self) 
+
 @intrinsic
 def _pointer_from_struct_incref(typingctx, val):
     def codegen(context, builder, sig, args):

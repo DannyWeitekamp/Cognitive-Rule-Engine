@@ -5,6 +5,8 @@ from cre.fact import define_fact
 from cre.var import Var
 import time
 
+Var(float)
+
 BOOP, BOOPType = define_fact("BOOP", {"A" : f8, "B": f8})
 
 time1 = time.time_ns()/float(1e6)

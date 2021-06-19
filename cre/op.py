@@ -283,3 +283,6 @@ define_boxing(OpTypeTemplate,Op)
 #   from something similar to attr_offsets for Vars. This would avoid
 #   overspecialization if an OpComp needs to be rebuilt with new constants
 #  
+#  We need to be able to do things like:
+#    -Add(Add(x,y),z)
+#    -Add(Add(x,y),x)

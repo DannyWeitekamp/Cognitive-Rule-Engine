@@ -8,7 +8,7 @@ from numba.experimental import structref
 from numba.experimental.structref import new, define_boxing, define_attributes, _Utils
 from numba.extending import overload_method, intrinsic, overload_attribute, intrinsic, lower_getattr_generic, overload, infer_getattr, lower_setattr_generic
 from numba.core.typing.templates import AttributeTemplate
-from cre.caching import gen_import_str, unique_hash,import_from_cached, source_to_cache, source_in_cache
+from cre.caching import gen_import_str, unique_hash,import_from_cached, source_to_cache, source_in_cache, cache_safe_exec
 from cre.context import kb_context
 from cre.structref import define_structref, define_structref_template
 from cre.kb import KnowledgeBaseType, KnowledgeBase, facts_for_t_id, fact_at_f_id
@@ -24,6 +24,7 @@ from cre.predicate_node import BasePredicateNode,BasePredicateNodeType, get_alph
  get_beta_predicate_node_definition, deref_attrs, define_alpha_predicate_node, define_beta_predicate_node, AlphaPredicateNode, BetaPredicateNode
 from numba.core import imputils, cgutils
 from numba.core.datamodel import default_manager, models
+from numba.experimental.function_type import _get_wrapper_address
 
 
 from operator import itemgetter
@@ -32,7 +33,7 @@ from os import getenv
 from cre.utils import deref_type, OFFSET_TYPE_ATTR, OFFSET_TYPE_LIST, listtype_sizeof_item
 import inspect, dill, pickle
 from textwrap import dedent
-# import inspect
+import time
 
 def gen_op_source(cls):
     '''Generate source code for the relevant functions of a user defined Op.
@@ -76,14 +77,28 @@ field_dict = {{**op_fields_dict,**{{f"arg{{i}}" : t for i,t in enumerate(call_si
 '''
     return source
 
+def gen_call_intrinsic_source(return_type,n_args):
+    source = f''' 
+@intrinsic
+def call_intrinsic(typingctx, {[f"a{i}" for i in range(n_args)]}):
+    sig = 
+    return 
+'''
+    return source
+
+
+
 op_fields_dict = {
     "name" : unicode_type,
-    "apply_ptr" : i8,
-    "apply_multi_ptr" : i8,
-    "condition_ptr" : i8,
-    "arg_types" : types.Any,
-    "out_type" : types.Any,
-    "is_const" : i8[::1]
+    "arg_type_names" : ListType(unicode_type),
+    "return_type_name" : unicode_type,
+    "call_ptr" : i8,
+    "call_multi_ptr" : i8,
+    "check_ptr" : i8,
+    
+    # "arg_types" : types.Any,
+    # "out_type" : types.Any,
+    # "is_const" : i8[::1]
 }
 
 @structref.register
@@ -93,7 +108,42 @@ class OpTypeTemplate(types.StructRef):
 
 GenericOpType = OpTypeTemplate([(k,v) for k,v in op_fields_dict.items()])
 
+@njit(cache=True)
+def op_ctor(name, return_type_name, arg_type_names, call_ptr=0, call_multi_ptr=0, check_ptr=0):
+    st = new(GenericOpType)
+    st.name = name
+    st.return_type_name = return_type_name
+    st.arg_type_names = arg_type_names
+    st.call_ptr = call_ptr
+    st.call_multi_ptr = call_multi_ptr
+    st.check_ptr = check_ptr
+    return st
+
+def dynam_gen_intrinsic(sig,codegen):
+    l = {}
+    g = {'codegen':codegen, 'sig': sig, 'intrinsic': intrinsic}
+    exec(f'''
+@intrinsic
+def intr_call(typingctx, {",".join([f'a{i}' for i in range(len(sig.args))])}):
+    print(sig, codegen)
+    return sig, codegen
+''',g,l)
+    return l['intr_call']
+        
+
+
 class Op(structref.StructRefProxy):
+    @classmethod
+    def jit_translate_method(cls,name,sig):
+        py_func = getattr(cls,name)
+        setattr(cls, name+"_pyfunc", py_func)
+        setattr(cls, name+"_sig", sig)
+        jitted_func = njit(sig,cache=True)(py_func)
+        setattr(cls, name, jitted_func)
+        setattr(cls, name+"_fndesc", jitted_func.overloads[sig.args].fndesc)
+        setattr(cls, name+"_addr", _get_wrapper_address(jitted_func, sig))
+
+
     def __init_subclass__(cls, **kwargs):
         ''' Define a rule, it must have when/conds and then defined'''
         super().__init_subclass__(**kwargs)
@@ -105,44 +155,95 @@ class Op(structref.StructRefProxy):
         if(has_check):
             assert hasattr(cls.check, '__call__'), "check() must be a function"
 
-        cls.call_pyfunc = cls.call
-        cls.call_src = dedent(inspect.getsource(cls.call_pyfunc))
+        time1 = time.time_ns()/float(1e6)
+        cls.jit_translate_method("call", cls.signature)
+        
         if(has_check):
-            cls.check_pyfunc = cls.check
-            cls.check_src = dedent(inspect.getsource(cls.check_pyfunc))
-        else:
-            cls.check_src = None
+            check_sig = u1(*cls.signature.args)
+            cls.jit_translate_method("check", check_sig)
 
-        name = cls.__name__
-        hash_code = unique_hash([cls.signature, cls.call_src, cls.check_src])
-        # print(hash_code)
-        if(not source_in_cache(name, hash_code) or getattr(cls,'cache',True) == False):
-            source = gen_op_source(cls)
-            source_to_cache(name,hash_code,source)
+        
 
+        time2 = time.time_ns()/float(1e6)
+        print(f'2: {time2-time1} ms')
 
-        to_import = ['call','call_addr']
-        if(has_check): to_import += ['check', 'check_addr']
-        l = import_from_cached(name, hash_code, to_import)
+        # name = cls.__name__
+        # hash_code = unique_hash([cls.signature, cls.call_src, cls.check_src])
+        # # print(hash_code)
+        # if(not source_in_cache(name, hash_code) or getattr(cls,'cache',True) == False):
+        #     source = gen_op_source(cls)
+        #     source_to_cache(name,hash_code,source)
 
-        cls.call = l['call']
-        cls._call_addr = l['call_addr']
-        if(has_check):
-            cls.check = l['check']
-            cls._check_addr = l['check_addr']
+        # time3 = time.time_ns()/float(1e6)
+        # print(f'3: {time3-time2} ms')
+        # to_import = ['call','call_addr']
+        # if(has_check): to_import += ['check', 'check_addr']
+        # l = import_from_cached(name, hash_code, to_import)
 
-    def __new__(self,*args):
-        is_const = [isinstance(x,Var) for x in args]
-        if(all(is_const)):
-            return self.call(*args)
-            # self = rule_ctor(cls.__name__,
-            #              conds if conds else cls.conds,
-            #             cls._atfp_addr)#, self._apply_then_from_ptrs)
-            # # self.apply_then_from_ptrs = apply_then_from_ptrs_type(cls._apply_then_from_ptrs)
-            # if(conds is not None): self.conds = conds
+    def __new__(cls,*py_args):
+        is_const = [not isinstance(x,Var) for x in py_args]
+        if(len(py_args) == len(cls.signature.args) and all(is_const)):
+            return cls.call(*py_args)            
+        elif(len(py_args) > 0 and any(is_const)):   
+            # If any constants are passed then redefine a jitted
+            #   function where the constants are injected into the llvm. 
+            sig, codegen = cls.gen_sig_codegen(py_args)
+            print(sig)
+            py_args = None
+            call_intr = dynam_gen_intrinsic(sig, codegen)
+            l = {}
+            cache_safe_exec(f'''
+@njit(sig,cache=False)
+def call(a):
+    return call_intr(a)
+                ''', l, {"njit": njit, "sig":sig, "call_intr": call_intr}
+            )
+            call = l['call']
             
-        else:   
-            return 1
+            call_addr = 0#_get_wrapper_address(call, sig)
+            # self.call = call
+        else:
+            # Otherwise 
+            sig, codegen = cls.signature, None
+            call_addr = cls.call_addr
+
+        st = op_ctor(cls.__name__,
+                    str(sig.return_type),
+                    List([str(x) for x in sig.args]),
+                    call_addr)
+        st.call = call
+        return st
+
+    def __call__(self,*args):
+        return self.call(*args)
+
+
+    @classmethod
+    def gen_sig_codegen(cls, py_args, fn_choice='call'):
+        arg_types = cls.signature.args
+        print(py_args)
+        new_arg_types = [arg_types[i] for i,x in enumerate(py_args) if(isinstance(x, Var))]
+        if(fn_choice =='call'):
+            sig = cls.signature.return_type(*new_arg_types)
+        else:
+            sig = u1(*new_arg_types)
+
+        def codegen(context, builder, _sig, _args):
+            args = []; i = 0;
+            for typ, py_arg in zip(arg_types, py_args):
+                if(isinstance(py_arg, Var)):
+                    args.append(_args[i]); i += 1;
+                else:
+                    args.append(context.get_constant_generic(builder, typ, py_arg))
+
+            fndesc = getattr(cls,fn_choice+"_fndesc")
+            fn_sig = getattr(cls,fn_choice+"_sig")
+            ret = context.call_internal(builder, cls.call_fndesc, fn_sig, args)
+            return ret
+        return sig, codegen
+
+
+define_boxing(OpTypeTemplate,Op)   
 
 
 

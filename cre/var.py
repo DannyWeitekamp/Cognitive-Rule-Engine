@@ -221,7 +221,12 @@ class Var(structref.StructRefProxy):
         from cre.condition_node import _var_NOT
         return _var_NOT(self)
     
-
+    # Explicitly defining these allows for pickling w/o invoking __getattr__()
+    def __getstate__(self):
+        return self.__dict__
+    def __setstate__(self, d):
+        self.__dict__ = d
+        
 
 
 

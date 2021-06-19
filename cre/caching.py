@@ -109,7 +109,11 @@ def source_to_cache(name,hsh,source,is_aot=False):
 
 def gen_import_str(name,hsh,targets,aot_module=None):
 	aot_module = aot_module if aot_module else ''
-	return "from cre_cache.{}.{}_{} import {}".format(name,aot_module,hsh,", ".join(targets))
+	if(isinstance(targets,dict)):
+		targets_str = ", ".join([f'{k} as {v}' for k,v in targets.items()])
+	else:
+		targets_str = ", ".join(targets)
+	return f"from cre_cache.{name}.{aot_module}_{hsh} import {targets_str}"
 
 
 def _import_cached(name,hsh,aot_module=None):

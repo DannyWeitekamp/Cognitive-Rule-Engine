@@ -8,17 +8,17 @@ from numba.experimental import structref
 from numba.experimental.structref import new, define_boxing, define_attributes, _Utils
 from numba.extending import overload_method, intrinsic, overload_attribute, intrinsic, lower_getattr_generic, overload, infer_getattr, lower_setattr_generic
 from numba.core.typing.templates import AttributeTemplate
-from cre.caching import gen_import_str, unique_hash,import_from_cached, source_to_cache, source_in_cache, cache_safe_exec
+from cre.caching import gen_import_str, unique_hash,import_from_cached, source_to_cache, source_in_cache, cache_safe_exec, get_cache_path
 from cre.context import kb_context
 from cre.structref import define_structref, define_structref_template
 from cre.kb import KnowledgeBaseType, KnowledgeBase, facts_for_t_id, fact_at_f_id
-from cre.fact import define_fact, BaseFactType, cast_fact, DeferredFactRefType, Fact
+# from cre.fact import define_fact, BaseFactType, cast_fact, DeferredFactRefType, Fact
 from cre.utils import (_struct_from_meminfo, _meminfo_from_struct, _cast_structref, cast_structref, decode_idrec, lower_getattr, _struct_from_pointer,  lower_setattr, lower_getattr,
-                       _pointer_from_struct, _decref_pointer, _incref_pointer, _incref_structref, get_offsets_from_member_types)
+                       _pointer_from_struct, _decref_pointer, _incref_pointer, _incref_structref)
 from cre.utils import assign_to_alias_in_parent_frame
 from cre.subscriber import base_subscriber_fields, BaseSubscriber, BaseSubscriberType, init_base_subscriber, link_downstream
 from cre.vector import VectorType
-from cre.fact import Fact, gen_fact_import_str
+from cre.fact import Fact, gen_fact_import_str, get_offsets_from_member_types
 from cre.var import Var
 from cre.predicate_node import BasePredicateNode,BasePredicateNodeType, get_alpha_predicate_node_definition, \
  get_beta_predicate_node_definition, deref_attrs, define_alpha_predicate_node, define_beta_predicate_node, AlphaPredicateNode, BetaPredicateNode
@@ -54,19 +54,21 @@ f'''from numba import njit, void, u1
 from numba.experimental.function_type import _get_wrapper_address
 from cre.utils import _func_from_address
 from cre.op import op_fields_dict, OpTypeTemplate
-import pickle
+import dill
 
-call_sig = pickle.loads({pickle.dumps(cls.signature)})
-call = pickle.loads({pickle.dumps(njit(cls.signature)(cls.call_pyfunc))})
-call.enable_caching()
+call_sig = dill.loads({dill.dumps(cls.call_sig)})
+call = njit(call_sig,cache=True)(dill.loads({cls.call_bytes}))
+# call.enable_caching()
 print(call)
+call_fndesc = call.overloads[call_sig.args].fndesc
 call_addr = _get_wrapper_address(call, call_sig)
 '''
     if(hasattr(cls,"check_pyfunc")):
         source += f'''
-check_sig = pickle.loads({pickle.dumps(cls.signature)})
-check = pickle.loads({pickle.dumps(njit(u1(*arg_types))(cls.check_pyfunc))})
-check.enable_caching()
+check_sig = dill.loads({dill.dumps(cls.check_sig)})
+check = njit(check_sig,cache=True)(dill.loads({cls.check_bytes}))
+# check.enable_caching()
+check_fndesc = check.overloads[check_sig.args].fndesc
 check_addr = _get_wrapper_address(check, check_sig)
 '''
 
@@ -139,15 +141,15 @@ class OpMeta(type):
 
 class Op(structref.StructRefProxy,metaclass=OpMeta):
     @classmethod
-    def jit_method(cls,name,sig):
+    def process_method(cls,name,sig):
         py_func = getattr(cls,name)
         setattr(cls, name+"_pyfunc", py_func)
         setattr(cls, name+"_sig", sig)
         jitted_func = njit(sig,cache=True)(py_func)
-        setattr(cls, name, jitted_func)
-        setattr(cls, name+"_fndesc", jitted_func.overloads[sig.args].fndesc)
-        setattr(cls, name+"_addr", _get_wrapper_address(jitted_func, sig))
-
+        setattr(cls, name+'_bytes', dill.dumps(py_func))#dedent(inspect.getsource(py_func)))
+        # setattr(cls, name, jitted_func)
+        # setattr(cls, name+"_fndesc", jitted_func.overloads[sig.args].fndesc)
+        # setattr(cls, name+"_addr", _get_wrapper_address(jitted_func, sig))
 
     def __init_subclass__(cls, **kwargs):
         ''' Define a rule, it must have when/conds and then defined'''
@@ -161,27 +163,31 @@ class Op(structref.StructRefProxy,metaclass=OpMeta):
             assert hasattr(cls.check, '__call__'), "check() must be a function"
 
         time1 = time.time_ns()/float(1e6)
-        cls.jit_method("call", cls.signature)
+        cls.process_method("call", cls.signature)
         
         if(has_check):
             check_sig = u1(*cls.signature.args)
-            cls.jit_method("check", check_sig)        
+            cls.process_method("check", check_sig)        
 
         time2 = time.time_ns()/float(1e6)
         print(f'2: {time2-time1} ms')
 
-        # name = cls.__name__
-        # hash_code = unique_hash([cls.signature, cls.call_src, cls.check_src])
-        # # print(hash_code)
-        # if(not source_in_cache(name, hash_code) or getattr(cls,'cache',True) == False):
-        #     source = gen_op_source(cls)
-        #     source_to_cache(name,hash_code,source)
+        name = cls.__name__
+        hash_code = unique_hash([cls.signature, cls.call_bytes, cls.check_bytes])
+        cls.hash_code = hash_code
+        # print(hash_code)
+        # print(get_cache_path(name, hash_code))
+        if(not source_in_cache(name, hash_code) or getattr(cls,'cache',True) == False):
+            source = gen_op_source(cls)
+            source_to_cache(name,hash_code,source)
 
-        # time3 = time.time_ns()/float(1e6)
-        # print(f'3: {time3-time2} ms')
-        # to_import = ['call','call_addr']
-        # if(has_check): to_import += ['check', 'check_addr']
-        # l = import_from_cached(name, hash_code, to_import)
+        time3 = time.time_ns()/float(1e6)
+        print(f'3: {time3-time2} ms')
+        to_import = ['call','call_addr','call_fndesc']
+        if(has_check): to_import += ['check', 'check_addr','check_fndesc']
+        l = import_from_cached(name, hash_code, to_import)
+        time4 = time.time_ns()/float(1e6)
+        print(f'4: {time4-time3} ms')
 
     def __new__(cls,*py_args):
 
@@ -319,20 +325,30 @@ class OpComp():
         for i,(v,t) in enumerate(self.vars.items()):
             names[v] = f'v{i}'
             var_names.append(f'v{i}')
-        var_names = ",".join(var_names)
+        var_names = ", ".join(var_names)
 
+        ops = {}
+        oc = 0
         for i,instr in enumerate(self.instructions):
             names[instr] = f'i{i}'
+            if(instr.op not in ops):
+                ops[instr.op] = (oc,instr.op.signature)
+                oc += 1
 
-            body += \
-f'''{ind}o{i} = instrs[{i}].op
-{ind}i{i} = context.call_internal(builder, o{i}.call_fndesc, o{i}.signature, ({", ".join([names[x] for x in instr.args])}))
-'''
+        op_imports = ""
+        for i,(op,(_,sig)) in enumerate(ops.items()):
+            op_imports += gen_import_str(op.__name__, op.hash_code,
+                {"call_fndesc" : f'call_fndesc{i}', "call_sig" : f'call_sig{i}',
+                "check_fndesc" : f'check_fndesc{i}', "check_sig" : f'check_sig{i}'}) + "\n"
+        for i,instr in enumerate(self.instructions):
+            j,_ = ops[instr.op]
+            body += f'''{ind}i{i} = context.call_internal(builder, call_fndesc{j}, call_sig{j}, ({", ".join([names[x] for x in instr.args])}))\n'''
 
         source = f'''
 from numba import float64, int64, njit
 from numba.types import unicode_type
 from numba.extending import intrinsic
+{op_imports}
 
 def codegen(context, builder, sig, args):
     [{var_names}] = args
@@ -347,6 +363,7 @@ def call_intr(ctx, {var_names}):
 def call({var_names}):
     return call_intr({var_names})
 '''
+        print(source)
         return source
 
 

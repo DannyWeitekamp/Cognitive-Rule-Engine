@@ -59,42 +59,69 @@ sig = f8(f8,f8)
 from numba import float64, int64, njit
 from numba.types import unicode_type
 from numba.extending import intrinsic
-import pickle
+from cre_cache.Add._3605db842138bca3e50ec979c2277c33285a9fc5d496a5672f2027e7e003368f import call_fndesc as call_fndesc0, call_sig as call_sig0, check_fndesc as check_fndesc0, check_sig as check_sig0
 
-time1 = time.time_ns()/float(1e6)
-fndesc0 = pickle.loads(pickle.dumps(instrs[0].op.call_fndesc))
-time2 = time.time_ns()/float(1e6)
-print("%s: %.4f ms" % ("unplickle:", time2-time1))
 
 def codegen(context, builder, sig, args):
-    [v0,v1] = args
+    [v0, v1] = args
     c0 = context.get_constant_generic(builder, float64, 2)
-    o0 = instrs[0].op
-    i0 = context.call_internal(builder, fndesc0, o0.signature, (v1, c0))
-    o1 = instrs[1].op
-    i1 = context.call_internal(builder, o1.call_fndesc, o1.signature, (v0, i0))
+
+    i0 = context.call_internal(builder, call_fndesc0, call_sig0, (v1, c0))
+
+    i1 = context.call_internal(builder, call_fndesc0, call_sig0, (v0, i0))
 
     return i1
 
 @intrinsic
-def call_intr(ctx, v0,v1):
+def call_intr(ctx, v0, v1):
     return sig, codegen
 
-time1 = time.time_ns()/float(1e6)
+@njit(sig)
+def call(v0, v1):
+    return call_intr(v0, v1)
 
-def gen_call():
-    @njit(sig,cache=True)
-    def call(v0,v1):
-        return call_intr(v0,v1)
-    return call
-call = gen_call()
+
 print(call(1,2))
-time2 = time.time_ns()/float(1e6)
-print("%s: %.4f ms" % ("poop:", time2-time1))
+
+# from numba import float64, int64, njit
+# from numba.types import unicode_type
+# from numba.extending import intrinsic
+# import pickle
+
+# time1 = time.time_ns()/float(1e6)
+# fndesc0 = pickle.loads(pickle.dumps(instrs[0].op.call_fndesc))
+# time2 = time.time_ns()/float(1e6)
+# print("%s: %.4f ms" % ("unplickle:", time2-time1))
+
+# def codegen(context, builder, sig, args):
+#     [v0,v1] = args
+#     c0 = context.get_constant_generic(builder, float64, 2)
+#     o0 = instrs[0].op
+#     i0 = context.call_internal(builder, fndesc0, o0.signature, (v1, c0))
+#     o1 = instrs[1].op
+#     i1 = context.call_internal(builder, o1.call_fndesc, o1.signature, (v0, i0))
+
+#     return i1
+
+# @intrinsic
+# def call_intr(ctx, v0,v1):
+#     return sig, codegen
+
+# time1 = time.time_ns()/float(1e6)
+
+# def gen_call():
+#     @njit(sig,cache=True)
+#     def call(v0,v1):
+#         return call_intr(v0,v1)
+#     return call
+# call = gen_call()
+# print(call(1,2))
+# time2 = time.time_ns()/float(1e6)
+# print("%s: %.4f ms" % ("poop:", time2-time1))
 
 # g = {"instrs": list(oc.instructions),"sig":f8(f8,f8)}
 # l = {}
-# source = oc.gen_intrinsic_source()
+source = oc.gen_intrinsic_source()
 # print(source)
 # exec(source,g,l)
 # call = l['call']

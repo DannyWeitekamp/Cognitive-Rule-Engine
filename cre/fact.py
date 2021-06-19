@@ -15,7 +15,7 @@ from numba.core.extending import (
     unbox,
     NativeValue
 )
-from numba.core.datamodel import models
+from numba.core.datamodel import default_manager, models
 from numba.core import types, cgutils
 from numba.types import ListType
 # from numba.core.extending import overload
@@ -26,7 +26,7 @@ from cre.caching import unique_hash, source_to_cache, import_from_cached, source
 from cre.structref import gen_structref_code, define_structref
 from cre.context import kb_context
 from cre.utils import (_struct_from_pointer, _cast_structref, struct_get_attr_offset, _obj_cast_codegen,
-                       _pointer_from_struct_codegen, _pointer_from_struct, get_offsets_from_member_types)
+                       _pointer_from_struct_codegen, _pointer_from_struct)
 from numba.core.typeconv import Conversion
 
 import numpy as np
@@ -299,6 +299,23 @@ def get_type_default(t):
 
 fact_types = (types.StructRef, DeferredFactRefType)
 
+#### Resolving Byte Offsets of Struct Members ####
+
+def get_offsets_from_member_types(fields):
+    # from cre.fact import fact_types, FactModel, BaseFactType
+    if(isinstance(fields, dict)): fields = [(k,v) for k,v in fields.items()]
+    #Replace fact references with BaseFactType
+    # fact_types = (types.StructRef, DeferredFactRefType)
+    fields = [(a,BaseFactType if isinstance(t,fact_types) else t) for a,t in fields]
+
+    class TempTypeTemplate(types.StructRef):
+        pass
+
+    default_manager.register(TempTypeTemplate, FactModel)
+
+    TempType = TempTypeTemplate(fields)
+
+    return [struct_get_attr_offset(TempType,attr) for attr, _ in fields]
 
 def repr_type(typ):
     '''Helper function for turning a type into code that reproduces it'''
@@ -365,6 +382,7 @@ def gen_assign_str(a,t):
     s = f"{a}"
 
     return f"st.{a} = " + s
+
 
 
 def gen_fact_code(typ, fields, fact_num, ind='    '):

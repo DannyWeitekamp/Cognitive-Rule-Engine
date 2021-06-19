@@ -483,20 +483,3 @@ def assign_to_alias_in_parent_frame(x,alias):
         inspect.stack()[2][0].f_globals[alias] = x
 
 
-#### Resolving Byte Offsets of Struct Members ####
-
-def get_offsets_from_member_types(fields):
-    from cre.fact import fact_types, FactModel, BaseFactType
-    if(isinstance(fields, dict)): fields = [(k,v) for k,v in fields.items()]
-    #Replace fact references with BaseFactType
-    # fact_types = (types.StructRef, DeferredFactRefType)
-    fields = [(a,BaseFactType if isinstance(t,fact_types) else t) for a,t in fields]
-
-    class TempTypeTemplate(types.StructRef):
-        pass
-
-    default_manager.register(TempTypeTemplate, FactModel)
-
-    TempType = TempTypeTemplate(fields)
-
-    return [struct_get_attr_offset(TempType,attr) for attr, _ in fields]

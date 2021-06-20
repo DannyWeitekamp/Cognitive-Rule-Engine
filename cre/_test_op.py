@@ -64,10 +64,7 @@ print("<<<",AddPlus2)
 print(AddPlus2(1,2))
 
 x = Var(float)
-intermediate = Add(x,0)
-Double = Add(x,intermediate)
-print(intermediate.hash_code)
-print(Double.hash_code)
+Double = Add(x,Add(x,0))
 
 print(Double(7))
 Foo = Double(AddOne(Var(float)))

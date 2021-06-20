@@ -207,9 +207,9 @@ class Op(structref.StructRefProxy,metaclass=OpMeta):
             return cls.call(*py_args)
         else:
             op_comp = OpComp(cls,*py_args)
-            op = op_comp.flatten()
-            op.op_comp = op_comp
-            return op
+            # op = op_comp.flatten()
+            # op.op_comp = op_comp
+            return op_comp
         # _vars = set()
         # var_map = {}
         # all_const = True
@@ -409,18 +409,18 @@ def call_codegen(context, builder, sig, args):
 {call_body}
 {ind}return i{len(self.instructions)-1}
 
-def check_codegen(context, builder, sig, args):
-    [{var_names}] = args
-{check_body}
-{ind}return k{len(self.instructions)-1}
+# def check_codegen(context, builder, sig, args):
+#     [{var_names}] = args
+# {check_body}
+# {ind}return k{len(self.instructions)-1}
 
 @intrinsic
 def call_intr(ctx, {var_names}):
     return call_sig, call_codegen
 
-@intrinsic
-def check_intr(ctx, {var_names}):
-    return check_sig, check_codegen
+# @intrinsic
+# def check_intr(ctx, {var_names}):
+#     return check_sig, check_codegen
 
 @njit(call_sig,cache=True)
 def call({var_names}):
@@ -442,16 +442,14 @@ class GenerateOp(Op):
         return source
 
     def flatten(self):
-        # name = cls.__name__
-        hash_code = unique_hash([self.name,*[(x.__name__,x.hash_code) for x in self.used_ops]])
-        # print(hash_code)
-        # print(get_cache_path(name, hash_code))
-        if(not source_in_cache('GenerateOp', hash_code)):
-            source = self.gen_source(hash_code)
-            source_to_cache('GenerateOp', hash_code, source)
-
-        l = import_from_cached('GenerateOp', hash_code, ['GenerateOp'])
-        return l['GenerateOp']
+        if(not hasattr(self,'_generate_op')):
+            hash_code = unique_hash([self.name,*[(x.__name__,x.hash_code) for x in self.used_ops]])
+            if(not source_in_cache('GenerateOp', hash_code)):
+                source = self.gen_source(hash_code)
+                source_to_cache('GenerateOp', hash_code, source)
+            l = import_from_cached('GenerateOp', hash_code, ['GenerateOp'])
+            self._generate_op = l['GenerateOp']
+        return self._generate_op
 
         
 
@@ -467,6 +465,11 @@ class GenerateOp(Op):
 
     def __repr__(self):
         return self.name
+
+    def __call__(self,*args):
+        print("HASH",self.flatten().hash_code)
+        return self.flatten()(*args)
+
 
 
 

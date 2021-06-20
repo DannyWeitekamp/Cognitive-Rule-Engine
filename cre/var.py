@@ -370,7 +370,7 @@ def str_var(self):
             if(deref.type == OFFSET_TYPE_ATTR):
                 s += "." + attr
             else:
-                s += "[" + str(int(deref.offset)) + "]"
+                s += "[" + attr + "]"
         return s
     else:
         return repr(self)

@@ -26,12 +26,12 @@ a = Add(v1,v2)
 
 one = 1
 class AddOne(Op):
-    signature = f8(f8,f8)
-    def check(a,b):
+    signature = f8(f8)
+    def check(a):
         return a > 0
-    def call(a,b):
+    def call(a):
         return a + one
-print(AddOne(1))
+# print("AddOne",AddOne(1).call())
 # print(a(1))
 
 
@@ -59,38 +59,19 @@ print(SumBOOPs(BOOP(1,2),BOOP(3,4)))
 print(Add(Var(float),Add(Var(float),2)))
 # print()
 
-oc = Add(Var(float),Add(Var(float),2))
+AddPlus2 = Add(Var(float),Add(Var(float),2)).flatten()
+print("<<<",AddPlus2)
+print(AddPlus2(1,2))
 
+x = Var(float)
+Double = Add(x,Add(x,0)).flatten()
 
-instrs = list(oc.instructions)
-sig = f8(f8,f8)
+print(Double(7))
+Foo = Double(AddOne(Var(float))).flatten()
+print(Foo(1))
+# print(AddPlus2.call(1,2))
 
-from numba import float64, int64, njit
-from numba.types import unicode_type
-from numba.extending import intrinsic
-from cre_cache.Add._3605db842138bca3e50ec979c2277c33285a9fc5d496a5672f2027e7e003368f import call_fndesc as call_fndesc0, call_sig as call_sig0, check_fndesc as check_fndesc0, check_sig as check_sig0
-
-
-def codegen(context, builder, sig, args):
-    [v0, v1] = args
-    c0 = context.get_constant_generic(builder, float64, 2)
-
-    i0 = context.call_internal(builder, call_fndesc0, call_sig0, (v1, c0))
-
-    i1 = context.call_internal(builder, call_fndesc0, call_sig0, (v0, i0))
-
-    return i1
-
-@intrinsic
-def call_intr(ctx, v0, v1):
-    return sig, codegen
-
-@njit(sig)
-def call(v0, v1):
-    return call_intr(v0, v1)
-
-
-print(call(1,2))
+# print(call(1,2))
 
 # from numba import float64, int64, njit
 # from numba.types import unicode_type
@@ -130,7 +111,9 @@ print(call(1,2))
 
 # g = {"instrs": list(oc.instructions),"sig":f8(f8,f8)}
 # l = {}
-source = oc.gen_intrinsic_source()
+
+
+# source = oc.gen_source()
 # print(source)
 # exec(source,g,l)
 # call = l['call']
@@ -252,3 +235,29 @@ source = oc.gen_intrinsic_source()
 #     return multi_arg_intr(1,2,3,"4")
 
 # print(mult_arg())
+from numba.core.imputils import impl_ret_untracked
+from numba.core import cgutils
+@intrinsic
+def _foo(typingctx, a,b):
+    sig = f8(f8,f8)
+    def codegen(context, builder, sig, args):
+        [va, vb] = args
+        [ta, tb] = sig.args
+        a = context.cast(builder, va, ta, sig.return_type)
+        b = context.cast(builder, vb, tb, sig.return_type)
+        with cgutils.if_zero(builder, b): return b
+            # b_ret = impl_ret_untracked(context, builder, sig.return_type, b)
+            
+        # fndesc = add.overloads[(f8,f8)].fndesc
+        # one = context.get_constant_generic(builder,f8,1.0)
+        # ret = context.call_internal(builder, fndesc, f8(f8,f8), (a0,one))
+        res = builder.fdiv(a, b)
+        return res#impl_ret_untracked(context, builder, sig.return_type, res)
+    return sig, codegen
+
+@njit
+def foo(a,b):
+    return _foo(a,b)
+
+print(foo(1.0,2.0))
+print(foo(1,0))

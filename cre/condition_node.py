@@ -367,7 +367,7 @@ class Conditions(structref.StructRefProxy):
     def get_matches(self, kb=None):
         from cre.matching import _get_matches
         context = kb_context()
-        fact_types = tuple([context.fact_types[x.fact_type_name] for x in self.vars if not x.is_not])
+        fact_types = tuple([context.fact_types[x.type_name] for x in self.vars if not x.is_not])
         return _get_matches(self, fact_types, kb=kb)
 
     def link(self,kb):
@@ -493,7 +493,7 @@ def conditions_repr(self,alias=None):
     s += " = "
     for j, v in enumerate(self.vars):
         prefix = "NOT" if(v.is_not) else "Var"
-        s_v = prefix + "(" + v.fact_type_name + ")"
+        s_v = prefix + "(" + v.type_name + ")"
         # : s_v = "NOT(" + s_v +")"
         s += s_v
         if(j < len(self.vars)-1): s += ", "

@@ -207,7 +207,7 @@ def _get_fact_vectors(conds):
     facts = List.empty_list(VectorType)    
 
     for i in range(n_vars):
-        t_id = t_id_map[conds.vars[i].fact_type_name]
+        t_id = t_id_map[conds.vars[i].type_name]
         facts.append(facts_for_t_id(kb_data, t_id))
     return facts
 

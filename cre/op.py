@@ -207,9 +207,9 @@ class Op(structref.StructRefProxy,metaclass=OpMeta):
             return cls.call(*py_args)
         else:
             op_comp = OpComp(cls,*py_args)
-            # op = op_comp.flatten()
-            # op.op_comp = op_comp
-            return op_comp
+            op = op_comp.flatten()
+            op.op_comp = op_comp
+            return op
         # _vars = set()
         # var_map = {}
         # all_const = True

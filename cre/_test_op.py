@@ -71,19 +71,28 @@ print(SumBOOPs(BOOP(1,2),BOOP(3,4)))
 print(Add(Var(float),Add(Var(float),2)))
 # print()
 
-with PrintElapse("--Exec AddPlus2"):
+with PrintElapse("--Def AddPlus2"):
     AddPlus2 = Add(Var(float),Add(Var(float),2))
     print(AddPlus2(1,2))
 
 
-with PrintElapse("--Exec Double"):
+with PrintElapse("--Def Double"):
     x = Var(float)
     Double = Add(x,Add(x,0))
     print(Double(7))
 
-with PrintElapse("--Exec Foo"):
-    Foo = Double(AddOne(Var(float)))
-    print(Foo(1))
+with PrintElapse("--Def DoubleOneMore"):
+    DoubleOneMore = Double(AddOne(Var(float)))
+    print("DoubleOneMore", DoubleOneMore(1))
+
+with PrintElapse("--Def Quadruple"):
+    Quadruple = Double(Double(Var(float)))
+    print("Quadruple", Quadruple(1))
+
+with PrintElapse("--Def SixteenTimes"):
+    SixteenTimes = Quadruple(Quadruple(Var(float)))
+    print(SixteenTimes.name)
+    print("SixteenTimes", SixteenTimes(1))
 
 #_-------------------
 # print(AddPlus2.call(1,2))

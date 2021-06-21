@@ -71,7 +71,7 @@ import dill'''
 call_sig = dill.loads({dill.dumps(cls.call_sig)})
 call = njit(call_sig,cache=True)(dill.loads({cls.call_bytes}))
 # call.enable_caching()
-call_fndesc = call.overloads[call_sig.args].fndesc
+# call_fndesc = call.overloads[call_sig.args].fndesc
 call_addr = _get_wrapper_address(call, call_sig)
 '''
     if(check_needs_jitting):
@@ -79,7 +79,7 @@ call_addr = _get_wrapper_address(call, call_sig)
 check_sig = dill.loads({dill.dumps(cls.check_sig)})
 check = njit(check_sig,cache=True)(dill.loads({cls.check_bytes}))
 # check.enable_caching()
-check_fndesc = check.overloads[check_sig.args].fndesc
+# check_fndesc = check.overloads[check_sig.args].fndesc
 check_addr = _get_wrapper_address(check, check_sig)
 '''
 # arg_offsets = {str(arg_offsets)}
@@ -201,8 +201,8 @@ class Op(structref.StructRefProxy,metaclass=OpMeta):
                     source_to_cache(name,hash_code,source)
 
             with PrintElapse("import_cached"):
-                to_import = ['call','call_addr','call_fndesc'] if check_needs_jitting else []
-                if(check_needs_jitting): to_import += ['check', 'check_addr','check_fndesc']
+                to_import = ['call','call_addr'] if check_needs_jitting else []
+                if(check_needs_jitting): to_import += ['check', 'check_addr']
                 l = import_from_cached(name, hash_code, to_import)
                 # time5 = time.time_ns()/float(1e6)
                 for key, value in l.items():
@@ -212,12 +212,13 @@ class Op(structref.StructRefProxy,metaclass=OpMeta):
         #     cls.call_fndesc = cls.
 
     def __new__(cls,*py_args):
-        if(all([not isinstance(x,(Var,Op,OpComp)) for x in py_args])):
+        if(all([not isinstance(x,(Var,OpMeta,OpComp)) for x in py_args])):
             return cls.call(*py_args)
         else:
             op_comp = OpComp(cls,*py_args)
             # op = op_comp.flatten()
             # op.op_comp = op_comp
+            # return op
             return op_comp
         
 
@@ -330,7 +331,7 @@ class OpComp():
         op_imports = ""
         op_has_check = []
         for i,(op,(_,sig)) in enumerate(ops.items()):
-            to_import = {"call_fndesc" : f'call_fndesc{i}', "call_sig" : f'call_sig{i}',
+            to_import = {"call_sig" : f'call_sig{i}',
                 "call" : f'call{i}'}
             if(hasattr(op,"check")):
                 op_has_check.append(True)

@@ -36,6 +36,16 @@ import inspect, dill, pickle
 from textwrap import dedent
 import time
 
+class PrintElapse():
+    def __init__(self, name):
+        self.name = name
+    def __enter__(self):
+        self.t0 = time.time_ns()/float(1e6)
+    def __exit__(self,*args):
+        self.t1 = time.time_ns()/float(1e6)
+        print(f'{self.name}: {self.t1-self.t0:.2f} ms')
+
+
 def gen_op_source(cls, call_needs_jitting, check_needs_jitting):
     '''Generate source code for the relevant functions of a user defined Op.
        Note: The jitted call() and check() functions are pickled, the bytes dumped  
@@ -43,12 +53,11 @@ def gen_op_source(cls, call_needs_jitting, check_needs_jitting):
         even if globals are used in the function. 
     '''
     arg_types = cls.signature.args
-    print(cls.signature.return_type)
     # arg_imports = "\n".join([gen_fact_import_str(x) for x in arg_types if isinstance(x,Fact)])
     field_dict = {**op_fields_dict,**{f"arg{i}" : t for i,t in enumerate(arg_types)}}
 
-    offsets = get_offsets_from_member_types(field_dict)
-    arg_offsets = offsets[len(op_fields_dict):]
+    # offsets = get_offsets_from_member_types(field_dict)
+    # arg_offsets = offsets[len(op_fields_dict):]
 
     source = \
 f'''from numba import njit, void, u1
@@ -62,7 +71,6 @@ import dill'''
 call_sig = dill.loads({dill.dumps(cls.call_sig)})
 call = njit(call_sig,cache=True)(dill.loads({cls.call_bytes}))
 # call.enable_caching()
-print(call)
 call_fndesc = call.overloads[call_sig.args].fndesc
 call_addr = _get_wrapper_address(call, call_sig)
 '''
@@ -74,9 +82,8 @@ check = njit(check_sig,cache=True)(dill.loads({cls.check_bytes}))
 check_fndesc = check.overloads[check_sig.args].fndesc
 check_addr = _get_wrapper_address(check, check_sig)
 '''
-
+# arg_offsets = {str(arg_offsets)}
     source += f'''
-arg_offsets = {str(arg_offsets)}
 field_dict = {{**op_fields_dict,**{{f"arg{{i}}" : t for i,t in enumerate(call_sig.args)}}}}
 {cls.__name__+'Type'} = OpTypeTemplate([(k,v) for k,v in field_dict.items()]) 
 '''
@@ -126,16 +133,16 @@ def op_ctor(name, return_type_name, arg_type_names, call_ptr=0, call_multi_ptr=0
     st.check_ptr = check_ptr
     return st
 
-def dynam_gen_intrinsic(sig,codegen):
-    l = {}
-    g = {'codegen':codegen, 'sig': sig, 'intrinsic': intrinsic}
-    exec(f'''
-@intrinsic
-def intr_call(typingctx, {",".join([f'a{i}' for i in range(len(sig.args))])}):
-    print(sig, codegen)
-    return sig, codegen
-''',g,l)
-    return l['intr_call']
+# def dynam_gen_intrinsic(sig,codegen):
+#     l = {}
+#     g = {'codegen':codegen, 'sig': sig, 'intrinsic': intrinsic}
+#     exec(f'''
+# @intrinsic
+# def intr_call(typingctx, {",".join([f'a{i}' for i in range(len(sig.args))])}):
+#     print(sig, codegen)
+#     return sig, codegen
+# ''',g,l)
+#     return l['intr_call']
         
 class OpMeta(type):
     def __repr__(cls):
@@ -160,7 +167,7 @@ class Op(structref.StructRefProxy,metaclass=OpMeta):
         # if(not hasattr(cls,"call")):
         assert hasattr(cls,'call'), "Op must have call() defined"
         assert hasattr(cls.call, '__call__'), "call() must be a function"
-        call_needs_jitting = not isinstance(cls.call,Dispatcher)
+        call_needs_jitting = not isinstance(cls.call, Dispatcher)
         check_needs_jitting = False 
 
         has_check = hasattr(cls,"check")
@@ -168,41 +175,43 @@ class Op(structref.StructRefProxy,metaclass=OpMeta):
             check_needs_jitting = not isinstance(cls.check,Dispatcher)
             assert hasattr(cls.check, '__call__'), "check() must be a function"
 
-        time1 = time.time_ns()/float(1e6)
         if(call_needs_jitting): cls.process_method("call", cls.signature)
         
         if(has_check):
             check_sig = u1(*cls.signature.args)
-            if(check_needs_jitting): cls.process_method("check", check_sig)        
+            if(check_needs_jitting):
+                cls.process_method("check", check_sig)        
+                print(cls.check_bytes)
 
-        time2 = time.time_ns()/float(1e6)
-        print(f'2: {time2-time1} ms')
-
-        if(check_needs_jitting or check_needs_jitting):
+        if(call_needs_jitting or check_needs_jitting):
             name = cls.__name__
-            hash_code = unique_hash([cls.signature, cls.call_bytes, cls.check_bytes])
+
+            # print(cls.call_bytes)
+            with PrintElapse("gen_hash"):
+                hash_code = unique_hash([cls.signature, cls.call_bytes,
+                    cls.check_bytes if has_check else None])
+
             cls.hash_code = hash_code
-            # print(hash_code)
+            print(hash_code)
             # print(get_cache_path(name, hash_code))
             if(not source_in_cache(name, hash_code) or getattr(cls,'cache',True) == False):
-                source = gen_op_source(cls, check_needs_jitting, check_needs_jitting)
-                source_to_cache(name,hash_code,source)
+                with PrintElapse("gen_source"):
+                    source = gen_op_source(cls, call_needs_jitting, check_needs_jitting)
+                with PrintElapse("source_to_cache"):
+                    source_to_cache(name,hash_code,source)
 
-            time3 = time.time_ns()/float(1e6)
-            print(f'3: {time3-time2} ms')
-            to_import = ['call','call_addr','call_fndesc'] if check_needs_jitting else []
-            if(check_needs_jitting): to_import += ['check', 'check_addr','check_fndesc']
-            l = import_from_cached(name, hash_code, to_import)
-            time4 = time.time_ns()/float(1e6)
-            print(f'4: {time4-time3} ms')
-            for key, value in l.items():
-                setattr(cls, key, value)
+            with PrintElapse("import_cached"):
+                to_import = ['call','call_addr','call_fndesc'] if check_needs_jitting else []
+                if(check_needs_jitting): to_import += ['check', 'check_addr','check_fndesc']
+                l = import_from_cached(name, hash_code, to_import)
+                # time5 = time.time_ns()/float(1e6)
+                for key, value in l.items():
+                    setattr(cls, key, value)
 
         # if(not check_needs_jitting):
         #     cls.call_fndesc = cls.
 
     def __new__(cls,*py_args):
-        print("py_args",py_args)
         if(all([not isinstance(x,(Var,Op,OpComp)) for x in py_args])):
             return cls.call(*py_args)
         else:
@@ -210,60 +219,10 @@ class Op(structref.StructRefProxy,metaclass=OpMeta):
             # op = op_comp.flatten()
             # op.op_comp = op_comp
             return op_comp
-        # _vars = set()
-        # var_map = {}
-        # all_const = True
-        # # any_const = True
-        # # var_map = Dict.empty(i8, unicode_type)
-        # unrolled_vars = []
-        # for x in py_args:
-        #     if(isinstance(x,Var)):
-        #         unrolled_vars.append(x)
-        #         var_map[x] = x.alias
-        #         all_const = False
-        #     elif(isinstance(x,Op)):
-        #         unrolled_vars += [x for x in x.var_map.values()]
-
-
-        # print(_vars)
-
-        # is_const = [not isinstance(x,Var) ]
-        # assert len(py_args) == len(cls.signature.args)
-        # if(all_const):
-        #     return cls.call(*py_args)
-        # else:
-        #     return        
-# #         elif(any(is_const)):   
-# #             # If any constants are passed then redefine a jitted
-# #             #   function where the constants are injected into the llvm. 
-# #             sig, codegen = cls.gen_sig_codegen(py_args)
-# #             print(sig)
-# #             py_args = None
-# #             call_intr = dynam_gen_intrinsic(sig, codegen)
-# #             l = {}
-# #             cache_safe_exec(f'''
-# # @njit(sig,cache=False)
-# # def call(a):
-# #     return call_intr(a)
-# #                 ''', l, {"njit": njit, "sig":sig, "call_intr": call_intr}
-# #             )
-# #             call = l['call']
-            
-# #             call_addr = 0#_get_wrapper_address(call, sig)
-# #             # self.call = call
-#         else:
-#             # Otherwise 
-#             sig, codegen = cls.signature, None
-#             call_addr = cls.call_addr
-
-#         st = op_ctor(cls.__name__,
-#                     str(sig.return_type),
-#                     List([str(x) for x in sig.args]),
-#                     call_addr)
-#         st.call = call
-#         return st
+        
 
     def __call__(self,*args):
+        print("CALLed")
         return self.call(*args)
 
 
@@ -327,9 +286,9 @@ class OpComp():
         self.op = op
         self.vars = _vars
         self.args = args
-        print("ARGS", args,)
         self.constants = constants
         self.instructions = instructions
+        print("DONE:", self.name)
         
         # print("-----START------")
         # print(list(self.vars.keys()))
@@ -350,10 +309,12 @@ class OpComp():
     
     def gen_source(self, hash_code, ind='    '):
         names = {} 
+        # call_body = ''
         shared_body = ''
         for i,(c,t) in enumerate(self.constants.items()):
             names[c] = f'c{i}'
-            shared_body +=  ind+f'c{i} = context.get_constant_generic(builder, {t}, {repr(c)})\n'
+            # call_body +=  ind+f'c{i} = context.get_constant_generic(builder, {t}, {repr(c)})\n'
+            shared_body +=  ind+f"c{i} = {c!r}\n"
 
         var_names = []
         for i,(v,t) in enumerate(self.vars.items()):
@@ -367,25 +328,46 @@ class OpComp():
         ops = self.used_ops
             
         op_imports = ""
+        op_has_check = []
         for i,(op,(_,sig)) in enumerate(ops.items()):
-            op_imports += gen_import_str(op.__name__, op.hash_code,
-                {"call_fndesc" : f'call_fndesc{i}', "call_sig" : f'call_sig{i}',
-                "check_fndesc" : f'check_fndesc{i}', "check_sig" : f'check_sig{i}'}) + "\n"
+            to_import = {"call_fndesc" : f'call_fndesc{i}', "call_sig" : f'call_sig{i}',
+                "call" : f'call{i}'}
+            if(hasattr(op,"check")):
+                op_has_check.append(True)
+                to_import.update({"check" : f'check{i}', "check_sig" : f'check_sig{i}'})
+            else:
+                op_has_check.append(False)
+
+            op_imports += gen_import_str(op.__name__, op.hash_code, to_import) + "\n"
+
+                # "check_fndesc" : f'check_fndesc{i}', "check_sig" : f'check_sig{i}'}) + "\n"
+        has_check = any(op_has_check)
 
         call_body = shared_body
         for i,instr in enumerate(self.instructions):
             j,_ = ops[instr.op]
             instr_names = "".join([names[x]+", " for x in instr.args])
-            call_body += f'''{ind}i{i} = context.call_internal(builder, call_fndesc{j}, call_sig{j}, ({instr_names}))\n'''
+            # call_body += f'''{ind}i{i} = context.call_internal(builder, call_fndesc{j}, call_sig{j}, ({instr_names}))\n'''
+            call_body += f'''{ind}i{i} = call{j}({instr_names})\n'''
 
-        check_body = shared_body
-        for i,instr in enumerate(self.instructions):
-            j,_ = ops[instr.op]
-            instr_names = "".join([names[x]+", " for x in instr.args])
-            check_body += f'''{ind}k{i} = context.call_internal(builder, check_fndesc{j}, call_sig{j}, ({instr_names}))\n'''
-            check_body += f'''{ind}with cgutils.if_zero(builder, k{i}): return k{i}\n'''
-            if(i < len(self.instructions)-1):
-                check_body += f'''{ind}i{i} = context.call_internal(builder, call_fndesc{j}, call_sig{j}, ({instr_names}))\n'''
+        # check_body = ""
+        if(has_check):
+            check_body = shared_body
+            final_k = ""
+            for i,instr in enumerate(self.instructions):
+                j,_ = ops[instr.op]
+                instr_names = "".join([names[x]+", " for x in instr.args])
+
+                # check_body += f'{ind}c{i} = {repr(c)!r}\n'
+                if(op_has_check[j]):
+                    check_body += f'''{ind}k{i} = check{j}({instr_names})\n'''
+                    check_body += f'''{ind}if(not k{i}): return 0\n'''
+                    final_k = f'k{i}'
+                # check_body += f'''{ind}k{i} = context.call_internal(builder, check_fndesc{j}, call_sig{j}, ({instr_names}))\n'''
+                # check_body += f'''{ind}with cgutils.if_zero(builder, k{i}): return k{i}\n'''
+                if(i < len(self.instructions)-1):
+                    check_body += f'''{ind}i{i} = call{j}({instr_names})\n'''
+                    # check_body += f'''{ind}i{i} = context.call_internal(builder, call_fndesc{j}, call_sig{j}, ({instr_names}))\n'''
 
         return_type = list(self.instructions.values())[-1].return_type
         call_sig = return_type(*self.vars.values())
@@ -404,39 +386,25 @@ import dill
 call_sig = dill.loads({dill.dumps(call_sig)})
 check_sig = dill.loads({dill.dumps(check_sig)})
 
-def call_codegen(context, builder, sig, args):
-    [{var_names}] = args
+@njit(call_sig,cache=True)
+def call({var_names}):
 {call_body}
 {ind}return i{len(self.instructions)-1}
 
-# def check_codegen(context, builder, sig, args):
-#     [{var_names}] = args
-# {check_body}
-# {ind}return k{len(self.instructions)-1}
 
-@intrinsic
-def call_intr(ctx, {var_names}):
-    return call_sig, call_codegen
-
-# @intrinsic
-# def check_intr(ctx, {var_names}):
-#     return check_sig, check_codegen
-
-@njit(call_sig,cache=True)
-def call({var_names}):
-    return call_intr({var_names})
-
-# @njit(check_sig,cache=True)
-# def check({var_names}):
-#     return check_intr({var_names})
-
-call_fndesc = call.overloads[call_sig.args].fndesc
-check_fndesc = 0#call.overloads[check_sig.args].fndesc
+'''
+        if(has_check): source +=f'''
+@njit(check_sig,cache=True)
+def check({var_names}):
+{check_body}
+{ind}return {final_k}
+'''
+        source += f'''
 
 class GenerateOp(Op):
     signature = call_sig
     call = call
-    # check = check
+    {"check = check" if(has_check) else ""}
     hash_code = {hash_code!r}
 '''
         return source
@@ -444,18 +412,14 @@ class GenerateOp(Op):
     def flatten(self):
         if(not hasattr(self,'_generate_op')):
             hash_code = unique_hash([self.name,*[(x.__name__,x.hash_code) for x in self.used_ops]])
+            print("HAH", hash_code)
             if(not source_in_cache('GenerateOp', hash_code)):
+                
                 source = self.gen_source(hash_code)
                 source_to_cache('GenerateOp', hash_code, source)
             l = import_from_cached('GenerateOp', hash_code, ['GenerateOp'])
             self._generate_op = l['GenerateOp']
         return self._generate_op
-
-        
-
-
-
-
 
     def __hash__(self):
         return hash(self.name)
@@ -467,8 +431,9 @@ class GenerateOp(Op):
         return self.name
 
     def __call__(self,*args):
-        print("HASH",self.flatten().hash_code)
-        return self.flatten()(*args)
+        flattened_inst = self.flatten()
+        print("FALT")
+        return flattened_inst(*args)
 
 
 

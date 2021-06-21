@@ -7,61 +7,73 @@ from cre.caching import cache_safe_exec
 import time
 
 
+class PrintElapse():
+    def __init__(self, name):
+        self.name = name
+    def __enter__(self):
+        self.t0 = time.time_ns()/float(1e6)
+    def __exit__(self,*args):
+        self.t1 = time.time_ns()/float(1e6)
+        print(f'{self.name}: {self.t1-self.t0:.2f} ms')
+
 BOOP, BOOPType = define_fact("BOOP", {"A" : f8, "B": f8})
 
-time1 = time.time_ns()/float(1e6)
-print(f8(f8,f8))
-class Add(Op):
-    signature = f8(f8,f8)
-    def check(a,b):
-        return a > 0
-    def call(a,b):
-        return a + b
-time2 = time.time_ns()/float(1e6)
-print("%s: %.4f ms" % ("def Add:", time2-time1))
+# time1 = time.time_ns()/float(1e6)
+# print(f8(f8,f8))
+with PrintElapse("--Def Add"):
+    class Add(Op):
+        signature = f8(f8,f8)
+        # def check(a,b):
+        #     return a > 0
+        def call(a,b):
+            return a + b
+# time2 = time.time_ns()/float(1e6)
+# print("%s: %.4f ms" % ("def Add:", time2-time1))
 
 v1 = Var(float,'v1')
 v2 = Var(float,'v2')
 a = Add(v1,v2)
 
-one = 1
-class AddOne(Op):
-    signature = f8(f8)
-    def check(a):
-        return a > 0
-    def call(a):
-        return a + one
+with PrintElapse("--Def AddOne"):
+    one = 1
+    class AddOne(Op):
+        signature = f8(f8)
+        def check(a):
+            return a > 0
+        def call(a):
+            return a + one
 # print("AddOne",AddOne(1).call())
 # print(a(1))
 
 
-time1 = time.time_ns()/float(1e6)
-class SumBOOPs(Op):
-    signature = BOOPType(BOOPType,BOOPType)
-    def check(a,b):
-        return a.A > 0
-    def call(a,b):
-        return BOOP(a.A + b.A, a.B + b.B)
-time2 = time.time_ns()/float(1e6)
-print("%s: %.4f ms" % ("def SumBOOPs:", time2-time1))
+# time1 = time.time_ns()/float(1e6)
+with PrintElapse("--Def SumBOOPs"):
+    class SumBOOPs(Op):
+        signature = BOOPType(BOOPType,BOOPType)
+        # def check(a,b):
+        #     return a.A > 0
+        def call(a,b):
+            return BOOP(a.A + b.A, a.B + b.B)
+# time2 = time.time_ns()/float(1e6)
+# print("%s: %.4f ms" % ("def SumBOOPs:", time2-time1))
 
 print(Add.call)
 print(Add.call(1,2))
-print(Add.check(1,2))
+# print(Add.check(1,2))
 print(Add(1,2))
 
 print("----")
 print(SumBOOPs.call(BOOP(1,2),BOOP(3,4)))
-print(SumBOOPs.check(BOOP(1,2),BOOP(3,4)))
+# print(SumBOOPs.check(BOOP(1,2),BOOP(3,4)))
 print(SumBOOPs(BOOP(1,2),BOOP(3,4)))
 
 
 print(Add(Var(float),Add(Var(float),2)))
 # print()
-
 AddPlus2 = Add(Var(float),Add(Var(float),2))
-print("<<<",AddPlus2)
-print(AddPlus2(1,2))
+
+with PrintElapse("--Exec AddPlus2"):
+    print(AddPlus2(1,2))
 
 x = Var(float)
 Double = Add(x,Add(x,0))
@@ -69,6 +81,8 @@ Double = Add(x,Add(x,0))
 print(Double(7))
 Foo = Double(AddOne(Var(float)))
 print(Foo(1))
+
+#_-------------------
 # print(AddPlus2.call(1,2))
 
 # print(call(1,2))

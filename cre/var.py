@@ -82,7 +82,7 @@ class Var(structref.StructRefProxy):
         else:
             type_name = str(typ)
         
-        print(repr(type_name))
+        # print(repr(type_name))
         typ_ref = types.TypeRef(typ)
 
         if(getenv("CRE_SPECIALIZE_VAR_TYPE",default=False)):

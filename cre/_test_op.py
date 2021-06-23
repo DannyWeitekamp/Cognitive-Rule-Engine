@@ -50,8 +50,8 @@ with PrintElapse("--Def AddOne"):
 with PrintElapse("--Def SumBOOPs"):
     class SumBOOPs(Op):
         signature = BOOPType(BOOPType,BOOPType)
-        # def check(a,b):
-        #     return a.A > 0
+        def check(a,b):
+            return a.A > 0
         def call(a,b):
             return BOOP(a.A + b.A, a.B + b.B)
 # time2 = time.time_ns()/float(1e6)

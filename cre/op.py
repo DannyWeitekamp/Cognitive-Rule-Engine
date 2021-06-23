@@ -15,7 +15,7 @@ from cre.structref import define_structref, define_structref_template
 from cre.kb import KnowledgeBaseType, KnowledgeBase, facts_for_t_id, fact_at_f_id
 # from cre.fact import define_fact, BaseFactType, cast_fact, DeferredFactRefType, Fact
 from cre.utils import (_struct_from_meminfo, _meminfo_from_struct, _cast_structref, cast_structref, decode_idrec, lower_getattr, _struct_from_pointer,  lower_setattr, lower_getattr,
-                       _pointer_from_struct, _decref_pointer, _incref_pointer, _incref_structref)
+                       _pointer_from_struct, _decref_pointer, _incref_pointer, _incref_structref, _pointer_from_struct_incref)
 from cre.utils import assign_to_alias_in_parent_frame
 from cre.subscriber import base_subscriber_fields, BaseSubscriber, BaseSubscriberType, init_base_subscriber, link_downstream
 from cre.vector import VectorType
@@ -70,16 +70,12 @@ import dill'''
         source +=f'''
 call_sig = dill.loads({dill.dumps(cls.call_sig)})
 call = njit(call_sig,cache=True)(dill.loads({cls.call_bytes}))
-# call.enable_caching()
-# call_fndesc = call.overloads[call_sig.args].fndesc
 call_addr = _get_wrapper_address(call, call_sig)
 '''
     if(check_needs_jitting):
         source += f'''
 check_sig = dill.loads({dill.dumps(cls.check_sig)})
 check = njit(check_sig,cache=True)(dill.loads({cls.check_bytes}))
-# check.enable_caching()
-# check_fndesc = check.overloads[check_sig.args].fndesc
 check_addr = _get_wrapper_address(check, check_sig)
 '''
 # arg_offsets = {str(arg_offsets)}
@@ -106,9 +102,10 @@ op_fields_dict = {
     "var_map" : DictType(i8, unicode_type),
     "inv_var_map" : DictType(unicode_type, i8),
     "return_type_name" : unicode_type,
-    "call_ptr" : i8,
-    "call_multi_ptr" : i8,
-    "check_ptr" : i8,
+    "arg_type_names" : ListType(unicode_type),
+    "call_addr" : i8,
+    "call_multi_addr" : i8,
+    "check_addr" : i8,
     
     # "arg_types" : types.Any,
     # "out_type" : types.Any,
@@ -122,16 +119,104 @@ class OpTypeTemplate(types.StructRef):
 
 GenericOpType = OpTypeTemplate([(k,v) for k,v in op_fields_dict.items()])
 
+
 @njit(cache=True)
-def op_ctor(name, return_type_name, arg_type_names, call_ptr=0, call_multi_ptr=0, check_ptr=0):
+def var_to_ptr(x):
+    return _pointer_from_struct_incref(x)
+
+def new_var_ptrs_from_types(types):
+    ptrs = np.empty(len(types), dtype=np.int64)
+    for i, t in enumerate(types):
+        ptrs[i] = var_to_ptr(Var(t))
+    return ptrs
+
+@njit(cache=True)
+def fill_empty_aliases(var_ptrs):
+    _vars = Dict.empty(i8, GenericVarType)
+    temp_inv_var_map = Dict.empty(unicode_type, i8)
+    
+    n_auto_gen = 0
+    for var_ptr in var_ptrs:
+        if(var_ptr not in _vars):
+            var = _struct_from_pointer(GenericVarType, var_ptr)
+            _vars[var_ptr] = var
+            
+    for var in _vars.values():
+        if(var.alias != ""):
+            if(var.alias not in temp_inv_var_map):
+                temp_inv_var_map[var.alias] = var_ptr
+            else:
+                raise NameError("Duplicate Var alias.")
+        else:
+            n_auto_gen += 1
+        
+    generated_aliases = List.empty_list(unicode_type)
+    ascii_code = 97# i.e. 'a'
+    bad_aliases = ['i','j','k','o','I','J','K','O']
+    for i in range(n_auto_gen):
+        alias = chr(ascii_code)
+        while(alias in temp_inv_var_map or alias in bad_aliases):
+            ascii_code += 1
+            alias = chr(ascii_code)
+        generated_aliases.append(alias)
+
+    j = 0
+    for var in _vars.values():
+        if(var.alias == ""):
+            var.alias = generated_aliases[j]; j+=1;
+        
+
+
+
+@njit(cache=True)
+def op_ctor(name, return_type_name, var_ptrs, call_addr=0, call_multi_addr=0, check_addr=0):
     st = new(GenericOpType)
     st.name = name
     st.return_type_name = return_type_name
-    st.arg_type_names = arg_type_names
-    st.call_ptr = call_ptr
-    st.call_multi_ptr = call_multi_ptr
-    st.check_ptr = check_ptr
+
+    st.arg_type_names = List.empty_list(unicode_type)
+    st.var_map = Dict.empty(i8, unicode_type)
+    st.inv_var_map = Dict.empty(unicode_type, i8)
+
+    fill_empty_aliases(var_ptrs)
+
+    nxt_alias_code = 97 # i.e. 'a'
+    nxt_alias_chr = chr(nxt_alias_code)
+    for var_ptr in var_ptrs:
+        var = _struct_from_pointer(GenericVarType, var_ptr)
+        st.var_map[var_ptr] = var.alias
+        st.inv_var_map[var.alias] = var_ptr
+        
+        # st.arg_type_names.append(var.type_name)
+        # if(var.alias != ''):
+        #     alias = var.alias
+        #     while(alias in st.inv_var_map):
+        #         alias = "_" + alias
+        # else:
+        #     while(nxt_alias_chr in st.inv_var_map):
+        #         nxt_alias_code += 1; nxt_alias_chr = chr(nxt_alias_code)
+        #     alias = nxt_alias_chr
+        #     nxt_alias_code += 1; nxt_alias_chr = chr(nxt_alias_code)
+        # st.var_map[var_ptr] = alias
+        # if(alias not in st.inv_var_map):
+        #     st.inv_var_map[alias] = var_ptr
+        # else:
+        #     raise Exception("Unresolved reuse of Var alias.")
+    
+    st.call_addr = call_addr
+    st.call_multi_addr = call_multi_addr
+    st.check_addr = check_addr
     return st
+
+
+@njit(cache=True)
+def op_str(st):
+    s = st.name + "("
+    for i,alias in enumerate(st.inv_var_map):
+        s += alias
+        if(i < len(st.inv_var_map)-1): s += ","
+    return s + ")"
+
 
 # def dynam_gen_intrinsic(sig,codegen):
 #     l = {}
@@ -143,10 +228,95 @@ def op_ctor(name, return_type_name, arg_type_names, call_ptr=0, call_multi_ptr=0
 #     return sig, codegen
 # ''',g,l)
 #     return l['intr_call']
+
+# @njit(cache=True)
+# def op_ctor(name):
+#     st = new(GenericOpType)
+#     st.name = name
+#     return st
+
         
 class OpMeta(type):
     def __repr__(cls):
         return cls.__name__ + f'({",".join(["?"] * len(cls.signature.args))})'
+
+    # This is similar to defining __init_subclass__ in Op inside except we can
+    #    return whatever we want
+    def __new__(cls, *args):
+        if(args[0] == "Op"):
+            return super().__new__(cls,*args)
+        members = args[2]
+        # print(members)
+
+        has_check = 'check' in members
+        assert 'call' in members, "Op must have call() defined"
+        assert hasattr(members['call'], '__call__'), "call() must be a function"
+        assert 'signature' in members, "Op must have signature"
+        assert not (has_check and not hasattr(members['check'], '__call__')), "check() must be a function"
+        
+        # see if call/check etc. are raw python functions and need to be wrapped in @jit 
+        call_needs_jitting = not isinstance(members['call'], Dispatcher)
+        check_needs_jitting = has_check and (not isinstance(members['check'],Dispatcher))
+        
+        # cls is the class of the user defined Op (i.e. Add(a,b))
+        cls = super().__new__(cls,*args) 
+        if(call_needs_jitting): cls.process_method("call", cls.signature)
+        
+        if(has_check):
+            if(check_needs_jitting): cls.process_method("check", u1(*cls.signature.args))        
+                
+        if(call_needs_jitting or check_needs_jitting):
+            name = cls.__name__
+
+            # print(cls.call_bytes)
+            with PrintElapse("gen_hash"):
+                hash_code = unique_hash([cls.signature, cls.call_bytes,
+                    cls.check_bytes if has_check else None])
+
+            cls.hash_code = hash_code
+            # print(hash_code)
+            # print(get_cache_path(name, hash_code))
+            if(not source_in_cache(name, hash_code) or getattr(cls,'cache',True) == False):
+                with PrintElapse("gen_source"):
+                    source = gen_op_source(cls, call_needs_jitting, check_needs_jitting)
+                with PrintElapse("source_to_cache"):
+                    source_to_cache(name,hash_code,source)
+
+            with PrintElapse("import_cached"):
+                to_import = ['call','call_addr'] if call_needs_jitting else []
+                if(check_needs_jitting): to_import += ['check', 'check_addr']
+                l = import_from_cached(name, hash_code, to_import)
+                # time5 = time.time_ns()/float(1e6)
+                for key, value in l.items():
+                    setattr(cls, key, value)
+
+        if(not call_needs_jitting): 
+            cls.call_sig = cls.signature
+            cls.call_addr = _get_wrapper_address(cls.call,cls.call_sig)
+
+        if(not check_needs_jitting and has_check):
+            cls.check_sig = u1(*cls.signature.args)
+            cls.check_addr = _get_wrapper_address(cls.check,cls.check_sig)
+
+        # print("L", l, to_import)
+        with PrintElapse("new_var_ptrs"):
+            new_var_ptrs = new_var_ptrs_from_types(cls.call_sig.args)
+        with PrintElapse("build_instance"):
+            sig = cls.signature
+            op_inst = op_ctor(
+                cls.__name__,
+                str(sig.return_type),
+                new_var_ptrs,#new_var_ptrs_from_types(cls.call_sig.args),
+                # List([str(x) for x in sig.args]),
+                call_addr=cls.call_addr,
+                check_addr=cls.__dict__.get('check_addr',0),
+                )
+        op_inst.__class__ = cls
+        # print("---------------",op_inst)
+        # print(op_inst.call_sig)
+
+        return cls
+
 
 
 class Op(structref.StructRefProxy,metaclass=OpMeta):
@@ -161,71 +331,33 @@ class Op(structref.StructRefProxy,metaclass=OpMeta):
         # setattr(cls, name+"_fndesc", jitted_func.overloads[sig.args].fndesc)
         # setattr(cls, name+"_addr", _get_wrapper_address(jitted_func, sig))
 
-    def __init_subclass__(cls, **kwargs):
-        ''' Define a rule, it must have when/conds and then defined'''
-        super().__init_subclass__(**kwargs)
+    # def __init_subclass__(cls, **kwargs):
+    #     ''' Define a rule, it must have when/conds and then defined'''
+    #     super().__init_subclass__(**kwargs)
         # if(not hasattr(cls,"call")):
-        assert hasattr(cls,'call'), "Op must have call() defined"
-        assert hasattr(cls.call, '__call__'), "call() must be a function"
-        call_needs_jitting = not isinstance(cls.call, Dispatcher)
-        check_needs_jitting = False 
-
-        has_check = hasattr(cls,"check")
-        if(has_check):
-            check_needs_jitting = not isinstance(cls.check,Dispatcher)
-            assert hasattr(cls.check, '__call__'), "check() must be a function"
-
-        if(call_needs_jitting): cls.process_method("call", cls.signature)
         
-        if(has_check):
-            check_sig = u1(*cls.signature.args)
-            if(check_needs_jitting):
-                cls.process_method("check", check_sig)        
-                print(cls.check_bytes)
-
-        if(call_needs_jitting or check_needs_jitting):
-            name = cls.__name__
-
-            # print(cls.call_bytes)
-            with PrintElapse("gen_hash"):
-                hash_code = unique_hash([cls.signature, cls.call_bytes,
-                    cls.check_bytes if has_check else None])
-
-            cls.hash_code = hash_code
-            print(hash_code)
-            # print(get_cache_path(name, hash_code))
-            if(not source_in_cache(name, hash_code) or getattr(cls,'cache',True) == False):
-                with PrintElapse("gen_source"):
-                    source = gen_op_source(cls, call_needs_jitting, check_needs_jitting)
-                with PrintElapse("source_to_cache"):
-                    source_to_cache(name,hash_code,source)
-
-            with PrintElapse("import_cached"):
-                to_import = ['call','call_addr'] if check_needs_jitting else []
-                if(check_needs_jitting): to_import += ['check', 'check_addr']
-                l = import_from_cached(name, hash_code, to_import)
-                # time5 = time.time_ns()/float(1e6)
-                for key, value in l.items():
-                    setattr(cls, key, value)
 
         # if(not check_needs_jitting):
         #     cls.call_fndesc = cls.
 
-    def __new__(cls,*py_args):
+    def __new__(cls,*py_args,return_instance=False):
+        if(return_instance): return super().__new__(Op,cls)
         if(all([not isinstance(x,(Var,OpMeta,OpComp)) for x in py_args])):
             return cls.call(*py_args)
         else:
             op_comp = OpComp(cls,*py_args)
-            # op = op_comp.flatten()
-            # op.op_comp = op_comp
-            # return op
-            return op_comp
+            op = op_comp.flatten()
+            op.op_comp = op_comp
+            return op
+            # return op_comp
         
 
     def __call__(self,*args):
         print("CALLed")
         return self.call(*args)
 
+    def __str__(self):
+        return op_str(self)
 
     # @classmethod
     # def gen_sig_codegen(cls, py_args, fn_choice='call'):
@@ -260,11 +392,15 @@ class Op(structref.StructRefProxy,metaclass=OpMeta):
 define_boxing(OpTypeTemplate,Op)   
 
 class OpComp():
+    # @classmethod
+    # def _new_backdoor(cls):
+    #     super().__
     def __init__(self,op,*py_args):
         _vars = {}
         constants = {}
         instructions = {}
         args = []
+
         for i, x in enumerate(py_args):
             if(isinstance(x,OpMeta)): x = x.op_comp
             if(isinstance(x,OpComp)):
@@ -280,7 +416,7 @@ class OpComp():
                 else:
                     constants[x] = op.signature.args[i]
             args.append(x)
-
+        print("VARS", _vars)
         self.name = f"{op.__name__}({', '.join([repr(x) for x in py_args])})"  
         instructions[self] = op.signature
 
@@ -413,7 +549,7 @@ class GenerateOp(Op):
     def flatten(self):
         if(not hasattr(self,'_generate_op')):
             hash_code = unique_hash([self.name,*[(x.__name__,x.hash_code) for x in self.used_ops]])
-            print("HAH", hash_code)
+            # print("HAH", hash_code)
             if(not source_in_cache('GenerateOp', hash_code)):
                 
                 source = self.gen_source(hash_code)
@@ -433,7 +569,7 @@ class GenerateOp(Op):
 
     def __call__(self,*args):
         flattened_inst = self.flatten()
-        print("FALT")
+        # print("FALT")
         return flattened_inst(*args)
 
 
@@ -478,3 +614,5 @@ class GenerateOp(Op):
 #  We need to be able to do things like:
 #    -Add(Add(x,y),z)
 #    -Add(Add(x,y),x)
+
+

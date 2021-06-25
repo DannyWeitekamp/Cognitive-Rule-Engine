@@ -241,6 +241,9 @@ class Var(structref.StructRefProxy):
 
     def __hash__(self):
         ptr = get_var_ptr(self)
+        return ptr
+
+    def get_ptr(self):
         return get_var_ptr(self)
 
 @njit(cache=True)    

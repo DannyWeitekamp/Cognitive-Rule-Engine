@@ -37,7 +37,6 @@ import inspect, dill, pickle
 from textwrap import dedent
 
 import time
-
 class PrintElapse():
     def __init__(self, name):
         self.name = name
@@ -131,10 +130,8 @@ def new_var_ptrs_from_types(types, names):
         and output a ptr_array of their memory addresses.'''
     #TODO: Op should have deconstructor so these are decrefed.
     ptrs = np.empty(len(types), dtype=np.int64)
-    # ascii_code = 97
     for i, t in enumerate(types):
-        ptrs[i] = var_to_ptr(Var(t,names[i]))#chr(ascii_code)
-        # ascii_code +=1
+        ptrs[i] = var_to_ptr(Var(t,names[i]))
     return ptrs
 
 @njit(cache=True)
@@ -170,9 +167,6 @@ def gen_placeholder_aliases(var_ptrs):
 
     return generated_aliases
 
-
-
-
 @njit(cache=True)
 def op_ctor(name, return_type_name, var_ptrs, call_addr=0, call_multi_addr=0, check_addr=0):
     st = new(GenericOpType)
@@ -193,61 +187,25 @@ def op_ctor(name, return_type_name, var_ptrs, call_addr=0, call_multi_addr=0, ch
         
         st.var_map[var_ptr] = alias
         st.inv_var_map[alias] = var_ptr
-        
-        # st.arg_type_names.append(var.type_name)
-        # if(var.alias != ''):
-        #     alias = var.alias
-        #     while(alias in st.inv_var_map):
-        #         alias = "_" + alias
-        # else:
-        #     while(nxt_alias_chr in st.inv_var_map):
-        #         nxt_alias_code += 1; nxt_alias_chr = chr(nxt_alias_code)
-        #     alias = nxt_alias_chr
-        #     nxt_alias_code += 1; nxt_alias_chr = chr(nxt_alias_code)
-        # st.var_map[var_ptr] = alias
-        # if(alias not in st.inv_var_map):
-        #     st.inv_var_map[alias] = var_ptr
-        # else:
-        #     raise Exception("Unresolved reuse of Var alias.")
-    
+            
     st.call_addr = call_addr
     st.call_multi_addr = call_multi_addr
     st.check_addr = check_addr
     return st
 
-
-
-
-
-# def dynam_gen_intrinsic(sig,codegen):
-#     l = {}
-#     g = {'codegen':codegen, 'sig': sig, 'intrinsic': intrinsic}
-#     exec(f'''
-# @intrinsic
-# def intr_call(typingctx, {",".join([f'a{i}' for i in range(len(sig.args))])}):
-#     print(sig, codegen)
-#     return sig, codegen
-# ''',g,l)
-#     return l['intr_call']
-
-# @njit(cache=True)
-# def op_ctor(name):
-#     st = new(GenericOpType)
-#     st.name = name
-#     return st
-
         
 class OpMeta(type):
+    ''' A the metaclass for op. Useful for singleton generation.
+    '''
     def __repr__(cls):
         return cls.__name__ + f'({",".join(["?"] * len(cls.signature.args))})'
 
     # This is similar to defining __init_subclass__ in Op inside except we can
-    #    return whatever we want
+    #    return whatever we want. In this case we return a singleton instance.
     def __new__(meta_cls, *args):
         if(args[0] == "Op"):
             return super().__new__(meta_cls,*args)
         members = args[2]
-        # print(members)
 
         has_check = 'check' in members
         assert 'call' in members, "Op must have call() defined"
@@ -265,34 +223,31 @@ class OpMeta(type):
         
         if(has_check):
             if(check_needs_jitting): cls.process_method("check", u1(*cls.signature.args))        
-                
+        
+        # If either call or check needs to be jitted then generate source code
+        #  to do the jitting and put it in the cache. Or retrieve if already
+        #  defined.  This way jit(cache=True) can reliably re-retreive.
         if(call_needs_jitting or check_needs_jitting):
             name = cls.__name__
-
-            # print(cls.call_bytes)
-            # with PrintElapse("gen_hash"):
             hash_code = unique_hash([cls.signature, cls.call_bytes,
                 cls.check_bytes if has_check else None])
 
             cls.hash_code = hash_code
-            # print(hash_code)
-            # print(get_cache_path(name, hash_code))
             if(not source_in_cache(name, hash_code) or getattr(cls,'cache',True) == False):
                 source = gen_op_source(cls, call_needs_jitting, check_needs_jitting)
                 source_to_cache(name,hash_code,source)
 
-            # with PrintElapse("import_cached"):
             to_import = ['call','call_addr'] if call_needs_jitting else []
             if(check_needs_jitting): to_import += ['check', 'check_addr']
             l = import_from_cached(name, hash_code, to_import)
-            # time5 = time.time_ns()/float(1e6)
             for key, value in l.items():
                 setattr(cls, key, value)
 
-        # Make it so that self isn't the first argument for call/check
+        # Make static so that self isn't the first argument for call/check.
         cls.call = staticmethod(cls.call)
         if(has_check): cls.check = staticmethod(cls.check)
 
+        # Get store the addresses for call/check
         if(not call_needs_jitting): 
             cls.call_sig = cls.signature
             cls.call_addr = _get_wrapper_address(cls.call,cls.call_sig)
@@ -301,22 +256,22 @@ class OpMeta(type):
             cls.check_sig = u1(*cls.signature.args)
             cls.check_addr = _get_wrapper_address(cls.check,cls.check_sig)
 
+        #Handle Shorthands
+        if(hasattr(cls,'short_hand') and 
+            not isinstance(cls.short_hand,dict)):
+            cls.short_hand = {'python' : cls.short_hand}
 
         if(cls.__name__ != "__GenerateOp__"):
             return cls.make_singleton_inst()
 
-
-        # print("---------------",op_inst)
-        # print(op_inst.call_sig)
-
         return cls
-
-    
-
-
 
 
 class Op(structref.StructRefProxy,metaclass=OpMeta):
+    ''' Base class for an functional operation. Custom operations can be
+        created by subclassing Op and defining a signature, call(), and 
+        optional check() method. 
+    '''
     @classmethod
     def process_method(cls,name,sig):
         py_func = getattr(cls,name)
@@ -328,14 +283,15 @@ class Op(structref.StructRefProxy,metaclass=OpMeta):
         if(all([not isinstance(x,(Var,OpMeta,OpComp, Op)) for x in py_args])):
             return self.call(*py_args)
         else:
-            op_comp = OpComp(self.__class__,*py_args)
+            op_comp = OpComp(self,*py_args)
             op = op_comp.flatten()
+            # print("<<",op, type(op))
             op.op_comp = op_comp
-            op._expr = op_comp.gen_expr('python',arg_names=get_arg_seq(op).split(","))
+            op._expr = op.gen_expr()#op_comp.gen_expr('python',arg_names=)
+            # print("<<",op, type(op))
             return op
 
     def __str__(self):
-        # print(get_var_map(self))
         name = get_name(self)
         if(name == "__GenerateOp__"):
             return self._expr
@@ -344,20 +300,26 @@ class Op(structref.StructRefProxy,metaclass=OpMeta):
 
     @classmethod
     def make_singleton_inst(cls,var_ptrs=None):
+        # Use the variable names that the user defined in the call() fn.
         arg_names = inspect.getfullargspec(cls.call.py_func)[0]
         if(var_ptrs is None):
             var_ptrs = new_var_ptrs_from_types(cls.call_sig.args, arg_names)
 
-        # with PrintElapse("build_instance"):
+        # Make the op instance
         sig = cls.signature
         op_inst = op_ctor(
             cls.__name__,
             str(sig.return_type),
-            var_ptrs,#new_var_ptrs_from_types(cls.call_sig.args),
-            # List([str(x) for x in sig.args]),
+            var_ptrs,
             call_addr=cls.call_addr,
             check_addr=cls.__dict__.get('check_addr',0),
             )
+        op_inst._expr = op_inst.gen_expr(
+            arg_names=arg_names,
+            use_shorthand=True,
+        )
+        # In the NRT the instance will be a GenericOpType, but on
+        #   the python side we need it to be its own custom class
         op_inst.__class__ = cls
         return op_inst
 
@@ -369,7 +331,23 @@ class Op(structref.StructRefProxy,metaclass=OpMeta):
     def var_map(self):
         return get_var_map(self)
 
-        # return op_str(self)
+    def gen_expr(self, lang='python',
+         arg_names=None, use_shorthand=False, **kwargs):
+        if(arg_names is None):
+            arg_names = get_arg_seq(self).split(",") 
+        if(hasattr(self,'op_comp')):
+            return self.op_comp.gen_expr(
+                lang=lang,
+                arg_names=arg_names,
+                use_shorthand=use_shorthand,
+                **kwargs)
+        else:
+            if( use_shorthand and 
+                hasattr(self,'short_hand') and
+                lang in self.short_hand):
+                return self.short_hand[lang].format(*arg_names)
+            else:
+                return f"{self.name}({','.join(arg_names)})"
 
 @njit(cache=True)
 def get_name(self):
@@ -391,34 +369,6 @@ def get_arg_seq(self):
         s += alias
         if(i < len(self.inv_var_map)-1): s += ","
     return s
-    # @classmethod
-    # def gen_sig_codegen(cls, py_args, fn_choice='call'):
-    #     arg_types = cls.signature.args
-    #     print(py_args)
-    #     new_arg_types = [arg_types[i] for i,x in enumerate(py_args) if(isinstance(x, Var))]
-    #     if(fn_choice =='call'):
-    #         sig = cls.signature.return_type(*new_arg_types)
-    #     else:
-    #         sig = u1(*new_arg_types)
-
-    #     def codegen(context, builder, _sig, _args):
-    #         args = []; i = 0;
-    #         for typ, py_arg in zip(arg_types, py_args):
-    #             if(isinstance(py_arg, Op)):
-    #                 args.append(_args[i]); i += 1;
-    #             elif(isinstance(py_arg, Var)):
-    #                 args.append(_args[i]); i += 1;
-    #             else:
-    #                 args.append(context.get_constant_generic(builder, typ, py_arg))
-
-    #         fndesc = getattr(cls,fn_choice+"_fndesc")
-    #         fn_sig = getattr(cls,fn_choice+"_sig")
-    #         ret = context.call_internal(builder, cls.call_fndesc, fn_sig, args)
-    #         return ret
-    #     return sig, codegen
-
-    # def __repr__(self):
-        # return 
 
 
 define_boxing(OpTypeTemplate,Op)   
@@ -476,7 +426,7 @@ class OpComp():
         self.v_ptr_to_ind = v_ptr_to_ind
 
         # alias_if_var = lambda x : 
-        self._expr = f"{op.__name__}({', '.join([self._repr_arg_helper(x) for x in self.args])})"  
+        self._expr = f"{op.name}({', '.join([self._repr_arg_helper(x) for x in self.args])})"  
         self.name = self._expr
 
         instructions[self] = op.signature
@@ -486,7 +436,7 @@ class OpComp():
 
     def flatten(self):
         if(not hasattr(self,'_generate_op')):
-            hash_code = unique_hash([self.name,*[(x.__name__,x.hash_code) for x in self.used_ops]])
+            hash_code = unique_hash([self._expr,*[(x.name,x.hash_code) for x in self.used_ops]])
             # print("HAH", hash_code)
             if(not source_in_cache('__GenerateOp__', hash_code)):
                 
@@ -532,7 +482,7 @@ class OpComp():
             if(hasattr(op,"check")):
                 to_import.update({"check" : f'check{i}', "check_sig" : f'check_sig{i}'})
 
-            op_imports += gen_import_str(op.__name__, op.hash_code, to_import) + "\n"
+            op_imports += gen_import_str(op.name, op.hash_code, to_import) + "\n"
         return op_imports
 
         
@@ -555,22 +505,23 @@ class OpComp():
                             op_fnames=None,
                             op_call_fnames=None,
                             op_check_fnames=None,
-                            skip_consts=False):
+                            skip_consts=False,
+                            **kwargs):
         names = {}
         arg_names = self._gen_arg_seq(lang, arg_names, names)
         for i,instr in enumerate(self.instructions):
             names[instr] = f'i{i}'
 
         if(op_call_fnames is None):
-            op_call_fnames = {op : f'{op.__name__}.call' for op in self.used_ops}
+            op_call_fnames = {op : f'{op.name}.call' for op in self.used_ops}
         for op, n in op_call_fnames.items(): names[(op,'call')] = n
             
         if(op_check_fnames is None):
-            op_check_fnames = {op : f'{op.__name__}.check' for op in self.used_ops}
+            op_check_fnames = {op : f'{op.name}.check' for op in self.used_ops}
         for op, n in op_check_fnames.items(): names[(op,'check')] = n
             
         if(op_fnames is None):
-            op_fnames = {op : op.__name__ for op in self.used_ops}
+            op_fnames = {op : op.name for op in self.used_ops}
         for op, n in op_fnames.items(): names[op] = n
             
         if(skip_consts):
@@ -582,8 +533,18 @@ class OpComp():
     def gen_expr(self, lang='python', **kwargs):
         names, arg_names = self._call_check_prereqs(lang, skip_consts=True, **kwargs)
         for i,instr in enumerate(self.instructions):
-            instr_names = ",".join([names.get(x,repr(x)) for x in instr.args])
-            names[instr] = f'{names[instr.op]}({instr_names})'
+            instr_reprs = []
+            for x in instr.args:
+                if(x in names):
+                    instr_reprs.append(names[x])
+                elif(isinstance(x,(Op,OpComp))):
+                    instr_reprs.append(x.gen_expr(lang,**kwargs))
+                else:
+                    instr_reprs.append(repr(x))
+
+            # instr_names = ",".join(instr_reprs)
+            instr_kwargs = {**kwargs,'arg_names':instr_reprs}
+            names[instr] = instr.op.gen_expr(lang=lang,**instr_kwargs) #f'{names[]}({instr_names})'
         return names[list(self.instructions.keys())[-1]]
 
     

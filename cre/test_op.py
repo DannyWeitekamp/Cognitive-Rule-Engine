@@ -142,6 +142,8 @@ def test_source_gen():
     assert IntegerDivision.gen_expr(lang='python',use_shorthand=True) == '(a//b)'
     assert IntegerDivision.gen_expr(lang='javascript',use_shorthand=True) == 'Math.floor(a/b)'
 
+    print(IntegerDivision.make_source())
+
 
 import time
 class PrintElapse():

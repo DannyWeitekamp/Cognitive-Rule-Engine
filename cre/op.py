@@ -357,9 +357,12 @@ class Op(structref.StructRefProxy,metaclass=OpMeta):
             else:
                 return f"{self.name}({','.join(arg_names)})"
 
-    @make_source('python')
-    def mk_src_py():
-        pass
+    @make_source('*')
+    def mk_src_py(self,lang='python'):
+        print("mk_src_py",lang)
+        
+
+
 
 
 @njit(cache=True)
@@ -456,7 +459,7 @@ class OpComp():
             hash_code = unique_hash([self._expr,*[(x.name,x.hash_code) for x in self.used_ops]])
             if(not source_in_cache('__GenerateOp__', hash_code)):
                 
-                source = self.gen_source(hash_code)
+                source = self.gen_flattened_op_src(hash_code)
                 source_to_cache('__GenerateOp__', hash_code, source)
             l = import_from_cached('__GenerateOp__', hash_code, ['__GenerateOp__'])
             op_cls = self._generate_op_cls = l['__GenerateOp__']
@@ -597,7 +600,7 @@ class OpComp():
         return gen_def_func(lang, fname, ", ".join(arg_names), check_body, tail)
 
     
-    def gen_source(self, hash_code, ind='    '):
+    def gen_flattened_op_src(self, hash_code, ind='    '):
         '''Generates python source for the equivalant flattened Op'''
         op_imports = self.gen_op_imports('python')
         

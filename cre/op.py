@@ -23,7 +23,7 @@ from cre.fact import Fact, gen_fact_import_str, get_offsets_from_member_types
 from cre.var import Var
 from cre.predicate_node import BasePredicateNode,BasePredicateNodeType, get_alpha_predicate_node_definition, \
  get_beta_predicate_node_definition, deref_attrs, define_alpha_predicate_node, define_beta_predicate_node, AlphaPredicateNode, BetaPredicateNode
-from cre.make_source import make_source, gen_def_func, gen_assign
+from cre.make_source import make_source, gen_def_func, gen_assign, resolve_template
 from numba.core import imputils, cgutils
 from numba.core.datamodel import default_manager, models
 from numba.experimental.function_type import _get_wrapper_address
@@ -256,10 +256,10 @@ class OpMeta(type):
             cls.check_sig = u1(*cls.signature.args)
             cls.check_addr = _get_wrapper_address(cls.check,cls.check_sig)
 
-        #Handle Shorthands
+        # Standardize short_hand definitions
         if(hasattr(cls,'short_hand') and 
             not isinstance(cls.short_hand,dict)):
-            cls.short_hand = {'python' : cls.short_hand}
+            cls.short_hand = {'*' : cls.short_hand}
 
         if(cls.__name__ != "__GenerateOp__"):
             return cls.make_singleton_inst()
@@ -279,16 +279,17 @@ class Op(structref.StructRefProxy,metaclass=OpMeta):
         setattr(cls, name+"_sig", sig)
         setattr(cls, name+'_bytes', dill.dumps(py_func))#dedent(inspect.getsource(py_func)))
 
-    def __call__(self,*py_args):#,return_instance=False):
+    def __call__(self,*py_args):
+        
         if(all([not isinstance(x,(Var,OpMeta,OpComp, Op)) for x in py_args])):
+            # If all of the arguments are constants then just call the Op
             return self.call(*py_args)
         else:
+            # Otherwise build an OpComp and flatten it into a new Op
             op_comp = OpComp(self,*py_args)
             op = op_comp.flatten()
-            # print("<<",op, type(op))
             op.op_comp = op_comp
-            op._expr = op.gen_expr()#op_comp.gen_expr('python',arg_names=)
-            # print("<<",op, type(op))
+            op._expr = op.gen_expr()
             return op
 
     def __str__(self):
@@ -300,6 +301,9 @@ class Op(structref.StructRefProxy,metaclass=OpMeta):
 
     @classmethod
     def make_singleton_inst(cls,var_ptrs=None):
+        '''Creates a singleton instance of the user defined subclass of Op.
+            These instances unbox into the NRT as GenericOpType.
+        '''
         # Use the variable names that the user defined in the call() fn.
         arg_names = inspect.getfullargspec(cls.call.py_func)[0]
         if(var_ptrs is None):
@@ -333,6 +337,10 @@ class Op(structref.StructRefProxy,metaclass=OpMeta):
 
     def gen_expr(self, lang='python',
          arg_names=None, use_shorthand=False, **kwargs):
+        '''Generates a one line expression for this Op (which might have been built
+            from a composition of ops) in terms of user defined Ops.
+            E.g. Multiply(Add(x,y),2).gen_expr() -> "Multiply(Add(x,y),2)"
+                 or if short_hands are defined -> "((x+y)*2)" '''
         if(arg_names is None):
             arg_names = get_arg_seq(self).split(",") 
         if(hasattr(self,'op_comp')):
@@ -343,11 +351,16 @@ class Op(structref.StructRefProxy,metaclass=OpMeta):
                 **kwargs)
         else:
             if( use_shorthand and 
-                hasattr(self,'short_hand') and
-                lang in self.short_hand):
-                return self.short_hand[lang].format(*arg_names)
+                hasattr(self,'short_hand')):
+                template = resolve_template(lang,self.short_hand,'short_hand')
+                return template.format(*arg_names)
             else:
                 return f"{self.name}({','.join(arg_names)})"
+
+    @make_source('python')
+    def mk_src_py():
+        pass
+
 
 @njit(cache=True)
 def get_name(self):
@@ -374,9 +387,9 @@ def get_arg_seq(self):
 define_boxing(OpTypeTemplate,Op)   
 
 class OpComp():
-    # @classmethod
-    # def _new_backdoor(cls):
-    #     super().__
+    '''A helper class representing a composition of operations
+        that can be flattened into a new Op definition.'''
+
     def _repr_arg_helper(self,x):
         if isinstance(x, Var):
             return f'a{self.v_ptr_to_ind[x.get_ptr()]}'
@@ -387,6 +400,9 @@ class OpComp():
 
 
     def __init__(self,op,*py_args):
+        '''Constructs the the core pieces of an OpComp from a set of arguments.
+            These pieces are the outermost 'op', and a set of 'constants',
+            'vars', and 'instructions' (i.e. other op_comps)'''
         _vars = {}
         constants = {}
         instructions = {}
@@ -425,7 +441,6 @@ class OpComp():
         self.constants = constants
         self.v_ptr_to_ind = v_ptr_to_ind
 
-        # alias_if_var = lambda x : 
         self._expr = f"{op.name}({', '.join([self._repr_arg_helper(x) for x in self.args])})"  
         self.name = self._expr
 
@@ -435,9 +450,10 @@ class OpComp():
         self.instructions = instructions
 
     def flatten(self):
+        ''' Flattens the OpComp into a single Op. Generates the source
+             for the new Op as needed.'''
         if(not hasattr(self,'_generate_op')):
             hash_code = unique_hash([self._expr,*[(x.name,x.hash_code) for x in self.used_ops]])
-            # print("HAH", hash_code)
             if(not source_in_cache('__GenerateOp__', hash_code)):
                 
                 source = self.gen_source(hash_code)
@@ -453,15 +469,10 @@ class OpComp():
             
         return self._generate_op
 
-        # print("DONE:", self.name)
-        
-        # print("-----START------")
-        # print(list(self.vars.keys()))
-        # print(list(self.constants.keys()))
-        # print(list(self.instructions.keys()))
-        # print("-----END------")
     @property
     def used_ops(self):
+        ''' Returns a dictionary keyed by ops used in the OpComp expression.
+            values are unique integers 0,1,2 etc.'''
         if(not hasattr(self,'_used_ops')):
             used_ops = {}
             oc = 0
@@ -473,8 +484,8 @@ class OpComp():
         return self._used_ops
 
     #### Code Generation Methods ####
-
-    def gen_op_imports(self,lang):
+    def gen_op_imports(self,lang='python'):
+        ''' Generates import expressions for any 'used_ops' in the OpComp'''
         op_imports = ""
         for i,(op,(_,sig)) in enumerate(self.used_ops.items()):
             to_import = {"call_sig" : f'call_sig{i}',
@@ -507,6 +518,10 @@ class OpComp():
                             op_check_fnames=None,
                             skip_consts=False,
                             **kwargs):
+        ''' Helper function that fills 'names' which is a dictionary of 
+            various objects to their equivalent string expressions, in 
+            addition to 'arg_names' which is autofilled as needed, 
+            and optionally 'const_defs'. '''
         names = {}
         arg_names = self._gen_arg_seq(lang, arg_names, names)
         for i,instr in enumerate(self.instructions):
@@ -531,6 +546,7 @@ class OpComp():
             return names, arg_names, const_defs
 
     def gen_expr(self, lang='python', **kwargs):
+        '''Generates a oneline expression for the OpComp'''
         names, arg_names = self._call_check_prereqs(lang, skip_consts=True, **kwargs)
         for i,instr in enumerate(self.instructions):
             instr_reprs = []
@@ -549,6 +565,7 @@ class OpComp():
 
     
     def gen_call(self, lang='python', fname="call", ind='    ', **kwargs):
+        '''Generates source for the equivalent call function for the OpComp'''
         names, arg_names, const_defs = self._call_check_prereqs(lang, **kwargs)
         call_body = const_defs
         for i,instr in enumerate(self.instructions):
@@ -561,6 +578,7 @@ class OpComp():
 
 
     def gen_check(self, lang='python', fname="check", ind='    ', **kwargs):
+        '''Generates source for the equivalent check function for the OpComp'''
         names, arg_names, const_defs = self._call_check_prereqs(lang, **kwargs)
         check_body = const_defs
         final_k = "True"
@@ -580,6 +598,7 @@ class OpComp():
 
     
     def gen_source(self, hash_code, ind='    '):
+        '''Generates python source for the equivalant flattened Op'''
         op_imports = self.gen_op_imports('python')
         
         op_call_fnames = {op : f'call{j}' for op,(j,_) in self.used_ops.items()}

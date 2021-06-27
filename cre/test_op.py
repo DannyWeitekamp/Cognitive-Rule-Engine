@@ -74,6 +74,18 @@ def test_var_propagation():
     assert str(op) == 'Add3(x,y,z)'
     assert [x.get_ptr(),y.get_ptr(),z.get_ptr()] == [*extract_var_ptrs(op)]
 
+def test_order():
+    class Subtract(Op):
+        signature = f8(f8,f8)
+        def call(x, y):
+            return x - y
+
+    assert Subtract(1,2) == -1
+    assert Subtract(2,1) == 1
+    a,b = Var(float,'a'), Var(float,'b')
+    s2 = Subtract(b,Subtract(a,1))
+    assert s2(3,2) == 2
+
 def test_auto_aliasing():
     class Add3(Op):
         signature = f8(f8,f8,f8)
@@ -105,7 +117,6 @@ def test_source_gen():
     DoublePlusOne = Add(Double,1)
     TimesDoublePlusOne = Multiply(DoublePlusOne,Var(float,'y'))
 
-    print(str(DoublePlusOne))
     assert str(DoublePlusOne) == "Add(Multiply(x,2),1)"
     assert str(TimesDoublePlusOne) == "Multiply(Add(Multiply(x,2),1),y)"
     assert TimesDoublePlusOne.check(-1,1) == False
@@ -114,6 +125,22 @@ def test_source_gen():
 
     assert TimesDoublePlusOne.gen_expr(use_shorthand=True) == '(((x*2)+1)*y)'
     assert TimesDoublePlusOne.gen_expr(use_shorthand=False) == 'Multiply(Add(Multiply(x,2),1),y)'
+    assert TimesDoublePlusOne.gen_expr(lang='javascript',use_shorthand=True) == '(((x*2)+1)*y)'
+
+    class IntegerDivision(Op):
+        signature = f8(f8,f8)
+        short_hand = {
+            'python' : '({0}//{1})',
+            'js' : 'Math.floor({0}/{1})',
+        }
+        call_body = {
+            "js" : '''{ind}return Math.floor({0}/{1})'''
+        }
+        def call(a, b):
+            return a // b    
+
+    assert IntegerDivision.gen_expr(lang='python',use_shorthand=True) == '(a//b)'
+    assert IntegerDivision.gen_expr(lang='javascript',use_shorthand=True) == 'Math.floor(a/b)'
 
 
 import time
@@ -132,11 +159,11 @@ if __name__ == "__main__":
         test_op_singleton()
     # with PrintElapse("test_define_apply_op"):
         test_define_apply_op()
-        test_define_apply_op()
     # with PrintElapse("test_op_singleton"):
         test_compose_op()
     # with PrintElapse("test_var_propagation"):
         test_var_propagation()
+        test_order()
     # with PrintElapse("test_auto_aliasing"):
         test_auto_aliasing()
     # with PrintElapse("test_source_gen"):

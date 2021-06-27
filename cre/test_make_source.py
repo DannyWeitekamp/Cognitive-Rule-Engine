@@ -9,13 +9,13 @@ def test_all():
             return 'just python'
 
         @make_source("python","special_piece")
-        def python_call_long_src(self, b="key word"):
+        def python_call_long_src(self, b="key word",**kwargs):
             return 'special ' + b
 
         @make_source("js")
         @make_source("python","piece")
         @make_source("python","other_piece")
-        def boop(self, b="key word"):
+        def boop(self, b="key word", **kwargs):
             return 'boop ' + b
 
     assert Foo.make_source('python') == 'just python'

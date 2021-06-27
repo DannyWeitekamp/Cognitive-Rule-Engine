@@ -33,7 +33,8 @@ def apply_make_source(self, lang="", piece="", **kwargs):
 
     for piece_template in piece_templates:
         if(piece in piece_template):
-            return piece_template[piece].func(self,{'lang':lang, 'piece':piece **kwargs})
+            return piece_template[piece].func(self,
+                **{'lang':lang, 'piece':piece, **kwargs})
 
     return None
 

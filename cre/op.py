@@ -23,7 +23,7 @@ from cre.fact import Fact, gen_fact_import_str, get_offsets_from_member_types
 from cre.var import Var
 from cre.predicate_node import BasePredicateNode,BasePredicateNodeType, get_alpha_predicate_node_definition, \
  get_beta_predicate_node_definition, deref_attrs, define_alpha_predicate_node, define_beta_predicate_node, AlphaPredicateNode, BetaPredicateNode
-from cre.make_source import make_source, gen_def_func, gen_assign, resolve_template
+from cre.make_source import make_source, gen_def_func, gen_assign, resolve_template, gen_def_class
 from numba.core import imputils, cgutils
 from numba.core.datamodel import default_manager, models
 from numba.experimental.function_type import _get_wrapper_address
@@ -34,7 +34,7 @@ from copy import copy
 from os import getenv
 from cre.utils import deref_type, OFFSET_TYPE_ATTR, OFFSET_TYPE_LIST, listtype_sizeof_item
 import inspect, dill, pickle
-from textwrap import dedent
+from textwrap import dedent, indent
 
 import time
 class PrintElapse():
@@ -322,6 +322,7 @@ class Op(structref.StructRefProxy,metaclass=OpMeta):
             arg_names=arg_names,
             use_shorthand=True,
         )
+        op_inst.arg_names = arg_names
         # In the NRT the instance will be a GenericOpType, but on
         #   the python side we need it to be its own custom class
         op_inst.__class__ = cls
@@ -357,11 +358,41 @@ class Op(structref.StructRefProxy,metaclass=OpMeta):
             else:
                 return f"{self.name}({','.join(arg_names)})"
 
+    # Make Source:
     @make_source('*')
-    def mk_src_py(self,lang='python'):
-        print("mk_src_py",lang)
-        
+    def mk_src(self, lang='python', ind='   ', **kwargs):
+        body = ''
+        call = self.make_source(lang,'call')
+        body += indent(self.make_source(lang,'call'),prefix=ind)
+        pc = self.make_source(lang,'parent_class')
+        return gen_def_class(lang, get_name(self), body, parent_classes=pc, inst_self=True)
 
+    # Make Source: parent_class
+    @make_source('python','parent_class')
+    def mk_src_py_parent_class(self, **kwargs):
+        return "cre.Op"
+    @make_source('js','parent_class')
+    def mk_src_js_parent_class(self, **kwargs):
+        return "Callable"
+    @make_source('*','parent_class')
+    def mk_src_any_parent_class(self, **kwargs):
+        return ""
+
+    # Make Source: call
+    @make_source("python", 'call')
+    def mk_src_py_call(self, **kwargs):
+        return dedent(inspect.getsource(self.call.py_func))
+
+    @make_source("*", 'call')
+    def mk_src_any_call(self, lang='*', ind='    ', **kwargs):
+        try:
+            temp = resolve_template(lang, self.call_body, 'call_body')
+            call_body = f'{temp.format(*self.arg_names,ind=ind)}\n'
+        except Exception as e:
+            temp = resolve_template(lang, self.short_hand, 'short_hand')
+            call_body = f'{ind}return {temp.format(*self.arg_names)}\n'
+
+        return gen_def_func(lang,'call',", ".join(self.arg_names), call_body)
 
 
 

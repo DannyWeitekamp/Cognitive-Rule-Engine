@@ -130,19 +130,26 @@ def test_source_gen():
     class IntegerDivision(Op):
         signature = f8(f8,f8)
         short_hand = {
-            'python' : '({0}//{1})',
+            '*' : '({0}//{1})',
             'js' : 'Math.floor({0}/{1})',
         }
         call_body = {
-            "js" : '''{ind}return Math.floor({0}/{1})'''
+            "js" : '''{ind}return Math.floor({0}/{1});'''
         }
         def call(a, b):
-            return a // b    
+            return a // b
 
     assert IntegerDivision.gen_expr(lang='python',use_shorthand=True) == '(a//b)'
     assert IntegerDivision.gen_expr(lang='javascript',use_shorthand=True) == 'Math.floor(a/b)'
 
-    print(IntegerDivision.make_source())
+    # By default look in call_body 
+    assert "a // b\n" in IntegerDivision.make_source()
+    assert "Math.floor(a/b);\n" in IntegerDivision.make_source('js')
+
+    # Otherwise use the short_hand 
+    IntegerDivision.call_body = {}
+    assert "Math.floor(a/b)\n" in IntegerDivision.make_source('js')
+
 
 
 import time

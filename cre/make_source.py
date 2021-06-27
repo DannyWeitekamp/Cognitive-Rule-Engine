@@ -22,14 +22,9 @@ def set_eq_source_targets(lang1, lang2):
 set_eq_source_targets("js", "javascript")
 set_eq_source_targets("py", "python")
 
-def apply_make_source(self, lang="", piece="", **kwargs):
-    # print(self, lang, piece, kwargs)
-    # print("resolve_make_source")
-
-    # if(not hasattr(self,parent_class)):
-    #     raise RuntimeError("Unbound make_source() target.")
+def apply_make_source(self=None, cls=None, lang="python", piece="", **kwargs):
     piece_templates = resolve_template(lang,
-        self._make_src_registry, accum_all=True)
+        cls._make_src_registry, accum_all=True)
 
     for piece_template in piece_templates:
         if(piece in piece_template):
@@ -58,8 +53,18 @@ class MakeSourceInst():
                 pass # TODO throw error if make_source was directly defined 
                 # if(?):raise NameError("Cannot ")
             else:
-                setattr(parent_class, 'make_source',
-                    MethodType(apply_make_source,parent_class))
+                def _apply_make_source(arg1,*args,**kwargs):
+                    if(isinstance(arg1,str)):
+                        #in this case arg1 is probably lang
+                        return apply_make_source(parent_class,parent_class,arg1,*args,**kwargs)
+                    else:
+                        #in this case arg1 is 'self'
+                        return apply_make_source(arg1,parent_class,*args,**kwargs)    
+                    # print("self",self)
+                    
+
+                setattr(parent_class, 'make_source', _apply_make_source)
+                    # MethodType(_apply_make_source,parent_class))
 
         mk_sr_reg = parent_class._make_src_registry          
         lang_pieces = mk_sr_reg.get(self.lang,{})
@@ -81,6 +86,7 @@ class MakeSourceInst():
     def __set_name__(self, owner, name):
         ''' Defining this automatically binds method decorations 
             to the class they are applied in.'''
+        # print(name)
         self._bind_parent(owner)
         
 
@@ -163,28 +169,71 @@ def resolve_template(lang, templates,desc="",accum_all=False):
         raise LookupError(f"Missing {desc} template for language : {lang}")
 
 
+def apply_template(template,*args,**kwargs):
+    if(isinstance(template,str)):
+        return template.format(*args,**kwargs)
+    else:
+        return template(*args,**kwargs)
+        
+
 assign_templates = {
     "javascript" : "let {alias} = {rest}",
     "python" : "{alias} = {rest}"
 }
 def gen_assign(lang,alias,rest):
     template = resolve_template(lang, assign_templates, 'assign')
-    return template.format(alias=alias,rest=rest)
+    return apply_template(template,alias=alias,rest=rest)
     
 
 
-def_func_templates = {
-    "javascript" : '''function {fname}({args}){{
-{body}{tail}}}''',
-
-    "python" : '''def {fname}({args}):
+def def_func_python(fname, args, body, tail, is_method=False):
+    return f'''def {fname}({args}):
 {body}{tail}'''
 
+def def_func_js(fname, args, body, tail, is_method=False):
+    prefix = "function " if not is_method else ""
+    return  f'''{prefix}{fname}({args}){{
+{body}{tail}}}'''
+
+def_func_templates = {
+    "javascript" : def_func_js,
+    "python" : def_func_python
 }
 
 def gen_def_func(lang, fname, args, body, tail=''):
     template = resolve_template(lang, def_func_templates, 'def_func')
-    return template.format(fname=fname,args=args, body=body, tail=tail)
+    return apply_template(template,fname=fname,args=args, body=body, tail=tail)
     
 
+def def_class_js(name, body, parent_classes="", inst_self=False):
+    extends = "" if parent_classes == "" else f"extends {parent_classes} "
+    c_name = f'_{name}' if(inst_self) else name
+    rest = f';let {name} = new _{name}()' if(inst_self) else ""
+    cls_def = f'''class {c_name} {extends}{{
+{body}
+}}'''
+    return f'let {name} = new (\n{cls_def})' if (inst_self) else cls_def
 
+def_class_templates = {
+    "javascript" : def_class_js,
+    "python" : '''class {name}({parent_classes}):
+{body}'''
+}
+
+def gen_def_class(lang, name, body, parent_classes="", inst_self=False):
+    template = resolve_template(lang, def_class_templates, 'def_class')
+    return apply_template(template,name=name, body=body,
+            parent_classes=parent_classes, inst_self=inst_self)
+
+
+
+
+js_extras = '''
+class Callable extends Function {
+  constructor() {
+    super('...args', 'return this._bound.call(...args)')
+    this._bound = this.bind(this)
+    return this._bound
+  }
+}
+'''

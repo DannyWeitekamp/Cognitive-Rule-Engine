@@ -124,7 +124,7 @@ def foo():
     for i, a in enumerate(["A","B","C","D"]):
         for j, b in enumerate(["A","B","C","D"]):
             v = a+b
-            hash(v)
+            print(hash(v))
             print(i,j,v)
             insert_str_record(arr,i*4 + j, v)
     return arr

@@ -396,10 +396,11 @@ class Op(structref.StructRefProxy,metaclass=OpMeta):
 
 
 
+### Various jitted getters ###
+
 @njit(cache=True)
 def get_name(self):
     return self.name
-
 
 @njit(cache=True)
 def get_var_map(self):
@@ -692,46 +693,5 @@ class __GenerateOp__(Op):
         return flattened_inst(*args)
 
 
-
-
-##### PLANNING PLANNING PLANNING ####
-# Op:
-#  members:
-#    -name
-#    -apply_ptr: 
-#    -apply_multi_ptr: 
-#    -condition_ptr: 
-#    -arg_types: 
-#    -out_type: 
-#  -commutes... might want to just keep at python object level
-#  should have option translations = {
-#   "javascript" : {
-#       "apply_body": '''return a + b'''
-#       "condition_body": '''return a != 0'''
-#   }
-# }
-#  
-# OpComp: 
-#  built in python with __call__
-#  when __call__ is run on all on non-vars its apply/condition is cached and compiled
-#   -happens in overload in numba context 
-#   -happens at runtime in python context
-#  Structref should subclass Operator
-#  The structref proxy should keep around a linearization 
-#  Should have a list of vars like a Condition
-#  The linearization is a list of operation objects 
-#    all that is necessary is that their modules can be identified
-#    and imported to that an intrinsic can be compiled and then njit wrapped
-#    then the various function ptrs can be retrieved at runtime
-#  More broadly the Operator's actual class can be retrieved from a context store
-#   by using it's name.
-#  Storing constants might be tricky, it seems like they should be
-#   stored in the OpComp structref, and retreived in the intrinsic
-#   from something similar to attr_offsets for Vars. This would avoid
-#   overspecialization if an OpComp needs to be rebuilt with new constants
-#  
-#  We need to be able to do things like:
-#    -Add(Add(x,y),z)
-#    -Add(Add(x,y),x)
 
 

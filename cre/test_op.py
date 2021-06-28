@@ -1,7 +1,9 @@
 from numba import f8, njit
+from numba.types import  FunctionType
 import numpy as np
 from cre.op import Op
 from cre.var import Var
+from cre.utils import _func_from_address
 import pytest
 
 def test_op_singleton():
@@ -11,6 +13,16 @@ def test_op_singleton():
             return x + y
 
     assert isinstance(Add,Op), "Op subclasses should be singleton instances."
+
+    # Test that we can actually pass the Op singleton as a parameter
+    #  and reconstruct it.
+    ftype = FunctionType(Add.signature)
+    @njit(cache=True)
+    def foo(op):
+        f = _func_from_address(ftype, op.call_addr)
+        return f(1,2)
+
+    assert foo(Add) == 3
 
 def test_define_apply_op():
     with pytest.raises(AssertionError):
@@ -142,13 +154,20 @@ def test_source_gen():
     assert IntegerDivision.gen_expr(lang='python',use_shorthand=True) == '(a//b)'
     assert IntegerDivision.gen_expr(lang='javascript',use_shorthand=True) == 'Math.floor(a/b)'
 
-    # By default look in call_body 
+    # Python source will just copy it's own definition
     assert "a // b\n" in IntegerDivision.make_source()
+
+    # For other languages by default look in call_body 
     assert "Math.floor(a/b);\n" in IntegerDivision.make_source('js')
 
-    # Otherwise use the short_hand 
+    # Otherwise fall back on any defined short_hands
     IntegerDivision.call_body = {}
     assert "Math.floor(a/b)\n" in IntegerDivision.make_source('js')
+
+    # OpComp built Ops should really only be rendered in the then() of a rule 
+    # print(TimesDoublePlusOne.make_source(""))
+
+
 
 
 

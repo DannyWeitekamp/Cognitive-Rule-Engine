@@ -336,6 +336,10 @@ class Op(structref.StructRefProxy,metaclass=OpMeta):
     def var_map(self):
         return get_var_map(self)
 
+    @property
+    def return_type_name(self):
+        return get_return_type_name(self)
+
     def gen_expr(self, lang='python',
          arg_names=None, use_shorthand=False, **kwargs):
         '''Generates a one line expression for this Op (which might have been built
@@ -405,6 +409,10 @@ def get_name(self):
 @njit(cache=True)
 def get_var_map(self):
     return self.var_map
+
+@njit(cache=True)
+def get_return_type_name(self):
+    return self.return_type_name
 
 @njit(cache=True)
 def op_str(self):

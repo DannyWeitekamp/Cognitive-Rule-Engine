@@ -1,4 +1,5 @@
 from numba import types, njit, u1,u2,u4,u8, i8,i2, literally
+from numba.core.imputils import impl_ret_borrowed
 from numba.types import Tuple, void, ListType
 from numba.experimental.structref import _Utils, imputils
 from numba.extending import intrinsic
@@ -172,13 +173,58 @@ def _struct_from_pointer(typingctx, struct_type, raw_ptr):
 
         st = cgutils.create_struct_proxy(inst_type)(context, builder)
         st.meminfo = meminfo
-        #NOTE: Fixes sefault but not sure about it's lifecycle (i.e. watch out for memleaks)
-        context.nrt.incref(builder, types.MemInfoPointer(types.voidptr), meminfo)
 
-        return st._getvalue()
+
+        #NOTE: Fixes sefault but not sure about it's lifecycle (i.e. watch out for memleaks)
+        # context.nrt.incref(builder, types.MemInfoPointer(types.voidptr), meminfo)
+
+        return impl_ret_borrowed(
+            context,
+            builder,
+            inst_type,
+            st._getvalue()
+        )
 
     sig = inst_type(struct_type, raw_ptr)
     return sig, codegen
+
+
+
+
+@intrinsic
+def _list_from_ptr(typingctx, listtyperef, raw_ptr_ty):
+    """Recreate a list from a MemInfoPointer
+    """
+    
+    list_type = listtyperef.instance_type
+    
+    def codegen(context, builder, sig, args):
+        # [tdref, _] = sig.args
+        # td = tdref.instance_type
+        [_, raw_ptr] = args
+
+        mi = builder.inttoptr(raw_ptr, cgutils.voidptr_t)
+
+        ctor = cgutils.create_struct_proxy(list_type)
+        dstruct = ctor(context, builder)
+
+        data_pointer = context.nrt.meminfo_data(builder, mi)
+        data_pointer = builder.bitcast(data_pointer, cgutils.voidptr_t.as_pointer())
+
+        dstruct.data = builder.load(data_pointer)
+        dstruct.meminfo = mi
+
+        return impl_ret_borrowed(
+            context,
+            builder,
+            list_type,
+            dstruct._getvalue(),
+        )
+
+    sig = list_type(listtyperef, raw_ptr_ty)
+    return sig, codegen
+
+_dict_from_ptr = _list_from_ptr
 
 
 

@@ -15,7 +15,8 @@ from cre.structref import define_structref, define_structref_template
 from cre.kb import KnowledgeBaseType, KnowledgeBase, facts_for_t_id, fact_at_f_id
 # from cre.fact import define_fact, BaseFactType, cast_fact, DeferredFactRefType, Fact
 from cre.utils import (_struct_from_meminfo, _meminfo_from_struct, _cast_structref, cast_structref, decode_idrec, lower_getattr, _struct_from_pointer,  lower_setattr, lower_getattr,
-                       _pointer_from_struct, _decref_pointer, _incref_pointer, _incref_structref, _pointer_from_struct_incref)
+                       _pointer_from_struct, _decref_pointer, _incref_pointer, _incref_structref, _pointer_from_struct_incref,
+                       _dict_from_ptr, _list_from_ptr)
 from cre.utils import assign_to_alias_in_parent_frame
 from cre.subscriber import base_subscriber_fields, BaseSubscriber, BaseSubscriberType, init_base_subscriber, link_downstream
 from cre.vector import VectorType
@@ -47,7 +48,7 @@ class PrintElapse():
         print(f'{self.name}: {self.t1-self.t0:.2f} ms')
 
 
-CondensedRecord_field_dict = {
+SC_Record_field_dict = {
     # 'op' : GenericOpType,
     # 'depth' : i8,
 
@@ -63,54 +64,53 @@ CondensedRecord_field_dict = {
     'vals_to_uid_ptr' : i8
     
 }
-CondensedRecord_fields = [(k,v) for k,v in CondensedRecord_field_dict.items()]
-CondensedRecord, CondensedRecordType = \
-    define_structref("CondensedRecord", CondensedRecord_fields)
+SC_Record_fields = [(k,v) for k,v in SC_Record_field_dict.items()]
+SC_Record, SC_RecordType = \
+    define_structref("SC_Record", SC_Record_fields)
 
 
-record_list_type = ListType(CondensedRecordType)
+record_list_type = ListType(SC_RecordType)
 dict_str_to_record_list_type = DictType(unicode_type, record_list_type)
 str_int_tuple = Tuple((unicode_type,i8))
 
-CondensedChainer_field_dict = {
+SetChainingPlanner_field_dict = {
     'ops': ListType(GenericOpType),
     # List of dictionaries that map:
     #  Tuple(type_str[str],depth[int]) -> ListType[Record])
-    'forward_records' : ListType(DictType(unicode_type, ListType(CondensedRecordType))),
+    'forward_records' : ListType(DictType(unicode_type, ListType(SC_RecordType))),
 
     # List of dictionaries that map:
     #  Tuple(type_str[str],depth[int]) -> ListType[Record])
-    'backward_records' : ListType(DictType(unicode_type, ListType(CondensedRecordType))),
+    'backward_records' : ListType(DictType(unicode_type, ListType(SC_RecordType))),
 
     # Maps type_str[str] -> *Dict(val[any] -> depth[u1])
     'vals_to_depth_ptr_dict' : DictType(unicode_type, i8),
     # Maps (type_str[str],depth[int]) -> *Iterator[any]
     'flat_vals_ptr_dict' : DictType(Tuple((unicode_type,i8)), i8),
 
-    'curr_infer_depth' : i8,
-    'max_depth' : i8,
 }
-CondensedChainer_fields = [(k,v) for k,v in CondensedChainer_field_dict.items()]
+SetChainingPlanner_fields = [(k,v) for k,v in SetChainingPlanner_field_dict.items()]
 
 @structref.register
-class CondensedChainerTypeTemplate(types.StructRef):
+class SetChainingPlannerTypeTemplate(types.StructRef):
     def preprocess_fields(self, fields):
         return tuple((name, types.unliteral(typ)) for name, typ in fields)
 
 
-class CondensedChainer(structref.StructRefProxy):
+class SetChainingPlanner(structref.StructRefProxy):
     def __new__(cls):
-        self = c_chainer_ctor()
+        self = sc_planner_ctor()
+        self.curr_infer_depth = 0
+        self.max_depth = 0
         return self
 
-define_boxing(CondensedChainerTypeTemplate,CondensedChainer)
-CondensedChainerType = CondensedChainerTypeTemplate(CondensedChainer_fields)
+define_boxing(SetChainingPlannerTypeTemplate,SetChainingPlanner)
+SetChainingPlannerType = SetChainingPlannerTypeTemplate(SetChainingPlanner_fields)
 
 
 @njit(cache=True)
-def c_chainer_ctor():
-    st = new(CondensedChainerType)
-    st.max_depth = 0
+def sc_planner_ctor():
+    st = new(SetChainingPlannerType)
     st.forward_records = List.empty_list(dict_str_to_record_list_type)
     st.backward_records = List.empty_list(dict_str_to_record_list_type)
     st.vals_to_depth_ptr_dict = Dict.empty(unicode_type, i8)
@@ -165,51 +165,58 @@ def insert_record(self, rec, ret_type_name, depth):
     '''Inserts a Record 'rec' into the list of records in  
         'self' for type 'ret_type_name' and depth 'depth' '''
     # Make sure records dictionaries up to this depth
-    while(depth > len(self.forward_records)):
+    print("INSER",depth)
+    while(depth >= len(self.forward_records)):
         self.forward_records.append(
             Dict.empty(unicode_type, record_list_type)
         )
     recs_at_depth = self.forward_records[depth]
     recs = recs_at_depth.get(ret_type_name,
-            List.empty_list(CondensedRecordType))
+            List.empty_list(SC_RecordType))
     recs.append(rec)
+    recs_at_depth[ret_type_name] = recs
 
 @njit(cache=True)
 def join_records_of_type(self, depth, typ_name,
          typ, dict_typ):
     ''' Goes through every record at 'depth' and joins them
         so that 'val_to_depth' and 'flat_vals' are defined '''
+    print("START", depth)
     recs = self.forward_records[depth][typ_name]
     prev_tup = (typ_name, depth-1)
-    if(prev_tup in self.vals_to_depth_ptr_dict):
-        vals_to_depth_ptr = self.vals_to_depth_ptr_dict(prev_tup)
-        vals_to_depth = _struct_from_pointer(dict_typ, vals_to_depth_ptr)
+    print("MID")
+    if(typ_name in self.vals_to_depth_ptr_dict):
+        vals_to_depth_ptr = self.vals_to_depth_ptr_dict[typ_name]
+        vals_to_depth = _dict_from_ptr(dict_typ, vals_to_depth_ptr)
     else:
         vals_to_depth = Dict.empty(typ, i8)
-
+    
     for rec in recs:
-        for val in rec.vals_to_uid:
+        vals_to_uid = _dict_from_ptr(dict_typ, rec.vals_to_uid_ptr)
+        for val in vals_to_uid:
             if(val not in vals_to_depth):
                 vals_to_depth[val] = depth
 
     flat_vals = List.empty_list(typ,len(vals_to_depth))
     for val in vals_to_depth:
-       flat_vals.append(val) 
-
-    tup = (typ_name, depth)
-    if(tup in self.vals_to_depth_ptr_dict):
-        _decref_pointer(self.vals_to_depth_ptr_dict[tup])
-    self.vals_to_depth_ptr_dict[tup] = \
+        flat_vals.append(val) 
+    
+    if(typ_name in self.vals_to_depth_ptr_dict):
+        _decref_pointer(self.vals_to_depth_ptr_dict[typ_name])
+    self.vals_to_depth_ptr_dict[typ_name] = \
         _pointer_from_struct_incref(vals_to_depth)
 
-    if(type_name in self.flat_vals_ptr_dict):
-        _decref_pointer(self.flat_vals_ptr_dict[typ_name])
-    self.flat_vals_ptr_dict[typ_name] = \
+    tup = (typ_name, depth)
+    if(tup in self.flat_vals_ptr_dict):
+        _decref_pointer(self.flat_vals_ptr_dict[tup])
+    self.flat_vals_ptr_dict[tup] = \
          _pointer_from_struct_incref(flat_vals)
 
 
-def join_records(self,depth):
-    for typ_name, typ in self.QM:
+def join_records(self,depth,ops):
+    typs = set([op.signature.return_type for op in ops])
+    for typ in typs:
+        typ_name = str(typ)
         val_to_depth = join_records_of_type(self,
             depth, typ_name, typ, DictType(typ,i8))
 
@@ -219,20 +226,22 @@ def forward_chain_one(self, ops=None):
     '''Applies 'ops' on all current inferred values'''
     depth = self.curr_infer_depth
     if(ops is None): ops = self.ops
-
     for op in ops:
-        rec = op.apply_multi(self, depth)
+        rec = apply_multi(op, self, depth)
+        print()
         if(rec is not None):
-            insert_record(self, rec, op.return_type_name, depth)
+            insert_record(self, rec, op.return_type_name, depth+1)
 
-    join_records(self, depth)
+    join_records(self, depth+1, ops)
+    self.curr_infer_depth = depth+1
 
+#### Source Generation -- apply_multi() ####
 
 def _gen_retrieve_itr(tn,typ_name,ind='    '):
     return indent(f'''tup{tn} = ('{typ_name}',depth)
 if(tup{tn} in planner.flat_vals_ptr_dict):
     iter_ptr{tn} = planner.flat_vals_ptr_dict[tup{tn}]
-    iter{tn} = _struct_from_pointer(l_typ{tn}, iter_ptr{tn})
+    iter{tn} = _dict_from_ptr(l_typ{tn}, iter_ptr{tn})
 else:
     return None
 ''',prefix=ind)
@@ -253,11 +262,12 @@ from numba.typed import Dict
 from numba.types import ListType
 import numpy as np
 import dill
-from cre.utils import _struct_from_pointer, _pointer_from_struct_incref
-from cre.condensed_chainer import CondensedRecord
-'''
+from cre.utils import _dict_from_ptr, _list_from_ptr, _pointer_from_struct_incref
+from cre.sc_planner import SC_Record
+''' 
+    imp_targets = ['call'] + (['check'] if has_check else [])
     src += f'''{gen_import_str(type(op).__name__,
-                 op.hash_code,['call','check'])}\n\n'''
+                 op.hash_code, imp_targets)}\n\n'''
 
     src += "".join([f'typ{i}'+", " for i in range(len(typs))]) + \
              f'= dill.loads({dill.dumps(tuple(typs.keys()))})\n'
@@ -301,22 +311,35 @@ uid=1
     src += indent(f'''{_as} = {params}
 {f'if(not check({_as})): continue' if has_check else ""}
 v = call({_as})
-if(v in vals_to_uid):
-    hist[{_is}] = vals_to_uid[v]
-else:
-    hist[{_is}] = uid
-    vals_to_uid[v] = uid; uid+=1''',prefix=c_ind)
+v_uid = vals_to_uid.get(v,None)
+if(v_uid is None):
+    v_uid = vals_to_uid[v] = uid; uid+=1;
+hist[{_is}] = v_uid
+
+# if(v in vals_to_uid):
+#     hist[{_is}] = vals_to_uid[v]
+# else:
+#     hist[{_is}] = uid
+#     vals_to_uid[v] = uid; uid+=1''',prefix=c_ind)
 
     src += indent(f'''
 vals_to_uid_ptr = _pointer_from_struct_incref(vals_to_uid)
-return CondensedRecord(hist.flatten(), hist_shape, vals_to_uid_ptr)
+return SC_Record(hist.flatten(),
+                 np.array(hist_shape,dtype=np.uint64),
+                 vals_to_uid_ptr
+                )
     ''',prefix=ind)
     return src
 
+###  apply_multi ###
 
 def apply_multi(op, planner, depth):
+    '''Applies 'op' at 'depth' and returns the SC_Record'''
+
+    # If it doesn't already exist generate and inject '_apply_multi' into 'op'
     if(not hasattr(op,'_apply_multi')):
         hash_code = unique_hash(['_apply_multi',op.hash_code])  
+        print(get_cache_path('apply_multi',hash_code))
         if(not source_in_cache('apply_multi',hash_code)):
             src = gen_apply_multi_source(op)
             source_to_cache('apply_multi',hash_code,src)
@@ -324,9 +347,7 @@ def apply_multi(op, planner, depth):
         setattr(op,'_apply_multi', l['apply_multi'])
         # print("<<<", type(am))
 
-
     am = getattr(op,'_apply_multi')
-    print(am)
     return am(planner,depth)
 
 

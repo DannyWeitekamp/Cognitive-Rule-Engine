@@ -157,6 +157,7 @@ def test_source_gen():
     # Python source will just copy it's own definition
     assert "a // b\n" in IntegerDivision.make_source()
 
+    print(IntegerDivision.make_source('js'))
     # For other languages by default look in call_body 
     assert "Math.floor(a/b);\n" in IntegerDivision.make_source('js')
 

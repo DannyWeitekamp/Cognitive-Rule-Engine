@@ -240,7 +240,9 @@ def _pointer_from_struct_codegen(context, builder, val, td,incref=True):
 
 
 @intrinsic
-def _pointer_from_struct(typingctx, val):
+def _pointer_from_struct(typingctx, val_ty):
+    if(isinstance(val_ty, types.Optional)):
+        val_ty = val_ty.type
     def codegen(context, builder, sig, args):
         [td] = sig.args
         [d] = args
@@ -249,7 +251,7 @@ def _pointer_from_struct(typingctx, val):
 
         # return res
         
-    sig = i8(val,)
+    sig = i8(val_ty,)
     return sig, codegen
 
 @njit
@@ -257,14 +259,16 @@ def pointer_from_struct(self):
     return _pointer_from_struct(self) 
 
 @intrinsic
-def _pointer_from_struct_incref(typingctx, val):
+def _pointer_from_struct_incref(typingctx, val_ty):
+    if(isinstance(val_ty, types.Optional)):
+        val_ty = val_ty.type
     def codegen(context, builder, sig, args):
         [td] = sig.args
         [d] = args
 
         return _pointer_from_struct_codegen(context, builder, d, td, True)
         
-    sig = i8(val,)
+    sig = i8(val_ty,)
     return sig, codegen
 
 @intrinsic
@@ -518,6 +522,38 @@ def _listtype_sizeof_item(typingctx, l_ty):
 @njit
 def listtype_sizeof_item(lt):
     return _listtype_sizeof_item(lt)
+
+### Array Intrinsics ###
+
+from numba.np.arrayobj import make_array
+@intrinsic
+def _get_array_data_ptr(typingctx, arr_typ):
+    def codegen(context, builder, sig, args):
+        [arr_typ] = sig.args
+        [arr] = args
+        # does create_struct_proxy plus some other stuff
+        arr_st = make_array(arr_typ)(context, builder, arr)
+        # arr_st = cgutils.create_struct_proxy(arr_typ)(context, builder, arr)
+        if context.enable_nrt:
+            context.nrt.incref(builder, arr_typ, arr)
+        return builder.ptrtoint(arr_st.data, cgutils.intp_t)
+        
+    sig = i8(arr_typ)
+    return sig, codegen
+
+@intrinsic
+def _as_void(typingctx, src):
+    """ returns a void pointer from a given memory address """
+    from numba.core import types, cgutils
+    sig = types.voidptr(src)
+
+    def codegen(cgctx, builder, sig, args):
+        return builder.inttoptr(args[0], cgutils.voidptr_t)
+    return sig, codegen
+
+@njit(cache=True)
+def _arr_from_data_ptr(d_ptr, shape, dtype):
+    return numba.carray(_as_void(d_ptr),shape,dtype=dtype)
 
 
 #### Automatic Variable Aliasing ####

@@ -177,8 +177,8 @@ if __name__ == "__main__":
     # test_apply_multi()
     # test_insert_record()
     # test_join_records_of_type()
-    test_forward_chain_one()
-    # benchmark_apply_multi()
+    # test_forward_chain_one()
+    benchmark_apply_multi()
         # test_apply_multi()
 # from numba import njit, i8
 # from numba.typed import Dict

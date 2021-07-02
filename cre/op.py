@@ -168,12 +168,12 @@ def gen_placeholder_aliases(var_ptrs):
     return generated_aliases
 
 @njit(cache=True)
-def op_ctor(name, return_type_name, var_ptrs, call_addr=0, call_multi_addr=0, check_addr=0):
+def op_ctor(name, return_type_name, arg_type_names, var_ptrs, call_addr=0, call_multi_addr=0, check_addr=0):
     st = new(GenericOpType)
     st.name = name
     st.return_type_name = return_type_name
 
-    st.arg_type_names = List.empty_list(unicode_type)
+    st.arg_type_names = arg_type_names
     st.var_map = Dict.empty(i8, unicode_type)
     st.inv_var_map = Dict.empty(unicode_type, i8)
 
@@ -310,10 +310,12 @@ class Op(structref.StructRefProxy,metaclass=OpMeta):
             var_ptrs = new_var_ptrs_from_types(cls.call_sig.args, arg_names)
 
         # Make the op instance
+        arg_type_names = List([str(x) for x in cls.signature.args])
         sig = cls.signature
         op_inst = op_ctor(
             cls.__name__,
             str(sig.return_type),
+            arg_type_names,
             var_ptrs,
             call_addr=cls.call_addr,
             check_addr=cls.__dict__.get('check_addr',0),

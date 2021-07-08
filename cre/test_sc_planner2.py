@@ -176,7 +176,9 @@ def setup_retrace():
 
 def test_retrace_goals_back_one():
     planner = setup_retrace()
-    build_explanation_tree(planner,f8,36.0)
+    root = build_explanation_tree(planner,f8,36.0)
+    print(root)
+
 
     # goals = Dict.empty(f8,ExplanationTreeType)
     # goals[36.0] = expl_tree_ctor()

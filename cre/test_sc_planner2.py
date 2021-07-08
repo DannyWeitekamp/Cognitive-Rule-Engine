@@ -166,18 +166,46 @@ def test_forward_chain_one():
         (650, 'AA', 'EEEE', 650, 'AA', 'EEEE')
 
 
-def setup_retrace():
-    planner = setup_float()
-    planner = setup_str(planner)
+def setup_retrace(n=5):
+    planner = setup_float(n=n)
+    planner = setup_str(planner,n=n)
     forward_chain_one(planner, [Add,Multiply,Concatenate])
     forward_chain_one(planner, [Add,Multiply,Concatenate])
     return planner
 
 
-def test_retrace_goals_back_one():
+@njit(cache=True)
+def tree_str(root,ind=0):
+    if(len(root.children) == 0): return "?"
+    s = ''
+    for child in root.children:
+        op, child_arg_ptrs = child.op, child.child_arg_ptrs
+
+        s += op.name + "("
+        print(child_arg_ptrs)
+        for ptr in child_arg_ptrs:
+            for i in range(ind):
+                s += " "
+            ch_expl = _struct_from_pointer(ExplanationTreeType, ptr)
+            print("str",tree_str(ch_expl, ind+1))
+            s += tree_str(ch_expl, ind+1)
+            s += ","
+        s += ")\n"
+    return s
+        
+
+
+
+
+def test_build_explanation_tree():
     planner = setup_retrace()
-    root = build_explanation_tree(planner,f8,36.0)
-    print(root)
+    root = build_explanation_tree(planner, f8, 36.0)
+
+    print(tree_str(root))
+    # for child in root.children:
+    #     op, args = child
+    #     print(op.name)
+
 
 
     # goals = Dict.empty(f8,ExplanationTreeType)
@@ -219,7 +247,7 @@ if __name__ == "__main__":
     # test_insert_record()
     # test_join_records_of_type()
     # test_forward_chain_one()
-    test_retrace_goals_back_one()
+    test_build_explanation_tree()
     # benchmark_apply_multi()
     # benchmark_retrace_back_one()
         # test_apply_multi()
@@ -274,3 +302,5 @@ if __name__ == "__main__":
 
 # print(apply_multi(Add,planner, 0))
 # print(
+
+

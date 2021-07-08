@@ -13,6 +13,7 @@ from cre.caching import gen_import_str, unique_hash,import_from_cached, source_t
 from cre.context import kb_context
 from cre.structref import define_structref, define_structref_template
 from cre.kb import KnowledgeBaseType, KnowledgeBase, facts_for_t_id, fact_at_f_id
+from cre.var import GenericVarType
 # from cre.fact import define_fact, BaseFactType, cast_fact, DeferredFactRefType, Fact
 from cre.utils import (_struct_from_meminfo, _meminfo_from_struct, _cast_structref, cast_structref, decode_idrec, lower_getattr, _struct_from_pointer,  lower_setattr, lower_getattr,
                        _pointer_from_struct, _decref_pointer, _incref_pointer, _incref_structref, _pointer_from_struct_incref,
@@ -21,14 +22,15 @@ from cre.utils import assign_to_alias_in_parent_frame
 from cre.subscriber import base_subscriber_fields, BaseSubscriber, BaseSubscriberType, init_base_subscriber, link_downstream
 from cre.vector import VectorType
 from cre.fact import Fact, gen_fact_import_str, get_offsets_from_member_types
-from cre.var import Var
+from cre.var import Var, VarTypeTemplate
+from cre.op import GenericOpType, OpTypeTemplate
 from cre.predicate_node import BasePredicateNode,BasePredicateNodeType, get_alpha_predicate_node_definition, \
  get_beta_predicate_node_definition, deref_attrs, define_alpha_predicate_node, define_beta_predicate_node, AlphaPredicateNode, BetaPredicateNode
 from cre.make_source import make_source, gen_def_func, gen_assign, resolve_template, gen_def_class
 from numba.core import imputils, cgutils
 from numba.core.datamodel import default_manager, models
 from numba.experimental.function_type import _get_wrapper_address
-from cre.op import GenericOpType
+
 
 from operator import itemgetter
 from copy import copy
@@ -50,14 +52,63 @@ class PrintElapse():
 
 SC_Record_field_dict = {
     'data' : u4[::1],
+    'stride' : i8[:,::1],
+    'is_op' : u1,
     'op' : GenericOpType,
+    'var' : GenericVarType,
     'depth' : i8,
     'nargs' : i8,
-    'stride' : i8[:,::1]
 }
 SC_Record_fields = [(k,v) for k,v in SC_Record_field_dict.items()]
 SC_Record, SC_RecordType = \
-    define_structref("SC_Record", SC_Record_fields)
+    define_structref("SC_Record", SC_Record_fields, define_constructor=False)
+
+@njit(cache=True)
+def _sc_record_ctor_helper(data,stride, depth, nargs):
+    st = new(SC_RecordType)
+    st.data = data
+    st.stride = stride
+    st.depth = depth
+    st.nargs = nargs
+    return st
+
+# @generated_jit(cache=True)
+# def sc_record_ctor(data,stride, op_or_var, depth, nargs):
+#     print(data,stride, op_or_var, depth, nargs)
+#     if(isinstance(op_or_var, OpTypeTemplate)):
+#         def impl(data, stride, op_or_var, depth, nargs):
+#             st = _sc_record_ctor_helper(data, stride, op_or_var, depth, nargs)
+#             st.is_op = True
+#             st.op = op_or_var
+#             return st
+#     elif(isinstance(op_or_var, VarTypeTemplate)):
+#         def impl(data, stride, op_or_var, depth, nargs):
+#             st = _sc_record_ctor_helper(data, stride, op_or_var, depth, nargs)
+#             st.is_op = False
+#             st.var = op_or_var
+#             return st
+#     else:
+#         print('fail')
+#     return impl
+    
+
+@overload(SC_Record, prefer_literal=False)
+def overload_SC_Record(data, stride, op_or_var, depth, nargs):
+    if(isinstance(op_or_var, OpTypeTemplate)):
+        def impl(data, stride, op_or_var, depth, nargs):
+            st = _sc_record_ctor_helper(data, stride, depth, nargs)
+            st.is_op = True
+            st.op = op_or_var
+            return st
+    elif(isinstance(op_or_var, VarTypeTemplate)):
+        def impl(data, stride, op_or_var, depth, nargs):
+            st = _sc_record_ctor_helper(data, stride, depth, nargs)
+            st.is_op = False
+            st.var = op_or_var
+            return st
+    else:
+        print('fail')
+    return impl
 
 SC_Record_Entry_field_dict = {
     'rec' : SC_RecordType,
@@ -301,7 +352,7 @@ val_map =  _dict_from_ptr(ret_d_typ,
 data_len = {"*".join([f'l{i}' for i in a_cnt])}*ENTRY_WIDTH
 data = np.empty(data_len,dtype=np.uint32)
 d_ptr = _get_array_data_ptr(data)
-rec = SC_Record(data, op_inst, depth, N_ARGS, stride)
+rec = SC_Record(data, stride, op_inst, depth, N_ARGS)
 rec_ptr = _pointer_from_struct_incref(rec)
 
 d_offset=0
@@ -375,23 +426,52 @@ def apply_multi(op, planner, depth):
     am = getattr(op,'_apply_multi')
     return am(op,planner,depth)
 
+### Explanation Tree Entry ###
 
+ExplanationTreeEntry_field_dict = {
+    "is_op" : u1,
+    "op" : GenericOpType,
+    "var" : GenericVarType,
+    "child_arg_ptrs" : i8[::1]
+}
+ExplanationTreeEntry_fields = [(k,v) for k,v in ExplanationTreeEntry_field_dict.items()]
+ExplanationTreeEntry, ExplanationTreeEntryType = \
+    define_structref("ExplanationTreeEntry", ExplanationTreeEntry_fields, define_constructor=False)
+
+@generated_jit(cache=True, nopython=True)
+def expl_tree_entry_ctor(op_or_var, child_arg_ptrs=None):
+    if(isinstance(op_or_var, OpTypeTemplate)):
+        def impl(op_or_var, child_arg_ptrs):
+            st = new(ExplanationTreeEntryType)
+            st.is_op = True
+            st.op = op_or_var
+            st.child_arg_ptrs = child_arg_ptrs
+            return st
+    elif(isinstance(op_or_var, VarTypeTemplate)):
+        def impl(op_or_var, child_arg_ptrs=None):
+            st = new(ExplanationTreeEntryType)
+            st.is_op = False
+            st.var = op_or_var
+            return st
+    return impl
+
+
+
+
+### Explanation Tree ###
 
 ExplanationTree_field_dict = {
-    # 'is_initialized' : u1,
-    'children' : ListType(Tuple((GenericOpType, i8[::1]))) #List[(op<GenericOpType> ,*ExplanationTree[::1])]
+    'children' : ListType(ExplanationTreeEntryType) #List[(op<GenericOpType> ,*ExplanationTree[::1])]
 }
 ExplanationTree_fields = [(k,v) for k,v in ExplanationTree_field_dict.items()]
 ExplanationTree, ExplanationTreeType = \
     define_structref("ExplanationTree", ExplanationTree_fields, define_constructor=False)
 
 
-op_i8_arr_tupl = Tuple((GenericOpType, i8[::1]))
-
 @njit(cache=True)
 def expl_tree_ctor():
     st = new(ExplanationTreeType)
-    st.children = List.empty_list(op_i8_arr_tupl)
+    st.children = List.empty_list(ExplanationTreeEntryType)
     return st
 
 i8_et_dict = DictType(i8,ExplanationTreeType)
@@ -408,23 +488,26 @@ def _fill_arg_inds_from_rec_entries(re, new_arg_inds, expl_tree):
         Add the new ExplanationTrees to the children of 'expl_tree'
     '''
     while(re is not None):
-        op = re.rec.op 
+        if(re.rec.is_op):
+            op = re.rec.op 
+            child_arg_ptrs = np.empty(len(re.args), dtype=np.int64)
+            for i, (arg_type_name, arg_ind) in enumerate(zip(op.arg_type_names, re.args)):
+                #Make sure a set of indicies has been instantied for 'arg_type_name'
+                if(arg_type_name not in new_arg_inds):
+                    new_arg_inds[arg_type_name] = Dict.empty(i8,ExplanationTreeType)
+                uai = new_arg_inds[arg_type_name]
 
-        child_arg_ptrs = np.empty(len(re.args), dtype=np.int64)
-        for i, (arg_type_name, arg_ind) in enumerate(zip(op.arg_type_names, re.args)):
-            #Make sure a set of indicies has been instantied for 'arg_type_name'
-            if(arg_type_name not in new_arg_inds):
-                new_arg_inds[arg_type_name] = Dict.empty(i8,ExplanationTreeType)
-            uai = new_arg_inds[arg_type_name]
+                # Fill in a new ExplanationTree instance if needed
+                if(arg_ind not in uai):
+                    uai[arg_ind] = expl_tree_ctor()
 
-            # Fill in a new ExplanationTree instance if needed
-            if(arg_ind not in uai):
-                uai[arg_ind] = expl_tree_ctor()
-
-            # Throw instance into the children of expl_tree 
-            child_arg_ptrs[i] = _pointer_from_struct_incref(uai[arg_ind])
-
-            expl_tree.children.append((op, child_arg_ptrs))
+                # Throw new tree instance into the children of 'expl_tree'
+                child_arg_ptrs[i] = _pointer_from_struct_incref(uai[arg_ind])
+                entry = expl_tree_entry_ctor(op,child_arg_ptrs)
+                expl_tree.children.append(entry)
+        else:
+            entry = expl_tree_entry_ctor(re.rec.var)
+            expl_tree.children.append(entry)
         re = next_rec_entry(re)   
 
 
@@ -451,6 +534,7 @@ def retrace_arg_inds(planner, typ,  goals, new_arg_inds=None):
         for goal, expl_tree in _goals.items():
             # 're' is the head of a linked list of rec_entries
             re = rec_entry_from_ptr(val_map[goal])
+            print(goal, re)
             _fill_arg_inds_from_rec_entries(re,
                 new_arg_inds, expl_tree)
             
@@ -471,7 +555,7 @@ def fill_subgoals_from_arg_inds(planner, arg_inds, typ, depth, new_subgoals):
         vals = _list_from_ptr(lst_typ, planner.flat_vals_ptr_dict[(typ_name,depth)])
         for ind, expl_tree in _arg_inds.items():
             _new_subgoals[vals[ind]] = expl_tree
-
+        print("new_subgoals",List(_new_subgoals.keys()))
         # Inject the new subgoals for 'typ' into 'new_subgoals'
         new_subgoals[typ_name] = _pointer_from_struct_incref(_new_subgoals)
     return impl
@@ -493,6 +577,7 @@ def retrace_goals_back_one(planner, goals):
         new_subgoals = fill_subgoals_from_arg_inds(
                 planner, new_arg_inds, typ,
                 planner.curr_infer_depth, new_subgoals)
+
 
     return new_subgoals
 
@@ -634,7 +719,24 @@ Notes on incrementally updating the planner:
     -Could probably use t_id, f_id, a_id the integer
 '''
 
+### More Thinking ### 
+'''
+So we need a standard way of writing things into the starting buffer 
+of the planner it seems like having a bunch of Var instances be 
+essentially the ops for those depth 0 values. This way we already have
+a standard way of encoding deref instructions.
+So then we need some kind of flag on the recEntry like is_op
+it seems like this warrants a new structref TreeEntry to replace 
+the tuple that is there now. We probably should not recycle the Record 
+instance because it has a ref to 'data' which is big should get able to 
+be freed even if the Explanation tree sticks around for a long time.
 
+So we have TreeEntry:
+-is_op : u1
+-op : GenericOpType
+-var : GenericVarType
+
+'''
 
 
 

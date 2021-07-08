@@ -562,13 +562,16 @@ def fill_subgoals_from_arg_inds(planner, arg_inds, typ, depth, new_subgoals):
 
 
 def retrace_goals_back_one(planner, goals):
+    print("RETRACE")
     new_arg_inds = None
     for typ_name in goals:
         # fix later 
         typ = f8 if typ_name == 'float64' else unicode_type
         new_arg_inds = retrace_arg_inds(planner, typ, goals, new_arg_inds)
 
-    if(len(new_arg_inds) == 0): return None
+    if(len(new_arg_inds) == 0):
+        print("BAIL")
+        return None
 
     new_subgoals = _init_subgoals()
     for typ_name in new_arg_inds:
@@ -578,7 +581,7 @@ def retrace_goals_back_one(planner, goals):
                 planner, new_arg_inds, typ,
                 planner.curr_infer_depth, new_subgoals)
 
-
+    print("SUBGOALS FOUND")
     return new_subgoals
 
 @generated_jit(cache=True)

@@ -10,7 +10,7 @@ from numba.extending import overload_method, intrinsic, overload_attribute, intr
 from numba.core.typing.templates import AttributeTemplate
 from cre.caching import gen_import_str, unique_hash,import_from_cached, source_to_cache, source_in_cache
 from cre.context import kb_context
-from cre.structref import define_structref, define_structref_template
+from cre.structref import define_structref, define_structref_template, CastFriendlyStructref
 from cre.kb import KnowledgeBaseType, KnowledgeBase, facts_for_t_id, fact_at_f_id
 from cre.fact import define_fact, BaseFactType, cast_fact, DeferredFactRefType, Fact, _standardize_type
 from cre.utils import _struct_from_meminfo, _meminfo_from_struct, _cast_structref, cast_structref, decode_idrec, lower_getattr, _struct_from_pointer,  lower_setattr, lower_getattr, _pointer_from_struct, _decref_pointer, _incref_pointer, _incref_structref, pointer_from_struct
@@ -63,7 +63,7 @@ var_fields_dict = {
 
 var_fields =  [(k,v) for k,v, in var_fields_dict.items()]
 
-class VarTypeTemplate(types.StructRef):
+class VarTypeTemplate(CastFriendlyStructref):
     pass
 
 
@@ -340,11 +340,11 @@ def var_ctor(var_struct_type, type_name="", alias=""):
 
 @overload(Var,strict=False)
 def overload_Var(typ,alias=None):
-    fact_type = typ.instance_type
-    type_name = fact_type._fact_name
-    struct_type = get_var_definition(typ,typ)
+    _typ = typ.instance_type
+    type_name = str(typ)
+    struct_type = get_var_definition(_typ,_typ)
     def impl(typ, alias=None):
-        return var_ctor(struct_type,type_name,alias)
+        return var_ctor(struct_type, type_name, alias)
 
     return impl
 

@@ -63,14 +63,14 @@ SC_Record_fields = [(k,v) for k,v in SC_Record_field_dict.items()]
 SC_Record, SC_RecordType = \
     define_structref("SC_Record", SC_Record_fields, define_constructor=False)
 
-@njit(cache=True)
-def _sc_record_ctor_helper(data,stride, depth, nargs):
-    st = new(SC_RecordType)
-    st.data = data
-    st.stride = stride
-    st.depth = depth
-    st.nargs = nargs
-    return st
+# @njit(cache=True)
+# def _sc_record_ctor_helper(depth, nargs):
+#     st = new(SC_RecordType)
+#     st.data = data
+#     st.stride = stride
+#     st.depth = depth
+#     st.nargs = nargs
+#     return st
 
 # @generated_jit(cache=True)
 # def sc_record_ctor(data,stride, op_or_var, depth, nargs):
@@ -93,18 +93,24 @@ def _sc_record_ctor_helper(data,stride, depth, nargs):
     
 
 @overload(SC_Record, prefer_literal=False)
-def overload_SC_Record(data, stride, op_or_var, depth, nargs):
+def overload_SC_Record(op_or_var, depth=0, nargs=0, data=None, stride=None):
     if(isinstance(op_or_var, OpTypeTemplate)):
-        def impl(data, stride, op_or_var, depth, nargs):
-            st = _sc_record_ctor_helper(data, stride, depth, nargs)
+        def impl(op_or_var, depth=0, nargs=0, data=None, stride=None):
+            st = new(SC_RecordType)
             st.is_op = True
             st.op = op_or_var
+            st.depth = depth
+            st.nargs = nargs
+            if(data is not None): st.data = data
+            if(stride is not None): st.stride = stride
             return st
     elif(isinstance(op_or_var, VarTypeTemplate)):
-        def impl(data, stride, op_or_var, depth, nargs):
-            st = _sc_record_ctor_helper(data, stride, depth, nargs)
+        def impl(op_or_var, depth=0, nargs=0, data=None, stride=None):
+            st = new(SC_RecordType)
             st.is_op = False
-            st.var = op_or_var
+            st.var = _cast_structref(GenericVarType, op_or_var) 
+            st.depth = depth
+            st.nargs = 0
             return st
     else:
         print('fail')
@@ -120,7 +126,7 @@ SC_Record_Entry, SC_Record_EntryType = \
     define_structref("SC_Record_Entry", SC_Record_Entry_fields)
 
 @njit(cache=True)
-def rec_entry_from_ptr(d_ptr, L=-1):
+def rec_entry_from_ptr(d_ptr):
     ptrs = _arr_from_data_ptr(d_ptr, (2,),dtype=np.int64)
     rec_ptr, next_entry_ptr = ptrs[0], ptrs[1]
     rec = _struct_from_pointer(SC_RecordType, rec_ptr)
@@ -149,8 +155,7 @@ SetChainingPlanner_field_dict = {
     # List of dictionaries that map:
     #  Tuple(type_str[str],depth[int]) -> ListType[Record])
     'backward_records' : ListType(DictType(unicode_type, ListType(SC_RecordType))),
-
-    # Maps type_str[str] -> *(Dict: val[any] -> *SC_Record_Entry)
+    # Maps type_str[str] -> *(Dict: val[any] -> Tuple(depth[i8], *SC_Record_Entry) )
     'val_map_ptr_dict' : DictType(unicode_type, i8),
     # Maps (type_str[str],depth[int]) -> *Iterator[any]
     'flat_vals_ptr_dict' : DictType(Tuple((unicode_type,i8)), i8),
@@ -242,46 +247,58 @@ def insert_record(self, rec, ret_type_name, depth):
     recs.append(rec)
     recs_at_depth[ret_type_name] = recs
 
-@njit(cache=True)
-def join_records_of_type(self, depth, typ_name,
-         typ, dict_typ):
-    ''' Goes through every record at 'depth' and joins them
-        so that 'val_to_depth' and 'flat_vals' are defined '''
-    recs = self.forward_records[depth][typ_name]
 
-    val_map = _dict_from_ptr(dict_typ, self.val_map_ptr_dict[typ_name])
-    flat_vals = List.empty_list(typ,len(val_map))
+i8_2x_tuple = Tuple((i8,i8))
+@generated_jit(cache=True, nopython=True)
+def join_records_of_type(self, depth, typ):
+    _typ = typ.instance_type
+    dict_typ = DictType(_typ,i8_2x_tuple)
+    typ_name = str(_typ)
+    def impl(self, depth, typ):
+        ''' Goes through every record at 'depth' and joins them
+            so that 'val_to_depth' and 'flat_vals' are defined '''
+        # recs = self.forward_records[depth][typ_name]
+        print("BEGIN", self.val_map_ptr_dict[typ_name])
+        val_map = _dict_from_ptr(dict_typ, self.val_map_ptr_dict[typ_name])
+        print(val_map)
+        flat_vals = List.empty_list(typ, len(val_map))
+        print("BEF1", depth)
+        for val in val_map:
+            flat_vals.append(val) 
 
-    for val in val_map:
-        flat_vals.append(val) 
+        tup = (typ_name, depth)
+        print("BEF2", depth)
+        #If (typ_name, depth) was already there then decref the
+        # entry in flat_vals_ptr_dict so it gets freed
+        # if(tup in self.flat_vals_ptr_dict):
+        #     _decref_pointer(self.flat_vals_ptr_dict[tup])
+        print("HI")
+        self.flat_vals_ptr_dict[tup] = \
+             _pointer_from_struct_incref(flat_vals)
+    return impl
 
-    tup = (typ_name, depth)
-    if(tup in self.flat_vals_ptr_dict):
-        _decref_pointer(self.flat_vals_ptr_dict[tup])
-    self.flat_vals_ptr_dict[tup] = \
-         _pointer_from_struct_incref(flat_vals)
 
-
-def join_records(self,depth,ops):
+def join_records(self, depth, ops):
     typs = set([op.signature.return_type for op in ops])
     for typ in typs:
-        typ_name = str(typ)
-        val_to_depth = join_records_of_type(self,
-            depth, typ_name, typ, DictType(typ,i8))
+        val_to_depth = join_records_of_type(self, depth, typ)
 
 # Don't njit 
 # Note: could probably not run all ops
 def forward_chain_one(self, ops=None):
     '''Applies 'ops' on all current inferred values'''
-    depth = self.curr_infer_depth
+    nxt_depth = self.curr_infer_depth+1
+    print("nxt_depth", nxt_depth)
     if(ops is None): ops = self.ops
     for op in ops:
-        rec = apply_multi(op, self, depth)
+        rec = apply_multi(op, self, self.curr_infer_depth)
+        print("AFT")
         if(rec is not None):
-            insert_record(self, rec, op.return_type_name, depth+1)
-
-    join_records(self, depth+1, ops)
-    self.curr_infer_depth = depth+1
+            insert_record(self, rec, op.return_type_name, nxt_depth)
+    print("JOIN")
+    join_records(self, nxt_depth, ops)
+    print("AFT JOIN")
+    self.curr_infer_depth = nxt_depth
 
 #### Source Generation -- apply_multi() ####
 
@@ -307,7 +324,7 @@ def gen_apply_multi_source(op, ind='    '):
     src = \
 f'''from numba import njit, i8, u4, u8
 from numba.typed import Dict
-from numba.types import ListType, DictType
+from numba.types import ListType, DictType, Tuple
 import numpy as np
 import dill
 from cre.utils import _dict_from_ptr, _list_from_ptr, _pointer_from_struct_incref, _get_array_data_ptr
@@ -321,7 +338,7 @@ from cre.sc_planner2 import SC_Record, SC_Record_Entry, SC_Record_EntryType
              f'= dill.loads({dill.dumps(tuple(typs.keys()))})\n'
 
     src += f'''ret_typ = dill.loads({dill.dumps(sig.return_type)})
-ret_d_typ = DictType(ret_typ,i8)
+ret_d_typ = DictType(ret_typ,Tuple((i8,i8)))
 '''
 
     src += ", ".join([f'l_typ{i}' for i in range(len(typs))]) + \
@@ -352,10 +369,11 @@ val_map =  _dict_from_ptr(ret_d_typ,
 data_len = {"*".join([f'l{i}' for i in a_cnt])}*ENTRY_WIDTH
 data = np.empty(data_len,dtype=np.uint32)
 d_ptr = _get_array_data_ptr(data)
-rec = SC_Record(data, stride, op_inst, depth, N_ARGS)
+rec = SC_Record(op_inst, depth, N_ARGS, data, stride)
 rec_ptr = _pointer_from_struct_incref(rec)
 
 d_offset=0
+val_map_defaults = (-1,0)
 ''',prefix=ind)
     c_ind = copy(ind)
     for i, arg in enumerate(args):
@@ -371,7 +389,9 @@ d_offset=0
 {f'if(not check({_as})): continue' if has_check else ""}
 v = call({_as})
 
-prev_entry = val_map.get(v,0)
+
+prev_depth, prev_entry = val_map.get(v, val_map_defaults)
+if(prev_depth != -1 and prev_depth < depth): continue
 
 data[d_offset +0] = u4(rec_ptr) # get low bits
 data[d_offset +1] = u4(rec_ptr>>32) # get high bits
@@ -381,7 +401,7 @@ data[d_offset +3] = u4(prev_entry>>32)# get high bits
 #Put arg inds at the end
 {arg_assigns}
 
-val_map[v] = d_ptr + d_offset*4
+val_map[v] = (depth, d_ptr + d_offset*4)
 d_offset += ENTRY_WIDTH
         
 ''',prefix=c_ind)
@@ -398,7 +418,7 @@ def _assert_prepared(self, typ, typ_name, depth):
             Dict.empty(unicode_type, record_list_type)
         )
     if(typ_name not in self.val_map_ptr_dict):
-        val_map = Dict.empty(typ, i8)
+        val_map = Dict.empty(typ, i8_2x_tuple)
         val_map_ptr = _pointer_from_struct_incref(val_map)
         self.val_map_ptr_dict[typ_name] = val_map_ptr
     
@@ -451,7 +471,7 @@ def expl_tree_entry_ctor(op_or_var, child_arg_ptrs=None):
         def impl(op_or_var, child_arg_ptrs=None):
             st = new(ExplanationTreeEntryType)
             st.is_op = False
-            st.var = op_or_var
+            st.var = _cast_structref(GenericVarType, op_or_var) 
             return st
     return impl
 
@@ -520,7 +540,7 @@ def retrace_arg_inds(planner, typ,  goals, new_arg_inds=None):
     # The actual type inside the type ref 'typ'
     _typ = typ.instance_type
 
-    val_map_d_typ = DictType(_typ, i8) 
+    val_map_d_typ = DictType(_typ, i8_2x_tuple) 
     _goals_d_typ = DictType(_typ, ExplanationTreeType) 
     typ_name = str(_typ)
     def impl(planner, typ, goals, new_arg_inds=None):
@@ -533,7 +553,8 @@ def retrace_arg_inds(planner, typ,  goals, new_arg_inds=None):
 
         for goal, expl_tree in _goals.items():
             # 're' is the head of a linked list of rec_entries
-            re = rec_entry_from_ptr(val_map[goal])
+            _, entry_ptr = val_map[goal]
+            re = rec_entry_from_ptr(entry_ptr)
             print(goal, re)
             _fill_arg_inds_from_rec_entries(re,
                 new_arg_inds, expl_tree)
@@ -544,7 +565,7 @@ def retrace_arg_inds(planner, typ,  goals, new_arg_inds=None):
 
 @generated_jit(cache=True,nopython=True) 
 def fill_subgoals_from_arg_inds(planner, arg_inds, typ, depth, new_subgoals):
-    '''For'new_subgoals' with the actual values pointed to by
+    '''Fill 'new_subgoals' with the actual values pointed to by
          the arg_inds of 'typ' '''
     _typ = typ.instance_type
     typ_name = str(_typ)
@@ -555,14 +576,14 @@ def fill_subgoals_from_arg_inds(planner, arg_inds, typ, depth, new_subgoals):
         vals = _list_from_ptr(lst_typ, planner.flat_vals_ptr_dict[(typ_name,depth)])
         for ind, expl_tree in _arg_inds.items():
             _new_subgoals[vals[ind]] = expl_tree
-        print("new_subgoals",List(_new_subgoals.keys()))
         # Inject the new subgoals for 'typ' into 'new_subgoals'
         new_subgoals[typ_name] = _pointer_from_struct_incref(_new_subgoals)
+        return new_subgoals
     return impl
 
 
 def retrace_goals_back_one(planner, goals):
-    print("RETRACE")
+    # print("RETRACE")
     new_arg_inds = None
     for typ_name in goals:
         # fix later 
@@ -570,7 +591,7 @@ def retrace_goals_back_one(planner, goals):
         new_arg_inds = retrace_arg_inds(planner, typ, goals, new_arg_inds)
 
     if(len(new_arg_inds) == 0):
-        print("BAIL")
+        # print("BAIL")
         return None
 
     new_subgoals = _init_subgoals()
@@ -581,7 +602,8 @@ def retrace_goals_back_one(planner, goals):
                 planner, new_arg_inds, typ,
                 planner.curr_infer_depth, new_subgoals)
 
-    print("SUBGOALS FOUND")
+    # print("SUBGOALS FOUND")
+    # print(new_subgoals)
     return new_subgoals
 
 @generated_jit(cache=True)
@@ -605,11 +627,16 @@ def _init_subgoals():
 def build_explanation_tree(planner, g_typ, goal):
     root = expl_tree_ctor()
     goals = _init_root_goals(g_typ, goal, root)
-
+    print("HERE")
     new_subgoals = retrace_goals_back_one(planner, goals)    
+    retrace_depth = planner.curr_infer_depth-1
     while(new_subgoals is not None):
+        if(retrace_depth < 0):
+            raise RecursionError("Retrace exceeded current inference depth.")
+        print("HERE")
         new_subgoals = retrace_goals_back_one(planner, new_subgoals)   
-
+        retrace_depth -= 1
+        
     return root
 
     # for typ_str in goals_d:

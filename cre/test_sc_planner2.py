@@ -1,14 +1,15 @@
 import numpy as np
 from numba import njit, f8, i8
 from numba.typed import List, Dict
-from numba.types import DictType, ListType, unicode_type
+from numba.types import DictType, ListType, unicode_type, Tuple
 from cre.op import Op
 from cre.sc_planner2 import (gen_apply_multi_source,
                      apply_multi, SetChainingPlanner, insert_record,
                      join_records_of_type, forward_chain_one, next_rec_entry,
                     rec_entry_from_ptr, SC_Record_EntryType, retrace_goals_back_one, expl_tree_ctor,
-                    build_explanation_tree, ExplanationTreeType)
-from cre.utils import _pointer_from_struct_incref, _list_from_ptr, _dict_from_ptr, _struct_from_pointer
+                    build_explanation_tree, ExplanationTreeType, SC_Record, SC_RecordType)
+from cre.utils import _pointer_from_struct_incref, _list_from_ptr, _dict_from_ptr, _struct_from_pointer, _get_array_data_ptr
+from cre.var import Var
 
 import time
 class PrintElapse():
@@ -42,19 +43,30 @@ class Concatenate(Op):
     def call(a, b):
         return a + b  
 
+i8_2x_tuple = Tuple((i8,i8))
 def setup_float(planner=None,n=5):
     if(planner is None):
         planner = SetChainingPlanner()
 
     @njit(cache=True)
     def inject_float_data(planner,n):
+        val_map = Dict.empty(f8,i8_2x_tuple)
         l = List.empty_list(f8,n)
+        print("START")
         for x in np.arange(n,dtype=np.float64):
+            print(x)
             l.append(x)
-
+            rec = SC_Record(Var(f8))
+            rec_entry = np.empty((1,),dtype=np.int64)
+            rec_entry[0] = _pointer_from_struct_incref(rec)
+            rec_entry_ptr = _get_array_data_ptr(rec_entry)
+            val_map[x] = (0, rec_entry_ptr)
+        print("END")
         planner.flat_vals_ptr_dict[('float64',0)] = _pointer_from_struct_incref(l)
-
+        planner.val_map_ptr_dict['float64'] = _pointer_from_struct_incref(val_map)
+    print("INJECT")
     inject_float_data(planner,n)
+    print("END!")
 
     return planner
 
@@ -64,11 +76,20 @@ def setup_str(planner=None,n=5):
 
     @njit(cache=True)
     def inject_str_data(planner,n):
+        val_map = Dict.empty(unicode_type,i8_2x_tuple)
         l = List.empty_list(unicode_type,n)
-        for x in range(65,n+65):
-            l.append(chr(x))
+        for _x in range(65,n+65):
+            x = chr(_x)
+            print(x)
+            l.append(x)
+            rec = SC_Record(Var(unicode_type))
+            rec_entry = np.empty((1,),dtype=np.int64)
+            rec_entry[0] = _pointer_from_struct_incref(rec)
+            rec_entry_ptr = _get_array_data_ptr(rec_entry)
+            val_map[x] = (0, rec_entry_ptr)
 
         planner.flat_vals_ptr_dict[('unicode_type',0)] = _pointer_from_struct_incref(l)
+        planner.val_map_ptr_dict['unicode_type'] = _pointer_from_struct_incref(val_map)
 
     inject_str_data(planner,n)
 

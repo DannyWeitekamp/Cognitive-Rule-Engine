@@ -23,7 +23,7 @@ from numba.types import ListType
 from cre.core import TYPE_ALIASES, REGISTERED_TYPES, JITSTRUCTS, py_type_map, numba_type_map, numpy_type_map
 from cre.gensource import assert_gen_source
 from cre.caching import unique_hash, source_to_cache, import_from_cached, source_in_cache, get_cache_path
-from cre.structref import gen_structref_code, define_structref
+from cre.structref import gen_structref_code, define_structref, CastFriendlyStructref
 from cre.context import kb_context
 from cre.utils import (_struct_from_pointer, _cast_structref, struct_get_attr_offset, _obj_cast_codegen,
                        _pointer_from_struct_codegen, _pointer_from_struct)
@@ -34,35 +34,15 @@ import numpy as np
 GLOBAL_FACT_COUNT = -1
 SPECIAL_ATTRIBUTES = ["inherit_from"]
 
-class Fact(types.StructRef):
+class Fact(CastFriendlyStructref):
     def __init__(self, fields):
         super().__init__(fields)
 
-    def can_convert_to(self, typingctx, other):
-        """
-        Convert this Record to the *other*.
-        This method only implements width subtyping for records.
-        """
-        from numba.core.errors import NumbaExperimentalFeatureWarning
-        # print(other.__dict__)
-        if isinstance(other, Fact):
-            if len(other._fields) > len(self._fields):
-                return
-            for other_fd, self_fd in zip(other._fields,
-                                         self._fields):
-                if not other_fd == self_fd:
-                    return
-            # warnings.warn(f"{self} has been considered a subtype of {other} "
-            #               f" This is an experimental feature.",
-            #               category=NumbaExperimentalFeatureWarning)
-            return Conversion.safe
+    
 
-    def can_convert_from(self, typingctx, other):
-        return other.can_convert_to(typingctx, other)
+    def __str__(self):
+        return self._fact_name if hasattr(self, '_fact_name') else "Fact"
 
-    def unify(self, typingctx, other):
-        if(self.can_convert_to(typingctx, other)):
-            return other
 
     # def __getstate__(self):
     #     state = self.__dict__.copy()

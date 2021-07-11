@@ -199,20 +199,23 @@ def setup_retrace(n=5):
 def tree_str(root,ind=0):
     print("START STR TREE")
     if(len(root.children) == 0): return "?"
-    s = ''
+    s = ' '*ind
     for child in root.children:
-        op, child_arg_ptrs = child.op, child.child_arg_ptrs
-
-        s += op.name + "("
-        print(child_arg_ptrs)
-        for ptr in child_arg_ptrs:
-            for i in range(ind):
-                s += " "
-            ch_expl = _struct_from_pointer(ExplanationTreeType, ptr)
-            print("str",tree_str(ch_expl, ind+1))
-            s += tree_str(ch_expl, ind+1)
-            s += ","
-        s += ")\n"
+        if(child.is_op):
+            op, child_arg_ptrs = child.op, child.child_arg_ptrs
+            # for i in range(ind): s += " "
+                
+            s += op.name + "("
+            # print(child_arg_ptrs)
+            for ptr in child_arg_ptrs:
+                
+                ch_expl = _struct_from_pointer(ExplanationTreeType, ptr)
+                # print("str",tree_str(ch_expl, ind+1))
+                s += tree_str(ch_expl, ind+1)
+                s += ","
+            s += ")"
+        else:
+            s += "?"
     return s
         
 

@@ -362,6 +362,7 @@ def apply_multi(op_inst, planner, depth):
     l_defs = '\n'.join([f'l{i} = stride[{i}][1]-stride[{i}][0]' for i in a_cnt])#", ".join([f"len(iter{it_inds[i]})-start{i}" for i in a_cnt])
     stride_defaults = ",".join([f'[0,len(iter{it_inds[i]})]' for i in a_cnt])
     src += indent(f'''
+nxt_depth = depth + 1
 stride = np.array([{stride_defaults}],dtype=np.int64)
 val_map =  _dict_from_ptr(ret_d_typ,
 {ind}planner.val_map_ptr_dict['{str(sig.return_type)}'])
@@ -369,7 +370,7 @@ val_map =  _dict_from_ptr(ret_d_typ,
 data_len = {"*".join([f'l{i}' for i in a_cnt])}*ENTRY_WIDTH
 data = np.empty(data_len,dtype=np.uint32)
 d_ptr = _get_array_data_ptr(data)
-rec = SC_Record(op_inst, depth, N_ARGS, data, stride)
+rec = SC_Record(op_inst, nxt_depth, N_ARGS, data, stride)
 rec_ptr = _pointer_from_struct_incref(rec)
 
 d_offset=0
@@ -391,7 +392,7 @@ v = call({_as})
 
 
 prev_depth, prev_entry = val_map.get(v, val_map_defaults)
-if(prev_depth != -1 and prev_depth < depth): continue
+if(prev_depth != -1 and prev_depth < nxt_depth): continue
 
 data[d_offset +0] = u4(rec_ptr) # get low bits
 data[d_offset +1] = u4(rec_ptr>>32) # get high bits
@@ -401,7 +402,7 @@ data[d_offset +3] = u4(prev_entry>>32)# get high bits
 #Put arg inds at the end
 {arg_assigns}
 
-val_map[v] = (depth, d_ptr + d_offset*4)
+val_map[v] = (nxt_depth, d_ptr + d_offset*4)
 d_offset += ENTRY_WIDTH
         
 ''',prefix=c_ind)
@@ -508,6 +509,7 @@ def _fill_arg_inds_from_rec_entries(re, new_arg_inds, expl_tree):
         Add the new ExplanationTrees to the children of 'expl_tree'
     '''
     while(re is not None):
+        print("REC IS OP", re.rec.is_op)
         if(re.rec.is_op):
             op = re.rec.op 
             child_arg_ptrs = np.empty(len(re.args), dtype=np.int64)
@@ -525,10 +527,14 @@ def _fill_arg_inds_from_rec_entries(re, new_arg_inds, expl_tree):
                 child_arg_ptrs[i] = _pointer_from_struct_incref(uai[arg_ind])
                 entry = expl_tree_entry_ctor(op,child_arg_ptrs)
                 expl_tree.children.append(entry)
+            re = next_rec_entry(re)   
         else:
+            print("HEY")
             entry = expl_tree_entry_ctor(re.rec.var)
+            print("HEY!!")
             expl_tree.children.append(entry)
-        re = next_rec_entry(re)   
+            print("HEY!!!!!")
+            re = None
 
 
 @generated_jit(cache=True, nopython=True) 
@@ -558,7 +564,7 @@ def retrace_arg_inds(planner, typ,  goals, new_arg_inds=None):
             print(goal, re)
             _fill_arg_inds_from_rec_entries(re,
                 new_arg_inds, expl_tree)
-            
+        print("ARG INDS END")
         return new_arg_inds
     return impl    
 
@@ -571,6 +577,7 @@ def fill_subgoals_from_arg_inds(planner, arg_inds, typ, depth, new_subgoals):
     typ_name = str(_typ)
     lst_typ = ListType(_typ)
     def impl(planner, arg_inds, typ, depth, new_subgoals):
+        print("START SUBGOALS")
         _new_subgoals =  Dict.empty(typ, ExplanationTreeType)
         _arg_inds = arg_inds[typ_name]
         vals = _list_from_ptr(lst_typ, planner.flat_vals_ptr_dict[(typ_name,depth)])
@@ -578,6 +585,8 @@ def fill_subgoals_from_arg_inds(planner, arg_inds, typ, depth, new_subgoals):
             _new_subgoals[vals[ind]] = expl_tree
         # Inject the new subgoals for 'typ' into 'new_subgoals'
         new_subgoals[typ_name] = _pointer_from_struct_incref(_new_subgoals)
+        print("END SUBGOALS")
+        print(_new_subgoals)
         return new_subgoals
     return impl
 

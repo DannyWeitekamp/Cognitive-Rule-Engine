@@ -197,6 +197,7 @@ def setup_retrace(n=5):
 
 @njit(cache=True)
 def tree_str(root,ind=0):
+    print("START STR TREE")
     if(len(root.children) == 0): return "?"
     s = ''
     for child in root.children:

@@ -444,13 +444,24 @@ def get_arg_seq(self):
 
 define_boxing(OpTypeTemplate,Op)   
 
+def g_nm(x,names):
+    '''Helper function that helps with putting instances of Var
+        as dictionary keys by replacing them with their NRT pointers.
+        This must be done because __eq__ is not a comparator on Var.'''
+    if(isinstance(x, Var)):
+        return names.get(x.get_ptr(),None)
+    else:
+        return names.get(x,None)
+
+
+
 class OpComp():
     '''A helper class representing a composition of operations
         that can be flattened into a new Op definition.'''
 
     def _repr_arg_helper(self,x):
         if isinstance(x, Var):
-            return f'a{self.v_ptr_to_ind[x.get_ptr()]}'
+            return f'a{self.vars[x.get_ptr()][1]}'
         elif(isinstance(x, OpComp)):
             return x.gen_expr('python')
         else:
@@ -461,20 +472,21 @@ class OpComp():
         '''Constructs the the core pieces of an OpComp from a set of arguments.
             These pieces are the outermost 'op', and a set of 'constants',
             'vars', and 'instructions' (i.e. other op_comps)'''
-        _vars = {}
+        _vars = {} #var_ptr -> (var_inst, index, type)
         constants = {}
         instructions = {}
         args = []
         arg_types = []
-        v_ptr_to_ind = {}
+        # v_ptr_to_ind = {} 
 
         for i, x in enumerate(py_args):
             if(isinstance(x, (OpMeta,Op))): x = x.op_comp
             if(isinstance(x, OpComp)):
-                for v,t in x.vars.items():
-                    if(v not in _vars):
-                        _vars[v] = t
-                        v_ptr_to_ind[v.get_ptr()] = len(arg_types)
+                for v_ptr,(v,_,t) in x.vars.items():
+                    if(v_ptr not in _vars):
+                        # v_ptr = v.get_ptr()
+                        _vars[v_ptr] = (v,len(arg_types),t)
+                        # v_ptr_to_ind[] = len(arg_types)
                         arg_types.append(t)
 
                 for c,t in x.constants.items():
@@ -483,10 +495,12 @@ class OpComp():
                     instructions[op_comp] = op_comp.op.signature
             else:
                 if(isinstance(x,Var)):
-                    if(x not in _vars):
+                    v_ptr = x.get_ptr()
+                    if(v_ptr not in _vars):
                         t = op.signature.args[i]
-                        _vars[x] = op.signature.args[i]
-                        v_ptr_to_ind[x.get_ptr()] = len(arg_types)
+                        _vars[v_ptr] = (x,len(arg_types),t)
+                        # _vars[x] = op.signature.args[i]
+                        # v_ptr_to_ind[x.get_ptr()] = len(arg_types)
                         arg_types.append(t)
                 else:
                     constants[x] = op.signature.args[i]
@@ -497,7 +511,7 @@ class OpComp():
         self.args = args
         self.arg_types = arg_types
         self.constants = constants
-        self.v_ptr_to_ind = v_ptr_to_ind
+        # self.v_ptr_to_ind = v_ptr_to_ind
 
         self._expr = f"{op.name}({', '.join([self._repr_arg_helper(x) for x in self.args])})"  
         self.name = self._expr
@@ -520,8 +534,8 @@ class OpComp():
             op_cls = self._generate_op_cls = l['__GenerateOp__']
 
             var_ptrs = np.empty(len(self.vars),dtype=np.int64)
-            for i,v in enumerate(self.vars):
-                var_ptrs[i] = v.get_ptr()
+            for i,v_p in enumerate(self.vars):
+                var_ptrs[i] = v_p#v.get_ptr()
 
             op = self._generate_op = op_cls.make_singleton_inst(var_ptrs)
             
@@ -562,11 +576,11 @@ class OpComp():
             constant_defs += f"{ind}{gen_assign(lang, f'c{i}', f'{c!r}')}\n"
         return constant_defs
 
-    def _gen_arg_seq(self,lang, arg_names=None, names={}):
+    def _gen_arg_seq(self, lang, arg_names=None, names={}):
         if(arg_names is None):
             arg_names = [f'a{i}' for i in range(len(self.vars))]
-        for i,(v,t) in enumerate(self.vars.items()):
-            names[v] = arg_names[i]
+        for i,(v_p,(v,_,t)) in enumerate(self.vars.items()):
+            names[v_p] = arg_names[i]
         return arg_names
 
         
@@ -609,8 +623,8 @@ class OpComp():
         for i,instr in enumerate(self.instructions):
             instr_reprs = []
             for x in instr.args:
-                if(x in names):
-                    instr_reprs.append(names[x])
+                if(g_nm(x,names) is not None):
+                    instr_reprs.append(g_nm(x,names))
                 elif(isinstance(x,(Op,OpComp))):
                     instr_reprs.append(x.gen_expr(lang,**kwargs))
                 else:
@@ -627,7 +641,7 @@ class OpComp():
         names, arg_names, const_defs = self._call_check_prereqs(lang, **kwargs)
         call_body = const_defs
         for i,instr in enumerate(self.instructions):
-            inp_seq = ", ".join([names[x] for x in instr.args])
+            inp_seq = ", ".join([g_nm(x,names) for x in instr.args])
             call_fname = names[(instr.op,'call')]
             call_body += f"{ind}{gen_assign(lang, f'i{i}', f'{call_fname}({inp_seq})')}\n"
 
@@ -642,7 +656,7 @@ class OpComp():
         final_k = "True"
         for i,instr in enumerate(self.instructions):
             j,_ = self.used_ops[instr.op]
-            inp_seq = ", ".join([names[x] for x in instr.args])
+            inp_seq = ", ".join([g_nm(x,names) for x in instr.args])
             if(hasattr(instr.op, 'check')):
                 check_fname = names[(instr.op,'check')]
                 check_body += f"{ind}{gen_assign(lang, f'k{i}', f'{check_fname}({inp_seq}')})\n"

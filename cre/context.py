@@ -116,7 +116,7 @@ class KnowledgeBaseContext(object):
     def __init__(self,name):
         self.name = name
         self.fact_ctors = {}
-        self.fact_types = {}
+        self.type_registry = {}
         self.op_instances = {}
         
         self.parents_of = {}
@@ -138,6 +138,7 @@ class KnowledgeBaseContext(object):
         #   self.enumerize_value(x)
     def _register_op_inst(self,op_inst):
         self.op_instances[op_inst.name] = op_inst
+        self.type_registry[op_inst.name] = op_inst.__class__
 
 
     def _register_fact_type(self, name, spec,
@@ -149,10 +150,10 @@ class KnowledgeBaseContext(object):
         # fact_type.fact_name = name
         
         self.fact_ctors[name] = fact_ctor
-        self.fact_types[name] = fact_type
+        self.type_registry[name] = fact_type
 
         #Map to t_ids
-        t_id = len(self.fact_types)
+        t_id = len(self.type_registry)
         assign_name_num_to_t_id(self.context_data,name,fact_type._fact_num, t_id)
         
         # fact_type._t_id = t_id
@@ -184,7 +185,7 @@ class KnowledgeBaseContext(object):
 
     def _register_flag(self,flag):
         d = self.spec_flags[flag] = Dict.empty(unicode_type,u1[:])
-        for name, fact_type in self.fact_types.items():
+        for name, fact_type in self.type_registry.items():
             spec = fact_type.spec
             d[name] = np.array([flag in x['flags'] for attr,x in spec.items()], dtype=np.uint8)
 

@@ -113,7 +113,7 @@ class Var(structref.StructRefProxy):
             fd = fact_type.field_dict
             head_type = fact_type.spec[attr]['type']
             if(isinstance(head_type,DeferredFactRefType)):
-                head_type = kb_context().fact_types[head_type._fact_name]
+                head_type = kb_context().type_registry[head_type._fact_name]
             # head_type = fact_type.field_dict[attr]
             offset = fact_type._attr_offsets[list(fd.keys()).index(attr)]
             deref_type = 'attr'

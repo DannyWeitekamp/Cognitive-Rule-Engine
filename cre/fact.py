@@ -120,8 +120,8 @@ def _standardize_type(typ, context, name='', attr=''):
             typ = numba_type_map[TYPE_ALIASES[typ_str.lower()]]
         elif(typ_str == name):
             typ = DeferredFactRefType(name)
-        elif(typ_str in context.fact_types):
-            typ = context.fact_types[typ_str]
+        elif(typ_str in context.type_registry):
+            typ = context.type_registry[typ_str]
         else:
             raise TypeError(f"Attribute type {typ_str!r} not recognized in spec" + 
                 f" for attribute definition {attr!r}." if attr else ".")
@@ -154,13 +154,13 @@ def _merge_spec_inheritance(spec : dict, context):
 
     if(isinstance(inherit_from, str)):
         temp = inherit_from
-        inherit_from = context.fact_types[inherit_from]
-        # print(context.fact_types)
+        inherit_from = context.type_registry[inherit_from]
+        # print(context.type_registry)
         # print("RESOLVE", temp, type(temp), inherit_from,type(inherit_from),)
         # print()
     # print("INHERIT_FROMM",inherit_from)
     if(not isinstance(inherit_from,types.StructRef)):
-        inherit_from = context.fact_types[inherit_from._fact_name]
+        inherit_from = context.type_registry[inherit_from._fact_name]
         
         
     if(not hasattr(inherit_from, 'spec')):
@@ -535,14 +535,14 @@ def define_fact(name : str, spec : dict, context=None):
     spec = _standardize_spec(spec,context,name)
     spec, inherit_from = _merge_spec_inheritance(spec,context)
 
-    if(name in context.fact_types):
-        # print(str(context.fact_types[name].spec))
+    if(name in context.type_registry):
+        # print(str(context.type_registry[name].spec))
         # print(str(spec))
-        assert str(context.fact_types[name].spec) == str(spec), \
+        assert str(context.type_registry[name].spec) == str(spec), \
         f"Redefinition of fact '{name}' in context '{context.name}' not permitted"
 
         # print(f"FACT REDEFINITION: '{name}' in context '{context.name}' ")
-        return context.fact_ctors[name], context.fact_types[name]
+        return context.fact_ctors[name], context.type_registry[name]
 
 
     fact_ctor, fact_type = _fact_from_spec(name, spec, context=context)

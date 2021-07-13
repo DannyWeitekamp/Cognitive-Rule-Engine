@@ -160,7 +160,6 @@ def get_pointer(st):
 
 def test_link():
     with kb_context() as context:
-        print(context.fact_types)
         # BOOP, BOOPType = define_fact("BOOP",{"A": "string", "B" : "number"})
         
         l1, l2 = Var(BOOPType,"l1"), Var(BOOPType,"l2")

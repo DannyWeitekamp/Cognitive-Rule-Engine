@@ -3,6 +3,7 @@ from numba.types import DictType
 from numba import i8, types
 from cre.caching import unique_hash, source_in_cache, import_from_cached, source_to_cache
 from numba.experimental import structref
+from numba.core.typeconv import Conversion
 
 def _gen_getter_jit(typ,attr):
     return f'''@njit

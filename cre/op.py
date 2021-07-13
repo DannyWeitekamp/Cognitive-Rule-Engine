@@ -261,8 +261,12 @@ class OpMeta(type):
             not isinstance(cls.short_hand,dict)):
             cls.short_hand = {'*' : cls.short_hand}
 
+        
         if(cls.__name__ != "__GenerateOp__"):
-            return cls.make_singleton_inst()
+            context = kb_context()
+            op_inst = cls.make_singleton_inst()
+            context._register_op_inst(op_inst)
+            return op_inst
 
         return cls
 
@@ -329,6 +333,15 @@ class Op(structref.StructRefProxy,metaclass=OpMeta):
         #   the python side we need it to be its own custom class
         op_inst.__class__ = cls
         return op_inst
+
+    def recover_singleton_inst(self,context=None):
+        '''Sometimes numba needs to emit an op instance 
+         that isn't the singleton instance. This recovers
+         the singleton instance from the kb_context'''
+        context = kb_context(context)
+        return context.op_instances[self.name]
+
+
 
     @property
     def name(self):

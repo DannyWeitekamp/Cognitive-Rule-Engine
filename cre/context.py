@@ -117,6 +117,7 @@ class KnowledgeBaseContext(object):
         self.name = name
         self.fact_ctors = {}
         self.fact_types = {}
+        self.op_instances = {}
         
         self.parents_of = {}
         self.children_of = {}
@@ -135,6 +136,10 @@ class KnowledgeBaseContext(object):
 
         # for x in ["<#ANY>",'','?sel']:
         #   self.enumerize_value(x)
+    def _register_op_inst(self,op_inst):
+        self.op_instances[op_inst.name] = op_inst
+
+
     def _register_fact_type(self, name, spec,
                             fact_ctor, fact_type, inherit_from=None):
         #Add attributes to the ctor and type objects

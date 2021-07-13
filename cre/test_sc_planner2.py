@@ -7,7 +7,8 @@ from cre.sc_planner2 import (gen_apply_multi_source,
                      apply_multi, SetChainingPlanner, insert_record,
                      join_records_of_type, forward_chain_one, next_rec_entry,
                     rec_entry_from_ptr, SC_Record_EntryType, retrace_goals_back_one, expl_tree_ctor,
-                    build_explanation_tree, ExplanationTreeType, SC_Record, SC_RecordType)
+                    build_explanation_tree, ExplanationTreeType, SC_Record, SC_RecordType,
+                    expl_tree_gen_iter)
 from cre.utils import _pointer_from_struct_incref, _list_from_ptr, _dict_from_ptr, _struct_from_pointer, _get_array_data_ptr
 from cre.var import Var
 
@@ -195,23 +196,27 @@ def setup_retrace(n=5):
     return planner
 
 
-@njit(cache=True)
+@njit(unicode_type(ExplanationTreeType,i8), cache=True)
 def tree_str(root,ind=0):
-    print("START STR TREE")
-    if(len(root.children) == 0): return "?"
+    # print("START STR TREE")
+    # if(len(root.children) == 0): return "?"
     s = ' '*ind
     for child in root.children:
+        pass
+        # print("child.is_op", child.is_op)
         if(child.is_op):
             op, child_arg_ptrs = child.op, child.child_arg_ptrs
-            # for i in range(ind): s += " "
+        #     # for i in range(ind): s += " "
                 
             s += op.name + "("
-            # print(child_arg_ptrs)
+        #     # print(child_arg_ptrs)
             for ptr in child_arg_ptrs:
                 
                 ch_expl = _struct_from_pointer(ExplanationTreeType, ptr)
-                # print("str",tree_str(ch_expl, ind+1))
-                s += tree_str(ch_expl, ind+1)
+                # print(ch_expl)
+                tree_str(ch_expl, ind+1)
+        #         # print("str",tree_str(ch_expl, ind+1))
+                # s += tree_str(ch_expl, ind+1)
                 s += ","
             s += ")"
         else:
@@ -225,8 +230,11 @@ def tree_str(root,ind=0):
 def test_build_explanation_tree():
     planner = setup_retrace()
     root = build_explanation_tree(planner, f8, 36.0)
-
-    print(tree_str(root))
+    print("BEF STR")
+    for op_comp in expl_tree_gen_iter(root):
+        print(op_comp)
+    print()
+    # print(tree_str(root,0))
     # for child in root.children:
     #     op, args = child
     #     print(op.name)
@@ -266,8 +274,48 @@ def benchmark_retrace_goals_back_one():
 
 
 
+# @njit(cache=False)
+def foo_gen():
+    for i in range(10):
+        yield i
+
+def product_of_generators(generators):
+    iters = []
+    out = []
+    
+    while(True):
+        #Create any iterators that need to be created
+        while(len(iters) < len(generators)):
+            it = generators[len(iters)]()
+            iters.append(it)
+        
+        iter_did_end = False
+        while(len(out) < len(iters)):
+            #Try to fill in any missing part of out
+            try:
+                nxt = next(iters[len(out)])
+                out.append(nxt)
+            #If any of the iterators failed pop up an iterator
+            except StopIteration as e:
+                # Stop yielding when 0th iter fails
+                if(len(iters) == 1):
+                    return
+                out = out[:-1]
+                iters = iters[:-1]
+                iter_did_end = True
+
+        if(iter_did_end): continue
+
+        yield out
+        out = out[:-1]
+
+with PrintElapse("gen_iters"):
+    l = [x for x in product_of_generators([foo_gen,foo_gen,foo_gen, foo_gen])]
+    print(len(l))
+    print()
 
 if __name__ == "__main__":
+    pass
     # test_apply_multi()
     # test_insert_record()
     # test_join_records_of_type()
@@ -276,6 +324,9 @@ if __name__ == "__main__":
     # benchmark_apply_multi()
     # benchmark_retrace_back_one()
         # test_apply_multi()
+    # gen = foo_gen()
+    # for i in gen:
+    #     print(i)
 # from numba import njit, i8
 # from numba.typed import Dict
 # from numba.types import ListType

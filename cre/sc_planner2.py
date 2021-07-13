@@ -485,15 +485,51 @@ ExplanationTree_field_dict = {
     'children' : ListType(ExplanationTreeEntryType) #List[(op<GenericOpType> ,*ExplanationTree[::1])]
 }
 ExplanationTree_fields = [(k,v) for k,v in ExplanationTree_field_dict.items()]
-ExplanationTree, ExplanationTreeType = \
-    define_structref("ExplanationTree", ExplanationTree_fields, define_constructor=False)
+# ExplanationTree, ExplanationTreeType = \
+#     define_structref("ExplanationTree", ExplanationTree_fields, define_constructor=False)
 
+@structref.register
+class ExplanationTreeTypeTemplate(types.StructRef):
+    def preprocess_fields(self, fields):
+        return tuple((name, types.unliteral(typ)) for name, typ in fields)
+
+
+class ExplanationTree(structref.StructRefProxy):
+    def __new__(cls):
+        self = expl_tree_ctor()
+        return self
+
+define_boxing(ExplanationTreeTypeTemplate,ExplanationTree)
+ExplanationTreeType = ExplanationTreeTypeTemplate(ExplanationTree_fields)
 
 @njit(cache=True)
-def expl_tree_ctor():
+def expl_tree_ctor(children=None):
     st = new(ExplanationTreeType)
-    st.children = List.empty_list(ExplanationTreeEntryType)
+    if(children is None):
+        st.children = List.empty_list(ExplanationTreeEntryType)
+    else:
+        st.children = children
     return st
+
+# lst_tree_entries = ListType(ExplanationTreeEntryType)
+# @njit(cache=True)
+# def consolidate_tree(tree):
+
+#     op_ptr_children = Dict.empty(i8, lst_tree_entries)
+#     for child in tree.children:
+#         if(child.is_op):
+#             ptr = _pointer_from_struct(child.op)
+#             if(ptr in op_ptr_children):
+#                 lst = op_ptr_children[ptr]
+#             else:
+#                 lst = List.empty_list(ExplanationTreeEntryType)                
+#                 op_ptr_children[ptr] = lst
+#             lst.append(child)
+
+
+
+
+
 
 i8_et_dict = DictType(i8,ExplanationTreeType)
 
@@ -523,7 +559,7 @@ def _fill_arg_inds_from_rec_entries(re, new_arg_inds, expl_tree):
                 if(arg_ind not in uai):
                     uai[arg_ind] = expl_tree_ctor()
 
-                # Throw new tree instance into the children of 'expl_tree'
+                # Throw new tree entry instance into the children of 'expl_tree'
                 child_arg_ptrs[i] = _pointer_from_struct_incref(uai[arg_ind])
                 entry = expl_tree_entry_ctor(op,child_arg_ptrs)
                 expl_tree.children.append(entry)
@@ -561,7 +597,7 @@ def retrace_arg_inds(planner, typ,  goals, new_arg_inds=None):
             # 're' is the head of a linked list of rec_entries
             _, entry_ptr = val_map[goal]
             re = rec_entry_from_ptr(entry_ptr)
-            print(goal, re)
+            print("goal", goal)
             _fill_arg_inds_from_rec_entries(re,
                 new_arg_inds, expl_tree)
         print("ARG INDS END")
@@ -598,11 +634,11 @@ def retrace_goals_back_one(planner, goals):
         # fix later 
         typ = f8 if typ_name == 'float64' else unicode_type
         new_arg_inds = retrace_arg_inds(planner, typ, goals, new_arg_inds)
-
+    print("L", len(new_arg_inds))
     if(len(new_arg_inds) == 0):
-        # print("BAIL")
+        print("BAIL")
         return None
-
+    print("MMMMMM")
     new_subgoals = _init_subgoals()
     for typ_name in new_arg_inds:
         # fix later 
@@ -611,7 +647,7 @@ def retrace_goals_back_one(planner, goals):
                 planner, new_arg_inds, typ,
                 planner.curr_infer_depth, new_subgoals)
 
-    # print("SUBGOALS FOUND")
+    print("SUBGOALS FOUND")
     # print(new_subgoals)
     return new_subgoals
 
@@ -638,15 +674,196 @@ def build_explanation_tree(planner, g_typ, goal):
     goals = _init_root_goals(g_typ, goal, root)
     print("HERE")
     new_subgoals = retrace_goals_back_one(planner, goals)    
+    print("THIS<")
     retrace_depth = planner.curr_infer_depth-1
+    print("THIS")
     while(new_subgoals is not None):
         if(retrace_depth < 0):
             raise RecursionError("Retrace exceeded current inference depth.")
         print("HERE")
         new_subgoals = retrace_goals_back_one(planner, new_subgoals)   
         retrace_depth -= 1
-        
+    
     return root
+
+
+IterData_field_dict = {
+    "inds" : i8[::1],
+    # "head_ind" : i8,
+    "expl_tree" : ExplanationTreeType
+    #Holds dictionaries of dictionaries where 
+    # "iter_data" : DictType(i8, )
+}
+IterData_fields = [(k,v) for k,v in IterData_field_dict.items()]
+IterData, IterDataType = \
+    define_structref("IterData", IterData_fields, define_constructor=True)
+
+
+
+from cre.akd import AKDType, new_akd
+ExplanationTreeIter_field_dict = {
+    "root" : ExplanationTreeType,
+    # "iter_data_map" : AKDType(i8,IterData),
+    "heads" : i8[::1]
+}
+ExplanationTreeIter_fields = [(k,v) for k,v in ExplanationTreeIter_field_dict.items()]
+ExplanationTreeIter, ExplanationTreeIterType = \
+    define_structref("ExplanationTreeIter", ExplanationTreeIter_fields, define_constructor=False)
+
+
+def expl_tree_iter_ctor(expl_tree,random=False):
+    st = new(ExplanationTreeType)
+    st.root = expl_tree
+    st.iter_data_map = new_akd(i8, IterData)
+    st.heads = np.empty((0,),dtype=np.int64)
+
+    n_options = len(expl_tree.children)
+    st.iter_data_map[st.heads] = IterData(np.arange(n_options), expl_tree)
+
+
+
+def expl_tree_iter_random_next(it):
+    pass
+
+
+@njit(i8(ExplanationTreeType,),cache=True)
+def expl_tree_num_entries(tree):
+    return len(tree.children)
+
+@njit(ExplanationTreeEntryType(ExplanationTreeType,i8),cache=True)
+def expl_tree_ith_entry(tree, i):
+    return tree.children[i]
+
+@njit(i8(ExplanationTreeEntryType),cache=True)
+def expl_tree_entry_num_args(tree_entry):
+    return len(tree_entry.child_arg_ptrs)
+
+@njit(u1(ExplanationTreeEntryType),cache=True)
+def expl_tree_entry_is_op(tree_entry):
+    return tree_entry.is_op
+
+@njit(GenericOpType(ExplanationTreeEntryType),cache=True)
+def expl_tree_entry_get_op(tree_entry):
+    return tree_entry.op
+
+@njit(GenericVarType(ExplanationTreeEntryType),cache=True)
+def expl_tree_entry_get_var(tree_entry):
+    return tree_entry.var
+
+@njit(ExplanationTreeType(ExplanationTreeEntryType,i8),cache=True)
+def expl_tree_entry_jth_arg(tree_entry, j):
+    return _struct_from_pointer(ExplanationTreeType,
+        tree_entry.child_arg_ptrs[j])
+
+
+def product_of_generators(generators):
+    iters = []
+    out = []
+    
+    while(True):
+        #Create any iterators that need to be created
+        while(len(iters) < len(generators)):
+            it = generators[len(iters)]()
+            iters.append(it)
+        
+        iter_did_end = False
+        while(len(out) < len(iters)):
+            #Try to fill in any missing part of out
+            try:
+                nxt = next(iters[len(out)])
+                out.append(nxt)
+            #If any of the iterators failed pop up an iterator
+            except StopIteration as e:
+                # Stop yielding when 0th iter fails
+                if(len(iters) == 1):
+                    return
+                out = out[:-1]
+                iters = iters[:-1]
+                iter_did_end = True
+        
+        if(iter_did_end): continue
+
+        yield out
+        out = out[:-1]
+
+
+from cre.op import OpComp
+def expl_tree_gen_iter(tree):
+    print("START EXPL GEN")    
+    for i in range(expl_tree_num_entries(tree)):
+        tree_entry = expl_tree_ith_entry(tree, i)
+        
+        
+        if(expl_tree_entry_is_op(tree_entry)):
+            op = expl_tree_entry_get_op(tree_entry)
+            op = op.recover_singleton_inst()
+            child_generators = []
+            for j in range(expl_tree_entry_num_args(tree_entry)):
+                child_tree = expl_tree_entry_jth_arg(tree_entry,j)
+                print("CHILD_TREE", child_tree)
+                child_gen = lambda : expl_tree_gen_iter(child_tree)
+                child_generators.append(child_gen)
+
+
+            for args in product_of_generators(child_generators):                
+                # print(args)
+                op_comp = OpComp(op, *args)
+                print("op_comp", op_comp)
+                yield op_comp
+        else:
+            v = expl_tree_entry_get_var(tree_entry)
+            print("V", v)
+            yield v
+            #GEt var
+
+
+
+
+
+    # while()
+    # head_data = st.iter_data_map[st.heads]
+    
+    # inds = head_data.inds
+    # istructions = List.empty_list(GenericOpType)
+    # if(len(inds) > 0):
+    #     options = head_data.expl_tree.children
+    #     ind = inds[0]
+    #     head_data.inds = inds[1:]
+
+    #     L = len(st.heads)
+    #     new_heads = np.empty((L+1,), dtype=np.int64)
+    #     new_heads[:L] = st.heads
+    #     new_heads[L] = ind
+
+    #     st.heads = new_heads
+    #     st.iter_data_map[st.heads] = IterData()
+
+
+         
+    # else:
+
+
+
+
+
+
+##THINKING 
+'''
+Head depth, head stack (can be iter datas) 
+'''
+
+#THINKING 
+# Do I want an iterator, or some other kind of structure
+# Do I want to consolidate the tree into op comps plus 
+#  bindings? 
+# What kinds of things should I do with the expl tree?
+#   -I should be able to know its size 
+#   -I should be able to iterate over it
+#   -I should be able to sample from it
+#     -But you really need to enumerate all the possibilities
+#       in order to sample without replacement
+#     -Or you can randomize the iterator traversal order 
+
 
     # for typ_str in goals_d:
     #     goals = goals_d[typ_str]

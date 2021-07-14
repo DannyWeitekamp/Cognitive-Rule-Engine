@@ -463,7 +463,9 @@ class OpComp():
         if isinstance(x, Var):
             return f'a{self.vars[x.get_ptr()][1]}'
         elif(isinstance(x, OpComp)):
-            return x.gen_expr('python')
+            arg_names = [f'a{self.vars[v_p][1]}' for v_p in x.vars]
+            # print("arg_names", arg_names)
+            return x.gen_expr('python',arg_names=arg_names)
         else:
             return repr(x) 
 
@@ -581,6 +583,7 @@ class OpComp():
             arg_names = [f'a{i}' for i in range(len(self.vars))]
         for i,(v_p,(v,_,t)) in enumerate(self.vars.items()):
             names[v_p] = arg_names[i]
+            # print(i, v_p, arg_names[i], len(self.vars))
         return arg_names
 
         
@@ -619,7 +622,10 @@ class OpComp():
 
     def gen_expr(self, lang='python', **kwargs):
         '''Generates a oneline expression for the OpComp'''
+        
         names, arg_names = self._call_check_prereqs(lang, skip_consts=True, **kwargs)
+        # print("gen_expr", arg_names)
+        # raise ValueError()
         for i,instr in enumerate(self.instructions):
             instr_reprs = []
             for x in instr.args:
@@ -633,6 +639,7 @@ class OpComp():
             # instr_names = ",".join(instr_reprs)
             instr_kwargs = {**kwargs,'arg_names':instr_reprs}
             names[instr] = instr.op.gen_expr(lang=lang,**instr_kwargs) #f'{names[]}({instr_names})'
+        # print(names)
         return names[list(self.instructions.keys())[-1]]
 
     

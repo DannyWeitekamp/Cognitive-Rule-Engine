@@ -17,7 +17,7 @@ from cre.var import GenericVarType
 # from cre.fact import define_fact, BaseFactType, cast_fact, DeferredFactRefType, Fact
 from cre.utils import (_struct_from_meminfo, _meminfo_from_struct, _cast_structref, cast_structref, decode_idrec, lower_getattr, _struct_from_pointer,  lower_setattr, lower_getattr,
                        _pointer_from_struct, _decref_pointer, _incref_pointer, _incref_structref, _pointer_from_struct_incref,
-                       _dict_from_ptr, _list_from_ptr, _load_pointer, _arr_from_data_ptr)
+                       _dict_from_ptr, _list_from_ptr, _load_pointer, _arr_from_data_ptr, _get_array_data_ptr)
 from cre.utils import assign_to_alias_in_parent_frame
 from cre.subscriber import base_subscriber_fields, BaseSubscriber, BaseSubscriberType, init_base_subscriber, link_downstream
 from cre.vector import VectorType
@@ -157,6 +157,8 @@ SetChainingPlanner_field_dict = {
     'backward_records' : ListType(DictType(unicode_type, ListType(SC_RecordType))),
     # Maps type_str[str] -> *(Dict: val[any] -> Tuple(depth[i8], *SC_Record_Entry) )
     'val_map_ptr_dict' : DictType(unicode_type, i8),
+    # Maps type_str[str] -> *(Dict: *Var -> val[any])
+    'inv_val_map_ptr_dict' : DictType(unicode_type, i8), 
     # Maps (type_str[str],depth[int]) -> *Iterator[any]
     'flat_vals_ptr_dict' : DictType(Tuple((unicode_type,i8)), i8),
 
@@ -176,6 +178,9 @@ class SetChainingPlanner(structref.StructRefProxy):
         self.max_depth = 0
         return self
 
+    def declare(self,val):
+        return planner_declare(self, val)
+
 define_boxing(SetChainingPlannerTypeTemplate,SetChainingPlanner)
 SetChainingPlannerType = SetChainingPlannerTypeTemplate(SetChainingPlanner_fields)
 
@@ -186,9 +191,69 @@ def sc_planner_ctor():
     st.forward_records = List.empty_list(dict_str_to_record_list_type)
     st.backward_records = List.empty_list(dict_str_to_record_list_type)
     st.val_map_ptr_dict = Dict.empty(unicode_type, i8)
+    st.inv_val_map_ptr_dict = Dict.empty(unicode_type, i8)
     st.flat_vals_ptr_dict = Dict.empty(str_int_tuple, i8)
     return st
 
+
+@njit(cache=True)
+def ensure_ptr_dicts(planner,typ,typ_name,lt,vt,ivt):
+    print("ENSURE")
+    tup = (typ_name,0)
+    if(tup not in planner.flat_vals_ptr_dict):
+        flat_vals = List.empty_list(typ)
+        planner.flat_vals_ptr_dict[tup] = _pointer_from_struct_incref(flat_vals)
+    print("ENSURE%")
+    if(typ_name not in planner.val_map_ptr_dict):
+        val_map = Dict.empty(typ, i8_2x_tuple)    
+        planner.val_map_ptr_dict[typ_name] = _pointer_from_struct_incref(val_map)
+    print("ENSURE!")
+    if(typ_name not in planner.inv_val_map_ptr_dict):
+        print("ENSURE!<")
+        inv_val_map = Dict.empty(i8, typ)    
+        print("ENSURE!<<")
+        planner.inv_val_map_ptr_dict[typ_name] = _pointer_from_struct_incref(inv_val_map)
+        print("ENSURE!<<<")
+
+    print("ENSURE@")
+    flat_vals = _list_from_ptr(lt, planner.flat_vals_ptr_dict[tup])    
+    val_map = _dict_from_ptr(vt, planner.val_map_ptr_dict[typ_name])    
+    inv_val_map = _dict_from_ptr(ivt, planner.inv_val_map_ptr_dict[typ_name])    
+    return flat_vals, val_map, inv_val_map
+
+    
+
+
+
+@generated_jit(cache=True)
+def planner_declare(planner, val):
+    '''Declares a value into the 0th depth of planner'''
+    val_typ = val
+    val_typ_name = str(val_typ)
+
+    l_typ = ListType(val_typ)
+    vm_typ = DictType(val_typ, i8_2x_tuple)
+    ivm_typ = DictType(i8, val_typ)
+
+    def impl(planner, val):
+        print("DECLARE")
+        flat_vals, val_map, inv_val_map = \
+            ensure_ptr_dicts(planner, val_typ,
+                val_typ_name, l_typ, vm_typ, ivm_typ)
+        print("DECLARE@")
+        v = Var(val_typ)
+        var_ptr = _pointer_from_struct(v)
+        rec = SC_Record(v)
+        rec_entry = np.empty((1,),dtype=np.int64)
+        rec_entry[0] = _pointer_from_struct_incref(rec)
+        rec_entry_ptr = _get_array_data_ptr(rec_entry)
+        print("DECLARE#")
+        flat_vals.append(val)
+        val_map[val] = (0, rec_entry_ptr)
+        inv_val_map[var_ptr] = val
+        print("DECLARE$")
+    return impl
+        
 
 ### Planning Planning Planning ###
 
@@ -672,15 +737,11 @@ def _init_subgoals():
 def build_explanation_tree(planner, g_typ, goal):
     root = expl_tree_ctor()
     goals = _init_root_goals(g_typ, goal, root)
-    print("HERE")
     new_subgoals = retrace_goals_back_one(planner, goals)    
-    print("THIS<")
     retrace_depth = planner.curr_infer_depth-1
-    print("THIS")
     while(new_subgoals is not None):
         if(retrace_depth < 0):
             raise RecursionError("Retrace exceeded current inference depth.")
-        print("HERE")
         new_subgoals = retrace_goals_back_one(planner, new_subgoals)   
         retrace_depth -= 1
     
@@ -757,42 +818,56 @@ def expl_tree_entry_jth_arg(tree_entry, j):
 
 
 def product_of_generators(generators):
+    '''Takes a list of generators and applies the equivalent of
+        itertools.product() on them. Has significantly less memory
+        overhead in cases when you only need a subset of the full product.
+    '''
     iters = []
     out = []
     
     while(True):
-        #Create any iterators that need to be created
+        # Create any missing iterators from generators
         while(len(iters) < len(generators)):
             it = generators[len(iters)]()
             iters.append(it)
         
         iter_did_end = False
         while(len(out) < len(iters)):
-            #Try to fill in any missing part of out
+            # Try to fill in any missing part of out
             try:
                 nxt = next(iters[len(out)])
                 out.append(nxt)
-            #If any of the iterators failed pop up an iterator
+            # If any of the iterators failed pop up an iterator
             except StopIteration as e:
-                # Stop yielding when 0th iter fails
+                # Stop yielding when 0th iter reaches end
                 if(len(iters) == 1):
                     return
                 out = out[:-1]
                 iters = iters[:-1]
                 iter_did_end = True
         
+        # If any of the iterators reached their end then 
+        #  we'll need to generate one or more new ones.
         if(iter_did_end): continue
 
         yield out
         out = out[:-1]
 
 
+class ExplTreeGen():
+    '''Helper object that is essentially a lambda that applies
+        gen_op_comps_from_expl_tree() on a particular ExplanationTree
+    '''
+    def __init__(self,child_tree):
+        self.child_tree = child_tree
+    def __call__(self):
+        return gen_op_comps_from_expl_tree(self.child_tree)
+
 from cre.op import OpComp
-def expl_tree_gen_iter(tree):
-    print("START EXPL GEN")    
+def gen_op_comps_from_expl_tree(tree):
+    '''A generator of OpComps from an ExplanationTree'''
     for i in range(expl_tree_num_entries(tree)):
         tree_entry = expl_tree_ith_entry(tree, i)
-        
         
         if(expl_tree_entry_is_op(tree_entry)):
             op = expl_tree_entry_get_op(tree_entry)
@@ -800,24 +875,15 @@ def expl_tree_gen_iter(tree):
             child_generators = []
             for j in range(expl_tree_entry_num_args(tree_entry)):
                 child_tree = expl_tree_entry_jth_arg(tree_entry,j)
-                print("CHILD_TREE", child_tree)
-                child_gen = lambda : expl_tree_gen_iter(child_tree)
+                child_gen = ExplTreeGen(child_tree)
                 child_generators.append(child_gen)
 
-
             for args in product_of_generators(child_generators):                
-                # print(args)
                 op_comp = OpComp(op, *args)
-                print("op_comp", op_comp)
                 yield op_comp
         else:
             v = expl_tree_entry_get_var(tree_entry)
-            print("V", v)
             yield v
-            #GEt var
-
-
-
 
 
     # while()
@@ -844,7 +910,22 @@ def expl_tree_gen_iter(tree):
 
 
 
+###TODO TODO
+'''
+1. Recover values from Vars
+2. Auto declaration:
+   -How should that work?
+   -Probably should just hook up to wm
+   -Have flag on attribute that is like: "visible" 
 
+3. Commuting: steal from numbert 
+4. Mute Exception: steal from numbert 
+
+5. Rename:
+-KB -> WM 
+-fact_type -> base_type
+
+'''
 
 
 ##THINKING 

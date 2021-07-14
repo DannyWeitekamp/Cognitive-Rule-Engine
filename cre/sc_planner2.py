@@ -652,12 +652,11 @@ def _fill_arg_inds_from_rec_entries(re, new_arg_inds, expl_tree):
                     uai[arg_ind] = expl_tree_ctor()
 
                 child_arg_ptrs[i] = _pointer_from_struct_incref(uai[arg_ind])
-                
+
             # Throw new tree entry instance into the children of 'expl_tree'
             entry = expl_tree_entry_ctor(op,child_arg_ptrs)
             expl_tree.children.append(entry)
             re = next_rec_entry(re)   
-            print("NEXT")
         else:
             entry = expl_tree_entry_ctor(re.rec.var)
             expl_tree.children.append(entry)
@@ -883,7 +882,6 @@ class ExplTreeGen():
 from cre.op import OpComp
 def gen_op_comps_from_expl_tree(tree):
     '''A generator of OpComps from an ExplanationTree'''
-    print("N CHILDS", expl_tree_num_entries(tree))
     for i in range(expl_tree_num_entries(tree)):
         tree_entry = expl_tree_ith_entry(tree, i)
         
@@ -891,7 +889,6 @@ def gen_op_comps_from_expl_tree(tree):
             op = expl_tree_entry_get_op(tree_entry)
             op = op.recover_singleton_inst()
             child_generators = []
-            print("N ARGS", expl_tree_entry_num_args(tree_entry))
             for j in range(expl_tree_entry_num_args(tree_entry)):
                 child_tree = expl_tree_entry_jth_arg(tree_entry,j)
                 child_gen = ExplTreeGen(child_tree)
@@ -938,7 +935,7 @@ def gen_op_comps_from_expl_tree(tree):
    -Probably should just hook up to wm
    -Have flag on attribute that is like: "visible" 
 
-3. Commuting: steal from numbert 
+[x]. Commuting: steal from numbert 
 4. Mute Exception: steal from numbert 
 
 5. Rename:

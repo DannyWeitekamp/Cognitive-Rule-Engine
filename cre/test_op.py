@@ -4,6 +4,8 @@ import numpy as np
 from cre.op import Op
 from cre.var import Var
 from cre.utils import _func_from_address
+from cre.context import kb_context
+from cre.fact import define_fact
 import pytest
 
 def test_op_singleton():
@@ -188,6 +190,22 @@ def test_commutes():
             def call(a, b, c):
                 return a + b
 
+def _test_fact_args():
+    class Add(Op):
+        signature = f8(f8,f8)        
+        commutes = True
+        def call(a, b):
+            return a + b
+
+    with kb_context('test_fact_args'):
+        spec = {"A" : "string", "B" : "number"}
+        BOOP, BOOPType = define_fact("BOOP", spec)
+
+        op = Add(Var(BOOP,'x').B, Var(BOOP,'y').B)
+        print(op)
+        # print(op(1,2))
+        print(op(BOOP("A",1),BOOP("B",2)))
+
     
 
     
@@ -219,6 +237,7 @@ if __name__ == "__main__":
     # # with PrintElapse("test_source_gen"):
     #     test_source_gen()
 
-        test_commutes()
+        # test_commutes()
+        _test_fact_args()
             
 

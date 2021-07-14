@@ -22,29 +22,31 @@ class PrintElapse():
         self.t1 = time.time_ns()/float(1e6)
         print(f'{self.name}: {self.t1-self.t0:.2f} ms')
 
-class Add(Op):
-    signature = f8(f8,f8)        
-    short_hand = '({0}+{1})'
-    commutes = True
-    def check(a, b):
-        return a > 0
-    def call(a, b):
-        return a + b
+def get_base_ops():
+    class Add(Op):
+        signature = f8(f8,f8)        
+        short_hand = '({0}+{1})'
+        commutes = True
+        def check(a, b):
+            return a > 0
+        def call(a, b):
+            return a + b
 
-class Multiply(Op):
-    signature = f8(f8,f8)
-    short_hand = '({0}*{1})'
-    commutes = True
-    def check(a, b):
-        return b != 0
-    def call(a, b):
-        return a * b  
+    class Multiply(Op):
+        signature = f8(f8,f8)
+        short_hand = '({0}*{1})'
+        commutes = True
+        def check(a, b):
+            return b != 0
+        def call(a, b):
+            return a * b  
 
-class Concatenate(Op):
-    signature = unicode_type(unicode_type,unicode_type)
-    short_hand = '({0}+{1})'
-    def call(a, b):
-        return a + b  
+    class Concatenate(Op):
+        signature = unicode_type(unicode_type,unicode_type)
+        short_hand = '({0}+{1})'
+        def call(a, b):
+            return a + b  
+    return Add, Multiply, Concatenate
 
 i8_2x_tuple = Tuple((i8,i8))
 def setup_float(planner=None,n=5):
@@ -108,9 +110,10 @@ def setup_str(planner=None,n=5):
     return planner
 
 def test_apply_multi():
+    Add, Multiply, Concatenate = get_base_ops()
     planner = setup_float()
     rec = apply_multi(Add, planner, 0)
-    d_typ = DictType(f8,i8)
+    d_typ = DictType(f8,i8_2x_tuple)
     @njit(cache=True)
     def summary_vals_map(planner,target=6.0):
         d = _dict_from_ptr(d_typ, planner.val_map_ptr_dict['float64'])
@@ -120,18 +123,20 @@ def test_apply_multi():
     def args_for(planner,target=6.0):
         d = _dict_from_ptr(d_typ, planner.val_map_ptr_dict['float64'])
         l = List()
-        re = rec_entry_from_ptr(d[target])
+        re = rec_entry_from_ptr(d[target][1])
         while(re is not None):
             print(re.args)
             l.append(re.args)
             re = next_rec_entry(re)            
         return l
 
-    assert summary_vals_map(planner) == (8,1,8)
+    assert summary_vals_map(planner) == (9,0.0,8.0)
+    print(np.array(args_for(planner,6)))
     assert np.array_equal(np.array(args_for(planner,6)),
-                 np.array([[4, 2],[3, 3],[2, 4]]))
+                 np.array([[4, 2],[3, 3]]))
 
 def test_insert_record():
+    Add, Multiply, Concatenate = get_base_ops()
     planner = setup_float()
     rec = apply_multi(Add, planner, 0)
     insert_record(planner, rec, 'float64', 1)
@@ -142,6 +147,7 @@ def test_insert_record():
     assert len_f_recs(planner,'float64',1) == 1
 
 def test_join_records_of_type():
+    Add, Multiply, Concatenate = get_base_ops()
     planner = setup_float()
     rec = apply_multi(Add, planner, 0)
     insert_record(planner, rec, 'float64', 1)
@@ -150,7 +156,7 @@ def test_join_records_of_type():
 
     d_typ = DictType(f8, i8)
     l_typ = ListType(f8)
-    join_records_of_type(planner,1,'float64',f8, d_typ)
+    join_records_of_type(planner,1,f8)
 
     @njit(cache=True)
     def summary_stats(planner, typ_name, depth):
@@ -171,6 +177,7 @@ def summary_stats(planner, typ_name, depth, d_typ, l_typ):
     return len(l), min(l),max(l),len(d), min(d),max(d)
 
 def test_forward_chain_one():
+    Add, Multiply, Concatenate = get_base_ops()
     fd_typ = DictType(f8, i8)
     fl_typ = ListType(f8)
     sd_typ = DictType(unicode_type, i8)
@@ -184,7 +191,7 @@ def test_forward_chain_one():
         (12, 0.0, 16.0, 12, 0.0, 16.0)
 
     assert summary_stats(planner,'unicode_type',1,sd_typ,sl_typ) == \
-        (25, 'AA', 'EE', 25, 'AA', 'EE')
+        (30, 'A', 'EE', 30, 'A', 'EE')
 
 
     forward_chain_one(planner, [Add,Multiply,Concatenate])
@@ -196,14 +203,15 @@ def test_forward_chain_one():
 
     print(summary_stats(planner,'unicode_type',1,sd_typ,sl_typ))
     assert summary_stats(planner,'unicode_type',2,sd_typ,sl_typ) == \
-        (650, 'AA', 'EEEE', 650, 'AA', 'EEEE')
+        (780, 'A', 'EEEE', 780, 'A', 'EEEE')
 
 
 def setup_retrace(n=5):
+    Add, Multiply, Concatenate = get_base_ops()
     planner = setup_float(n=n)
     planner = setup_str(planner,n=n)
     forward_chain_one(planner, [Add,Multiply,Concatenate])
-    # forward_chain_one(planner, [Add,Multiply,Concatenate])
+    forward_chain_one(planner, [Add,Multiply,Concatenate])
     return planner
 
 
@@ -240,7 +248,7 @@ def tree_str(root,ind=0):
 
 def test_build_explanation_tree():
     planner = setup_retrace()
-    root = build_explanation_tree(planner, f8, 7.0)
+    root = build_explanation_tree(planner, f8, 36.0)
     print("BEF STR")
     for op_comp in root:
         print(op_comp)
@@ -268,6 +276,7 @@ def test_build_explanation_tree():
 
 
 def benchmark_apply_multi():
+    Add, Multiply, Concatenate = get_base_ops()
     planner = setup_float(n=1000)
 
     apply_multi(Add, planner, 0)
@@ -276,6 +285,7 @@ def benchmark_apply_multi():
             apply_multi(Add, planner, 0)
 
 def benchmark_retrace_goals_back_one():
+    Add, Multiply, Concatenate = get_base_ops()
     planner = setup_retrace()
     goals = List([36.0])
 

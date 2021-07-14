@@ -513,6 +513,7 @@ class OpComp():
         self.args = args
         self.arg_types = arg_types
         self.constants = constants
+        self.signature = op.signature.return_type(*arg_types)
         # self.v_ptr_to_ind = v_ptr_to_ind
 
         self._expr = f"{op.name}({', '.join([self._repr_arg_helper(x) for x in self.args])})"  

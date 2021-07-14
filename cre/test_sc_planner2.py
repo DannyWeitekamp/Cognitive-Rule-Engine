@@ -240,7 +240,7 @@ def test_build_explanation_tree():
     planner = setup_retrace()
     root = build_explanation_tree(planner, f8, 36.0)
     print("BEF STR")
-    for op_comp in gen_op_comps_from_expl_tree(root):
+    for op_comp in root:
         print(op_comp)
         # print(op_comp.vars)
     print()

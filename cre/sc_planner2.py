@@ -275,7 +275,9 @@ def planner_declare(planner, val):
 
 def how_search(self, goal, ops=None,
              search_depth=1, max_solutions=10,
-             min_stop_depth=-1):
+             min_stop_depth=-1,context=None):
+
+    context = kb_context(context)
     if(min_stop_depth == -1): min_stop_depth = search_depth
 
     # NOTE: Make sure that things exist here
@@ -284,6 +286,12 @@ def how_search(self, goal, ops=None,
         if(_query_goal(self) is None and 
             self.curr_infer_depth > min_stop_depth):
             self.forward_chain_one(ops)
+
+    g_typ = context.type_registry[str(type(goal))]
+
+    expl_tree = build_explanation_tree(self, g_typ, goal)
+
+
 
 @njit(cache=True)
 def _query_goal(self, type_name, typ, goal):
@@ -547,7 +555,8 @@ def expl_tree_entry_ctor(op_or_var, child_arg_ptrs=None):
 ### Explanation Tree ###
 
 ExplanationTree_field_dict = {
-    'children' : ListType(ExplanationTreeEntryType) #List[(op<GenericOpType> ,*ExplanationTree[::1])]
+    'children' : ListType(ExplanationTreeEntryType), #List[(op<GenericOpType> ,*ExplanationTree[::1])]
+    'inv_val_map_ptr_dict' : DictType(unicode_type,i8)
 }
 ExplanationTree_fields = [(k,v) for k,v in ExplanationTree_field_dict.items()]
 # ExplanationTree, ExplanationTreeType = \
@@ -564,16 +573,51 @@ class ExplanationTree(structref.StructRefProxy):
         self = expl_tree_ctor()
         return self
 
+    def __iter__(self):
+        return ExplanationTreeIter(self)
+
+@generated_jit(cache=True)
+def read_inv_val_map(expl_tree, var_ptr, typ):
+    _typ = typ.instance_type
+    typ_name = str(_typ)
+    ivm_typ = DictType(i8, _typ)
+    def impl(expl_tree, var_ptr, typ):
+        inv_val_map_ptr_dict = expl_tree.inv_val_map_ptr_dict
+        inv_val_map = _dict_from_ptr(ivm_typ, inv_val_map_ptr_dict[typ_name])
+        return inv_val_map[var_ptr]
+    return impl
+
+
+class ExplanationTreeIter():
+    def __init__(self, expl_tree):
+        self.expl_tree = expl_tree
+        self.gen = gen_op_comps_from_expl_tree(expl_tree)
+    def __next__(self):
+        op_comp = next(self.gen)
+        vals = []
+        for var_ptr, val_typ in zip(op_comp.vars, op_comp.signature.args):
+            vals.append(read_inv_val_map(self.expl_tree, var_ptr, val_typ))
+        
+        return op_comp, vals
+
+
+
+
 define_boxing(ExplanationTreeTypeTemplate,ExplanationTree)
 ExplanationTreeType = ExplanationTreeTypeTemplate(ExplanationTree_fields)
 
 @njit(cache=True)
-def expl_tree_ctor(children=None):
+def expl_tree_ctor(children=None, planner=None):
     st = new(ExplanationTreeType)
     if(children is None):
         st.children = List.empty_list(ExplanationTreeEntryType)
     else:
         st.children = children
+    if(planner is not None):
+        st.inv_val_map_ptr_dict = Dict.empty(unicode_type,i8)
+        for typ_name, ptr in planner.inv_val_map_ptr_dict.items():
+            _incref_pointer(ptr)
+            st.inv_val_map_ptr_dict[typ_name] = ptr
     return st
 
 # lst_tree_entries = ListType(ExplanationTreeEntryType)
@@ -735,7 +779,7 @@ def _init_subgoals():
     return Dict.empty(unicode_type,i8)
 
 def build_explanation_tree(planner, g_typ, goal):
-    root = expl_tree_ctor()
+    root = expl_tree_ctor(None,planner)
     goals = _init_root_goals(g_typ, goal, root)
     new_subgoals = retrace_goals_back_one(planner, goals)    
     retrace_depth = planner.curr_infer_depth-1
@@ -748,43 +792,43 @@ def build_explanation_tree(planner, g_typ, goal):
     return root
 
 
-IterData_field_dict = {
-    "inds" : i8[::1],
-    # "head_ind" : i8,
-    "expl_tree" : ExplanationTreeType
-    #Holds dictionaries of dictionaries where 
-    # "iter_data" : DictType(i8, )
-}
-IterData_fields = [(k,v) for k,v in IterData_field_dict.items()]
-IterData, IterDataType = \
-    define_structref("IterData", IterData_fields, define_constructor=True)
+# IterData_field_dict = {
+#     "inds" : i8[::1],
+#     # "head_ind" : i8,
+#     "expl_tree" : ExplanationTreeType
+#     #Holds dictionaries of dictionaries where 
+#     # "iter_data" : DictType(i8, )
+# }
+# IterData_fields = [(k,v) for k,v in IterData_field_dict.items()]
+# IterData, IterDataType = \
+#     define_structref("IterData", IterData_fields, define_constructor=True)
 
 
 
-from cre.akd import AKDType, new_akd
-ExplanationTreeIter_field_dict = {
-    "root" : ExplanationTreeType,
-    # "iter_data_map" : AKDType(i8,IterData),
-    "heads" : i8[::1]
-}
-ExplanationTreeIter_fields = [(k,v) for k,v in ExplanationTreeIter_field_dict.items()]
-ExplanationTreeIter, ExplanationTreeIterType = \
-    define_structref("ExplanationTreeIter", ExplanationTreeIter_fields, define_constructor=False)
+# from cre.akd import AKDType, new_akd
+# ExplanationTreeIter_field_dict = {
+#     "root" : ExplanationTreeType,
+#     # "iter_data_map" : AKDType(i8,IterData),
+#     "heads" : i8[::1]
+# }
+# ExplanationTreeIter_fields = [(k,v) for k,v in ExplanationTreeIter_field_dict.items()]
+# ExplanationTreeIter, ExplanationTreeIterType = \
+#     define_structref("ExplanationTreeIter", ExplanationTreeIter_fields, define_constructor=False)
 
 
-def expl_tree_iter_ctor(expl_tree,random=False):
-    st = new(ExplanationTreeType)
-    st.root = expl_tree
-    st.iter_data_map = new_akd(i8, IterData)
-    st.heads = np.empty((0,),dtype=np.int64)
+# def expl_tree_iter_ctor(expl_tree,random=False):
+#     st = new(ExplanationTreeType)
+#     st.root = expl_tree
+#     st.iter_data_map = new_akd(i8, IterData)
+#     st.heads = np.empty((0,),dtype=np.int64)
 
-    n_options = len(expl_tree.children)
-    st.iter_data_map[st.heads] = IterData(np.arange(n_options), expl_tree)
+#     n_options = len(expl_tree.children)
+#     st.iter_data_map[st.heads] = IterData(np.arange(n_options), expl_tree)
 
 
 
-def expl_tree_iter_random_next(it):
-    pass
+# def expl_tree_iter_random_next(it):
+#     pass
 
 
 @njit(i8(ExplanationTreeType,),cache=True)

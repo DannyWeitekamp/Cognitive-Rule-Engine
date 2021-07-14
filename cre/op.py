@@ -35,6 +35,9 @@ from os import getenv
 from cre.utils import deref_type, OFFSET_TYPE_ATTR, OFFSET_TYPE_LIST, listtype_sizeof_item
 import inspect, dill, pickle
 from textwrap import dedent, indent
+# from itertools import combinations
+from collections.abc import Iterable
+
 
 import time
 class PrintElapse():
@@ -193,6 +196,8 @@ def op_ctor(name, return_type_name, arg_type_names, var_ptrs, call_addr=0, call_
     st.check_addr = check_addr
     return st
 
+
+
         
 class OpMeta(type):
     ''' A the metaclass for op. Useful for singleton generation.
@@ -219,6 +224,8 @@ class OpMeta(type):
         
         # 'cls' is the class of the user defined Op (i.e. Add(a,b)).
         cls = super().__new__(meta_cls,*args) 
+        cls._handle_commutes()
+
         if(call_needs_jitting): cls.process_method("call", cls.signature)
         
         if(has_check):
@@ -269,6 +276,40 @@ class OpMeta(type):
             return op_inst
 
         return cls
+
+    def _handle_commutes(cls):
+        if(not hasattr(cls,'commutes')):
+            cls.commutes = []
+            cls.right_commutes = {}
+            return
+
+        arg_types = cls.signature.args
+        if(isinstance(cls.commutes,bool)):
+            if(cls.commutes == True):
+                cls.commutes, d = [], {}
+                for i, typ in enumerate(arg_types): 
+                    d[typ] = d.get(typ,[]) + [i] 
+                for typ, inds in d.items():
+                    cls.commutes += [inds]#list(combinations(inds,2))
+            else:
+                cls.commutes = []
+        else:
+            assert(isinstance(cls.commutes,Iterable))
+
+        print(cls.commutes)
+
+        right_commutes = {}#Dict.empty(i8,i8[::1])
+        for i in range(len(cls.commutes)):
+            commuting_set =  cls.commutes[i]
+            # print(commuting_set)
+            for j in range(len(commuting_set)-1,0,-1):
+                right_commutes[commuting_set[j]] = np.array(commuting_set[0:j],dtype=np.int64)
+                for k in commuting_set[0:j]:
+                    typ1, typ2 = arg_types[k], arg_types[commuting_set[j]]
+                    assert typ1==typ2, \
+            f"cre.Op {cls.__name__!r} has invalid 'commutes' member {cls.commutes}. Signature arguments {k} and {commuting_set[j]} have different types {typ1} and {typ2}."
+        cls.right_commutes = right_commutes
+
 
 
 class Op(structref.StructRefProxy,metaclass=OpMeta):

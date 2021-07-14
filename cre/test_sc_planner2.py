@@ -25,6 +25,7 @@ class PrintElapse():
 class Add(Op):
     signature = f8(f8,f8)        
     short_hand = '({0}+{1})'
+    commutes = True
     def check(a, b):
         return a > 0
     def call(a, b):
@@ -33,6 +34,7 @@ class Add(Op):
 class Multiply(Op):
     signature = f8(f8,f8)
     short_hand = '({0}*{1})'
+    commutes = True
     def check(a, b):
         return b != 0
     def call(a, b):
@@ -201,7 +203,7 @@ def setup_retrace(n=5):
     planner = setup_float(n=n)
     planner = setup_str(planner,n=n)
     forward_chain_one(planner, [Add,Multiply,Concatenate])
-    forward_chain_one(planner, [Add,Multiply,Concatenate])
+    # forward_chain_one(planner, [Add,Multiply,Concatenate])
     return planner
 
 
@@ -238,7 +240,7 @@ def tree_str(root,ind=0):
 
 def test_build_explanation_tree():
     planner = setup_retrace()
-    root = build_explanation_tree(planner, f8, 36.0)
+    root = build_explanation_tree(planner, f8, 7.0)
     print("BEF STR")
     for op_comp in root:
         print(op_comp)

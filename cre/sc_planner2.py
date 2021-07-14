@@ -198,24 +198,17 @@ def sc_planner_ctor():
 
 @njit(cache=True)
 def ensure_ptr_dicts(planner,typ,typ_name,lt,vt,ivt):
-    print("ENSURE")
     tup = (typ_name,0)
     if(tup not in planner.flat_vals_ptr_dict):
         flat_vals = List.empty_list(typ)
         planner.flat_vals_ptr_dict[tup] = _pointer_from_struct_incref(flat_vals)
-    print("ENSURE%")
     if(typ_name not in planner.val_map_ptr_dict):
         val_map = Dict.empty(typ, i8_2x_tuple)    
         planner.val_map_ptr_dict[typ_name] = _pointer_from_struct_incref(val_map)
-    print("ENSURE!")
     if(typ_name not in planner.inv_val_map_ptr_dict):
-        print("ENSURE!<")
         inv_val_map = Dict.empty(i8, typ)    
-        print("ENSURE!<<")
         planner.inv_val_map_ptr_dict[typ_name] = _pointer_from_struct_incref(inv_val_map)
-        print("ENSURE!<<<")
 
-    print("ENSURE@")
     flat_vals = _list_from_ptr(lt, planner.flat_vals_ptr_dict[tup])    
     val_map = _dict_from_ptr(vt, planner.val_map_ptr_dict[typ_name])    
     inv_val_map = _dict_from_ptr(ivt, planner.inv_val_map_ptr_dict[typ_name])    
@@ -236,22 +229,18 @@ def planner_declare(planner, val):
     ivm_typ = DictType(i8, val_typ)
 
     def impl(planner, val):
-        print("DECLARE")
         flat_vals, val_map, inv_val_map = \
             ensure_ptr_dicts(planner, val_typ,
                 val_typ_name, l_typ, vm_typ, ivm_typ)
-        print("DECLARE@")
         v = Var(val_typ)
         var_ptr = _pointer_from_struct(v)
         rec = SC_Record(v)
         rec_entry = np.empty((1,),dtype=np.int64)
         rec_entry[0] = _pointer_from_struct_incref(rec)
         rec_entry_ptr = _get_array_data_ptr(rec_entry)
-        print("DECLARE#")
         flat_vals.append(val)
         val_map[val] = (0, rec_entry_ptr)
         inv_val_map[var_ptr] = val
-        print("DECLARE$")
     return impl
         
 
@@ -331,21 +320,16 @@ def join_records_of_type(self, depth, typ):
         ''' Goes through every record at 'depth' and joins them
             so that 'val_to_depth' and 'flat_vals' are defined '''
         # recs = self.forward_records[depth][typ_name]
-        print("BEGIN", self.val_map_ptr_dict[typ_name])
         val_map = _dict_from_ptr(dict_typ, self.val_map_ptr_dict[typ_name])
-        print(val_map)
         flat_vals = List.empty_list(typ, len(val_map))
-        print("BEF1", depth)
         for val in val_map:
             flat_vals.append(val) 
 
         tup = (typ_name, depth)
-        print("BEF2", depth)
         #If (typ_name, depth) was already there then decref the
         # entry in flat_vals_ptr_dict so it gets freed
         # if(tup in self.flat_vals_ptr_dict):
         #     _decref_pointer(self.flat_vals_ptr_dict[tup])
-        print("HI")
         self.flat_vals_ptr_dict[tup] = \
              _pointer_from_struct_incref(flat_vals)
     return impl
@@ -361,16 +345,12 @@ def join_records(self, depth, ops):
 def forward_chain_one(self, ops=None):
     '''Applies 'ops' on all current inferred values'''
     nxt_depth = self.curr_infer_depth+1
-    print("nxt_depth", nxt_depth)
     if(ops is None): ops = self.ops
     for op in ops:
         rec = apply_multi(op, self, self.curr_infer_depth)
-        print("AFT")
         if(rec is not None):
             insert_record(self, rec, op.return_type_name, nxt_depth)
-    print("JOIN")
     join_records(self, nxt_depth, ops)
-    print("AFT JOIN")
     self.curr_infer_depth = nxt_depth
 
 #### Source Generation -- apply_multi() ####
@@ -453,6 +433,10 @@ val_map_defaults = (-1,0)
     for i, arg in enumerate(args):
         src += f'{c_ind}for i{i} in range(stride[{i}][0],stride[{i}][1]):\n'
         c_ind += ind
+        if(i in op.right_commutes):
+            ignore_conds = 'or'.join([f"i{i} > i{j}" for j in op.right_commutes[i]])
+            src += f'{c_ind}if({ignore_conds}): continue\n'
+        
 
     _is = ",".join([f"i{i}" for i in a_cnt])
     _as = ",".join([f"a{i}" for i in a_cnt])
@@ -654,7 +638,6 @@ def _fill_arg_inds_from_rec_entries(re, new_arg_inds, expl_tree):
         Add the new ExplanationTrees to the children of 'expl_tree'
     '''
     while(re is not None):
-        print("REC IS OP", re.rec.is_op)
         if(re.rec.is_op):
             op = re.rec.op 
             child_arg_ptrs = np.empty(len(re.args), dtype=np.int64)
@@ -668,17 +651,16 @@ def _fill_arg_inds_from_rec_entries(re, new_arg_inds, expl_tree):
                 if(arg_ind not in uai):
                     uai[arg_ind] = expl_tree_ctor()
 
-                # Throw new tree entry instance into the children of 'expl_tree'
                 child_arg_ptrs[i] = _pointer_from_struct_incref(uai[arg_ind])
-                entry = expl_tree_entry_ctor(op,child_arg_ptrs)
-                expl_tree.children.append(entry)
-            re = next_rec_entry(re)   
-        else:
-            print("HEY")
-            entry = expl_tree_entry_ctor(re.rec.var)
-            print("HEY!!")
+                
+            # Throw new tree entry instance into the children of 'expl_tree'
+            entry = expl_tree_entry_ctor(op,child_arg_ptrs)
             expl_tree.children.append(entry)
-            print("HEY!!!!!")
+            re = next_rec_entry(re)   
+            print("NEXT")
+        else:
+            entry = expl_tree_entry_ctor(re.rec.var)
+            expl_tree.children.append(entry)
             re = None
 
 
@@ -706,10 +688,8 @@ def retrace_arg_inds(planner, typ,  goals, new_arg_inds=None):
             # 're' is the head of a linked list of rec_entries
             _, entry_ptr = val_map[goal]
             re = rec_entry_from_ptr(entry_ptr)
-            print("goal", goal)
             _fill_arg_inds_from_rec_entries(re,
                 new_arg_inds, expl_tree)
-        print("ARG INDS END")
         return new_arg_inds
     return impl    
 
@@ -722,7 +702,6 @@ def fill_subgoals_from_arg_inds(planner, arg_inds, typ, depth, new_subgoals):
     typ_name = str(_typ)
     lst_typ = ListType(_typ)
     def impl(planner, arg_inds, typ, depth, new_subgoals):
-        print("START SUBGOALS")
         _new_subgoals =  Dict.empty(typ, ExplanationTreeType)
         _arg_inds = arg_inds[typ_name]
         vals = _list_from_ptr(lst_typ, planner.flat_vals_ptr_dict[(typ_name,depth)])
@@ -730,8 +709,6 @@ def fill_subgoals_from_arg_inds(planner, arg_inds, typ, depth, new_subgoals):
             _new_subgoals[vals[ind]] = expl_tree
         # Inject the new subgoals for 'typ' into 'new_subgoals'
         new_subgoals[typ_name] = _pointer_from_struct_incref(_new_subgoals)
-        print("END SUBGOALS")
-        print(_new_subgoals)
         return new_subgoals
     return impl
 
@@ -743,11 +720,8 @@ def retrace_goals_back_one(planner, goals):
         # fix later 
         typ = f8 if typ_name == 'float64' else unicode_type
         new_arg_inds = retrace_arg_inds(planner, typ, goals, new_arg_inds)
-    print("L", len(new_arg_inds))
     if(len(new_arg_inds) == 0):
-        print("BAIL")
         return None
-    print("MMMMMM")
     new_subgoals = _init_subgoals()
     for typ_name in new_arg_inds:
         # fix later 
@@ -756,7 +730,6 @@ def retrace_goals_back_one(planner, goals):
                 planner, new_arg_inds, typ,
                 planner.curr_infer_depth, new_subgoals)
 
-    print("SUBGOALS FOUND")
     # print(new_subgoals)
     return new_subgoals
 
@@ -910,6 +883,7 @@ class ExplTreeGen():
 from cre.op import OpComp
 def gen_op_comps_from_expl_tree(tree):
     '''A generator of OpComps from an ExplanationTree'''
+    print("N CHILDS", expl_tree_num_entries(tree))
     for i in range(expl_tree_num_entries(tree)):
         tree_entry = expl_tree_ith_entry(tree, i)
         
@@ -917,6 +891,7 @@ def gen_op_comps_from_expl_tree(tree):
             op = expl_tree_entry_get_op(tree_entry)
             op = op.recover_singleton_inst()
             child_generators = []
+            print("N ARGS", expl_tree_entry_num_args(tree_entry))
             for j in range(expl_tree_entry_num_args(tree_entry)):
                 child_tree = expl_tree_entry_jth_arg(tree_entry,j)
                 child_gen = ExplTreeGen(child_tree)
@@ -956,8 +931,9 @@ def gen_op_comps_from_expl_tree(tree):
 
 ###TODO TODO
 '''
-1. Recover values from Vars
-2. Auto declaration:
+[x] Recover values from Vars
+[x] Decalaration
+[ ] Auto declaration:
    -How should that work?
    -Probably should just hook up to wm
    -Have flag on attribute that is like: "visible" 

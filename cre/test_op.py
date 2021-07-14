@@ -1,5 +1,5 @@
 from numba import f8, njit
-from numba.types import  FunctionType
+from numba.types import  FunctionType, unicode_type
 import numpy as np
 from cre.op import Op
 from cre.var import Var
@@ -169,7 +169,28 @@ def test_source_gen():
     # print(TimesDoublePlusOne.make_source(""))
 
 
+def test_commutes():
+    class Add3(Op):
+        signature = f8(f8,f8,f8)        
+        commutes = True
+        def call(a, b, c):
+            return a + b + c
 
+    print(Add3.commutes)
+    assert Add3.commutes == [[0,1,2]]
+    print(Add3.right_commutes)
+    assert str(Add3.right_commutes) == '{2: array([0, 1]), 1: array([0])}'
+
+    with pytest.raises(AssertionError):
+        class Floop(Op):
+            signature = f8(f8,f8, unicode_type)        
+            commutes = [[0,1,2]]
+            def call(a, b, c):
+                return a + b
+
+    
+
+    
 
 
 import time
@@ -185,17 +206,19 @@ class PrintElapse():
 
 if __name__ == "__main__":
     # with PrintElapse("test_op_singleton"):
-        test_op_singleton()
-    # with PrintElapse("test_define_apply_op"):
-        test_define_apply_op()
-    # with PrintElapse("test_op_singleton"):
-        test_compose_op()
-    # with PrintElapse("test_var_propagation"):
-        test_var_propagation()
-        test_order()
-    # with PrintElapse("test_auto_aliasing"):
-        test_auto_aliasing()
-    # with PrintElapse("test_source_gen"):
-        test_source_gen()
+    #     test_op_singleton()
+    # # with PrintElapse("test_define_apply_op"):
+    #     test_define_apply_op()
+    # # with PrintElapse("test_op_singleton"):
+    #     test_compose_op()
+    # # with PrintElapse("test_var_propagation"):
+    #     test_var_propagation()
+    #     test_order()
+    # # with PrintElapse("test_auto_aliasing"):
+    #     test_auto_aliasing()
+    # # with PrintElapse("test_source_gen"):
+    #     test_source_gen()
+
+        test_commutes()
             
 

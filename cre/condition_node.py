@@ -95,11 +95,11 @@ def _resolve_var_types(var):
     #  because if "CRE_SPECIALIZE_VAR_TYPE"==False all Vars are GenericVarType.
     # print(type(var))
     if(isinstance(var,Var)):
-        fact_type = var.fact_type
+        fact_type = var.base_type
         head_type = var.head_type
         # var = var._numba_type_
     else:
-        fact_type = var.field_dict['fact_type'].instance_type
+        fact_type = var.field_dict['base_type'].instance_type
         head_type = var.field_dict['head_type'].instance_type
     return fact_type, head_type
 
@@ -367,7 +367,7 @@ class Conditions(structref.StructRefProxy):
     def get_matches(self, kb=None):
         from cre.matching import _get_matches
         context = kb_context()
-        fact_types = tuple([context.type_registry[x.type_name] for x in self.vars if not x.is_not])
+        fact_types = tuple([context.type_registry[x.base_type_name] for x in self.vars if not x.is_not])
         return _get_matches(self, fact_types, kb=kb)
 
     def link(self,kb):
@@ -493,7 +493,7 @@ def conditions_repr(self,alias=None):
     s += " = "
     for j, v in enumerate(self.vars):
         prefix = "NOT" if(v.is_not) else "Var"
-        s_v = prefix + "(" + v.type_name + ")"
+        s_v = prefix + "(" + v.base_type_name + ")"
         # : s_v = "NOT(" + s_v +")"
         s += s_v
         if(j < len(self.vars)-1): s += ", "

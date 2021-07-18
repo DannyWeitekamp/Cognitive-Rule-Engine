@@ -209,8 +209,11 @@ def _test_fact_args():
         vb = Var(BOOP,'v').B
         op = Add(vb,vb)
         print(op)
-        print(op)
         print(op(BOOP("A",1)))
+
+        op = Add(vb,Add(vb,Var(BOOP, 'u').B))
+        print(op)
+        print(op(BOOP("A",1), BOOP("B",2)))
 
     
 

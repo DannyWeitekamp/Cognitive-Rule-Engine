@@ -559,8 +559,8 @@ class OpComp():
 
                 for c,t in x.constants.items():
                     constants[c] = t
-                for op_comp in x.instructions:
-                    instructions[op_comp] = op_comp.op.signature
+                for instr, sig in x.instructions.items():
+                    instructions[instr] = sig
             else:
                 if(isinstance(x,Var)):
                     v_ptr = x.base_ptr

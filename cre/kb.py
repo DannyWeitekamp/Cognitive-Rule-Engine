@@ -9,7 +9,7 @@ from numba.cpython.unicode import  _set_code_point
 from numba.experimental import structref
 from numba.experimental.structref import new, define_boxing
 from numba.extending import overload_method, intrinsic, overload
-from cre.core import TYPE_ALIASES, REGISTERED_TYPES, JITSTRUCTS, py_type_map, numba_type_map, numpy_type_map
+from cre.core import TYPE_ALIASES, JITSTRUCTS, py_type_map, numba_type_map, numpy_type_map
 from numba.core import types, cgutils
 from numba.core.errors import TypingError
 

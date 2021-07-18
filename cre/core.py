@@ -37,7 +37,7 @@ TYPE_ALIASES = {
 	'float64' : 'float64',
 }
 
-REGISTERED_TYPES = {'float64': float64,
+DEFAULT_REGISTERED_TYPES = {'float64': float64,
 					 'unicode_type' : unicode_type}
 
 JITSTRUCTS = {}					 

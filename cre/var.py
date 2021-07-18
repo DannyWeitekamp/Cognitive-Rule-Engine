@@ -160,6 +160,11 @@ class Var(structref.StructRefProxy):
                 return base_type_ref.instance_type 
             else:
                 # Otherwise we need to resolve the type from the current context
+
+                if(not hasattr(self,'_base_type')):
+                    ctx = kb_context()
+                    bt_name = var_get_base_type_name(self)
+                    self._base_type = ctx.type_registry[bt_name]
                 return self._base_type
                 # return kb_context().base_type[self.type_name]
         elif(attr == 'head_type'):
@@ -167,6 +172,10 @@ class Var(structref.StructRefProxy):
             if(head_type_ref != types.Any):
                 return base_type_ref.instance_type 
             else:
+                if(not hasattr(self,'_head_type')):
+                    ctx = kb_context()
+                    ht_name = var_get_head_type_name(self)
+                    self._head_type = ctx.type_registry[ht_name]
                 return self._head_type
                 # return head_type.instance_type if(head_type != types.Any) else None
         elif(attr == 'is_not'):

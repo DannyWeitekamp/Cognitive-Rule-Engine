@@ -490,9 +490,19 @@ def g_nm(x,names):
         as dictionary keys by replacing them with their NRT pointers.
         This must be done because __eq__ is not a comparator on Var.'''
     if(isinstance(x, Var)):
-        return names.get(x.get_ptr(),None)
+        return names.get(x.base_ptr,None)
     else:
         return names.get(x,None)
+
+class DerefInstr():
+    '''A placeholder instruction for dereferencing'''
+    def __init__(self, var):
+        self.var = var
+        self.deref_attrs = var.deref_attrs
+
+    @property
+    def template(self):
+        return f'{{}}.{".".join(list(self.deref_attrs))}'
 
 
 
@@ -502,7 +512,7 @@ class OpComp():
 
     def _repr_arg_helper(self,x):
         if isinstance(x, Var):
-            return f'a{self.vars[x.get_ptr()][1]}'
+            return f'a{self.vars[x.base_ptr][1]}'
         elif(isinstance(x, OpComp)):
             arg_names = [f'a{self.vars[v_p][1]}' for v_p in x.vars]
             # print("arg_names", arg_names)
@@ -538,12 +548,16 @@ class OpComp():
                     instructions[op_comp] = op_comp.op.signature
             else:
                 if(isinstance(x,Var)):
-                    v_ptr = x.get_ptr()
+                    v_ptr = x.base_ptr
                     if(v_ptr not in _vars):
-                        t = op.signature.args[i]
+                        t = x.base_type
                         _vars[v_ptr] = (x,len(arg_types),t)
-                        # _vars[x] = op.signature.args[i]
-                        # v_ptr_to_ind[x.get_ptr()] = len(arg_types)
+                        if(x.base_type != x.head_type):
+                            d_instr = DerefInstr(x)
+                            instructions[d_instr] = x.head_type(x.base_type,)
+                            x = d_instr
+                        
+
                         arg_types.append(t)
                 else:
                     constants[x] = op.signature.args[i]
@@ -593,7 +607,7 @@ class OpComp():
             used_ops = {}
             oc = 0
             for i,instr in enumerate(self.instructions):
-                if(instr.op not in used_ops):
+                if(isinstance(instr, OpComp) and instr.op not in used_ops):
                     used_ops[instr.op] = (oc,instr.op.signature)
                     oc += 1
             self._used_ops = used_ops
@@ -670,17 +684,20 @@ class OpComp():
         # raise ValueError()
         for i,instr in enumerate(self.instructions):
             instr_reprs = []
-            for x in instr.args:
-                if(g_nm(x,names) is not None):
-                    instr_reprs.append(g_nm(x,names))
-                elif(isinstance(x,(Op,OpComp))):
-                    instr_reprs.append(x.gen_expr(lang,**kwargs))
-                else:
-                    instr_reprs.append(repr(x))
+            if(isinstance(instr, DerefInstr)):
+                names[instr] = instr.template.format(g_nm(instr.var,names))
+            else:
+                for x in instr.args:
+                    if(g_nm(x,names) is not None):
+                        instr_reprs.append(g_nm(x,names))
+                    elif(isinstance(x,(Op,OpComp))):
+                        instr_reprs.append(x.gen_expr(lang,**kwargs))
+                    else:
+                        instr_reprs.append(repr(x))
 
             # instr_names = ",".join(instr_reprs)
-            instr_kwargs = {**kwargs,'arg_names':instr_reprs}
-            names[instr] = instr.op.gen_expr(lang=lang,**instr_kwargs) #f'{names[]}({instr_names})'
+                instr_kwargs = {**kwargs,'arg_names':instr_reprs}
+                names[instr] = instr.op.gen_expr(lang=lang,**instr_kwargs) #f'{names[]}({instr_names})'
         # print(names)
         return names[list(self.instructions.keys())[-1]]
 
@@ -690,9 +707,13 @@ class OpComp():
         names, arg_names, const_defs = self._call_check_prereqs(lang, **kwargs)
         call_body = const_defs
         for i,instr in enumerate(self.instructions):
-            inp_seq = ", ".join([g_nm(x,names) for x in instr.args])
-            call_fname = names[(instr.op,'call')]
-            call_body += f"{ind}{gen_assign(lang, f'i{i}', f'{call_fname}({inp_seq})')}\n"
+            if(isinstance(instr, DerefInstr)):
+                deref_str = f'{g_nm(instr.var,names)}.{".".join(instr.deref_attrs)}'
+                call_body += f"{ind}{gen_assign(lang, f'i{i}', deref_str)}\n"
+            else:
+                inp_seq = ", ".join([g_nm(x,names) for x in instr.args])
+                call_fname = names[(instr.op,'call')]
+                call_body += f"{ind}{gen_assign(lang, f'i{i}', f'{call_fname}({inp_seq})')}\n"
 
         tail = f'{ind}return i{len(self.instructions)-1}\n'
         return gen_def_func(lang, fname, ", ".join(arg_names), call_body, tail)

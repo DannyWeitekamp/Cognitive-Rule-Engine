@@ -8,7 +8,7 @@ from numba.typed import List, Dict
 from numba.core.types import DictType, ListType, unicode_type, float64, NamedTuple, NamedUniTuple, UniTuple 
 from numba.cpython.unicode import  _set_code_point
 from cre.caching import cache_safe_exec
-from cre.core import TYPE_ALIASES, REGISTERED_TYPES, JITSTRUCTS, py_type_map, numba_type_map, numpy_type_map
+from cre.core import TYPE_ALIASES, JITSTRUCTS, py_type_map, numba_type_map, numpy_type_map
 from cre.gensource import assert_gen_source
 from cre.caching import unique_hash, source_to_cache, import_from_cached, source_in_cache
 from collections import namedtuple

@@ -5,7 +5,7 @@ from numba import void,b1,u1,u2,u4,u8,i1,i2,i4,i8,f4,f8,c8,c16
 from numba.typed import List, Dict
 from numba.core.types import DictType, ListType, unicode_type, float64, NamedTuple, NamedUniTuple, UniTuple, Array
 from numba.cpython.unicode import  _set_code_point
-from cre.core import TYPE_ALIASES, REGISTERED_TYPES, JITSTRUCTS, py_type_map, numba_type_map, numpy_type_map
+from cre.core import TYPE_ALIASES, DEFAULT_REGISTERED_TYPES, JITSTRUCTS, py_type_map, numba_type_map, numpy_type_map
 from cre.gensource import assert_gen_source
 from cre.caching import unique_hash, source_to_cache, import_from_cached, source_in_cache
 # from cre.struct_gen import gen_struct_code
@@ -116,7 +116,7 @@ class KnowledgeBaseContext(object):
     def __init__(self,name):
         self.name = name
         self.fact_ctors = {}
-        self.type_registry = {}
+        self.type_registry = {**DEFAULT_REGISTERED_TYPES}
         self.op_instances = {}
         
         self.parents_of = {}

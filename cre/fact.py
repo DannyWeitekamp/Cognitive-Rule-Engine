@@ -20,7 +20,7 @@ from numba.core import types, cgutils
 from numba.types import ListType
 # from numba.core.extending import overload
 
-from cre.core import TYPE_ALIASES, REGISTERED_TYPES, JITSTRUCTS, py_type_map, numba_type_map, numpy_type_map
+from cre.core import TYPE_ALIASES, JITSTRUCTS, py_type_map, numba_type_map, numpy_type_map
 from cre.gensource import assert_gen_source
 from cre.caching import unique_hash, source_to_cache, import_from_cached, source_in_cache, get_cache_path
 from cre.structref import gen_structref_code, define_structref, CastFriendlyStructref

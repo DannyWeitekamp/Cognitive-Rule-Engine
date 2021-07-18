@@ -564,7 +564,6 @@ class OpComp():
             else:
                 if(isinstance(x,Var)):
                     v_ptr = x.base_ptr
-                    print("v_ptr", v_ptr)
                     if(v_ptr not in _vars):
                         t = x.base_type
                         _vars[v_ptr] = (x,len(arg_types),t)
@@ -590,15 +589,12 @@ class OpComp():
         
 
         self._expr = f"{op.name}({', '.join([self._repr_arg_helper(x) for x in self.args])})"  
-        print(self._expr)
         self.name = self._expr
 
         instructions[self] = op.signature
 
         
         self.instructions = instructions
-        print(self.vars)
-        print(self.instructions)
 
     def flatten(self):
         ''' Flattens the OpComp into a single Op. Generates the source

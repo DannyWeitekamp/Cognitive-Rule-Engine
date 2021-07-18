@@ -504,6 +504,19 @@ class DerefInstr():
     def template(self):
         return f'{{}}.{".".join(list(self.deref_attrs))}'
 
+    def _get_hashable(self):
+        if(not hasattr(self,"_hashable")):
+            self._hashable = (self.var.base_ptr, tuple(*self.deref_attrs))
+        return self._hashable
+
+    def __eq__(self, other):
+        return self._get_hashable() == other._get_hashable()
+
+    def __hash__(self):
+        return hash(self._get_hashable())
+
+
+
 
 
 class OpComp():
@@ -517,6 +530,8 @@ class OpComp():
             arg_names = [f'a{self.vars[v_p][1]}' for v_p in x.vars]
             # print("arg_names", arg_names)
             return x.gen_expr('python',arg_names=arg_names)
+        elif(isinstance(x,DerefInstr)):
+            return f'a{self.vars[x.var.base_ptr][1]}.{".".join(x.deref_attrs)}'
         else:
             return repr(x) 
 
@@ -549,16 +564,18 @@ class OpComp():
             else:
                 if(isinstance(x,Var)):
                     v_ptr = x.base_ptr
+                    print("v_ptr", v_ptr)
                     if(v_ptr not in _vars):
                         t = x.base_type
                         _vars[v_ptr] = (x,len(arg_types),t)
-                        if(x.base_type != x.head_type):
-                            d_instr = DerefInstr(x)
-                            instructions[d_instr] = x.head_type(x.base_type,)
-                            x = d_instr
+                        arg_types.append(t)
+                    if(x.base_type != x.head_type):
+                        d_instr = DerefInstr(x)
+                        instructions[d_instr] = x.head_type(x.base_type,)
+                        x = d_instr
                         
 
-                        arg_types.append(t)
+                        
                 else:
                     constants[x] = op.signature.args[i]
             args.append(x)
@@ -570,14 +587,18 @@ class OpComp():
         self.constants = constants
         self.signature = op.signature.return_type(*arg_types)
         # self.v_ptr_to_ind = v_ptr_to_ind
+        
 
         self._expr = f"{op.name}({', '.join([self._repr_arg_helper(x) for x in self.args])})"  
+        print(self._expr)
         self.name = self._expr
 
         instructions[self] = op.signature
 
         
         self.instructions = instructions
+        print(self.vars)
+        print(self.instructions)
 
     def flatten(self):
         ''' Flattens the OpComp into a single Op. Generates the source

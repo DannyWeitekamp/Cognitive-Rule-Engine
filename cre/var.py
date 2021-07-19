@@ -98,7 +98,6 @@ class Var(structref.StructRefProxy):
         if(not skip_assign_alias):
             assign_to_alias_in_parent_frame(st,alias)
 
-
         # print("after")
         return st
         # return structref.StructRefProxy.__new__(cls, *args)
@@ -151,7 +150,6 @@ class Var(structref.StructRefProxy):
 
 
     def __getattr__(self, attr):
-        # print("DEREF", attr)
         if(attr in ['_head_type', '_base_type']): return None
         if(attr == 'base_type'):
             base_type_ref = self._numba_type_.field_dict['base_type']
@@ -160,24 +158,21 @@ class Var(structref.StructRefProxy):
                 return base_type_ref.instance_type 
             else:
                 # Otherwise we need to resolve the type from the current context
-
-                if(not hasattr(self,'_base_type')):
+                if('_base_type' not in self.__dict__):
                     ctx = kb_context()
                     bt_name = var_get_base_type_name(self)
                     self._base_type = ctx.type_registry[bt_name]
                 return self._base_type
-                # return kb_context().base_type[self.type_name]
         elif(attr == 'head_type'):
             head_type_ref = self._numba_type_.field_dict['head_type']
             if(head_type_ref != types.Any):
-                return base_type_ref.instance_type 
+                return head_type_ref.instance_type 
             else:
-                if(not hasattr(self,'_head_type')):
+                if('_head_type' not in self.__dict__):
                     ctx = kb_context()
                     ht_name = var_get_head_type_name(self)
                     self._head_type = ctx.type_registry[ht_name]
                 return self._head_type
-                # return head_type.instance_type if(head_type != types.Any) else None
         elif(attr == 'is_not'):
             return var_get_is_not(self)
         elif(attr == 'deref_attrs'):
@@ -361,7 +356,7 @@ def var_ctor(var_struct_type, base_type_name="", alias=""):
 @overload(Var,strict=False)
 def overload_Var(typ,alias=None):
     _typ = typ.instance_type
-    base_type_name = str(typ)
+    base_type_name = str(_typ)
     struct_type = get_var_definition(_typ,_typ)
     def impl(typ, alias=None):
         return var_ctor(struct_type, base_type_name, alias)

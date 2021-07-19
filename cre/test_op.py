@@ -190,7 +190,7 @@ def test_commutes():
             def call(a, b, c):
                 return a + b
 
-def _test_fact_args():
+def test_fact_args():
     class Add(Op):
         signature = f8(f8,f8)        
         commutes = True
@@ -202,22 +202,18 @@ def _test_fact_args():
         BOOP, BOOPType = define_fact("BOOP", spec)
 
         op = Add(Var(BOOP,'x').B, Var(BOOP,'y').B)
-        print(op)
-        # print(op(1,2))
-        print(op(BOOP("A",1),BOOP("B",2)))
+        assert str(op) == "Add(x.B,y.B)"
+        assert op(BOOP("A",1),BOOP("B",2)) == 3.0
 
         vb = Var(BOOP,'v').B
         op = Add(vb,vb)
-        print(op)
-        print(op(BOOP("A",1)))
+        assert str(op) == 'Add(v.B,v.B)'
+        assert op(BOOP("A",1)) == 2.0
 
         op = Add(vb,Add(vb,Var(BOOP, 'u').B))
-        print(op)
-        print(op(BOOP("A",1), BOOP("B",2)))
-
-    
-
-    
+        assert str(op) == 'Add(v.B,Add(v.B,u.B))'
+        assert op(BOOP("A",1), BOOP("B",2)) == 4.0
+        
 
 
 import time
@@ -247,6 +243,6 @@ if __name__ == "__main__":
     #     test_source_gen()
 
         # test_commutes()
-        _test_fact_args()
+        test_fact_args()
             
 

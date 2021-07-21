@@ -185,31 +185,60 @@ def float_to_str(x):
 
     return s
 
+# Monkey Patch type conversions so that float(str) and str(float)
+# work like in normal python
 
-# Unfortunately this doesn't do the trick
+@overload(str)
+def overload_float_from_str(x):
+    if(x not in types.real_domain): return
+    def impl(x):
+        return float_to_str(x)
+    return impl
+
 @overload(float)
 def overload_float_from_str(x):
     if(x != unicode_type): return
-    return str_to_float
+    def impl(x):
+        return str_to_float(x)
+    return impl
+
+
+from numba.core.typing.templates import (AttributeTemplate, ConcreteTemplate,
+                                         AbstractTemplate, infer_global, infer,
+                                         infer_getattr, signature,
+                                         bound_function, make_callable_template)
+
+
+@infer_global(float)
+class Float(AbstractTemplate):
+    def generic(self, args, kws):
+        assert not kws
+
+        [arg] = args
+
+        if(arg == unicode_type):
+            #For unicode_type fall back on @overload 
+            return 
+
+        if arg not in types.number_domain:
+            raise TypeError("float() only support for numbers")
+
+        if arg in types.complex_domain:
+            raise TypeError("float() does not support complex")
+
+        if arg in types.integer_domain:
+            return signature(types.float64, arg)
+
+        elif arg in types.real_domain:
+            return signature(arg, arg)
 
 
 
-
-
-
-
-# @njit
-# def failed_str():
-#   str(1.2)
-
-# @njit
-# def failed_float():
-#   float("1.2")
 
 # @njit
 # def failed_int():
 #   int("1.2")
 
-# failed_str()
-# failed_float()
+# print(repr(failed_str()))
+# print(repr(failed_float()))
 # failed_int()

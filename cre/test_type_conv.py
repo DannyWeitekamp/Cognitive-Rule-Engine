@@ -68,6 +68,19 @@ def test_to_str():
     assert to_str_close(9.99999999999999e+200)
 
 
+@njit(cache=True)
+def _str_test():
+  return str(1.2)
+
+@njit(cache=True)
+def _float_test():
+  return float("1.2")
+
+def test_str_float_overloaded():
+    assert _float_test() == 1.2
+    assert _str_test() == '1.2'
+
+
 def test_ops():
     class StrToFloat(Op):
         signature = f8(unicode_type,)

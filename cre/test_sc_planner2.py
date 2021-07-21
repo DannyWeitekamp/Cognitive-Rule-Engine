@@ -8,9 +8,11 @@ from cre.sc_planner2 import (gen_apply_multi_source,
                      join_records_of_type, forward_chain_one, next_rec_entry,
                     rec_entry_from_ptr, SC_Record_EntryType, retrace_goals_back_one, expl_tree_ctor,
                     build_explanation_tree, ExplanationTreeType, SC_Record, SC_RecordType,
-                    gen_op_comps_from_expl_tree)
+                    gen_op_comps_from_expl_tree, planner_declare_fact)
 from cre.utils import _pointer_from_struct_incref, _list_from_ptr, _dict_from_ptr, _struct_from_pointer, _get_array_data_ptr, _pointer_from_struct
 from cre.var import Var
+from cre.context import kb_context
+from cre.fact import define_fact
 
 import time
 class PrintElapse():
@@ -243,9 +245,6 @@ def tree_str(root,ind=0):
     return s
         
 
-
-
-
 def test_build_explanation_tree():
     planner = setup_retrace()
     root = build_explanation_tree(planner, f8, 36.0)
@@ -259,6 +258,17 @@ def test_build_explanation_tree():
     #     op, args = child
     #     print(op.name)
 
+
+def _test_declare_fact():
+    planner = SetChainingPlanner()
+
+    with kb_context("test_declare_fact"):
+        spec = {"A" : "string", "B" : "number"}
+        BOOP, BOOPType = define_fact("BOOP", spec)
+
+        planner = SetChainingPlanner()
+        b = BOOP("A",1.0)
+        planner_declare_fact(planner,b,[("B","unicode_type"), ("B", 'float')])
 
 
     # goals = Dict.empty(f8,ExplanationTreeType)
@@ -342,13 +352,14 @@ if __name__ == "__main__":
     # test_insert_record()
     # test_join_records_of_type()
     # test_forward_chain_one()
-    test_build_explanation_tree()
+    # test_build_explanation_tree()
     # benchmark_apply_multi()
     # benchmark_retrace_back_one()
         # test_apply_multi()
     # gen = foo_gen()
     # for i in gen:
     #     print(i)
+    _test_declare_fact()
 # from numba import njit, i8
 # from numba.typed import Dict
 # from numba.types import ListType

@@ -242,6 +242,27 @@ def planner_declare(planner, val):
         val_map[val] = (0, rec_entry_ptr)
         inv_val_map[var_ptr] = val
     return impl
+
+from cre.fact import _standardize_type
+# @generated_jit(cache=True)
+def gen_declare_attr_impl(attr_typ):
+    context = kb_context()
+    pass
+
+    # def impl(planner, val)
+
+
+
+
+
+def planner_declare_fact(planner, val, attrs_as_types=None):
+    print(attrs_as_types)
+    def impl(planner, val, attrs_as_types=None):
+        pass
+    return impl
+
+
+
         
 
 ### Planning Planning Planning ###
@@ -878,7 +899,7 @@ class ExplTreeGen():
         self.child_tree = child_tree
     def __call__(self):
         return gen_op_comps_from_expl_tree(self.child_tree)
-
+        
 from cre.op import OpComp
 def gen_op_comps_from_expl_tree(tree):
     '''A generator of OpComps from an ExplanationTree'''
@@ -924,7 +945,37 @@ def gen_op_comps_from_expl_tree(tree):
          
     # else:
 
+### THinking Thinking 
+'''
+When the fact is declared we need to rip off things and cast them
+The casting of them will cause the expr to be ugly
+-idea: Some types i.e. float, int, unicode_type can be casted between
+    so if the type is wrong then it simply injects the casting when 
+    flattening. check will invariably need to add explicit casts in
 
+-alternatively we simply add str() or float() but then repr doesn't work
+ because str(op_comp/var) is literally a string. 
+
+-could also add a cast(typ, val) option that generates/recovers an op
+  that makes a new cast
+
+-TThoughts: 
+Need to try to cast on declare, or try casting all reasonable 
+    types on forward chain. The latter case would have some elegance
+    but would be less performant. Frankly it may be necessary. 
+
+-Casting could overloaded and built into the ops themselves either:
+    -Explicitly with more than one signature, or a valid arg casting dict
+
+THINGS:
+1) Things need to be forced to be declared as the proper type
+    -For the time being, just 
+
+
+
+'''
+
+###
 
 ###TODO TODO
 '''

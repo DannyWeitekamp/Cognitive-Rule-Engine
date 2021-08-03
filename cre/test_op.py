@@ -1,4 +1,5 @@
 from numba import f8, njit
+from numba.core.errors import NumbaPerformanceWarning
 from numba.types import  FunctionType, unicode_type
 import numpy as np
 from cre.op import Op
@@ -6,6 +7,7 @@ from cre.var import Var
 from cre.utils import _func_from_address
 from cre.context import kb_context
 from cre.fact import define_fact
+import re
 import pytest
 
 def test_op_singleton():
@@ -213,7 +215,61 @@ def test_fact_args():
         op = Add(vb,Add(vb,Var(BOOP, 'u').B))
         assert str(op) == 'Add(v.B,Add(v.B,u.B))'
         assert op(BOOP("A",1), BOOP("B",2)) == 4.0
-        
+
+
+def not_jit_compilable():
+    class Add(Op):
+        signature = f8(f8,f8)        
+        commutes = True
+        def call(a, b):
+            return a + b
+
+    with pytest.warns(NumbaPerformanceWarning):
+        class Map(Op):
+            signature = f8(f8)
+            def check(a):
+                l = []
+                d = {1.0: 10.0, 2.0: 20.0}
+                for i in range(int(a)):
+                    l.append(str(i+1))
+                    l.append(float(i+1))
+
+                return d[l[-1]] > 0
+            def call(a):
+                l = []
+                d = {1.0: 10.0, 2.0: 20.0}
+                for i in range(int(a)):
+                    l.append(str(i+1))
+                    l.append(float(i+1))
+
+                return d[l[-1]]
+
+
+    assert Map(1.0)==10.0
+    assert Map.call(1.0)==10.0
+    assert Map.check(1.0)==1
+
+
+    op = Add(Map(Var(float,'x')),Map(Var(float,'y')))
+    assert op(1,2)==30.0
+
+    with kb_context('test_fact_args'):
+        spec = {"A" : "string", "B" : "number"}
+        BOOP, BOOPType = define_fact("BOOP", spec)
+
+        class BOOPMap(Op):
+            signature = BOOPType(BOOPType)
+            def call(a):
+                l = []
+                d = {1.0: 10.0, 2.0: 20.0}
+                for i in range(int(a.B)):
+                    l.append(str(i+1))
+                    l.append(float(i+1))
+
+                return BOOP("A", d[l[-1]])
+
+        assert BOOPMap(BOOP("A",1.0)).B == 10.0
+        assert BOOPMap.call(BOOP("A",1.0)).B == 10.0
 
 
 import time
@@ -243,6 +299,7 @@ if __name__ == "__main__":
     #     test_source_gen()
 
         # test_commutes()
-        test_fact_args()
+        # test_fact_args()
+    not_jit_compilable()
             
 

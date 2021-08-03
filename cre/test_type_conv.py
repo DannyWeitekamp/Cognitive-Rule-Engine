@@ -85,7 +85,7 @@ def test_ops():
     class StrToFloat(Op):
         signature = f8(unicode_type,)
         def call(x):
-            return str_to_float(x)
+            return float(x)
 
     class Add3(Op):
         signature = f8(f8,f8,f8)        
@@ -95,9 +95,8 @@ def test_ops():
 
     x,y,z = Var(unicode_type,'x'), Var(unicode_type,'y'), Var(unicode_type,'z')
     op = Add3(StrToFloat(x),StrToFloat(y),StrToFloat(z))
-    print(str(op))
     assert str(op) == 'Add3(StrToFloat(x),StrToFloat(y),StrToFloat(z))'
-    print(op('1','2','3'))
+    assert op('1','2','3') == 6.0
 
 if __name__ == "__main__":
     test_to_str()

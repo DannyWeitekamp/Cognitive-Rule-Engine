@@ -9,6 +9,7 @@ from numba.experimental import structref
 from numba.experimental.structref import new, define_boxing, define_attributes, _Utils
 from numba.extending import overload_method, intrinsic, overload_attribute, intrinsic, lower_getattr_generic, overload, infer_getattr, lower_setattr_generic
 from numba.core.typing.templates import AttributeTemplate
+from numba.core.errors import NumbaError, NumbaPerformanceWarning
 from cre.caching import gen_import_str, unique_hash,import_from_cached, source_to_cache, source_in_cache, cache_safe_exec, get_cache_path
 from cre.context import kb_context
 from cre.structref import define_structref, define_structref_template
@@ -37,6 +38,8 @@ import inspect, dill, pickle
 from textwrap import dedent, indent
 # from itertools import combinations
 from collections.abc import Iterable
+import warnings
+
 
 
 import time
@@ -49,6 +52,16 @@ class PrintElapse():
         self.t1 = time.time_ns()/float(1e6)
         print(f'{self.name}: {self.t1-self.t0:.2f} ms')
 
+def warn_cant_compile(func_name, op_name, e):
+    s = f'''
+########## WARNING CAN'T COMPILE {op_name}.{func_name}() ########### 
+{indent(str(e),'  ')} 
+########################################################
+Numba was unable to compile {func_name}() for op {op_name}. 
+Using objmode (i.e. native python) instead. To ignore warning set nopython=False.\n\
+'''
+    warnings.warn(s, NumbaPerformanceWarning)
+
 
 def gen_op_source(cls, call_needs_jitting, check_needs_jitting):
     '''Generate source code for the relevant functions of a user defined Op.
@@ -57,29 +70,62 @@ def gen_op_source(cls, call_needs_jitting, check_needs_jitting):
         even if globals are used in the function. 
     '''
     arg_types = cls.signature.args
+    return_type = cls.signature.return_type
     # arg_imports = "\n".join([gen_fact_import_str(x) for x in arg_types if isinstance(x,Fact)])
     field_dict = {**op_fields_dict,**{f"arg{i}" : t for i,t in enumerate(arg_types)}}
-
+    arg_names = ', '.join([f'a{i}' for i in range(len(arg_types))])
     # offsets = get_offsets_from_member_types(field_dict)
     # arg_offsets = offsets[len(op_fields_dict):]
 
     source = \
-f'''from numba import njit, void, u1
+f'''from numba import njit, void, u1, objmode
 from numba.experimental.function_type import _get_wrapper_address
+from numba.core.errors import NumbaError, NumbaPerformanceWarning
 from cre.utils import _func_from_address
-from cre.op import op_fields_dict, OpTypeTemplate
-import dill'''
+from cre.op import op_fields_dict, OpTypeTemplate, warn_cant_compile
+import dill
+nopython_call = {cls.nopython_call} 
+nopython_check = {cls.nopython_check} 
+'''
     if(call_needs_jitting):
 
         source +=f'''
 call_sig = dill.loads({dill.dumps(cls.call_sig)})
-call = njit(call_sig,cache=True)(dill.loads({cls.call_bytes}))
+call_pyfunc = dill.loads({cls.call_bytes})
+try:
+    call = njit(call_sig,cache=True)(call_pyfunc)
+except NumbaError as e:
+    nopython_call=False
+    warn_cant_compile('call',{cls.__name__!r}, e)
+
+if(nopython_call==False):
+    return_type = call_sig.return_type
+    if(not nopython_call):
+        @njit(cache=True)
+        def call({arg_names}):
+            with objmode(_return=return_type):
+                _return = call_pyfunc({arg_names})
+            return _return
+
 call_addr = _get_wrapper_address(call, call_sig)
 '''
     if(check_needs_jitting):
         source += f'''
 check_sig = dill.loads({dill.dumps(cls.check_sig)})
-check = njit(check_sig,cache=True)(dill.loads({cls.check_bytes}))
+check_pyfunc = dill.loads({cls.check_bytes})
+try:
+    check = njit(check_sig,cache=True)(check_pyfunc)
+except NumbaError as e:
+    nopython_check=False
+    warn_cant_compile('check',{cls.__name__!r}, e)
+
+if(nopython_check==False):
+    @njit(cache=True)
+    def check({arg_names}):
+        with objmode(_return=u1):
+            _return = check_pyfunc({arg_names})
+        return _return
+
 check_addr = _get_wrapper_address(check, check_sig)
 '''
 # arg_offsets = {str(arg_offsets)}
@@ -225,6 +271,7 @@ class OpMeta(type):
         # 'cls' is the class of the user defined Op (i.e. Add(a,b)).
         cls = super().__new__(meta_cls,*args) 
         cls._handle_commutes()
+        cls._handle_nopython()
 
         if(call_needs_jitting): cls.process_method("call", cls.signature)
         
@@ -243,6 +290,8 @@ class OpMeta(type):
             if(not source_in_cache(name, hash_code) or getattr(cls,'cache',True) == False):
                 source = gen_op_source(cls, call_needs_jitting, check_needs_jitting)
                 source_to_cache(name,hash_code,source)
+
+            print(get_cache_path(name,hash_code))
 
             to_import = ['call','call_addr'] if call_needs_jitting else []
             if(check_needs_jitting): to_import += ['check', 'check_addr']
@@ -276,6 +325,12 @@ class OpMeta(type):
             return op_inst
 
         return cls
+
+    def _handle_nopython(cls):
+        if(not hasattr(cls,'nopython_call')):
+            cls.nopython_call = getattr(cls,'nopython',None)
+        if(not hasattr(cls,'nopython_check')):
+            cls.nopython_check = getattr(cls,'nopython',None)
 
     def _handle_commutes(cls):
         if(not hasattr(cls,'commutes')):

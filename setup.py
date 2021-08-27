@@ -2,12 +2,18 @@ from setuptools import setup, find_packages
   
 with open('requirements.txt') as f: 
     requirements = f.readlines() 
+
   
 long_description = '...need to add description' 
+
+dev_requirements = [
+    "pytest",
+    "pytest-benchmark"
+]
   
 setup( 
         name ='cre', 
-        version ='0.1.0', 
+        version ='0.2.0', 
         author ='Daniel Weitekamp', 
         author_email ='weitekamp@cmu.edu', 
         url ='https://github.com/DannyWeitekamp/Cognitive-Rule-Engine', 
@@ -33,4 +39,7 @@ setup(
         ), 
         keywords ='expert system production rules', 
         install_requires = requirements, 
+        extras_require={
+            'dev' : dev_requirements
+        }
 ) 

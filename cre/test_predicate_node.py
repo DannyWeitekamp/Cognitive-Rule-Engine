@@ -6,7 +6,7 @@ from cre.fact import define_fact
 from cre.kb import KnowledgeBase
 from cre.context import kb_context
 from cre.predicate_node import get_alpha_predicate_node, get_beta_predicate_node, BasePredicateNodeType, generate_link_data
-from cre.predicate_node import get_alpha_predicate_node_definition, get_beta_predicate_node_definition
+from cre.predicate_node import get_alpha_predicate_node_definition, get_beta_predicate_node_definition, deref_attrs
 from cre.test_kb import _delcare_10000, _retract_10000
 import pytest
 np.set_printoptions(threshold=np.inf)
@@ -308,7 +308,25 @@ def test_beta_predicate_node_2_typed():
 
         # print(ld.truth_values)
 
+from cre.utils import pointer_from_struct
+from cre.predicate_node import deref_type, OFFSET_TYPE_ATTR
 
+print(deref_type)
+print(deref_type.dtype)
+print(type(deref_type.dtype))
+
+def test_deref_attrs():
+    with kb_context("test_deref_attrs"):
+        BOOP, BOOPType = define_fact("BOOP",{"A": "string", "B" : "number"})
+
+        # pn = get_alpha_predicate_node(BOOPType,"A", "<",9)
+        B_offset = BOOPType.get_attr_offset("B")
+        offsets = np.array([(OFFSET_TYPE_ATTR, B_offset)],dtype=deref_type.dtype)
+
+        b1 = BOOP("A", 2.0)
+        b1_ptr = pointer_from_struct(b1)
+        left_val = deref_attrs(f8, b1_ptr, offsets)
+        assert left_val == 2.0
 
 
 
@@ -436,8 +454,9 @@ def test_b_beta_update_100x100(benchmark):
 
 
 if __name__ == "__main__":
-    # test_predicate_node_sanity()
-    test_alpha_predicate_node()
-    test_beta_predicate_node_1_typed()
-    test_beta_predicate_node_2_typed()
+    # test_deref_attrs()
+    test_predicate_node_sanity()
+    # test_alpha_predicate_node()
+    # test_beta_predicate_node_1_typed()
+    # test_beta_predicate_node_2_typed()
 

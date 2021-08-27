@@ -43,6 +43,9 @@ class Fact(CastFriendlyStructref):
     def __str__(self):
         return self._fact_name if hasattr(self, '_fact_name') else "Fact"
 
+    def get_attr_offset(self,attr):
+        fd = self.field_dict
+        return self._attr_offsets[list(fd.keys()).index(attr)]
 
     # def __getstate__(self):
     #     state = self.__dict__.copy()

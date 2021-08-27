@@ -452,7 +452,7 @@ def base_ptr_from_container_data(builder,cd):
         [ll_list_type],
     )
     fname = 'numba_list_base_ptr'
-    fn = builder.module.get_or_insert_function(fnty, fname)
+    fn = cgutils.get_or_insert_function(builder.module, fnty, fname)
     fn.attributes.add('alwaysinline')
     fn.attributes.add('nounwind')
     fn.attributes.add('readonly')

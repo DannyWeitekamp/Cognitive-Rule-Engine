@@ -498,7 +498,7 @@ def resolve_deref(typ,attr_chain):
     #NOTE: Does this acutally ever get used by the end user?
     print(type(deref_type.dtype),deref_type.dtype)
     offsets = np.empty((len(attr_chain),),dtype=deref_type.dtype)
-    print(offsets)
+    # print(offsets)
     out_type = typ 
     for i, attr in enumerate(attr_chain):
         if(not hasattr(out_type,'field_dict')): 
@@ -508,7 +508,7 @@ def resolve_deref(typ,attr_chain):
         offsets[i][0] = OFFSET_TYPE_ATTR
         offsets[i][1] = out_type._attr_offsets[list(fd.keys()).index(attr)]  #struct_get_attr_offset(out_type,attr) #For some reason ~4.6ms
         out_type = fd[attr]
-
+    print(offsets)
     return out_type, offsets
 
 def define_alpha_predicate_node(left_type, op_str, right_type):

@@ -10,9 +10,9 @@ from numba.experimental.structref import new, define_boxing, define_attributes, 
 from numba.extending import overload_method, intrinsic, overload_attribute, intrinsic, lower_getattr_generic, overload, infer_getattr, lower_setattr_generic
 from numba.core.typing.templates import AttributeTemplate
 from cre.caching import gen_import_str, unique_hash,import_from_cached, source_to_cache, source_in_cache, cache_safe_exec, get_cache_path
-from cre.context import kb_context
+from cre.context import cre_context
 from cre.structref import define_structref, define_structref_template
-from cre.kb import KnowledgeBaseType, KnowledgeBase, facts_for_t_id, fact_at_f_id
+from cre.memory import MemoryType, Memory, facts_for_t_id, fact_at_f_id
 from cre.var import GenericVarType
 # from cre.fact import define_fact, BaseFactType, cast_fact, DeferredFactRefType, Fact
 from cre.utils import (_struct_from_meminfo, _meminfo_from_struct, _cast_structref, cast_structref, decode_idrec, lower_getattr, _struct_from_pointer,  lower_setattr, lower_getattr,
@@ -246,7 +246,7 @@ def planner_declare(planner, val):
 from cre.fact import _standardize_type
 # @generated_jit(cache=True)
 def gen_declare_attr_impl(attr_typ):
-    context = kb_context()
+    context = cre_context()
     pass
 
     # def impl(planner, val)
@@ -287,7 +287,7 @@ def how_search(self, goal, ops=None,
              search_depth=1, max_solutions=10,
              min_stop_depth=-1,context=None):
 
-    context = kb_context(context)
+    context = cre_context(context)
     if(min_stop_depth == -1): min_stop_depth = search_depth
 
     # NOTE: Make sure that things exist here
@@ -990,7 +990,7 @@ THINGS:
 4. Mute Exception: steal from numbert 
 
 5. Rename:
--KB -> WM 
+-mem -> WM 
 -fact_type -> base_type
 
 '''
@@ -1020,7 +1020,7 @@ Head depth, head stack (can be iter datas)
     #     if(typ_str == 'float64'):
     #         new_arg_inds = retrace_arg_inds(planner, typ, goals)
     #         for typ, inds in arg_inds_d.items():
-    #             # select_from_collection(kb.u_vs[typ],arg_inds[typ])
+    #             # select_from_collection(mem.u_vs[typ],arg_inds[typ])
     #             select_from_collection(?,arg_inds[typ])
     #         print(goals_d)
     # print()
@@ -1119,8 +1119,8 @@ Notes on incrementally updating the planner:
         keep around a copy of each inference level or reconstruct a copy
         up to where the record entries show a deeper depth.
     -Depth zero will have one such val_map
-    -When things are injected in from a kb they go into depth zero
-    -There needs to be back connections to the kb elements 
+    -When things are injected in from a mem they go into depth zero
+    -There needs to be back connections to the mem elements 
     -Could probably use t_id, f_id, a_id the integer
 '''
 

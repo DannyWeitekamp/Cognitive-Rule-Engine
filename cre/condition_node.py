@@ -8,9 +8,9 @@ from numba.experimental.structref import new, define_boxing, define_attributes, 
 from numba.extending import overload_method, intrinsic, overload_attribute, intrinsic, lower_getattr_generic, overload, infer_getattr, lower_setattr_generic
 from numba.core.typing.templates import AttributeTemplate
 from cre.caching import gen_import_str, unique_hash,import_from_cached, source_to_cache, source_in_cache
-from cre.context import kb_context
+from cre.context import cre_context
 from cre.structref import define_structref, define_structref_template
-from cre.kb import KnowledgeBaseType, KnowledgeBase, facts_for_t_id, fact_at_f_id
+from cre.memory import MemoryType, Memory, facts_for_t_id, fact_at_f_id
 from cre.fact import define_fact, BaseFactType, cast_fact
 from cre.utils import _struct_from_meminfo, _meminfo_from_struct, _cast_structref, cast_structref, decode_idrec, lower_getattr, _struct_from_pointer,  lower_setattr, lower_getattr, _pointer_from_struct, _pointer_from_struct_incref, _decref_pointer
 from cre.utils import assign_to_alias_in_parent_frame
@@ -32,7 +32,7 @@ pterm_fields_dict = {
     "var_base_ptrs" : UniTuple(i8,2),
     "negated" : u1,
     "is_alpha" : u1,
-    "kb_ptr" : i8,
+    "mem_ptr" : i8,
     "link_data" : PredicateNodeLinkDataType
 }
 
@@ -75,7 +75,7 @@ def alpha_pterm_ctor(pn, left_var, op_str, right_var):
     st.var_base_ptrs = (left_var.base_ptr,0)
     st.negated = False
     st.is_alpha = True
-    st.kb_ptr = 0
+    st.mem_ptr = 0
     return st
 
 @njit(cache=True)
@@ -86,7 +86,7 @@ def beta_pterm_ctor(pn, left_var, op_str, right_var):
     st.var_base_ptrs = (left_var.base_ptr,right_var.base_ptr)
     st.negated = False
     st.is_alpha = False
-    st.kb_ptr = 0
+    st.mem_ptr = 0
     return st
 
 
@@ -189,8 +189,8 @@ def pterm_copy(self):
     st.var_base_ptrs = self.var_base_ptrs
     st.negated = self.negated
     st.is_alpha = self.is_alpha
-    st.kb_ptr = self.kb_ptr
-    if(self.kb_ptr):
+    st.mem_ptr = self.mem_ptr
+    if(self.mem_ptr):
         st.link_data = self.link_data
     return st
     
@@ -319,9 +319,9 @@ conditions_fields_dict = {
     # Wether or not the conditions object has been initialized
     'is_initialized' : u1,
 
-    # A pointer to the KnowledgeBase the Conditions object is linked to.
-    #   If the KnowledgeBase is not linked defaults to 0.
-    'kb_ptr' : i8,
+    # A pointer to the Memory the Conditions object is linked to.
+    #   If the Memory is not linked defaults to 0.
+    'mem_ptr' : i8,
 
     ### Fields that are filled in after initialization ### 
 
@@ -360,23 +360,23 @@ class Conditions(structref.StructRefProxy):
     def __invert__(self):
         return conditions_not(self)
 
-    def get_ptr_matches(self,kb=None):
+    def get_ptr_matches(self,mem=None):
         from cre.matching import get_ptr_matches
-        return get_ptr_matches(self,kb)
+        return get_ptr_matches(self,mem)
 
-    def get_matches(self, kb=None):
+    def get_matches(self, mem=None):
         from cre.matching import _get_matches
-        context = kb_context()
+        context = cre_context()
         fact_types = tuple([context.type_registry[x.base_type_name] for x in self.vars if not x.is_not])
-        return _get_matches(self, fact_types, kb=kb)
+        return _get_matches(self, fact_types, mem=mem)
 
-    def link(self,kb):
-        get_linked_conditions_instance(self,kb,copy=False)
+    def link(self,mem):
+        get_linked_conditions_instance(self,mem,copy=False)
 
     @property
     def signature(self):
         if(not hasattr(self,"_signature")):
-            context = kb_context()
+            context = cre_context()
             # print(self)
             sig_str = _get_sig_str(self)
             fact_types = sig_str[1:-1].split(",")
@@ -406,9 +406,9 @@ def conds_get_vars(self):
 
 
 @overload_method(ConditionsTypeTemplate,'get_matches')
-def impl_get_matches(self,kb=None):
+def impl_get_matches(self,mem=None):
     from cre.matching import get_matches
-    def impl(self,kb=None):
+    def impl(self,mem=None):
         return get_matches(get_matches)
     return impl
 
@@ -871,11 +871,11 @@ def cond_not(c):
 #### Linking ####
 
 @njit(cache=True)
-def link_pterm_instance(pterm, kb):
-    link_data = generate_link_data(pterm.pred_node, kb)
+def link_pterm_instance(pterm, mem):
+    link_data = generate_link_data(pterm.pred_node, mem)
     # if(copy): pterm = pterm_copy(pterm)
     pterm.link_data = link_data
-    pterm.kb_ptr = _pointer_from_struct(kb)
+    pterm.mem_ptr = _pointer_from_struct(mem)
     return pterm
 
 @njit(cache=True)
@@ -891,19 +891,19 @@ def dnf_copy(dnf,shallow=True):
     return ndnf
 
 @njit(cache=True)
-def get_linked_conditions_instance(conds, kb, copy=False):
+def get_linked_conditions_instance(conds, mem, copy=False):
     dnf = dnf_copy(conds.dnf,shallow=False) if copy else conds.dnf
     for alpha_conjunct, beta_conjunct in dnf:
-        for term in alpha_conjunct: link_pterm_instance(term, kb)
-        for term in beta_conjunct: link_pterm_instance(term, kb)
+        for term in alpha_conjunct: link_pterm_instance(term, mem)
+        for term in beta_conjunct: link_pterm_instance(term, mem)
     if(copy):
         new_conds = Conditions(conds.var_map, dnf)
         if(conds.is_initialized): initialize_conditions(new_conds)
         conds = new_conds
 
-    #Note... maybe it's simpler to just make KB an optional(KBType)
-    old_ptr = conds.kb_ptr
-    conds.kb_ptr = _pointer_from_struct_incref(kb)
+    #Note... maybe it's simpler to just make mem an optional(memType)
+    old_ptr = conds.mem_ptr
+    conds.mem_ptr = _pointer_from_struct_incref(mem)
     if(old_ptr != 0): _decref_pointer(old_ptr)
     return conds
 

@@ -24,7 +24,7 @@ from cre.core import TYPE_ALIASES, JITSTRUCTS, py_type_map, numba_type_map, nump
 from cre.gensource import assert_gen_source
 from cre.caching import unique_hash, source_to_cache, import_from_cached, source_in_cache, get_cache_path
 from cre.structref import gen_structref_code, define_structref, CastFriendlyStructref
-from cre.context import kb_context
+from cre.context import cre_context
 from cre.utils import (_struct_from_pointer, _cast_structref, struct_get_attr_offset, _obj_cast_codegen,
                        _pointer_from_struct_codegen, _pointer_from_struct)
 from numba.core.typeconv import Conversion
@@ -508,7 +508,7 @@ def add_to_fact_registry(name,hash_code):
 
 
 def _fact_from_fields(name, fields, context=None):
-    context = kb_context(context)
+    context = cre_context(context)
     hash_code = unique_hash([name,fields])
     if(not source_in_cache(name,hash_code)):
         fact_num = lines_in_fact_registry()
@@ -533,7 +533,7 @@ def _fact_from_spec(name, spec, context=None):
 
 def define_fact(name : str, spec : dict, context=None):
     '''Defines a new fact.'''
-    context = kb_context(context)
+    context = cre_context(context)
 
     spec = _standardize_spec(spec,context,name)
     spec, inherit_from = _merge_spec_inheritance(spec,context)
@@ -579,7 +579,6 @@ def define_facts(specs, #: list[dict[str,dict]],
 base_fact_fields = [
     ("idrec", u8),
     ("fact_num", i8)
-    # ("kb", kb)
 ]
 
 BaseFact, BaseFactType = _fact_from_fields("BaseFact", [])
@@ -600,7 +599,7 @@ def fact_to_ptr_incref(fact):
 @generated_jit
 def cast_fact(typ, val):
     '''Casts a fact to a new type of fact if possible'''
-    context = kb_context()    
+    context = cre_context()    
     inst_type = typ.instance_type
     # print("CAST", val._fact_name, "to", inst_type._fact_name)
 

@@ -3,11 +3,11 @@ from numba import njit, f8
 from cre.utils import _meminfo_from_struct, _struct_from_meminfo, _cast_structref, struct_get_attr_offset
 from cre.subscriber import BaseSubscriberType
 from cre.fact import define_fact
-from cre.kb import KnowledgeBase
-from cre.context import kb_context
+from cre.memory import Memory
+from cre.context import cre_context
 from cre.predicate_node import get_alpha_predicate_node, get_beta_predicate_node, BasePredicateNodeType, generate_link_data
 from cre.predicate_node import get_alpha_predicate_node_definition, get_beta_predicate_node_definition, deref_attrs
-from cre.test_kb import _delcare_10000, _retract_10000
+from cre.test_mem import _delcare_10000, _retract_10000
 import pytest
 np.set_printoptions(threshold=np.inf)
 
@@ -39,9 +39,9 @@ def cast(pn,ty):
 from cre.predicate_node import base_subscriber_fields, basepredicate_node_fields, alpha_predicate_node_fields, beta_predicate_node_fields, GenericAlphaPredicateNodeType, GenericBetaPredicateNodeType
 
 def test_predicate_node_sanity():
-    with kb_context("test_predicate_node_sanity"):
+    with cre_context("test_predicate_node_sanity"):
         BOOP, BOOPType = define_fact("BOOP",{"A": "string", "B" : "number"})
-        kb = KnowledgeBase()
+        mem = Memory()
 
         pn = get_alpha_predicate_node(BOOPType,"B", "<",9)
         pnc = cast(pn, BasePredicateNodeType)
@@ -53,7 +53,7 @@ def test_predicate_node_sanity():
         assert np.array_equal(attrs_pn,attrs_png[:len(attrs_pn)])
         assert np.array_equal(attrs_pnc,attrs_png)
         
-        ld = generate_link_data(pnc, kb)
+        ld = generate_link_data(pnc, mem)
 
         assert len(filter_alpha(png, ld, np.arange(5)))==0
 
@@ -61,7 +61,7 @@ def test_predicate_node_sanity():
         pnc = cast(pn, BasePredicateNodeType)
         png = cast(pn, GenericBetaPredicateNodeType)
 
-        ld = generate_link_data(pnc, kb)
+        ld = generate_link_data(pnc, mem)
 
         attrs_pn  = np.array([struct_get_attr_offset(pnc,x[0]) for x in base_subscriber_fields+basepredicate_node_fields])
         attrs_pnc = np.array([struct_get_attr_offset(pn, x[0]) for x in base_subscriber_fields+beta_predicate_node_fields])
@@ -73,20 +73,20 @@ def test_predicate_node_sanity():
         assert len(filter_beta(png, ld, np.arange(5), np.arange(5))) == 0
         # print('l')
         # pn.filter(np.arange(5))
-        # pnn = generate_link_data(cast(pn, BasePredicateNodeType), kb)
+        # pnn = generate_link_data(cast(pn, BasePredicateNodeType), mem)
 
 
 
 
 def test_alpha_predicate_node():
-    with kb_context("test_alpha_predicate_node"):
+    with cre_context("test_alpha_predicate_node"):
         BOOP, BOOPType = define_fact("BOOP",{"A": "string", "B" : "number"})
 
-        kb = KnowledgeBase()
+        mem = Memory()
         pn = get_alpha_predicate_node(BOOPType,"B", "<",9)
-        ld = generate_link_data(pn, kb)
+        ld = generate_link_data(pn, mem)
 
-        # kb.add_subscriber(pn)
+        # mem.add_subscriber(pn)
 
         x = BOOP("x",7)
         y = BOOP("y",11)
@@ -94,18 +94,18 @@ def test_alpha_predicate_node():
 
         assert len(ld.truth_values) == 0        
 
-        kb.declare(x)
-        kb.declare(y)
-        kb.declare(z)
+        mem.declare(x)
+        mem.declare(y)
+        mem.declare(z)
 
         # njit_update(pn)
         inds = filter_alpha(pn, ld, np.arange(3))
         assert np.array_equal(inds, [0,2]) 
         assert all(ld.truth_values[:3,0] == [1,0,1])
 
-        kb.modify(x,"B", 100)
-        kb.modify(y,"B", 3)
-        kb.modify(z,"B", 88)
+        mem.modify(x,"B", 100)
+        mem.modify(y,"B", 3)
+        mem.modify(z,"B", 88)
 
         #Checks doesn't change before update
         assert all(ld.truth_values[:3,0] == [1,0,1])
@@ -113,9 +113,9 @@ def test_alpha_predicate_node():
         assert np.array_equal(inds, [1]) 
         assert all(ld.truth_values[:3,0] == [0,1,0])
 
-        kb.retract(x)
-        kb.retract(y)
-        kb.retract(z)
+        mem.retract(x)
+        mem.retract(y)
+        mem.retract(z)
 
         #Checks doesn't change before update
         assert all(ld.truth_values[:3,0] == [0,1,0])
@@ -128,13 +128,13 @@ def test_alpha_predicate_node():
         #Checks that retracted facts show up as u1.nan = 0XFF
         assert all(ld.truth_values[:3,0] == [0xFF,0xFF,0xFF])
 
-        kb.declare(x)
-        kb.declare(y)
-        kb.declare(z)
-        kb.modify(z,"A","Z")
-        kb.modify(x,"B",0)
-        kb.modify(y,"B",0)
-        kb.modify(z,"B",0)
+        mem.declare(x)
+        mem.declare(y)
+        mem.declare(z)
+        mem.modify(z,"A","Z")
+        mem.modify(x,"B",0)
+        mem.modify(y,"B",0)
+        mem.modify(z,"B",0)
 
         inds = filter_alpha(pn, ld, np.arange(3))
         assert np.array_equal(inds, [0,1,2]) 
@@ -142,14 +142,14 @@ def test_alpha_predicate_node():
         assert all(ld.truth_values[:3,0] == [1,1,1])
 
 def test_beta_predicate_node_1_typed():
-    with kb_context("test_beta_predicate_node_1_typed"):
+    with cre_context("test_beta_predicate_node_1_typed"):
         BOOP, BOOPType = define_fact("BOOP",{"A": "string", "B" : "number"})
 
-        kb = KnowledgeBase()
+        mem = Memory()
         pn = get_beta_predicate_node(BOOPType,"B", "<", BOOPType,"B")
         # png = cast(pn, GenericBetaPredicateNodeType)
-        ld = generate_link_data(pn, kb)
-        # kb.add_subscriber(pn)
+        ld = generate_link_data(pn, mem)
+        # mem.add_subscriber(pn)
 
         x = BOOP("x",7)
         y = BOOP("y",11)
@@ -157,9 +157,9 @@ def test_beta_predicate_node_1_typed():
 
         assert len(ld.truth_values) == 0        
 
-        kb.declare(x)
-        kb.declare(y)
-        kb.declare(z)
+        mem.declare(x)
+        mem.declare(y)
+        mem.declare(z)
 
         # njit_update(pn)
         inds = filter_beta(pn, ld, np.arange(3), np.arange(3))
@@ -175,9 +175,9 @@ def test_beta_predicate_node_1_typed():
         q = BOOP("q",-7)
         r = BOOP("r",-11)
         t = BOOP("t",-8)
-        kb.declare(q)
-        kb.declare(r)
-        kb.declare(t)
+        mem.declare(q)
+        mem.declare(r)
+        mem.declare(t)
 
         inds = filter_beta(pn, ld, np.arange(6), np.arange(6))
         # print(inds)
@@ -194,8 +194,8 @@ def test_beta_predicate_node_1_typed():
         assert all(ld.truth_values[4,:6] == [1,1,1,1,0,1])
         assert all(ld.truth_values[5,:6] == [1,1,1,1,0,0])
 
-        kb.modify(r,"B", 0)
-        kb.modify(y,"B", 0)
+        mem.modify(r,"B", 0)
+        mem.modify(y,"B", 0)
 
         inds = filter_beta(pn, ld, np.arange(6), np.arange(6))
         true_parts = (ld.truth_values[:6,:6]==1).astype(np.int64)
@@ -211,8 +211,8 @@ def test_beta_predicate_node_1_typed():
         assert all(true_parts[4,:6] == [1,0,1,0,0,0])
         assert all(true_parts[5,:6] == [1,1,1,1,1,0])
 
-        kb.retract(r)
-        kb.retract(y)
+        mem.retract(r)
+        mem.retract(y)
 
         inds = filter_beta(pn, ld, np.arange(6), np.arange(6))
         true_parts = (ld.truth_values[:6,:6]==1).astype(np.int64)
@@ -231,15 +231,15 @@ def test_beta_predicate_node_1_typed():
 
 
 def test_beta_predicate_node_2_typed():
-    with kb_context("test_beta_predicate_node_2_typed"):
+    with cre_context("test_beta_predicate_node_2_typed"):
         BOOP1, BOOP1Type = define_fact("BOOP1",{"A": "number", "B" : "string"})
         BOOP2, BOOP2Type = define_fact("BOOP2",{"A": "string", "B" : "number"})
 
-        kb = KnowledgeBase()
+        mem = Memory()
 
         pn = get_beta_predicate_node(BOOP1Type,"A", "<", BOOP2Type,"B")
-        ld = generate_link_data(pn, kb)
-        # kb.add_subscriber(pn)
+        ld = generate_link_data(pn, mem)
+        # mem.add_subscriber(pn)
 
         x1,x2 = BOOP1(7,"x"),  BOOP2("x",7.5) #<- slightly different
         y1,y2 = BOOP1(11,"y"), BOOP2("y",11)
@@ -247,9 +247,9 @@ def test_beta_predicate_node_2_typed():
 
         assert len(ld.truth_values) == 0        
 
-        kb.declare(x1); kb.declare(x2)
-        kb.declare(y1); kb.declare(y2)
-        kb.declare(z1); kb.declare(z2)
+        mem.declare(x1); mem.declare(x2)
+        mem.declare(y1); mem.declare(y2)
+        mem.declare(z1); mem.declare(z2)
         
         inds = filter_beta(pn, ld, np.arange(3), np.arange(3))
         # print(inds)
@@ -263,9 +263,9 @@ def test_beta_predicate_node_2_typed():
         q1, q2 = BOOP1(-7,"q"),  BOOP2("q",-7)
         r1, r2 = BOOP1(-11,"r"), BOOP2("r",-11)
         t1, t2 = BOOP1(-8,"t"),  BOOP2("t",-8)
-        kb.declare(q1); kb.declare(q2)
-        kb.declare(r1); kb.declare(r2)
-        kb.declare(t1); kb.declare(t2)
+        mem.declare(q1); mem.declare(q2)
+        mem.declare(r1); mem.declare(r2)
+        mem.declare(t1); mem.declare(t2)
 
         inds = filter_beta(pn, ld, np.arange(6), np.arange(6))
         # print(inds)
@@ -279,8 +279,8 @@ def test_beta_predicate_node_2_typed():
         assert all(ld.truth_values[4,:6] == [1,1,1,1,0,1])
         assert all(ld.truth_values[5,:6] == [1,1,1,1,0,0])
 
-        kb.modify(r1,"A", 0); kb.modify(r2,"B", 0)
-        kb.modify(y1,"A", 0); kb.modify(y2,"B", 0)
+        mem.modify(r1,"A", 0); mem.modify(r2,"B", 0)
+        mem.modify(y1,"A", 0); mem.modify(y2,"B", 0)
 
         inds = filter_beta(pn, ld, np.arange(6), np.arange(6))
         true_parts = (ld.truth_values[:6,:6]==1).astype(np.int64)
@@ -292,8 +292,8 @@ def test_beta_predicate_node_2_typed():
         assert all(true_parts[4,:6] == [1,0,1,0,0,0])
         assert all(true_parts[5,:6] == [1,1,1,1,1,0])
 
-        kb.retract(r1); kb.retract(r2)
-        kb.retract(y1); kb.retract(y2)
+        mem.retract(r1); mem.retract(r2)
+        mem.retract(y1); mem.retract(y2)
         
         inds = filter_beta(pn, ld, np.arange(6), np.arange(6))
         true_parts = (ld.truth_values[:6,:6]==1).astype(np.int64)
@@ -316,7 +316,7 @@ print(deref_type.dtype)
 print(type(deref_type.dtype))
 
 def test_deref_attrs():
-    with kb_context("test_deref_attrs"):
+    with cre_context("test_deref_attrs"):
         BOOP, BOOPType = define_fact("BOOP",{"A": "string", "B" : "number"})
 
         # pn = get_alpha_predicate_node(BOOPType,"A", "<",9)
@@ -332,13 +332,13 @@ def test_deref_attrs():
 
 # import time
 
-with kb_context("test_predicate_node"):
+with cre_context("test_predicate_node"):
     BOOP, BOOPType = define_fact("BOOP",{"A": "string", "B" : "number"})
 
 #### get_alpha_predicate_node ####
 
 def _get_alpha_predicate_node():
-    with kb_context("test_predicate_node"):
+    with cre_context("test_predicate_node"):
         pn = get_alpha_predicate_node(BOOPType,"B", "<",50)
         pn = get_alpha_predicate_node(BOOPType,"B", "<",49)
 
@@ -350,12 +350,12 @@ def test_b_get_alpha_predicate_node(benchmark):
 #### setup ####
 
 def _benchmark_setup():
-    with kb_context("test_predicate_node"):
-        kb = KnowledgeBase()
+    with cre_context("test_predicate_node"):
+        mem = Memory()
         pn = get_alpha_predicate_node(BOOPType,"B", "<",50)
-        ld = generate_link_data(pn,kb)
-        # kb.add_subscriber(pn)
-        return (kb, pn, ld), {}
+        ld = generate_link_data(pn,mem)
+        # mem.add_subscriber(pn)
+        return (mem, pn, ld), {}
 
 @pytest.mark.benchmark(group="setup")
 def test_b_setup(benchmark):
@@ -365,13 +365,13 @@ def test_b_setup(benchmark):
 #### alpha_update_post_declare ####
 
 def _alpha_update_post_declare_setup():
-    (kb,pn,ld),_ = _benchmark_setup()
-    idrecs = _delcare_10000(kb)
-    return (kb,pn,ld, np.arange(10000), idrecs), {}
+    (mem,pn,ld),_ = _benchmark_setup()
+    idrecs = _delcare_10000(mem)
+    return (mem,pn,ld, np.arange(10000), idrecs), {}
 
 
 @njit(cache=True)
-def _alpha_update_post_declare_10000(kb,pn,ld,inds,idrecs):
+def _alpha_update_post_declare_10000(mem,pn,ld,inds,idrecs):
     # njit_update(pn)
     filter_alpha(pn,ld,inds)
 
@@ -381,17 +381,17 @@ def test_b_alpha_update_post_declare_10000(benchmark):
 #### alpha_update_post_retract ####
 
 def _alpha_update_post_retract_setup():
-    (kb,pn,ld),_ = _benchmark_setup()
-    idrecs = _delcare_10000(kb)
+    (mem,pn,ld),_ = _benchmark_setup()
+    idrecs = _delcare_10000(mem)
     inds = np.arange(10000)
     filter_alpha(pn,ld,inds)
     # njit_update(pn) #<-- Handle update after declare to time just change set 
-    _retract_10000(kb,idrecs)
+    _retract_10000(mem,idrecs)
 
-    return (kb,pn,ld, inds, idrecs), {}
+    return (mem,pn,ld, inds, idrecs), {}
 
 @njit(cache=True)
-def _alpha_update_post_retract_10000(kb,pn,ld, inds, idrecs):
+def _alpha_update_post_retract_10000(mem,pn,ld, inds, idrecs):
     filter_alpha(pn,ld,inds)
 
 def test_b_alpha_update_post_retract_10000(benchmark):
@@ -400,24 +400,24 @@ def test_b_alpha_update_post_retract_10000(benchmark):
 #### alpha_update_10000_times ####
 
 def _alpha_setup():
-    with kb_context("test_predicate_node"):
-        kb = KnowledgeBase()
+    with cre_context("test_predicate_node"):
+        mem = Memory()
         pn = get_alpha_predicate_node(BOOPType,"B", "<", 50)
-        ld = generate_link_data(pn, kb)
-        # kb.add_subscriber(pn)
+        ld = generate_link_data(pn, mem)
+        # mem.add_subscriber(pn)
         idrecs = np.empty((10000,),dtype=np.int64)
         for i in range(10000):
-            idrecs[i] = kb.declare(BOOP("?",i))
+            idrecs[i] = mem.declare(BOOP("?",i))
         # njit_update(pn)
-        return (kb, pn, ld, np.arange(10000), idrecs), {}
+        return (mem, pn, ld, np.arange(10000), idrecs), {}
 
 
 @njit(cache=True)
-def _alpha_update_10000_times(kb,pn,ld, inds,idrecs):
+def _alpha_update_10000_times(mem,pn,ld, inds,idrecs):
     filter_alpha(pn,ld,inds)
     for i in range(10000):
-        # idrec = kb.declare(BOOP("?",i))
-        kb.retract(idrecs[i])
+        # idrec = mem.declare(BOOP("?",i))
+        mem.retract(idrecs[i])
         filter_alpha(pn,ld,inds)
         # njit_update(pn)
         # njit_update(pn)
@@ -428,22 +428,22 @@ def test_b_alpha_update_10000_times(benchmark):
 
 
 def _beta_setup():
-    with kb_context("test_predicate_node"):
-        kb = KnowledgeBase()
+    with cre_context("test_predicate_node"):
+        mem = Memory()
         pn = get_beta_predicate_node(BOOPType,"B", "<", BOOPType,"B")
-        # kb.add_subscriber(pn)
-        ld = generate_link_data(pn, kb)
+        # mem.add_subscriber(pn)
+        ld = generate_link_data(pn, mem)
         idrecs = np.empty((100,),dtype=np.int64)
         for i in range(100):
-            idrecs[i] = kb.declare(BOOP("?",i))
-        return (kb, pn, ld, np.arange(100), idrecs), {}
+            idrecs[i] = mem.declare(BOOP("?",i))
+        return (mem, pn, ld, np.arange(100), idrecs), {}
 
 
 @njit(cache=True)
-def _beta_update_100_times(kb,pn,ld, inds,idrecs):
+def _beta_update_100_times(mem,pn,ld, inds,idrecs):
     filter_beta(pn,ld,inds,inds)
     for i in range(100):
-        kb.retract(idrecs[i])
+        mem.retract(idrecs[i])
         filter_beta(pn,ld,inds,inds)
         # njit_update(pn)
 

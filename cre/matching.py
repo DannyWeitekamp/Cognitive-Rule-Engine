@@ -52,10 +52,10 @@ def get_alpha_inds(facts_per_var, alpha_conjuncts, conds):
     # alpha_inds_list = List.empty_list(list_i8_arr)
     # for alpha_conjuncts, _, _ in conds.distr_dnf:
 
-    # kb = _struct_from_pointer(KnowledgeBaseType,conds.kb_ptr)
-    # kb_data = kb.kb_data
+    # mem = _struct_from_pointer(MemoryType,conds.mem_ptr)
+    # mem_data = mem.mem_data
     # # Using this dictionary might be a little slow, but it's low frequency
-    # t_id_map = kb.context_data.fact_to_t_id
+    # t_id_map = mem.context_data.fact_to_t_id
 
 
     alpha_inds = List.empty_list(i8_arr)
@@ -198,17 +198,17 @@ def fill_singles_at(partial_matches,i, candidate_inds, is_not):
 @njit(cache=True)
 def _get_fact_vectors(conds):
     n_vars = len(conds.vars)
-    kb = _struct_from_pointer(KnowledgeBaseType,conds.kb_ptr)
-    kb_data = kb.kb_data
+    mem = _struct_from_pointer(MemoryType,conds.mem_ptr)
+    mem_data = mem.mem_data
 
     # Using this dictionary might be a little slow, but it's low frequency
-    t_id_map = kb.context_data.fact_to_t_id
+    t_id_map = mem.context_data.fact_to_t_id
 
     facts = List.empty_list(VectorType)    
 
     for i in range(n_vars):
         t_id = t_id_map[conds.vars[i].base_type_name]
-        facts.append(facts_for_t_id(kb_data, t_id))
+        facts.append(facts_for_t_id(mem_data, t_id))
     return facts
 
 @njit(i8[:,::1](ConditionsType),cache=True)
@@ -216,7 +216,7 @@ def _get_ptr_matches(conds):
     '''Takes a linked Conditions object and gets sets of pointers to 
        facts that match
     '''
-    if(not conds.kb_ptr): raise RuntimeError("Cannot match unlinked conditions object.")
+    if(not conds.mem_ptr): raise RuntimeError("Cannot match unlinked conditions object.")
     if(not conds.is_initialized): initialize_conditions(conds)
 
     n_vars = len(conds.vars)
@@ -260,16 +260,16 @@ def _get_ptr_matches(conds):
 
 
 @njit(cache=True)
-def ensure_linked(conds, kb=None):
-    if(conds.kb_ptr == 0):
-        if(kb is None):
-            raise RuntimeError("Cannot match Condtions that are not yet linked to a KnowledgeBase.")
-        conds = get_linked_conditions_instance(conds,kb, True)
+def ensure_linked(conds, mem=None):
+    if(conds.mem_ptr == 0):
+        if(mem is None):
+            raise RuntimeError("Cannot match Condtions that are not yet linked to a Memory.")
+        conds = get_linked_conditions_instance(conds,mem, True)
     return conds
 
 @njit(cache=True)
-def get_ptr_matches(conds, kb=None):
-    conds = ensure_linked(conds, kb)
+def get_ptr_matches(conds, mem=None):
+    conds = ensure_linked(conds, mem)
     return _get_ptr_matches(conds)
 
 
@@ -315,7 +315,7 @@ def _struct_tuple_from_pointer_arr(typingctx, struct_types, ptr_arr):
     return sig,codegen
 
 # @generated_jit(cache=True,nopython=True)
-# def _get_matches(conds, struct_types, kb=None):
+# def _get_matches(conds, struct_types, mem=None):
 #     print(type(struct_types))
 #     print(struct_types)
 #     if(isinstance(struct_types, UniTuple)):
@@ -326,11 +326,11 @@ def _struct_tuple_from_pointer_arr(typingctx, struct_types, ptr_arr):
 
     # print(typs)
 @njit(cache=True, locals={"ptr_set" : i8[::1]})
-def _get_matches(conds, struct_types, kb=None):
+def _get_matches(conds, struct_types, mem=None):
     
 
     
-    ptr_matches = get_ptr_matches(conds, kb)
+    ptr_matches = get_ptr_matches(conds, mem)
 
     out = List()
 

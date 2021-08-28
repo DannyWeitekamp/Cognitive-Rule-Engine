@@ -5,7 +5,7 @@ from numba.extending import intrinsic, box, NativeValue
 
 
 
-# if(not source_in_cache("KnowledgeBaseData",'KnowledgeBaseData')):
+# if(not source_in_cache("MemoryData",'MemoryData')):
 # source = gen_struct_code("MyStruct",data_fields)
 # print(source)
 

@@ -9,7 +9,7 @@ and can be rearranged and resused in ConditionNodes as needed.
 Alpha predicates correspond to statements of the form `fact.attribute < literal_value`, 
 and Beta predicates correspond to satements of the form `fact1.attribute1 < fact2.attribute2`
 where `<` can be any comparison operator. These nodes subscribe to changes
-in a KnowledgeBase. When their update_func() is called each predicate nodes' internal 
+in a Memory. When their update_func() is called each predicate nodes' internal 
 truth_values are updated for each fact or pair of facts of the particular type(s) evaluated 
 on the nodes' particular comparison statement.
 '''
@@ -22,9 +22,9 @@ from numba.core.types.misc import unliteral
 from numba.experimental.structref import new
 from numba.extending import overload_method, intrinsic, overload
 from cre.caching import gen_import_str, unique_hash,import_from_cached, source_to_cache, source_in_cache
-from cre.context import kb_context
+from cre.context import cre_context
 from cre.structref import define_structref, define_structref_template
-from cre.kb import KnowledgeBaseType, KnowledgeBase, facts_for_t_id, fact_at_f_id
+from cre.memory import MemoryType, Memory, facts_for_t_id, fact_at_f_id
 from cre.fact import define_fact, BaseFactType, cast_fact
 from cre.utils import _struct_from_meminfo, _meminfo_from_struct, _cast_structref, \
  decode_idrec, lower_getattr, _struct_from_pointer, struct_get_attr_offset, _struct_get_data_pointer, \
@@ -87,8 +87,8 @@ predicate_node_link_data_field_dict = {
     "grow_head": i8,
     "change_queue": VectorType,
     "grow_queue": VectorType,
-    "kb_grow_queue" : VectorType,
-    "kb_change_queue" : VectorType,
+    "mem_grow_queue" : VectorType,
+    "mem_change_queue" : VectorType,
 
 
 
@@ -104,22 +104,22 @@ PredicateNodeLinkData, PredicateNodeLinkDataType = define_structref("PredicateNo
 
 
 @njit(cache=True)
-def generate_link_data(pn, kb):
+def generate_link_data(pn, mem):
     '''Takes a prototype predicate node and a knowledge base and returns
         a link_data instance for that predicate node.
     '''
     link_data = new(PredicateNodeLinkDataType)
     # print(pn.left_fact_type_name)
-    # print(kb.context_data.fact_to_t_id)
+    # print(mem.context_data.fact_to_t_id)
     # print(pn.left_fact_type_name)
     # print("Q")
-    link_data.left_t_id = kb.context_data.fact_to_t_id[pn.left_fact_type_name]
+    link_data.left_t_id = mem.context_data.fact_to_t_id[pn.left_fact_type_name]
     # print("Q2", link_data.left_t_id)
-    link_data.left_facts = facts_for_t_id(kb.kb_data,i8(link_data.left_t_id)) 
+    link_data.left_facts = facts_for_t_id(mem.mem_data,i8(link_data.left_t_id)) 
     # print("Z")
     if(not pn.is_alpha):
-        link_data.right_t_id = kb.context_data.fact_to_t_id[pn.right_fact_type_name]
-        link_data.right_facts = facts_for_t_id(kb.kb_data,i8(link_data.right_t_id)) 
+        link_data.right_t_id = mem.context_data.fact_to_t_id[pn.right_fact_type_name]
+        link_data.right_facts = facts_for_t_id(mem.mem_data,i8(link_data.right_t_id)) 
         link_data.left_consistency = np.empty((0,),dtype=np.uint8)
         link_data.right_consistency = np.empty((0,),dtype=np.uint8)
     else:
@@ -132,8 +132,8 @@ def generate_link_data(pn, kb):
     link_data.change_queue = new_vector(8)
     link_data.grow_queue = new_vector(8)
 
-    link_data.kb_grow_queue = kb.kb_data.grow_queue
-    link_data.kb_change_queue = kb.kb_data.change_queue
+    link_data.mem_grow_queue = mem.mem_data.grow_queue
+    link_data.mem_change_queue = mem.mem_data.change_queue
     link_data.truth_values = np.empty((0,0),dtype=np.uint8)
         
     # print("DONE")
@@ -187,8 +187,8 @@ base_predicate_node_field_dict = {
     # "left_t_id" : u8,
     # "left_facts" : VectorType, #Vector<*Fact>
     # "truth_values" : u1[:,:],
-    # "kb_grow_queue" : VectorType,
-    # "kb_change_queue" : VectorType,
+    # "mem_grow_queue" : VectorType,
+    # "mem_change_queue" : VectorType,
     
 }
 
@@ -355,19 +355,19 @@ def alpha_filter(pnode_type, pred_meminfo, link_data, inds, negated):
     # print("A")
     # if(pred_meminfo is None): return
 
-    # Resolve this instance of the AlphaPredicateNode, it's KnowledgeBase, and 
+    # Resolve this instance of the AlphaPredicateNode, it's Memory, and 
     #   the fact pointer vector associated with this AlphaPredicateNode's t_id
     pred_node = _struct_from_meminfo(pnode_type, pred_meminfo)
-    # kb = _struct_from_meminfo(KnowledgeBaseType, pred_node.kb_meminfo)
-    grw_q = link_data.kb_grow_queue
-    chg_q = link_data.kb_change_queue
-    facts = link_data.left_facts#facts_for_t_id(kb.kb_data,i8(pred_node.left_t_id))
+    # mem = _struct_from_meminfo(MemoryType, pred_node.mem_meminfo)
+    grw_q = link_data.mem_grow_queue
+    chg_q = link_data.mem_change_queue
+    facts = link_data.left_facts#facts_for_t_id(mem.mem_data,i8(pred_node.left_t_id))
     # print("B")
     # Ensure that truth_values is the size of the fact pointer vector
     if(len(facts.data) > len(link_data.truth_values)):
         link_data.truth_values = expand_2d(link_data.truth_values,len(facts.data),1,np.uint8)
     # print("C")
-    # Update from the grow head to the KnowledgeBase's grow head  
+    # Update from the grow head to the Memory's grow head  
     for i in range(pred_node.grow_head, grw_q.head):
         t_id, f_id, a_id = decode_idrec(grw_q[i])
         if(link_data.left_t_id == t_id):
@@ -376,7 +376,7 @@ def alpha_filter(pnode_type, pred_meminfo, link_data, inds, negated):
             # pred_node.grow_queue.add(f_id)
     link_data.grow_head = grw_q.head
     # print("D")
-    # Update from the change head to the KnowledgeBase's change head
+    # Update from the change head to the Memory's change head
     for i in range(pred_node.change_head, chg_q.head):
         t_id, f_id, a_id = decode_idrec(chg_q[i])
         if(link_data.left_t_id == t_id):
@@ -531,7 +531,7 @@ def define_alpha_predicate_node(left_type, op_str, right_type):
 def get_alpha_predicate_node_definition(typ, attr_chain, op_str, right_type):
     '''Gets various definitions for an AlphaPredicateNode, returns a dict with 'ctor'
          'pnode_type', 'left_type', 'left_attr_offsets', 't_id' '''
-    # context = kb_context()    
+    # context = cre_context()    
     # t_id = context.fact_to_t_id[typ._fact_name]
 
     if(not isinstance(attr_chain,list)): attr_chain = [attr_chain]
@@ -617,14 +617,14 @@ def beta_filter(pnode_type, pred_meminfo, link_data, left_inds, right_inds, nega
 
     # return np.zeros((1,1))
     # if(pred_meminfo is None): return
-    # Resolve this instance of the BetaPredicateNode, it's KnowledgeBase, and 
+    # Resolve this instance of the BetaPredicateNode, it's Memory, and 
     #   the fact pointer vectors associated with this the left and right t_id.
     pred_node = _struct_from_meminfo(pnode_type, pred_meminfo)
-    # kb = _struct_from_meminfo(KnowledgeBaseType, pred_node.kb_meminfo)
-    grw_q = link_data.kb_grow_queue #kb.kb_data.grow_queue
-    chg_q = link_data.kb_change_queue#kb.kb_data.change_queue
-    left_facts = link_data.left_facts#facts_for_t_id(kb.kb_data,i8(pred_node.left_t_id))
-    right_facts = link_data.right_facts#facts_for_t_id(kb.kb_data,i8(pred_node.right_t_id))
+    # mem = _struct_from_meminfo(MemoryType, pred_node.mem_meminfo)
+    grw_q = link_data.mem_grow_queue #mem.mem_data.grow_queue
+    chg_q = link_data.mem_change_queue#mem.mem_data.change_queue
+    left_facts = link_data.left_facts#facts_for_t_id(mem.mem_data,i8(pred_node.left_t_id))
+    right_facts = link_data.right_facts#facts_for_t_id(mem.mem_data,i8(pred_node.right_t_id))
     #Expand the truth_values, and left and right consistencies to match fact vectors
     if(len(left_facts.data) > link_data.truth_values.shape[0] or
        len(right_facts.data) > link_data.truth_values.shape[1]):
@@ -783,7 +783,7 @@ def define_beta_predicate_node(left_type, op_str, right_type):
 def get_beta_predicate_node_definition(left_fact_type, left_attr_chain, op_str, right_fact_type, right_attr_chain):
     '''Gets various definitions for an BetaPredicateNode, returns a dict with 'ctor'
          'pnode_type', 'left_type', 'left_attr_offsets', 'left_t_id', 'right_type', 'right_attr_offsets', 'right_t_id' '''
-    context = kb_context()    
+    context = cre_context()    
     left_t_id = context.fact_to_t_id[left_fact_type._fact_name]
     right_t_id = context.fact_to_t_id[right_fact_type._fact_name]
 
@@ -830,7 +830,7 @@ def get_beta_predicate_node(left_fact_type, left_attr_chain, op_str, right_fact_
 
 # We have Condtions they are structrefs
 # there is a context.store() that keeps definitions of each predicate_node
-# they are unique and every kb has (at most) exactly one predicate node of each type
+# they are unique and every mem has (at most) exactly one predicate node of each type
 # Conditions are defined with mixed alpha/beta bits 
 # When the dnf is generated there are OR and AND collections that are condition nodes
 # condition nodes are also unique
@@ -848,7 +848,7 @@ def get_beta_predicate_node(left_fact_type, left_attr_chain, op_str, right_fact_
 # When linked, predicate node in the conditions need to be initialized with
 #    the fact vector for the knowledge base 
 # Somehow predicate nodes need to be shared across Conditions objects
-#   probably makes sense to have a predicate node cache in the knowledgebase
+#   probably makes sense to have a predicate node cache in the Memory
 #   that is a dictionary of the predicate nodes' str (which needs to be precomputed)
 #   as something like str(Var) + str(comp) + str(val/Var)
 #   this should happen at link time if the node is cached then use that one
@@ -875,12 +875,12 @@ def get_beta_predicate_node(left_fact_type, left_attr_chain, op_str, right_fact_
 
 # The Plan:
 # 1. [0%] Implement id_str from conditions object
-# 2. [0%] Implement link_copy(node, kb) + tests which 
+# 2. [0%] Implement link_copy(node, mem) + tests which 
 #  copies a prototype predicate node and links it to a knowledge_base
 #  -attr_offsets, id_str, and op are kept
-#  -left_facts, right_fact, kb_grow_queue, kb_change_queue are ripped
+#  -left_facts, right_fact, mem_grow_queue, mem_change_queue are ripped
 #  -truth values are reinstantiated (don't instantiate if attr_offsets > 1)
-#  *By the end we should no longer need to import KnowledgeBase here
+#  *By the end we should no longer need to import Memory here
 # 3. [20%] Implement filter() + tests as described above
 # 4. Reimplement so that truth/consistency are densely bit packed 
 

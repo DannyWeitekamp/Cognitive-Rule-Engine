@@ -5,7 +5,7 @@ from numba.types import ListType, unicode_type, void
 from numba.experimental.structref import new
 from numba.extending import overload_method, intrinsic
 from cre.structref import define_structref, define_structref_template
-# from cre.kb import KnowledgeBaseType, KnowledgeBase
+# from cre.memory import MemoryType, Memory
 from cre.fact import define_fact
 from cre.utils import _struct_from_meminfo, _meminfo_from_struct, _cast_structref
 from cre.vector import new_vector, VectorType
@@ -15,8 +15,8 @@ meminfo_type = types.MemInfoPointer(types.voidptr)
 
 
 base_subscriber_fields = [
-    #Meminfo for the knowledgebase to which this subscribes
-    ("kb_meminfo", types.optional(meminfo_type)),
+    #Meminfo for the Memory to which this subscribes
+    ("mem_meminfo", types.optional(meminfo_type)),
     #upstream BaseSubscribers' meminfos that need to be updated before this can be.
     ("upstream", ListType(meminfo_type)), 
     #The subscribers immediately downstream of this one.
@@ -45,7 +45,7 @@ BaseSubscriber, BaseSubscriberType = define_structref("BaseSubscriber", base_sub
 
 @njit(cache=True)
 def init_base_subscriber(bs):
-    bs.kb_meminfo = None#_meminfo_from_struct(kb)
+    bs.mem_meminfo = None#_meminfo_from_struct(mem)
     bs.upstream = List.empty_list(meminfo_type)
     bs.children = List.empty_list(meminfo_type)
 
@@ -60,7 +60,7 @@ def link_downstream(parent, child):
     child_meminfo = _meminfo_from_struct(child)
     parent_meminfo = _meminfo_from_struct(parent)
 
-    child.kb_meminfo = parent.kb_meminfo
+    child.mem_meminfo = parent.mem_meminfo
 
     parent.children.append(child_meminfo)
     upstream = parent.upstream.copy()
@@ -69,11 +69,11 @@ def link_downstream(parent, child):
 
 
 @njit(cache=True)
-def link_downstream_of_kb(kb, child):
+def link_downstream_of_mem(mem, child):
     child_meminfo = _meminfo_from_struct(child)
-    kb_meminfo = _meminfo_from_struct(kb)
+    mem_meminfo = _meminfo_from_struct(mem)
 
-    child.kb_meminfo = kb_meminfo
+    child.mem_meminfo = mem_meminfo
 
     parent.children.append(child_meminfo)
     upstream = parent.upstream.copy()

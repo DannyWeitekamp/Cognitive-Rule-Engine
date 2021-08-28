@@ -88,7 +88,7 @@ def resolve_fact_getattr_type(typ, attr):
     if (hasattr(typ,'spec') and attr in typ.spec):
         attrty = typ.spec[attr]['type']
         if(isinstance(attrty,DeferredFactRefType)):
-            # attrty = kb_context().fact_types[attrty._fact_name]
+            # attrty = cre_context().fact_types[attrty._fact_name]
             attrty = attrty.get()
         if(isinstance(attrty,Fact)):
             attrty = types.optional(attrty)
@@ -284,7 +284,7 @@ def define_attributes(struct_typeclass):
             idrec = getattr(dataval, "idrec")
             idrec_set = builder.icmp_signed('!=', idrec, idrec.type(-1))
             with builder.if_then(idrec_set):
-                msg =("Facts objects are immutable once declared. Use kb.modify instead.",)
+                msg =("Facts objects are immutable once declared. Use mem.modify instead.",)
                 context.call_conv.return_user_exc(builder, AttributeError, msg)
 
         # [inst_type, val_type] = sig.args

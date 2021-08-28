@@ -3,7 +3,7 @@ from numba import njit
 from numba.typed import List
 from cre.fact import define_fact
 from cre.rule import Rule, RuleEngine
-from cre.kb import KnowledgeBase
+from cre.memory import Memory
 from cre.var import Var
 from cre.condition_node import NOT
 from cre.utils import _pointer_from_struct
@@ -99,22 +99,22 @@ class startMatching(Rule):
     def when():
         return (Var(PhaseHandler,"ph").phase == 0)
 
-    def then(kb, ph):
+    def then(mem, ph):
         # TODO: clear conflict set
         print("START MATCHING",ph.phase)
-        # kb.focus("phase1")
-        kb.modify(ph, "phase", 1)   
+        # mem.focus("phase1")
+        mem.modify(ph, "phase", 1)   
 
 class startResolving(Rule):
         # cache_then = False
     def when():
         return (Var(PhaseHandler,"ph").phase == 1)
 
-    def then(kb, ph):
+    def then(mem, ph):
         # TODO: clear conflict set
         print("START Resolving")
-        # kb.focus("phase2")
-        kb.modify(ph, "phase", 2)
+        # mem.focus("phase2")
+        mem.modify(ph, "phase", 2)
 
 
 class startChecking(Rule):
@@ -122,21 +122,21 @@ class startChecking(Rule):
     def when():
         return (Var(PhaseHandler,"ph").phase == 2)
 
-    def then(kb, ph):
+    def then(mem, ph):
         # TODO: clear conflict set
         print("START Checking")
-        # kb.focus("phase3")
-        kb.modify(ph, "phase", 3)
+        # mem.focus("phase3")
+        mem.modify(ph, "phase", 3)
 
 class reportCorrectness(Rule):
         # cache_then = False
     def when():
         return (Var(PhaseHandler,"ph").phase == 3)
 
-    def then(kb, ph):
+    def then(mem, ph):
         print("START Correctness")
-        # kb.focus("phase4")
-        kb.modify(ph, "phase", 4)
+        # mem.focus("phase4")
+        mem.modify(ph, "phase", 4)
 
 class resetting(Rule):
         # cache_then = False
@@ -144,13 +144,13 @@ class resetting(Rule):
         return (Var(PhaseHandler,"ph").phase == 4) & \
                Var(ConflictSet,"cfs");
 
-    def then(kb, ph, cfs):
+    def then(mem, ph, cfs):
         print("START Reset")
-        # kb.focus("phase0")
-        # kb.modify(cfs,'conflict_set',conflict_set);
-        kb.modify(ph, "phase", 0)
-        kb.modify(ph, "cycle", ph.cycle+1)
-        kb.halt();
+        # mem.focus("phase0")
+        # mem.modify(cfs,'conflict_set',conflict_set);
+        mem.modify(ph, "phase", 0)
+        mem.modify(ph, "cycle", ph.cycle+1)
+        mem.halt();
 
 ##############  RULES START #################
 
@@ -170,7 +170,7 @@ class Add2(Rule):
             (arg1.below == sel)
         )
 
-    def then(kb, ph, sel, arg0, arg1):
+    def then(mem, ph, sel, arg0, arg1):
         # print("APPLESAUCE")
         v = "?"#str((float(arg0.value) + float(arg1.value)) % 10);
         if(True): # used to check for NaN?
@@ -180,7 +180,7 @@ class Add2(Rule):
                          args=List([arg0.name,arg1.name]),
                          full_fired=False);
                          # arg0.name + "," + arg1.name)
-            kb.declare(match);
+            mem.declare(match);
 
 
 class ResolveAdd2(Rule):
@@ -198,8 +198,8 @@ class ResolveAdd2(Rule):
             NOT(Match,'m3') & (m3.rhs == "Add3") #& (m3.args[0] == sel.above.above.above.name)#(m3.sel == sel.above.above.above) & 
         )
 
-    def then(kb, ph, match, sel):
-        kb.modify(match,"full_fired",True)
+    def then(mem, ph, match, sel):
+        mem.modify(match,"full_fired",True)
         print("ResolveAdd2", match.sel, sel.name)
 
 class Add3(Rule):
@@ -217,7 +217,7 @@ class Add3(Rule):
             (sel.above == arg2) & (arg2.below == sel)
         )
 
-    def then(kb, ph, sel, arg0, arg1, arg2):
+    def then(mem, ph, sel, arg0, arg1, arg2):
         v = "?"#String((Number(arg0.value) + Number(arg1.value) + Number(arg2.value)) % 10);
         # if(!isNaN(v)){
         #     console.log("Add3", v, sel.name, arg0.name, arg1.name, arg2.name);
@@ -229,7 +229,7 @@ class Add3(Rule):
                      input=v,
                      args=List([arg0.name,arg1.name]));
                      # arg0.name + "," + arg1.name)
-        kb.declare(match);
+        mem.declare(match);
 print("C")        
         
 class ResolveAdd3(Rule):
@@ -240,8 +240,8 @@ class ResolveAdd3(Rule):
             NOT(TextField, 'sel_r') & (sel.to_right == sel_r) & (sel_r.enabled == True)
         )
 
-    def then(kb, match, sel):
-        kb.modify(match,'full_fired', 1)
+    def then(mem, match, sel):
+        mem.modify(match,'full_fired', 1)
 
 class Carry2_1(Rule):
     def when():
@@ -258,13 +258,13 @@ class Carry2_1(Rule):
             (arg1.above == arg0) #& 
             # NOT()
         )
-    def then(kb,ph,sel, arg0, arg1, neigh0):
+    def then(mem,ph,sel, arg0, arg1, neigh0):
         v = "?"
         if(True):
             match = Match(skill="Carry2",rhs="Carry2", sel=sel.name, action="UpdateTextField",
                      input=v,
                      args=List([arg0.name,arg1.name]));
-            kb.declare(match);
+            mem.declare(match);
 
 
 class ResolveCarry2(Rule):
@@ -276,8 +276,8 @@ class ResolveCarry2(Rule):
             # ()
             # TODO: Maybe add exists
         )
-    def then(kb, match, sel):
-        kb.modify("full_fired", True)
+    def then(mem, match, sel):
+        mem.modify("full_fired", True)
         print("RESOLVE Carry2", match.sel)
 
 
@@ -298,13 +298,13 @@ class Carry3(Rule):
             # (arg1.above == arg0) #& 
             # NOT()
         )
-    def then(kb,ph,sel, arg0, arg1, neigh0):
+    def then(mem,ph,sel, arg0, arg1, neigh0):
         v = "?"
         if(True):
             match = Match(skill="Carry2",rhs="Carry2", sel=sel.name, action="UpdateTextField",
                      input=v,
                      args=List([arg0.name,arg1.name]));
-            kb.declare(match);
+            mem.declare(match);
 # print("D")
 
 #######
@@ -316,9 +316,9 @@ class Carry3(Rule):
 
 
 def bootstrap():
-    kb = KnowledgeBase()
-    kb.declare(PhaseHandler())
-    kb.declare(ConflictSet())
+    mem = Memory()
+    mem.declare(PhaseHandler())
+    mem.declare(ConflictSet())
 
     row_names = ["C","A","B","O"]
     enabled_rows = [True,False,False,True]
@@ -356,14 +356,14 @@ def bootstrap():
                 "above", e.above.name if e.above else "", ',',
                 "below", e.below.name if e.below else "",
                 )
-            kb.declare(rows[i][j])
+            mem.declare(rows[i][j])
 
 
 
-    return kb
+    return mem
 
-kb = bootstrap()
-r_eng = RuleEngine(kb,[Add2, ResolveAdd2, Add3, ResolveAdd3,
+mem = bootstrap()
+r_eng = RuleEngine(mem,[Add2, ResolveAdd2, Add3, ResolveAdd3,
     startMatching, startResolving, startChecking, reportCorrectness, resetting])
 r_eng.start()
 

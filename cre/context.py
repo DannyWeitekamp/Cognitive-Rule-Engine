@@ -43,20 +43,20 @@ context_data_fields = [
     ("fact_num_to_t_id" , i8[::1]),#DictType(i8,i8)),
 ]
 
-KnowledgeBaseContextData, KnowledgeBaseContextDataType = define_structref("KnowledgeBaseContextData",context_data_fields)
+CREContextData, CREContextDataType = define_structref("CREContextData",context_data_fields)
 
-# if(not source_in_cache("KnowledgeBaseContextData",'KnowledgeBaseContextData')):
-#     source = gen_struct_code("KnowledgeBaseContextData",context_data_fields)
-#     source_to_cache("KnowledgeBaseContextData",'KnowledgeBaseContextData',source)
+# if(not source_in_cache("CREContextData",'CREContextData')):
+#     source = gen_struct_code("CREContextData",context_data_fields)
+#     source_to_cache("CREContextData",'CREContextData',source)
     
-# KnowledgeBaseContextData, KnowledgeBaseContextDataTypeTemplate = import_from_cached("KnowledgeBaseContextData",
-#     "KnowledgeBaseContextData",["KnowledgeBaseContextData","KnowledgeBaseContextDataTypeTemplate"]).values()
+# CREContextData, CREContextDataTypeTemplate = import_from_cached("CREContextData",
+#     "CREContextData",["CREContextData","CREContextDataTypeTemplate"]).values()
 
-# KnowledgeBaseContextDataType = KnowledgeBaseContextDataTypeTemplate(fields=context_data_fields)
+# CREContextDataType = CREContextDataTypeTemplate(fields=context_data_fields)
 
 
 @njit(cache=True)
-def new_kb_context():
+def new_cre_context():
     string_enums = Dict.empty(unicode_type,i8)
     number_enums = Dict.empty(f8,i8)
     string_backmap = Dict.empty(i8,unicode_type)
@@ -67,7 +67,7 @@ def new_kb_context():
     spec_flags = Dict.empty(unicode_type,Dict_Unicode_to_Flags)
     fact_to_t_id = Dict.empty(unicode_type,i8)
     fact_num_to_t_id = np.empty(2,dtype=np.int64)#Dict.empty(i8,i8)
-    return KnowledgeBaseContextData(string_enums, number_enums,
+    return CREContextData(string_enums, number_enums,
         string_backmap, number_backmap,
         enum_counter, attr_inds_by_type, spec_flags, fact_to_t_id,
         fact_num_to_t_id)
@@ -86,7 +86,7 @@ def assign_name_num_to_t_id(context_data, name, fact_num, t_id):
         context_data.fact_num_to_t_id = grow_fact_num_to_t_id(context_data, fact_num*2)
     context_data.fact_num_to_t_id[fact_num] = t_id 
 
-class KnowledgeBaseContext(object):
+class CREContext(object):
     _contexts = {}
 
     @classmethod
@@ -104,8 +104,8 @@ class KnowledgeBaseContext(object):
     @classmethod
     def get_context(cls, name=None):
         if(name is None):
-            return cls.get_context(kb_context_ctxvar.get(cls.get_default_context()))
-        if(isinstance(name,KnowledgeBaseContext)): return name
+            return cls.get_context(cre_context_ctxvar.get(cls.get_default_context()))
+        if(isinstance(name,CREContext)): return name
         if(name not in cls._contexts): cls.init(name)
         return cls._contexts[name]
 
@@ -123,7 +123,7 @@ class KnowledgeBaseContext(object):
         self.children_of = {}
         # self.jitstructs = {}
         
-        self.context_data = cd = new_kb_context()
+        self.context_data = cd = new_cre_context()
         self.string_enums = cd.string_enums
         self.number_enums = cd.number_enums
         self.string_backmap = cd.string_backmap
@@ -205,14 +205,14 @@ class KnowledgeBaseContext(object):
         self.attr_inds_by_type[name] = d
 
     def __str__(self):
-        return f"KnowledgeBaseContext({self.name})"
+        return f"CREContext({self.name})"
 
     def __enter__(self):
-        self.token_prev_context = kb_context_ctxvar.set(self.name)
+        self.token_prev_context = cre_context_ctxvar.set(self.name)
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        kb_context_ctxvar.reset(self.token_prev_context)
+        cre_context_ctxvar.reset(self.token_prev_context)
         self.token_prev_context = None
         if(exc_val): raise exc_val.with_traceback(exc_tb)
 
@@ -300,11 +300,11 @@ class KnowledgeBaseContext(object):
 
 
     
-def kb_context(context=None):
-    return KnowledgeBaseContext.get_context(context)
+def cre_context(context=None):
+    return CREContext.get_context(context)
 
 def define_fact(name : str, spec : dict, context=None):
-    return kb_context(context).define_fact(name,spec)
+    return cre_context(context).define_fact(name,spec)
 
 def define_facts(specs, #: list[dict[str,dict]],
                  context=None):
@@ -316,7 +316,7 @@ class _BaseContextful(object):
     def __init__(self, context):
 
         #Context stuff
-        self.context = KnowledgeBaseContext.get_context(context)
+        self.context = CREContext.get_context(context)
         cd = self.context.context_data
         self.string_enums = cd.string_enums
         self.number_enums = cd.number_enums
@@ -327,5 +327,5 @@ class _BaseContextful(object):
         self.spec_flags = cd.spec_flags
         
         
-kb_context_ctxvar = contextvars.ContextVar("kb_context",
-        default=KnowledgeBaseContext.get_default_context()) 
+cre_context_ctxvar = contextvars.ContextVar("cre_context",
+        default=CREContext.get_default_context()) 

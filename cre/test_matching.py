@@ -2,17 +2,17 @@ import numpy as np
 from numba import njit, f8
 from numba.typed import List
 from cre.condition_node import *
-from cre.kb import KnowledgeBase
-from cre.context import kb_context
+from cre.memory import Memory
+from cre.context import cre_context
 from cre.matching import get_ptr_matches,_get_matches
 from cre.utils import _struct_from_pointer, _pointer_from_struct
 
-# with kb_context("test_matching"):
+# with cre_context("test_matching"):
     
 
-def match_names(c,kb=None):
+def match_names(c,mem=None):
     out = []
-    for m in c.get_matches(kb):
+    for m in c.get_matches(mem):
         print(m)
         out.append([x.name for x in m])
         # print("X")
@@ -32,20 +32,20 @@ def get_ptr(fact):
     return _pointer_from_struct(fact)
 
 
-def kb_w_n_boops(n):
-    kb = KnowledgeBase()
+def mem_w_n_boops(n):
+    mem = Memory()
     for i in range(n):
         boop = BOOP(str(i), i)
-        kb.declare(boop)
-    return kb
+        mem.declare(boop)
+    return mem
 
 
 def test_matching():
-    with kb_context("test_matching_unconditioned"):
+    with cre_context("test_matching_unconditioned"):
         BOOP, BOOPType = define_fact("BOOP",{"name": "string", "B" : "number"})
-        # with kb_context("test_link"):
+        # with cre_context("test_link"):
         # BOOP, BOOPType = define_fact("BOOP",{"A": "string", "B" : "number"})
-        kb = kb_w_n_boops(5)
+        mem = mem_w_n_boops(5)
 
 
         l1, l2 = Var(BOOPType,"l1"), Var(BOOPType,"l2")
@@ -56,7 +56,7 @@ def test_matching():
 
         print(c)
 
-        cl = get_linked_conditions_instance(c, kb)
+        cl = get_linked_conditions_instance(c, mem)
 
         Bs = boop_Bs_from_ptrs(get_ptr_matches(cl))
         print("Bs", Bs)
@@ -65,22 +65,22 @@ def test_matching():
 
         c = (l1.B <= 1) & (l1.B < l2.B) & (l2.B <= r1.B)
 
-        cl = get_linked_conditions_instance(c, kb)
+        cl = get_linked_conditions_instance(c, mem)
 
         Bs = boop_Bs_from_ptrs(get_ptr_matches(cl))
         print("Bs", Bs)
 
 
 def test_matching_unconditioned():
-    with kb_context("test_matching_unconditioned"):
+    with cre_context("test_matching_unconditioned"):
         BOOP, BOOPType = define_fact("BOOP",{"name": "string", "B" : "number"})
-        kb = kb_w_n_boops(5)
+        mem = mem_w_n_boops(5)
 
 
         l1, l2 = Var(BOOPType,"l1"), Var(BOOPType,"l2")
         c = l1 & l2
 
-        cl = get_linked_conditions_instance(c, kb)
+        cl = get_linked_conditions_instance(c, mem)
         Bs = boop_Bs_from_ptrs(get_ptr_matches(cl))
         print("Bs", Bs)
 
@@ -88,20 +88,20 @@ def test_matching_unconditioned():
         l1, l2 = Var(BOOPType,"l1"), Var(BOOPType,"l2")
         c = l1 & (l2.B < 3)
 
-        cl = get_linked_conditions_instance(c, kb)
+        cl = get_linked_conditions_instance(c, mem)
         Bs = boop_Bs_from_ptrs(get_ptr_matches(cl))
         print("Bs", Bs)
 
 def test_ref_matching():
-    with kb_context("test_ref_matching"):
+    with cre_context("test_ref_matching"):
         TestLL, TestLLType = define_fact("TestLL",{"name": "string", "B" :'number', "nxt" : "TestLL"})
-        kb = KnowledgeBase()
+        mem = Memory()
         a = TestLL("A", B=0)
         b = TestLL("B", B=1, nxt=a)
         c = TestLL("C", B=2, nxt=b)
-        kb.declare(a)
-        kb.declare(b)
-        kb.declare(c)
+        mem.declare(a)
+        mem.declare(b)
+        mem.declare(c)
 
         print(a,b,c)
 
@@ -109,10 +109,10 @@ def test_ref_matching():
         c = (x1.nxt == x2)
         # assert str(c) == '(x1.nxt == x2)'
         print(c)
-        # print(match_names(c,kb))
+        # print(match_names(c,mem))
 
-        assert sorted(match_names(c,kb)) == [['B','A'],['C','B']]
-        # cl = get_linked_conditions_instance(c, kb)
+        assert sorted(match_names(c,mem)) == [['B','A'],['C','B']]
+        # cl = get_linked_conditions_instance(c, mem)
         # print(get_ptr_matches(cl))
         # Bs = boop_Bs_from_ptrs(get_ptr_matches(cl))
 
@@ -121,9 +121,9 @@ def test_ref_matching():
         # assert str(c) == '(x1.nxt == None)'
         print(c)
 
-        assert match_names(c,kb) == [['A']]
+        assert match_names(c,mem) == [['A']]
 
-        # cl = get_linked_conditions_instance(c, kb)
+        # cl = get_linked_conditions_instance(c, mem)
         # print(get_ptr_matches(cl))
 
 
@@ -131,15 +131,15 @@ def test_ref_matching():
         # assert str(c) == '(x1.nxt == None)'
         print(c)
 
-        assert match_names(c,kb) == [['A']]
+        assert match_names(c,mem) == [['A']]
 
-        # cl = get_linked_conditions_instance(c, kb)
+        # cl = get_linked_conditions_instance(c, mem)
         # print(get_ptr_matches(cl))
 
 def test_multiple_deref():
-    with kb_context("test_multiple_deref"):
+    with cre_context("test_multiple_deref"):
         TestLL, TestLLType = define_fact("TestLL",{"name": "string", "B" :'number', "nxt" : "TestLL"})
-        kb = KnowledgeBase()
+        mem = Memory()
 
         #    c1   c2
         #     |   |
@@ -152,108 +152,108 @@ def test_multiple_deref():
         b2 = TestLL("B2", B=1, nxt=a)
         c2 = TestLL("C2", B=2, nxt=b2)
 
-        kb.declare(a)
-        kb.declare(b1)
-        kb.declare(c1)
-        kb.declare(b2)
-        kb.declare(c2)
+        mem.declare(a)
+        mem.declare(b1)
+        mem.declare(c1)
+        mem.declare(b2)
+        mem.declare(c2)
 
         v1 = Var(TestLL,'v1')
         v2 = Var(TestLL,'v2')
 
         # One Deep check same fact instance
         c = (v1.nxt != 0) & (v1.nxt == v2.nxt) & (v1 != v2)
-        assert match_names(c, kb) == [['B1', 'B2'], ['B2', 'B1']]
+        assert match_names(c, mem) == [['B1', 'B2'], ['B2', 'B1']]
 
         # One Deep check same B value
         c = (v1.nxt != 0) & (v1.nxt.B == v2.nxt.B) & (v1 != v2)
-        names = match_names(c, kb) 
+        names = match_names(c, mem) 
         print(names)
         assert names == [['B1', 'B2'], ['C1', 'C2'], ['B2', 'B1'], ['C2', 'C1']]
 
         # Two Deep w/ Permutions
         c = (v1.nxt.nxt != 0) & (v1.nxt.nxt == v2.nxt.nxt) & (v1 != v2)
-        assert match_names(c, kb) == [['C1', 'C2'], ['C2', 'C1']]
+        assert match_names(c, mem) == [['C1', 'C2'], ['C2', 'C1']]
 
         # Two Deep w/o Permutions. 
         # NOTE: v1 < v2 compares ptrs, can't guarentee order 
         c = (v1.nxt.nxt != 0) & (v1.nxt.nxt == v2.nxt.nxt) & (v1 < v2)
-        names = match_names(c, kb)
+        names = match_names(c, mem)
         assert names == [['C1', 'C2']] or names == [['C2', 'C1']]
 
-        kb.declare(TestLL("D1", B=3, nxt=c1))
-        kb.declare(TestLL("D2", B=3, nxt=c2))
+        mem.declare(TestLL("D1", B=3, nxt=c1))
+        mem.declare(TestLL("D2", B=3, nxt=c2))
 
         # Three Deep (use None) -- helps check that dereference errors 
         #  are treated internally as errors instead evaluating to 0.
         c = (v1.nxt.nxt.nxt != 0) & (v1.nxt.nxt.nxt == v2.nxt.nxt.nxt) & (v1 != v2)
-        names = match_names(c, kb) 
+        names = match_names(c, mem) 
         print(names)
         assert names == [['D1', 'D2'], ['D2', 'D1']]
 
 
 
 def test_NOT():
-    with kb_context("test_NOT"):
+    with cre_context("test_NOT"):
         BOOP, BOOPType = define_fact("BOOP",{"name": "string", "B" : "number"})
 
-        kb = kb_w_n_boops(3)
+        mem = mem_w_n_boops(3)
 
         x1,x2,x3 = Var(BOOP,'x1'), Var(BOOP,'x2'), Var(BOOP,'x3')
         c = (x1.B > 1) & (x2.B < 1) & NOT(x3.B > 9000) 
 
-        assert match_names(c,kb) == [['2','0']]
+        assert match_names(c,mem) == [['2','0']]
 
         over_9000 = BOOP("over_9000", 9001)
-        kb.declare(over_9000)
+        mem.declare(over_9000)
 
-        assert match_names(c,kb) == []
+        assert match_names(c,mem) == []
 
-        kb.retract(over_9000)
+        mem.retract(over_9000)
 
-        assert match_names(c,kb) == [['2','0']]
+        assert match_names(c,mem) == [['2','0']]
 
         #TODO: Make sure NOT() works on betas
 
 def test_list():
-    with kb_context("test_list"):
+    with cre_context("test_list"):
         TList, TListType = define_fact("TList",{"name" : "string", "items" : "ListType(string)"})
         v1 = Var(TList,"v1")
         v2 = Var(TList,"v2")
 
-        kb = KnowledgeBase()
-        kb.declare(TList("A", List(["x","a"])))
-        kb.declare(TList("B", List(["x","b"])))
+        mem = Memory()
+        mem.declare(TList("A", List(["x","a"])))
+        mem.declare(TList("B", List(["x","b"])))
 
         c = (v1 != v2) & (v1.items[0] == v2.items[0])
-        assert match_names(c, kb) == [['A','B'],['B','A']]
+        assert match_names(c, mem) == [['A','B'],['B','A']]
 
         c = (v1 != v2) & (v1.items[1] != v2.items[1])
-        assert match_names(c, kb) == [['A','B'],['B','A']]
+        assert match_names(c, mem) == [['A','B'],['B','A']]
 
         #TODO: Self-Beta-like conditions
         # c = v1.items[0] != v1.items[1]
-        # match_names(c, kb)
+        # match_names(c, mem)
 
 def test_multiple_types():
-    with kb_context("test_multiple_types"):
+    with cre_context("test_multiple_types"):
         BOOP, BOOPType = define_fact("BOOP",{"name": "string", "B" : "number"})
         TList, TListType = define_fact("TList",{"name" : "string", "items" : "ListType(string)"})
 
         b = Var(BOOP,"b")
         t = Var(TList,"t")
 
-        kb = KnowledgeBase()
-        kb.declare(BOOP("A", 0))
-        kb.declare(BOOP("B", 1))
-        kb.declare(TList("A", List(["x","a"])))
-        kb.declare(TList("B", List(["x","b"])))
+        mem = Memory()
+        mem.declare(BOOP("A", 0))
+        mem.declare(BOOP("B", 1))
+        mem.declare(TList("A", List(["x","a"])))
+        mem.declare(TList("B", List(["x","b"])))
 
         c = (t.name == b.name)
-        assert match_names(c,kb) == [["A","A"], ["B","B"]]
+        assert match_names(c,mem) == [["A","A"], ["B","B"]]
 
         c = (b.name == t.name)
-        assert match_names(c,kb) == [["A","A"], ["B","B"]]
+        assert match_names(c,mem) == [["A","A"], ["B","B"]]
 
 
 
@@ -267,48 +267,48 @@ def test_multiple_types():
 
 
 
-with kb_context("test_matching_benchmarks"):
+with cre_context("test_matching_benchmarks"):
     BOOP, BOOPType = define_fact("BOOP",{"name": "string", "B" : "number"})
 
 
 
 @njit(cache=True)
-def apply_it(kb,l1,l2,r1):
+def apply_it(mem,l1,l2,r1):
     print(l1,l2,r1)
-    kb.declare(BOOP("??",1000+r1.B))
+    mem.declare(BOOP("??",1000+r1.B))
 
 @njit(cache=True)
-def apply_all_matches(c, f, kb):
-    cl = get_linked_conditions_instance(c, kb)
+def apply_all_matches(c, f, mem):
+    cl = get_linked_conditions_instance(c, mem)
     ptr_matches = get_ptr_matches(cl)
     for match in ptr_matches:
         arg0 = _struct_from_pointer(BOOPType,match[0]) 
         arg1 = _struct_from_pointer(BOOPType,match[1]) 
         arg2 = _struct_from_pointer(BOOPType,match[2]) 
-        f(kb,arg0,arg1,arg2)
+        f(mem,arg0,arg1,arg2)
 
 
 def test_applying():
-    with kb_context("test_matching_benchmarks"):
-        kb = kb_w_n_boops(5)
+    with cre_context("test_matching_benchmarks"):
+        mem = mem_w_n_boops(5)
         l1, l2 = Var(BOOPType,"l1"), Var(BOOPType,"l2")
         r1, r2 = Var(BOOPType,"r1"), Var(BOOPType,"r2")
         c = (l1.B <= 1) & (l1.B < l2.B) & (l2.B <= r1.B)
-        apply_all_matches(c,apply_it,kb)
-        apply_all_matches(c,apply_it,kb)
+        apply_all_matches(c,apply_it,mem)
+        apply_all_matches(c,apply_it,mem)
 
 
 
 def matching_1_t_4_lit_setup():
-    with kb_context("test_matching_benchmarks"):
-        kb = kb_w_n_boops(100)
+    with cre_context("test_matching_benchmarks"):
+        mem = mem_w_n_boops(100)
 
         l1, l2 = Var(BOOPType,"l1"), Var(BOOPType,"l2")
         r1, r2 = Var(BOOPType,"r1"), Var(BOOPType,"r2")
 
         c = (l1.B > 0) & (l1.B != 3) & (l1.B < 4) & (l2.B != 3) 
 
-        cl = get_linked_conditions_instance(c, kb)
+        cl = get_linked_conditions_instance(c, mem)
 
         # Bs = boop_Bs_from_ptrs(get_ptr_matches(cl))
         return (cl,), {}

@@ -1,4 +1,4 @@
-from cre.context import KnowledgeBaseContext
+from cre.context import CREContext
 
 from numba import types, njit, guvectorize,vectorize,prange
 from numba.experimental import jitclass
@@ -287,7 +287,7 @@ def infer_nb_type(value):
 
 
 def state_to_nb_objects(state,context=None):
-	c = KnowledgeBaseContext.get_context(context)
+	c = CREContext.get_context(context)
 
 	tm = numpy_type_map
 	#Throw the attribute values into tuples and find the lengths of
@@ -343,7 +343,7 @@ def state_to_nb_objects(state,context=None):
 	return out	
 
 def object_to_nb_object(name,obj_d,context=None):
-	c = KnowledgeBaseContext.get_context(context)
+	c = CREContext.get_context(context)
 	assert 'type' in obj_d, "Object %s missing required attribute 'type'" % name
 	assert obj_d['type'] in c.registered_specs, \
 			 "Object specification not defined for %s" % obj_d['type']
@@ -361,7 +361,7 @@ def object_to_nb_object(name,obj_d,context=None):
 	return obj
 
 def nb_objects_to_enumerized(nb_objects,context=None):
-	c = KnowledgeBaseContext.get_context(context)
+	c = CREContext.get_context(context)
 	out = Dict.empty(unicode_type,Dict_Unicode_to_Enums)
 	for typ,objs in nb_objects.items():
 		enumerize_nb_objs = c.jitstructs[typ].enumerize_nb_objs
@@ -373,7 +373,7 @@ def nb_objects_to_enumerized(nb_objects,context=None):
 
 
 def enumerize(value, typ=None,context=None):
-	c = KnowledgeBaseContext.get_context(context)
+	c = CREContext.get_context(context)
 	if(isinstance(value,np.ndarray)):
 		if(np.issubdtype(value.dtype, np.number)):
 			return enumerize_array(value,c.number_enums,c.number_backmap,c.enum_counter)
@@ -389,7 +389,7 @@ def enumerize(value, typ=None,context=None):
 		return c.enumerize_value(value)
 
 def enumerize_value(c,value, typ=None,context=None):
-	c = KnowledgeBaseContext.get_context(context)
+	c = CREContext.get_context(context)
 	if(typ is None): typ = infer_type(value)
 	if(typ == 'string'):
 		value = str(value)
@@ -404,7 +404,7 @@ def enumerize_value(c,value, typ=None,context=None):
 		raise ValueError("Unrecognized type %r" % typ)
 
 def unenumerize_value(c,value, typ=None, context=None):
-	c = KnowledgeBaseContext.get_context(context)
+	c = CREContext.get_context(context)
 	if(value in c.string_backmap):
 		return c.string_backmap[value]
 	elif(value in c.number_backmap):
@@ -413,7 +413,7 @@ def unenumerize_value(c,value, typ=None, context=None):
 		raise ValueError("No enum for %r." % value)
 
 def enumerized_to_vectorized(c,enumerized_state,return_inversion_data=False,context=None):
-	c = KnowledgeBaseContext.get_context(context)
+	c = CREContext.get_context(context)
 
 	nominal, continuous, inversion_data = enumerized_to_vectorized(enumerized_state,
 									c.spec_flags['nominal'],c.number_backmap,

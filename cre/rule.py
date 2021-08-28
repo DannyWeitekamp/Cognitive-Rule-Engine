@@ -25,12 +25,12 @@ from cre.core import TYPE_ALIASES, JITSTRUCTS, py_type_map, numba_type_map, nump
 from cre.gensource import assert_gen_source
 from cre.caching import unique_hash, source_to_cache, import_from_cached, source_in_cache, get_cache_path, cache_safe_exec
 from cre.structref import gen_structref_code, define_structref, define_structref_template
-from cre.context import kb_context
+from cre.context import cre_context
 from cre.utils import _cast_structref, _struct_from_pointer, _func_from_address
 from cre.var import Var
 from cre.fact import define_fact, gen_fact_import_str
 from cre.condition_node import get_linked_conditions_instance
-from cre.kb import KnowledgeBaseType
+from cre.memory import MemoryType
 from cre.matching import _get_ptr_matches, _struct_tuple_from_pointer_arr
 from cre.condition_node import ConditionsType
 import inspect, dill, pickle
@@ -66,9 +66,9 @@ then = pickle.loads({pickle.dumps(njit(cls.then_pyfunc))})
 then.enable_caching()
 
 @njit(atfp_type.signature, cache=True)
-def apply_then_from_ptrs(kb,ptrs):
+def apply_then_from_ptrs(mem,ptrs):
     facts_tuple = _struct_tuple_from_pointer_arr(arg_types,ptrs)
-    then(kb,*facts_tuple)
+    then(mem,*facts_tuple)
 
 atfp_addr = _get_wrapper_address(apply_then_from_ptrs, atfp_type.signature)
 
@@ -86,7 +86,7 @@ class Rule(structref.StructRefProxy, metaclass=RuleMeta):
         if(conds is not None): self.conds = conds
         return self
     # def __init__(self, conds):
-    #     '''An instance of a rule has its conds linked to a KnowledgeBase'''
+    #     '''An instance of a rule has its conds linked to a Memory'''
     #     self.conds = conds
 
     def __init_subclass__(cls, **kwargs):
@@ -135,9 +135,9 @@ class Rule(structref.StructRefProxy, metaclass=RuleMeta):
         # print(cls.conds)
 
     # @classmethod
-    def apply_then_from_ptrs(cls, kb, ptrs):
+    def apply_then_from_ptrs(cls, mem, ptrs):
         '''Applies then() on a matching set of facts given as an array of pointers'''
-        return rule_apply_then_from_ptrs(cls, kb, ptrs)
+        return rule_apply_then_from_ptrs(cls, mem, ptrs)
 
     def __str__(self):
         return str_rule(self)
@@ -150,8 +150,8 @@ class Rule(structref.StructRefProxy, metaclass=RuleMeta):
 
 
 @njit(cache=True)
-def rule_apply_then_from_ptrs(self, kb, ptrs):
-    return self.apply_then_from_ptrs(kb,ptrs)
+def rule_apply_then_from_ptrs(self, mem, ptrs):
+    return self.apply_then_from_ptrs(mem,ptrs)
 
 @njit(cache=True) 
 def rule_get_conds(self):
@@ -163,7 +163,7 @@ class RuleTypeTemplate(types.StructRef):
     def preprocess_fields(self, fields):
         return tuple((name, types.unliteral(typ)) for name, typ in fields)
 
-apply_then_from_ptrs_type = types.FunctionType(types.void(KnowledgeBaseType,i8[::1]))
+apply_then_from_ptrs_type = types.FunctionType(types.void(MemoryType,i8[::1]))
 
 rule_fields = [
     ('name', unicode_type),
@@ -175,7 +175,7 @@ rule_fields = [
 define_boxing(RuleTypeTemplate,Rule)
 
 RuleType = RuleTypeTemplate(rule_fields)
-atfp_type = types.FunctionType(types.void(KnowledgeBaseType,i8[::1]))
+atfp_type = types.FunctionType(types.void(MemoryType,i8[::1]))
 
 @njit(cache=False)
 def rule_ctor(name, conds, atfp_addr):
@@ -242,24 +242,24 @@ def _append_list(l,x):
     return l.append(x)
 
 class RuleEngine(object):
-    def __init__(self,kb, rule_classes):
-        self.kb = kb
+    def __init__(self,mem, rule_classes):
+        self.mem = mem
         self.rule_classes = rule_classes
         self.rules = _new_rule_list()
         for rule_cls in rule_classes:
-            conds =  get_linked_conditions_instance(rule_cls.conds, kb, copy=True) 
+            conds =  get_linked_conditions_instance(rule_cls.conds, mem, copy=True) 
             print(rule_cls)
             _append_list(self.rules, rule_cls(conds))
         # self.rules = List(self.rules)
 
     def start(self):
-        rule_engine_start(self.kb,self.rules)
+        rule_engine_start(self.mem,self.rules)
         
             
 MAX_CYCLES = 100
 
 @njit(cache=True)
-def rule_engine_start(kb, rules):
+def rule_engine_start(mem, rules):
     stack = List.empty_list(ConflictSetIterType)
 
     for cycles in range(MAX_CYCLES):
@@ -279,14 +279,14 @@ def rule_engine_start(kb, rules):
             rule, match = cs_iter_next(cs_iter)
             # t0 = time_ns()
             # print(rule, match)
-            rule.apply_then_from_ptrs(kb, match)
+            rule.apply_then_from_ptrs(mem, match)
             # t1 = time_ns()
             # print("\tthen", (t1-t0)/1e6)
-            if(kb.halt_flag):
+            if(mem.halt_flag):
                 print("HALT")
                 return
 
-            # if(kb.backtrack_flag):
+            # if(mem.backtrack_flag):
             #     pass
             # else:
             #     stack.append(cs_iter)

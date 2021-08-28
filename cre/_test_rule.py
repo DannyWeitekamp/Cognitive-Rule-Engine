@@ -6,7 +6,7 @@ import numpy as np
 from numba import njit
 from cre.fact import define_fact
 from cre.rule import Rule, RuleEngine
-from cre.kb import KnowledgeBase
+from cre.memory import Memory
 from cre.var import Var
 from cre.utils import _pointer_from_struct,_pointer_from_struct_incref
 
@@ -29,13 +29,13 @@ class GreenToYellow(Rule):
         c = (s.color == "green")
         return c
 
-    def then(kb,s):
+    def then(mem,s):
         b = s.color
-        kb.modify(s,"color",'yellow')
+        mem.modify(s,"color",'yellow')
         print(b+ "->" + s.color)
         # print(np.abs(global_value))
-        # kb.declare(BOOP("???",1000+r2.B))
-        # kb.halt()
+        # mem.declare(BOOP("???",1000+r2.B))
+        # mem.halt()
 
 
 class YellowToRed(Rule):
@@ -44,12 +44,12 @@ class YellowToRed(Rule):
         c = (s.color == "yellow")
         return c
 
-    def then(kb,s):
+    def then(mem,s):
         b = s.color
-        kb.modify(s,"color",'red')
+        mem.modify(s,"color",'red')
         print(b+ "->" + s.color)
-        # kb.declare(BOOP("???",1000+r2.B))
-        kb.halt()
+        # mem.declare(BOOP("???",1000+r2.B))
+        mem.halt()
 
 t3 = time.time_ns()
 
@@ -59,25 +59,25 @@ print("Def Rules time",(t3-t2)/1e6)
 
 # @njit(cache=True)
 def start_up():
-    kb = KnowledgeBase()
-    kb.declare(StopLight("green"))
-    return kb
+    mem = Memory()
+    mem.declare(StopLight("green"))
+    return mem
 
-kb = KnowledgeBase()
+mem = Memory()
 
 t4 = time.time_ns()
-print("Inst KB",(t4-t3)/1e6)
+print("Inst mem",(t4-t3)/1e6)
 
 sl = StopLight("green")
 
 t5 = time.time_ns()
 print("Inst StopLight",(t5-t4)/1e6)
-kb.declare(sl)
+mem.declare(sl)
 t6 = time.time_ns()
 print("Declare",(t6-t5)/1e6)
 
 
-rule_engine = RuleEngine(kb, [GreenToYellow,YellowToRed])
+rule_engine = RuleEngine(mem, [GreenToYellow,YellowToRed])
 t7 = time.time_ns()
 print("Init Rule Engine",(t7-t6)/1e6)
 
@@ -88,8 +88,8 @@ print("Rule Engine Start",(t8-t7)/1e6)
 
 
 def foo():
-    kb = start_up()
-    rule_engine = RuleEngine(kb, [GreenToYellow,YellowToRed])
+    mem = start_up()
+    rule_engine = RuleEngine(mem, [GreenToYellow,YellowToRed])
     rule_engine.start()
 
 

@@ -1,6 +1,6 @@
 from cre.condition_node import *
-from cre.kb import KnowledgeBase
-from cre.context import kb_context
+from cre.memory import Memory
+from cre.context import cre_context
 from time import time_ns
 from cre.utils import  _pointer_from_struct
 
@@ -18,7 +18,7 @@ def first_beta(c):
     return c.dnf[0][1][0].is_alpha 
 
 def test_literal():
-    with kb_context("test_literal"):
+    with cre_context("test_literal"):
         # BOOP, BOOPType = define_fact("BOOP",{"A": "string", "B" : "number"})
         l1, l2 = Var(BOOPType,"l1"), Var(BOOPType,"l2")
         c1 = l1.B < 1
@@ -33,7 +33,7 @@ def test_literal():
 
 # @njit(cache=True)
 def test_build_conditions():
-    with kb_context("test_build_conditions"):
+    with cre_context("test_build_conditions"):
         # BOOP, BOOPType = define_fact("BOOP",{"A": "string", "B" : "number"})
 
         l1, l2 = Var(BOOPType,"l1"), Var(BOOPType,"l2")
@@ -131,7 +131,7 @@ def cond_get_vars(cond):
     return cond.vars
 
 def test_initialize():
-    with kb_context("test_initialize"):
+    with cre_context("test_initialize"):
         # BOOP, BOOPType = define_fact("BOOP",{"A": "string", "B" : "number"})
 
         l1, l2 = Var(BOOPType,"l1"), Var(BOOPType,"l2")
@@ -159,7 +159,7 @@ def get_pointer(st):
     return _pointer_from_struct(st)
 
 def test_link():
-    with kb_context() as context:
+    with cre_context() as context:
         # BOOP, BOOPType = define_fact("BOOP",{"A": "string", "B" : "number"})
         
         l1, l2 = Var(BOOPType,"l1"), Var(BOOPType,"l2")
@@ -170,12 +170,12 @@ def test_link():
              (l2.B < 1) & (l2.B > 7) & (l2.B < r1.B) & (l1.B < l2.B)
 
 
-        kb = KnowledgeBase()
-        cl = get_linked_conditions_instance(c, kb)
+        mem = Memory()
+        cl = get_linked_conditions_instance(c, mem)
 
         assert get_pointer(cl) == get_pointer(c)
 
-        cl = get_linked_conditions_instance(c, kb, copy=True)
+        cl = get_linked_conditions_instance(c, mem, copy=True)
 
         assert get_pointer(cl) != get_pointer(c)
 
@@ -191,7 +191,7 @@ def test_unconditioned():
     print(conditions_repr(l1 & (l2.B > 1), "c"))
     
 def test_multiple_deref():
-    with kb_context("test_ref_matching"):
+    with cre_context("test_ref_matching"):
         TestLL, TestLLType = define_fact("TestLL",{"name": "string", "B" :'number', "nxt" : "TestLL"})
 
         v1 = Var(TestLL,'v1')
@@ -221,7 +221,7 @@ def test_existential_not():
     # print(repr(c2))
 
 def test_list_operations():
-    with kb_context("test_list_operations"):
+    with cre_context("test_list_operations"):
         TList, TListType = define_fact("TList",{"name" : "string", "items" : "ListType(string)"})
         v = Var(TList,"v")
         print(v.items[0])

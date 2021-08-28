@@ -9,9 +9,9 @@ from numba.experimental.structref import new, define_boxing, define_attributes, 
 from numba.extending import overload_method, intrinsic, overload_attribute, intrinsic, lower_getattr_generic, overload, infer_getattr, lower_setattr_generic
 from numba.core.typing.templates import AttributeTemplate
 from cre.caching import gen_import_str, unique_hash,import_from_cached, source_to_cache, source_in_cache
-from cre.context import kb_context
+from cre.context import cre_context
 from cre.structref import define_structref, define_structref_template, CastFriendlyStructref
-from cre.kb import KnowledgeBaseType, KnowledgeBase, facts_for_t_id, fact_at_f_id
+from cre.memory import MemoryType, Memory, facts_for_t_id, fact_at_f_id
 from cre.fact import define_fact, BaseFactType, cast_fact, DeferredFactRefType, Fact, _standardize_type
 from cre.utils import _struct_from_meminfo, _meminfo_from_struct, _cast_structref, cast_structref, decode_idrec, lower_getattr, _struct_from_pointer,  lower_setattr, lower_getattr, _pointer_from_struct, _decref_pointer, _incref_pointer, _incref_structref, pointer_from_struct
 from cre.utils import assign_to_alias_in_parent_frame
@@ -76,7 +76,7 @@ GenericVarType = VarTypeTemplate([(k,v) for k,v in var_fields_dict.items()])
 class Var(structref.StructRefProxy):
     def __new__(cls, typ, alias=None, skip_assign_alias=False):
         # if(not isinstance(typ, types.StructRef)): typ = typ.fact_type
-        typ = _standardize_type(typ, kb_context())
+        typ = _standardize_type(typ, cre_context())
         # if(hasattr(typ,'fact_type')): typ = typ.fact_type
         # if(isinstance(typ, Fact)): 
         #     type_name = typ._fact_name
@@ -115,7 +115,7 @@ class Var(structref.StructRefProxy):
             fd = fact_type.field_dict
             head_type = fact_type.spec[attr]['type']
             if(isinstance(head_type,DeferredFactRefType)):
-                head_type = kb_context().type_registry[head_type._fact_name]
+                head_type = cre_context().type_registry[head_type._fact_name]
             # head_type = fact_type.field_dict[attr]
             offset = fact_type._attr_offsets[list(fd.keys()).index(attr)]
             deref_type = 'attr'
@@ -159,7 +159,7 @@ class Var(structref.StructRefProxy):
             else:
                 # Otherwise we need to resolve the type from the current context
                 if('_base_type' not in self.__dict__):
-                    ctx = kb_context()
+                    ctx = cre_context()
                     bt_name = var_get_base_type_name(self)
                     self._base_type = ctx.type_registry[bt_name]
                 return self._base_type
@@ -169,7 +169,7 @@ class Var(structref.StructRefProxy):
                 return head_type_ref.instance_type 
             else:
                 if('_head_type' not in self.__dict__):
-                    ctx = kb_context()
+                    ctx = cre_context()
                     ht_name = var_get_head_type_name(self)
                     self._head_type = ctx.type_registry[ht_name]
                 return self._head_type

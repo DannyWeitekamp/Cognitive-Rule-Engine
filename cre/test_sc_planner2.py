@@ -11,7 +11,7 @@ from cre.sc_planner2 import (gen_apply_multi_source,
                     gen_op_comps_from_expl_tree, planner_declare_fact)
 from cre.utils import _pointer_from_struct_incref, _list_from_ptr, _dict_from_ptr, _struct_from_pointer, _get_array_data_ptr, _pointer_from_struct
 from cre.var import Var
-from cre.context import kb_context
+from cre.context import cre_context
 from cre.fact import define_fact
 
 import time
@@ -262,7 +262,7 @@ def test_build_explanation_tree():
 def _test_declare_fact():
     planner = SetChainingPlanner()
 
-    with kb_context("test_declare_fact"):
+    with cre_context("test_declare_fact"):
         spec = {"A" : "string", "B" : "number"}
         BOOP, BOOPType = define_fact("BOOP", spec)
 

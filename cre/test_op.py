@@ -5,7 +5,7 @@ import numpy as np
 from cre.op import Op
 from cre.var import Var
 from cre.utils import _func_from_address
-from cre.context import kb_context
+from cre.context import cre_context
 from cre.fact import define_fact
 import re
 import pytest
@@ -199,7 +199,7 @@ def test_fact_args():
         def call(a, b):
             return a + b
 
-    with kb_context('test_fact_args'):
+    with cre_context('test_fact_args'):
         spec = {"A" : "string", "B" : "number"}
         BOOP, BOOPType = define_fact("BOOP", spec)
 
@@ -253,7 +253,7 @@ def not_jit_compilable():
     op = Add(Map(Var(float,'x')),Map(Var(float,'y')))
     assert op(1,2)==30.0
 
-    with kb_context('test_fact_args'):
+    with cre_context('test_fact_args'):
         spec = {"A" : "string", "B" : "number"}
         BOOP, BOOPType = define_fact("BOOP", spec)
 

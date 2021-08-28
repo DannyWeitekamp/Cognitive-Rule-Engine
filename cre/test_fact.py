@@ -1,13 +1,13 @@
 from cre.fact import _fact_from_spec, _standardize_spec, _merge_spec_inheritance, \
      define_fact, cast_fact, _cast_structref, BaseFact, BaseFactType, DeferredFactRefType
-from cre.context import kb_context
-from cre.kb import KnowledgeBase
+from cre.context import cre_context
+from cre.memory import Memory
 from numba import njit, u8
 from numba.typed import List
 import pytest
 
 def test__standardize_spec():
-    with kb_context("test__standardize_spec") as context:
+    with cre_context("test__standardize_spec") as context:
         spec = {"A" : "string", "B" : "number"}
         spec = _standardize_spec(spec, context,"BOOP")
         print(spec)
@@ -21,7 +21,7 @@ def test__standardize_spec():
     
 
 def test__merge_spec_inheritance():
-    with kb_context("test__merge_spec_inheritance") as context:
+    with cre_context("test__merge_spec_inheritance") as context:
         spec1 = {"A" : "string", "B" : "number"}
         BOOP, BOOPType = define_fact("BOOP", spec1, context="test__merge_spec_inheritance")
 
@@ -59,20 +59,20 @@ def test__merge_spec_inheritance():
 def test_define_fact():
     spec = {"A" : "string", "B" : "number"}
     spec2 = {"A" : "string", "B" : "string"}
-    with kb_context("test_define_fact") as context:
+    with cre_context("test_define_fact") as context:
         
         ctor, typ1 = define_fact("BOOP", spec)
         #Redefinition illegal with new types
         with pytest.raises(AssertionError):
             define_fact("BOOP", spec2)
 
-    with kb_context("test_define_fact2") as context:
+    with cre_context("test_define_fact2") as context:
         #But is okay if defined under a different context
         ctor, typ2 = define_fact("BOOP", spec2)
 
 
 def test_inheritence():
-    with kb_context("test_inheritence") as context:
+    with cre_context("test_inheritence") as context:
         spec1 = {"A" : "string", "B" : "number"}
         BOOP1, BOOP1Type = define_fact("BOOP1", spec1, context="test_inheritence")
         spec2 = {"inherit_from" : BOOP1, "C" : "number"}
@@ -98,7 +98,7 @@ def test_inheritence():
 
 
 def test_cast_fact():
-    with kb_context("test_cast_fact") as context:
+    with cre_context("test_cast_fact") as context:
         spec1 = {"A" : "string", "B" : "number"}
         BOOP1, BOOP1Type = define_fact("BOOP1", spec1, context="test_cast_fact")
         spec2 = {"inherit_from" : BOOP1, "C" : "number"}
@@ -165,12 +165,12 @@ def test_cast_fact():
 
 def test_protected_mutability():
     print("RUNTIME1.")
-    with kb_context("test_protected_mutability") as context:
+    with cre_context("test_protected_mutability") as context:
         print("RUNTIME1.2")
         spec = {"A" : "string", "B" : "number"}
         BOOP, BOOPType = define_fact("BOOP", spec,context="test_protected_mutability")
         print("RUNTIME1.3")
-        kb = KnowledgeBase(context="test_protected_mutability")
+        mem = Memory(context="test_protected_mutability")
         print("RUNTIME1")
         b1 = BOOP("A",0)
         b2 = BOOP("B",0)
@@ -186,13 +186,13 @@ def test_protected_mutability():
         # edit_it.py_func(b2)
         print("RUNTIME3")
         @njit
-        def declare_it(kb,b,name):
-            kb.declare(b,name)
+        def declare_it(mem,b,name):
+            mem.declare(b,name)
 
         print("RUNTIME3.1",b1.fact_num)
-        declare_it(kb,b1,"b1")
+        declare_it(mem,b1,"b1")
         print("RUNTIME3.2")
-        declare_it.py_func(kb,b2,"b2")
+        declare_it.py_func(mem,b2,"b2")
 
         print("RUNTIMEz")
 
@@ -224,7 +224,7 @@ from numba import literally
 
 
 def _test_list_type():
-    with kb_context("test_list_type"):
+    with cre_context("test_list_type"):
         spec = {"A" : "string", "B" : "number"}
         BOOP, BOOPType = define_fact("BOOP", spec)
 
@@ -258,7 +258,7 @@ def _test_list_type():
         
 #Work in progress...
 def _test_reference_type():
-    with kb_context("test_reference_type"):
+    with cre_context("test_reference_type"):
         spec = {"A" : "string", "B" : "number"}
         BOOP, BOOPType = define_fact("BOOP", spec)
 
@@ -329,7 +329,7 @@ if __name__ == "__main__":
     
 [] For each type need to test:
     -getattr, setattr, str 
-    -kb.modify
+    -mem.modify
     -matching
 
 

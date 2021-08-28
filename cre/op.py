@@ -11,9 +11,9 @@ from numba.extending import overload_method, intrinsic, overload_attribute, intr
 from numba.core.typing.templates import AttributeTemplate
 from numba.core.errors import NumbaError, NumbaPerformanceWarning
 from cre.caching import gen_import_str, unique_hash,import_from_cached, source_to_cache, source_in_cache, cache_safe_exec, get_cache_path
-from cre.context import kb_context
+from cre.context import cre_context
 from cre.structref import define_structref, define_structref_template
-from cre.kb import KnowledgeBaseType, KnowledgeBase, facts_for_t_id, fact_at_f_id
+from cre.memory import MemoryType, Memory, facts_for_t_id, fact_at_f_id
 # from cre.fact import define_fact, BaseFactType, cast_fact, DeferredFactRefType, Fact
 from cre.utils import (_struct_from_meminfo, _meminfo_from_struct, _cast_structref, cast_structref, decode_idrec, lower_getattr, _struct_from_pointer,  lower_setattr, lower_getattr,
                        _pointer_from_struct, _decref_pointer, _incref_pointer, _incref_structref, _pointer_from_struct_incref)
@@ -319,7 +319,7 @@ class OpMeta(type):
 
         
         if(cls.__name__ != "__GenerateOp__"):
-            context = kb_context()
+            context = cre_context()
             op_inst = cls.make_singleton_inst()
             context._register_op_inst(op_inst)
             return op_inst
@@ -433,8 +433,8 @@ class Op(structref.StructRefProxy,metaclass=OpMeta):
     def recover_singleton_inst(self,context=None):
         '''Sometimes numba needs to emit an op instance 
          that isn't the singleton instance. This recovers
-         the singleton instance from the kb_context'''
-        context = kb_context(context)
+         the singleton instance from the cre_context'''
+        context = cre_context(context)
         return context.op_instances[self.name]
 
 

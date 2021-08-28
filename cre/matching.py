@@ -10,7 +10,7 @@ from numba.extending import overload_method, intrinsic, overload_attribute, intr
 from numba.core.typing.templates import AttributeTemplate
 from cre.utils import _struct_from_meminfo, _meminfo_from_struct, _cast_structref, cast_structref, decode_idrec, lower_getattr, _struct_from_pointer,  lower_setattr, lower_getattr, _pointer_from_struct
 from cre.caching import gen_import_str, unique_hash,import_from_cached, source_to_cache, source_in_cache
-from cre.condition_node import Conditions, ConditionsType, initialize_conditions, get_linked_conditions_instance
+from cre.conditions import Conditions, ConditionsType, initialize_conditions, get_linked_conditions_instance
 
 from cre.var import *
 from cre.predicate_node import GenericAlphaPredicateNodeType, GenericBetaPredicateNodeType

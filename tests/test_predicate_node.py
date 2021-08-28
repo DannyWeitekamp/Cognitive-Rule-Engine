@@ -7,7 +7,7 @@ from cre.memory import Memory
 from cre.context import cre_context
 from cre.predicate_node import get_alpha_predicate_node, get_beta_predicate_node, BasePredicateNodeType, generate_link_data
 from cre.predicate_node import get_alpha_predicate_node_definition, get_beta_predicate_node_definition, deref_attrs
-from cre.test_mem import _delcare_10000, _retract_10000
+from .test_mem import _delcare_10000, _retract_10000
 import pytest
 np.set_printoptions(threshold=np.inf)
 

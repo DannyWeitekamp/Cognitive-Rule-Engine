@@ -232,15 +232,15 @@ class Var(structref.StructRefProxy):
     def __ne__(self,other): return self._cmp_helper("==",other,True)
 
     def __and__(self, other):
-        from creconditions import conditions_and
+        from cre.conditions import conditions_and
         return conditions_and(self, other)
 
     def __or__(self, other):
-        from creconditions import conditions_or
+        from cre.conditions import conditions_or
         return conditions_or(self, other)
 
     def __invert__(self):
-        from creconditions import _var_NOT
+        from cre.conditions import _var_NOT
         return _var_NOT(self)
     
     # Explicitly defining these allows for pickling w/o invoking __getattr__()
@@ -263,7 +263,7 @@ def get_var_ptr(self):
 
 
 def var_cmp_alpha(left_var, op_str, right_var,negated):
-    from creconditions import pt_to_cond, gen_pterm_ctor_alpha, gen_pterm_ctor_beta
+    from cre.conditions import pt_to_cond, gen_pterm_ctor_alpha, gen_pterm_ctor_beta
     # Treat None as 0 for comparing against a fact ref
     print("***", isinstance(left_var.head_type, Fact),isinstance(left_var.head_type, types.StructRef), left_var.head_type)
     if(right_var is None and isinstance(left_var.head_type, types.StructRef)): right_var = 0
@@ -275,7 +275,7 @@ def var_cmp_alpha(left_var, op_str, right_var,negated):
     
 
 def var_cmp_beta(left_var, op_str, right_var, negated):
-    from creconditions import pt_to_cond, gen_pterm_ctor_alpha, gen_pterm_ctor_beta
+    from cre.conditions import pt_to_cond, gen_pterm_ctor_alpha, gen_pterm_ctor_beta
     ctor = gen_pterm_ctor_beta(left_var, op_str, right_var)
     pt = ctor(left_var, op_str, right_var)
     lbv = cast_structref(GenericVarType,left_var)

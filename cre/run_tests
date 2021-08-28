@@ -1,0 +1,2 @@
+cd ../tests
+python3 -m pytest test_utils.py test_deref_struct.py test_fact.py test_mem.py test_predicate_node.py test_conditions.py test_matching.py test_op.py test_make_source.py test_sc_planner2.py test_type_conv.py

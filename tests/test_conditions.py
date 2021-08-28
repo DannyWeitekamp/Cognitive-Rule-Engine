@@ -1,4 +1,4 @@
-from cre.condition_node import *
+from cre.conditions import *
 from cre.memory import Memory
 from cre.context import cre_context
 from time import time_ns

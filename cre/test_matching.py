@@ -1,7 +1,7 @@
 import numpy as np
 from numba import njit, f8
 from numba.typed import List
-from cre.condition_node import *
+from creconditions import *
 from cre.memory import Memory
 from cre.context import cre_context
 from cre.matching import get_ptr_matches,_get_matches

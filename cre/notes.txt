@@ -2,10 +2,10 @@
 --Aug 27, 2021--
 
 Proposed renamings:
-	condition_node.py -> conditions.py
-	knowledgebase -> memory
-	predicate_node -> literal
-	fact OK 
+	  condition_node.py -> conditions.py
+	✓ knowledgebase -> memory
+	  predicate_node -> literal
+	✓ fact OK 
 	Op -> Func
 	var OK 
 
@@ -143,4 +143,19 @@ Otherwise it is VALUE
 
 When a FuncComp is &/| then it should be flattened in order to define an exec_func
 
+Under what contexts does exec_func get applied?
+	1. When the func is used as a literal term that we want to check a match against in which case we would want to just pass it pointers or Fact instances. In this case what do we do with the func's muted exceptions and check function?
+	2. When we use it during get_matches and want to filter a partial match. In this case it needs to be wrapped in some loop, and it should really just return a boolean value. 
+	3. When the Executable is used to compute groundings, and we want to use exec_func to produce the value of the grounding. 
+	4. When the Executable shows up on the RHS of a Rule and we want to declare whatever comes out of the exec_func 
 
+For cases 1 & 2 the exec can just be wrapped to be Truthy if it isn't already.
+
+
+For cases 1 & 2 the type of the exec can be anything, in this context it probably makes sense to for exec_func to poop out an Atom if it doesn't already poop out a proper Fact. 
+
+There is also the consideration that in this case we can have NOT(x) kinds of terms. How do we unify this with the Executable type? NOT only makes sense in the context of Vars and would in reality be wrapped in a Conditions object. So the Conditions object could just know that NOT(x) should be treated as a retraction at runtime. 
+
+We need a way of declaring named facts using this shorthand. In principle this means that every fact should be able to take name as a kwarg, and have a name slot. 
+
+There is also the runtime consideration that FactCtor(Var, Var,...) is actually an Op of sorts... Maybe I already handled this 

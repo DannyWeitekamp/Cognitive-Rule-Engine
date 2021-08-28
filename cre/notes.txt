@@ -1,0 +1,146 @@
+
+--Aug 27, 2021--
+
+Proposed renamings:
+	condition_node.py -> conditions.py
+	knowledgebase -> memory
+	predicate_node -> literal
+	fact OK 
+	Op -> Func
+	var OK 
+
+
+Thinking...
+	Right now predicate nodes extract info from Vars when they are constructed...
+	Ultimately it would be nice to be able to not just do something like "var op var", and also f(var, var,...) or f(var, f(var,var)) ect. So it seems that 
+	it might make more sense for predicate nodes to just be Funcs, and for them
+	to be characterized as alpha or not by the number of free variables. Using indexing on "==" is one special detail, and this would need to be turned on or off optionally... maybe that would go into "Context". But it seems that the actual index dictionary needs go into the linked instance, and the Func needs to be marked as indexable (Thought... are beta nodes indexable?)
+
+	There is also the matter of evaluation. Vars and Funcs are both ultimately evaluatable given some binding. For Vars deref_attrs() needs to be executed. 
+
+	Considerations:
+		-It would be nice if Conditions were made up of some common thing... like cre.Evaluatable, where it can be executed and it's source is generated on the fly. 
+
+	Evaluatables have in common:
+		-A set of variables ('var_base_ptrs?')
+		-A thing that happens when all of the variables are grounded 
+		-A filter function? Maybe this is just hard coded?
+		-A function for generating a string for itself.
+		-Metadata?
+		-Maybe some way of recasting itself to it's actual type if it is emitted into python. 
+		-A way to copy itself... maybe just evaling it's string in python?
+
+	When conditions are linked there is a representation problem. It would be best if the conditions could be rearranged freely. The cleanest thing might just be instead of having Pterms that are linked to Memories, there are normal Condition instances and linked instances? It looks like there is already a copy=True/False option for this. 
+
+	It seems that in all cases a Pterm has enough in common with the proposed cre.Executable that maybe they should be merged. In principle an executable could be linked to a Memory in some contextual manner, that it might make sense for all the link stuff to just be in there. There is also the 'negated' property which could in principle be applied to non-binary values as a sort of existential NOT. Then again maybe Exectuable can just be standin for BasePredicateNodeType.
+
+
+	There is some common structure like
+
+	Conditions.link_mem(mem).get_matches() -> A list of Match Predicates
+	Executable.link_mem(mem).get_matches() -> All Predicates/Tokens representing the execution of the executable.
+	Var.link_mem(mem).get).get_matches() -> All values matching the var
+
+	For Conditions some link data is maintained that keeps track of partial matches.
+	For Var nothing needs to be maintained, the list of facts are simply returned
+	For Func some link data is
+
+	Maybe Predicates should be a specialization of Fact.  
+
+	Predicates are just Pred(name, ...list of member predicates)
+	Members should be Facts
+	Or alternatively Pred(name,members=x)
+
+	Atoms should also be facts and have .type_name and .value,
+
+	But are Vars facts? Like Equals(boop1.A, boop2.A) -> 
+	Vars are executables... maybe facts should also be executables?
+
+	If I wanted a table of things like Equals(boop1.A, boop2.A), then this is more like a table of executables, in which case 
+
+	Could define predicate types like Match=Pred("Match") or just Pred("Match")
+
+	Maybe there is the grounded version of things i.e. Facts + Predicates and then the exectuable versions?
+
+	So if I would like to do something like BOOP(x,y) >> BOOP(str(y),float(x))
+	Then BOOP(x,y) both the LHS and RHS are executables.
+	Or maybe BOOP(x,y) is really Var(BOOP,"z") & (x:=z.A) & (y:=z.B) >> BOOP(x,y)  
+	or Var(BOOP,"z") >> BOOP(str(z.B), float(z.A))
+
+	Is this invertable... I guess this is it's own inverse? But how do I find that?
+	I guess the constructor BOOP would have an inversion BOOP(u,v) >> u & v and then str and float would be inverses of each other so BOOP(u,v)
+
+
+	Var(str,"x") & Var(float,"y") & Var()
+
+
+
+
+
+Example:
+c = (
+	Var(f8, "A") &
+	Var(f8, "B") &
+	(B+1 < A) & (A==1) & F(B)
+)
+
+
+
+--Aug 28, 2021--
+
+CREBase(cre_type : u8)
+
+What if there are
+	Executables(base_var_ptrs : *Var[:], exec_func_addr : *Func):
+		-Var
+		-Func
+		-Conditions
+		-Rule(lhs: conditions, rhs : executable)
+	Facts:
+		-Normal Fact structs
+		-Grounding (exec : cre.Executable, args : *Fact[:], value : Cre.Atom)
+		-Predicate (name : str, args : *Fact[:])
+		-Atom (type: str, value : any[float,str,list[any]])
+
+Memories only consist of Facts. The flattened working memory would only consist of groundings. 
+
+Executables all have base_var_ptrs, and an exec_func_addr
+
+
+
+Example Rules:
+
+#For all boops 'x' declare another boop with B=x.B+1
+Var(BOOP, "x") >> BOOP(x.A,x.B+1)
+
+
+#Define Predicate
+Pred("GT")
+(
+	Var(BOOP,"x") & Var(BOOP,"y") & 
+	(x.B <= (y.B + 1))
+) >> (
+	GT(x,y)
+)
+
+
+#Retract 
+(
+	Var(BOOP,"x") & Var(BOOP,"y") & 
+	(x.B <= (y.B + 1))
+) >> (
+	NOT(x) 
+)
+
+
+Note: A var can be existentially NOT'ed, an executable can be negated
+Potential qualifiers for an executable:
+	TRUTHY(1), FALSEY(-1), VALUE(0)
+
+If &/| are applied to put it in a conditions object then it should be TRUTHY 
+If ~ is applied then it should be FALSEY
+Otherwise it is VALUE 
+
+When a FuncComp is &/| then it should be flattened in order to define an exec_func
+
+

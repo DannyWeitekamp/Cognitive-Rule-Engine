@@ -421,7 +421,21 @@ class Op(structref.StructRefProxy,metaclass=OpMeta):
 
 
 
+    def __and__(self,other):
+        from cre.conditions import op_to_cond, conditions_and
+        self = op_to_cond(self)
+        if(isinstance(other, Op)): other = op_to_cond(other)
+        return conditions_and(self, other)
 
+    def __or__(self,other):
+        from cre.conditions import op_to_cond, conditions_or
+        self = op_to_cond(self)
+        if(isinstance(other, Op)): other = op_to_cond(other)
+        return conditions_or(self, other)
+
+    def __invert__(self):
+        from cre.conditions import literal_ctor, literal_to_cond, literal_not
+        return literal_to_cond(literal_not(literal_ctor(self)))
     #     pass
     # def __call__(self,*py_args):
         

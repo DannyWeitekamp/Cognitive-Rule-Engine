@@ -124,7 +124,7 @@ def literal_get_op(self):
 define_boxing(LiteralTypeTemplate, Literal)
 LiteralType = LiteralTypeTemplate(literal_fields)
 
-@njit(cache=True)
+@njit(LiteralType(GenericOpType),cache=True)
 @overload(Literal)
 def literal_ctor(op):
     st = new(LiteralType)
@@ -139,12 +139,12 @@ def literal_ctor(op):
 
 
 #TODO: STR
-# @overload(str)
-# def str_pterm(self):
-#     if(not isinstance(self, PTermTypeTemplate)): return
-#     def impl(self):
-#         return self.str_val
-#     return impl
+@overload(str)
+def literal_str(self):
+    if(not isinstance(self, LiteralTypeTemplate)): return
+    def impl(self):
+        return literal_get_str_val(self)
+    return impl
 
 @njit(cache=True)
 def literal_copy(self):
@@ -168,8 +168,8 @@ def literal_not(self):
 @njit(cache=True)
 def literal_to_cond(lit):
     dnf = new_dnf(1)
-    ind = 0 if (pt.is_alpha) else 1
-    dnf[0][ind].append(pt)
+    ind = 0 if (lit.is_alpha) else 1
+    dnf[0][ind].append(lit)
     _vars = List.empty_list(GenericVarType)
 
     for ptr in lit.var_base_ptrs:
@@ -179,6 +179,10 @@ def literal_to_cond(lit):
     # pt.negated = negated
     c = Conditions(_vars, dnf)
     return c
+
+@njit(cache=True)
+def op_to_cond(op):
+    return literal_to_cond(literal_ctor(op))
 
 
 #TODO compartator helper?
@@ -410,7 +414,7 @@ def conditions_str(self,add_non_conds=False):
     for j, (alpha_conjunct, beta_conjunct) in enumerate(self.dnf):
         for i, alpha_lit in enumerate(alpha_conjunct):
             s += "~" if alpha_lit.negated else ""
-            s += "(" + str(alpha_lit) + ")" 
+            s += str(alpha_lit)
             if(i < len(alpha_conjunct)-1 or
                 len(beta_conjunct)): s += " & "
             if(add_non_conds): 
@@ -418,7 +422,7 @@ def conditions_str(self,add_non_conds=False):
 
         for i, beta_lit in enumerate(beta_conjunct):
             s += "~" if beta_lit.negated else ""
-            s += "(" + str(beta_lit) + ")" 
+            s += str(beta_lit)
             if(i < len(beta_conjunct)-1): s += " & "
             if(add_non_conds): 
                 used_var_ptrs[beta_lit.var_base_ptrs[0]] = u1(1)
@@ -482,7 +486,7 @@ def build_var_list(var_map):
 
 
 @njit(cache=True)
-def _conditions_and(left,right):
+def _conditions_and(left, right):
     '''AND is distributive
     AND((ab+c), (de+f)) = abde+abf+cde+cf'''
     return Conditions(build_var_map(left.vars,right.vars),

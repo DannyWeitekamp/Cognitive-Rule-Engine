@@ -16,9 +16,10 @@ from cre.utils import _struct_from_meminfo, _meminfo_from_struct, _cast_structre
 from cre.utils import assign_to_alias_in_parent_frame
 from cre.subscriber import base_subscriber_fields, BaseSubscriber, BaseSubscriberType, init_base_subscriber, link_downstream
 from cre.vector import VectorType
-from cre.predicate_node import BasePredicateNode,BasePredicateNodeType, get_alpha_predicate_node_definition, \
- get_beta_predicate_node_definition, deref_attrs, define_alpha_predicate_node, define_beta_predicate_node, AlphaPredicateNode, BetaPredicateNode, \
- PredicateNodeLinkDataType, generate_link_data
+from cre.op import GenericOpType
+# from cre.predicate_node import BasePredicateNode,BasePredicateNodeType, get_alpha_predicate_node_definition, \
+ # get_beta_predicate_node_definition, deref_attrs, define_alpha_predicate_node, define_beta_predicate_node, AlphaPredicateNode, BetaPredicateNode, \
+ # LiteralLinkDataType, generate_link_data
 from numba.core import imputils, cgutils
 from numba.core.datamodel import default_manager, models
 from cre.var import *
@@ -26,277 +27,172 @@ from cre.var import *
 from operator import itemgetter
 from copy import copy
 
-pterm_fields_dict = {
-    "str_val" : unicode_type,
-    "pred_node" : BasePredicateNodeType,
-    "var_base_ptrs" : UniTuple(i8,2),
-    "negated" : u1,
-    "is_alpha" : u1,
-    "mem_ptr" : i8,
-    "link_data" : PredicateNodeLinkDataType
+#### Literal Link Data ####
+
+literal_link_data_field_dict = {
+    "left_t_id" : u8,
+    "right_t_id" : u8,
+    "left_facts" : VectorType, #Vector<*Fact>
+    "right_facts" : VectorType, #Vector<*Fact>
+    
+    "change_head": i8,
+    "grow_head": i8,
+    "change_queue": VectorType,
+    "grow_queue": VectorType,
+    "mem_grow_queue" : VectorType,
+    "mem_change_queue" : VectorType,
+
+
+
+    "truth_values" : u1[:,:],
+    "left_consistency" : u1[:],
+    "right_consistency" : u1[:],
 }
 
-pterm_fields =  [(k,v) for k,v, in pterm_fields_dict.items()]
+literal_link_data_fields = [(k,v) for k,v, in literal_link_data_field_dict.items()]
+LiteralLinkData, LiteralLinkDataType = define_structref("LiteralLinkData", 
+                literal_link_data_fields, define_constructor=False)
+
+
+@njit(cache=True)
+def generate_link_data(pn, mem):
+    '''Takes a prototype predicate node and a knowledge base and returns
+        a link_data instance for that predicate node.
+    '''
+    link_data = new(LiteralLinkDataType)
+    link_data.left_t_id = mem.context_data.fact_to_t_id[pn.left_fact_type_name]
+    link_data.left_facts = facts_for_t_id(mem.mem_data,i8(link_data.left_t_id)) 
+    if(not pn.is_alpha):
+        link_data.right_t_id = mem.context_data.fact_to_t_id[pn.right_fact_type_name]
+        link_data.right_facts = facts_for_t_id(mem.mem_data,i8(link_data.right_t_id)) 
+        link_data.left_consistency = np.empty((0,),dtype=np.uint8)
+        link_data.right_consistency = np.empty((0,),dtype=np.uint8)
+    else:
+        link_data.right_t_id = -1
+
+
+    link_data.change_head = 0
+    link_data.grow_head = 0
+    link_data.change_queue = new_vector(8)
+    link_data.grow_queue = new_vector(8)
+
+    link_data.mem_grow_queue = mem.mem_data.grow_queue
+    link_data.mem_change_queue = mem.mem_data.change_queue
+    link_data.truth_values = np.empty((0,0),dtype=np.uint8)
+        
+    
+    return link_data
+
+#### Literal ####
+
+
+literal_fields_dict = {
+    # "str_val" : unicode_type,
+    "op" : GenericOpType,
+    "var_base_ptrs" : i8[:],#UniTuple(i8,2),
+    "negated" : u1,
+    "is_alpha" : u1,
+    "cre_mem_ptr" : i8,
+    "link_data" : LiteralLinkDataType   
+}
+
+literal_fields =  [(k,v) for k,v, in literal_fields_dict.items()]
 
 @structref.register
-class PTermTypeTemplate(types.StructRef):
+class LiteralTypeTemplate(types.StructRef):
     pass
 
-class PTerm(structref.StructRefProxy):
+class Literal(structref.StructRefProxy):
     def __new__(cls, *args):
-        return pterm_ctor(*args)
+        return literal_ctor(*args)
         # return structref.StructRefProxy.__new__(cls, *args)
     def __str__(self):
-        return pterm_get_str_val(self)
+        return literal_get_str_val(self)
 
     @property
-    def pred_node(self):
-        return pterm_get_pred_node(self)
-
-
-
-@njit(cach=True)
-def pterm_get_str_val(self):
-    return self.str_val
-
-@njit(cach=True)
-def pterm_get_pred_node(self):
-    return self.pred_node
-
-define_boxing(PTermTypeTemplate,PTerm)
-PTermType = PTermTypeTemplate(pterm_fields)
-
+    def op(self):
+        return literal_get_pred_node(self)
 
 @njit(cache=True)
-def alpha_pterm_ctor(pn, left_var, op_str, right_var):
-    st = new(PTermType)
-    st.pred_node = pn
-    st.str_val = str(left_var) + " " + op_str + " " + "?" #base_str + "?"#TODO str->float needs to work
-    st.var_base_ptrs = (left_var.base_ptr,0)
-    st.negated = False
-    st.is_alpha = True
-    st.mem_ptr = 0
-    return st
+def literal_get_str_val(self):
+    return self.op.shorthand_expr
 
 @njit(cache=True)
-def beta_pterm_ctor(pn, left_var, op_str, right_var):
-    st = new(PTermType)
-    st.pred_node = pn
-    st.str_val = str(left_var) + " " + op_str + " " + str(right_var)
-    st.var_base_ptrs = (left_var.base_ptr,right_var.base_ptr)
-    st.negated = False
-    st.is_alpha = False
-    st.mem_ptr = 0
+def literal_get_op(self):
+    return self.op
+
+define_boxing(LiteralTypeTemplate, Literal)
+LiteralType = LiteralTypeTemplate(literal_fields)
+
+@njit(cache=True)
+@overload(Literal)
+def literal_ctor(op):
+    st = new(LiteralType)
+    st.op = op
+    st.var_base_ptrs = np.empty(len(op.var_map),dtype=np.int64)
+    for i, ptr in enumerate(op.var_map):
+        st.var_base_ptrs[i] = ptr
+    st.negated = 0
+    st.is_alpha = u1(len(st.var_base_ptrs) == 1)
+    st.cre_mem_ptr = 0
     return st
 
 
-def _resolve_var_types(var):
-    # In the python context the Var instance is passed instead of the type,
-    #  because if "CRE_SPECIALIZE_VAR_TYPE"==False all Vars are GenericVarType.
-    # print(type(var))
-    if(isinstance(var,Var)):
-        fact_type = var.base_type
-        head_type = var.head_type
-        # var = var._numba_type_
-    else:
-        fact_type = var.field_dict['base_type'].instance_type
-        head_type = var.field_dict['head_type'].instance_type
-    return fact_type, head_type
-
-
-pnode_dat_cache = {}
-def get_alpha_pnode_ctor(l_var, op_str, r_var):
-    l_fact_type, l_type  = _resolve_var_types(l_var)
-
-    t = ("alpha",str(l_fact_type), str(l_type), op_str, r_var)
-    if(t not in pnode_dat_cache):
-        ctor, _ = define_alpha_predicate_node(l_type, op_str, r_var)
-        pnode_dat_cache[t] = (ctor, l_fact_type._fact_name)
-    return pnode_dat_cache[t]
-
-
-def get_beta_pnode_ctor(l_var, op_str, r_var):
-    l_fact_type, l_type  = _resolve_var_types(l_var)
-    r_fact_type, r_type  = _resolve_var_types(r_var)
-    # print(">>>",l_fact_type._fact_name, r_fact_type._fact_name)
-
-    t = ("beta", str(l_fact_type), str(l_type), op_str,str(r_fact_type), str(r_type))
-    if(t not in pnode_dat_cache):
-        ctor, _ = define_beta_predicate_node(l_type, op_str, r_type)
-        pnode_dat_cache[t] = (ctor, l_fact_type._fact_name, r_fact_type._fact_name)
-    return pnode_dat_cache[t]
+#TODO: STR
+# @overload(str)
+# def str_pterm(self):
+#     if(not isinstance(self, PTermTypeTemplate)): return
+#     def impl(self):
+#         return self.str_val
+#     return impl
 
 @njit(cache=True)
-def cpy_derefs(var):
-    # offsets = np.empty((len(var.deref_offsets),),dtype=np.int64)
-    # for i,x in enumerate(var.deref_offsets): offsets[i] = x
-    return var.deref_offsets.copy()
-
-# @njit(cache=True)
-# def cast_pn_to_base(pn):
-#     return _cast_structref(BasePredicateNodeType,pn) 
-
-def gen_pterm_ctor_alpha(left_var, op_str, right_var):
-    ctor, left_fact_type_name = \
-            get_alpha_pnode_ctor(left_var, op_str, right_var)
-    def impl(left_var, op_str, right_var):
-        l_offsets = cpy_derefs(left_var)
-        apn = ctor(str(left_fact_type_name), l_offsets, right_var)
-        pn = cast_structref(BasePredicateNodeType, apn) 
-        lvb = cast_structref(GenericVarType, left_var)
-        return alpha_pterm_ctor(pn, lvb, op_str, right_var)
-    return impl
-
-def gen_pterm_ctor_beta(left_var, op_str, right_var):
-    ctor, left_fact_type_name, right_fact_type_name = \
-            get_beta_pnode_ctor(left_var, op_str, right_var)
-    
-    def impl(left_var, op_str, right_var):
-        l_offsets = cpy_derefs(left_var)
-        r_offsets = cpy_derefs(right_var)
-        apn = ctor(str(left_fact_type_name), l_offsets, str(right_fact_type_name), r_offsets)
-        pn = cast_structref(BasePredicateNodeType, apn) 
-        lvb = cast_structref(GenericVarType, left_var)
-        rvb = cast_structref(GenericVarType, right_var)
-        return beta_pterm_ctor(pn, lvb, op_str, rvb)            
-    return impl
-
-@generated_jit(cache=True)
-@overload(PTerm)
-def pterm_ctor(left_var, op_str, right_var):
-    if(not isinstance(op_str, types.Literal)): return 
-    if(not isinstance(left_var, VarTypeTemplate)): return
-
-    op_str = op_str.literal_value
-    if(not isinstance(right_var, VarTypeTemplate)):
-        return gen_pterm_ctor_alpha(left_var, op_str, right_var)
-    else:
-        return gen_pterm_ctor_beta(left_var, op_str, right_var)
-
-
-@overload(str)
-def str_pterm(self):
-    if(not isinstance(self, PTermTypeTemplate)): return
-    def impl(self):
-        return self.str_val
-    return impl
-
-@njit(cache=True)
-def pterm_copy(self):
-    st = new(PTermType)
-    st.str_val = self.str_val
-    st.pred_node = self.pred_node
+def literal_copy(self):
+    st = new(Literal)
+    # st.str_val = self.str_val
+    st.op = self.op
     st.var_base_ptrs = self.var_base_ptrs
     st.negated = self.negated
     st.is_alpha = self.is_alpha
-    st.mem_ptr = self.mem_ptr
-    if(self.mem_ptr):
+    st.cre_mem_ptr = self.cre_mem_ptr
+    if(self.cre_mem_ptr):
         st.link_data = self.link_data
     return st
     
 @njit(cache=True)
-def pterm_not(self):
-    npt = pterm_copy(self)
-    npt.negated = not npt.negated
-    return npt
-
-
-# @njit(cache=True)
-# def comparator_jitted(left_var, op_str, right_var, negated):
-#     pt = PTerm(left_var, op_str, right_var)
-#     dnf = new_dnf(1)
-#     # ind = 0 if (pt.is_alpha) else 1
-#     dnf[0].append(pt)
-#     _vars = List([left_var.alias])
-#     # if(not is_alpha): _vars.append(right_var.alias)
-#     pt.negated = negated
-#     # print(type(right_var))
-#     c = Conditions(_vars, dnf)
-#     return c
-
+def literal_not(self):
+    n = literal_copy(self)
+    n.negated = not n.negated
+    return n
 
 @njit(cache=True)
-def pt_to_cond(pt, left_var, right_var, negated):
+def literal_to_cond(lit):
     dnf = new_dnf(1)
     ind = 0 if (pt.is_alpha) else 1
     dnf[0][ind].append(pt)
     _vars = List.empty_list(GenericVarType)
-    _vars.append(left_var)
-    if(right_var is not None):
-        _vars.append(right_var)
-    pt.negated = negated
+
+    for ptr in lit.var_base_ptrs:
+        _vars.append(_struct_from_pointer(GenericVarType, ptr))
+    # if(right_var is not None):
+    #     _vars.append(right_var)
+    # pt.negated = negated
     c = Conditions(_vars, dnf)
     return c
 
 
-def comparator_helper(op_str, left_var, right_var,negated=False):
-    if(isinstance(left_var,VarTypeTemplate)):
-        check_legal_cmp(left_var, op_str, right_var)
-        op_str = types.unliteral(op_str)
-        # print("AAAA", op_str)
-        if(not isinstance(right_var,VarTypeTemplate)):
-            # print("POOP")
-            right_var_type = types.unliteral(right_var)
-            # ctor = gen_pterm_ctor_alpha(left_var, op_str, right_var_type)
-            # print("POOP")
+#TODO compartator helper?
 
-            def impl(left_var, right_var):
-                pt = PTerm(left_var, op_str, right_var)
-                lbv = cast_structref(GenericVarType,left_var)
-                return pt_to_cond(pt, lbv, None, negated)
-        else:
-            # ctor = gen_pterm_ctor_beta(left_var, op_str, right_var)
-            def impl(left_var, right_var):
-                pt = PTerm(left_var, op_str, right_var)
-                lbv = cast_structref(GenericVarType,left_var)
-                rbv = cast_structref(GenericVarType,right_var)
-                return pt_to_cond(pt, lbv, rbv, negated)
-
-            # return var_cmp_beta
-
-
-        return impl
-
-
-@generated_jit(cache=True)
-@overload(operator.lt)
-def var_lt(left_var, right_var):
-    return comparator_helper("<", left_var, right_var)
-
-@generated_jit(cache=True)
-@overload(operator.le)
-def var_le(left_var, right_var):
-    return comparator_helper("<=", left_var, right_var)
-
-@generated_jit(cache=True)
-@overload(operator.gt)
-def var_gt(left_var, right_var):
-    return comparator_helper(">", left_var, right_var)
-
-@generated_jit(cache=True)
-@overload(operator.ge)
-def var_ge(left_var, right_var):
-    return comparator_helper(">=", left_var, right_var)
-
-@generated_jit(cache=True)
-@overload(operator.eq)
-def var_eq(left_var, right_var):
-    return comparator_helper("==", left_var, right_var)
-
-@generated_jit(cache=True)
-@overload(operator.ne)
-def var_ne(left_var, right_var):
-    return comparator_helper("==", left_var, right_var, True)
 
 
 ## dnf_type ##
-pterm_list_type = ListType(PTermType)
-ab_conjunct_type = Tuple((pterm_list_type, pterm_list_type))
+literal_list_type = ListType(LiteralType)
+ab_conjunct_type = Tuple((literal_list_type, literal_list_type))
 dnf_type = ListType(ab_conjunct_type)
 
 ## distr_dnf_type ##e
-pterm_list_list_type = ListType(pterm_list_type)
-distr_ab_conjunct_type = Tuple((pterm_list_list_type, pterm_list_list_type, i8[:,:]))
+literal_list_list_type = ListType(literal_list_type)
+distr_ab_conjunct_type = Tuple((literal_list_list_type, literal_list_list_type, i8[:,:]))
 distr_dnf_type = ListType(distr_ab_conjunct_type)
 
 
@@ -335,8 +231,6 @@ conditions_fields_dict = {
 }
 
 conditions_fields =  [(k,v) for k,v, in conditions_fields_dict.items()]
-
-
 
 @structref.register
 class ConditionsTypeTemplate(types.StructRef):
@@ -417,7 +311,7 @@ def impl_get_matches(self,mem=None):
 def new_dnf(n):
     dnf = List.empty_list(ab_conjunct_type)
     for i in range(n):
-        dnf.append((List.empty_list(PTermType), List.empty_list(PTermType)) )
+        dnf.append((List.empty_list(LiteralType), List.empty_list(LiteralType)) )
     return dnf
 
 @njit(cache=True)
@@ -704,10 +598,10 @@ def dnf_not(c_dnf):
     for i, conjunct in enumerate(c_dnf):
         dnf = new_dnf(len(conjunct[0])+len(conjunct[1]))
         for j, term in enumerate(conjunct[0]):
-            dnf[j][0].append(pterm_not(term))
+            dnf[j][0].append(literal_not(term))
         for j, term in enumerate(conjunct[1]):
             k = len(conjunct[0]) + j
-            dnf[k][1].append(pterm_not(term))
+            dnf[k][1].append(literal_not(term))
         dnfs.append(dnf)
 
     # print("PHAZZZZZZ")
@@ -868,25 +762,27 @@ def cond_not(c):
     return lambda c : conditions_not(c)
 
 
+
+
+
 #### Linking ####
 
 @njit(cache=True)
-def link_pterm_instance(pterm, mem):
-    link_data = generate_link_data(pterm.pred_node, mem)
-    # if(copy): pterm = pterm_copy(pterm)
-    pterm.link_data = link_data
-    pterm.mem_ptr = _pointer_from_struct(mem)
-    return pterm
+def link_literal_instance(literal, mem):
+    link_data = generate_link_data(literal.pred_node, mem)
+    literal.link_data = link_data
+    literal.mem_ptr = _pointer_from_struct(mem)
+    return literal
 
 @njit(cache=True)
 def dnf_copy(dnf,shallow=True):
     ndnf = new_dnf(len(dnf))
     for i, (alpha_lit, beta_lit) in enumerate(dnf):
         for alpha_literal in alpha_lit:
-            new_alpha = alpha_literal if(shallow) else pterm_copy(alpha_literal)
+            new_alpha = alpha_literal if(shallow) else literal_copy(alpha_literal)
             ndnf[i][0].append(new_alpha)
         for beta_literal in beta_lit:
-            new_beta = beta_literal if(shallow) else pterm_copy(beta_literal)
+            new_beta = beta_literal if(shallow) else literal_copy(beta_literal)
             ndnf[i][1].append(new_beta)
     return ndnf
 
@@ -894,8 +790,8 @@ def dnf_copy(dnf,shallow=True):
 def get_linked_conditions_instance(conds, mem, copy=False):
     dnf = dnf_copy(conds.dnf,shallow=False) if copy else conds.dnf
     for alpha_conjunct, beta_conjunct in dnf:
-        for term in alpha_conjunct: link_pterm_instance(term, mem)
-        for term in beta_conjunct: link_pterm_instance(term, mem)
+        for term in alpha_conjunct: link_literal_instance(term, mem)
+        for term in beta_conjunct: link_literal_instance(term, mem)
     if(copy):
         new_conds = Conditions(conds.var_map, dnf)
         if(conds.is_initialized): initialize_conditions(new_conds)
@@ -917,10 +813,10 @@ def initialize_conditions(conds):
     distr_dnf = List.empty_list(distr_ab_conjunct_type)
     n_vars = len(conds.vars)
     for ac, bc in conds.dnf:
-        alpha_conjuncts = List.empty_list(pterm_list_type)
-        beta_conjuncts = List.empty_list(pterm_list_type)
+        alpha_conjuncts = List.empty_list(literal_list_type)
+        beta_conjuncts = List.empty_list(literal_list_type)
         
-        for _ in range(n_vars): alpha_conjuncts.append(List.empty_list(PTermType))
+        for _ in range(n_vars): alpha_conjuncts.append(List.empty_list(LiteralType))
         
         for term in ac:
             i = conds.var_map[term.var_base_ptrs[0]]
@@ -935,7 +831,7 @@ def initialize_conditions(conds):
             if(beta_inds[i,j] == -1):
                 k = len(beta_conjuncts)
                 beta_inds[i,j] = k
-                beta_conjuncts.append(List.empty_list(PTermType))
+                beta_conjuncts.append(List.empty_list(LiteralType))
                 
             beta_conjuncts[beta_inds[i,j]].append(term)
             # beta_conjuncts.append(term)

@@ -115,7 +115,7 @@ def test_auto_aliasing():
 def test_source_gen():
     class Add(Op):
         signature = f8(f8,f8)        
-        short_hand = '({0}+{1})'
+        shorthand = '({0}+{1})'
         def check(a, b):
             return a > 0
         def call(a, b):
@@ -123,7 +123,7 @@ def test_source_gen():
 
     class Multiply(Op):
         signature = f8(f8,f8)
-        short_hand = '({0}*{1})'
+        shorthand = '({0}*{1})'
         def check(a, b):
             return b != 0
         def call(a, b):
@@ -145,7 +145,7 @@ def test_source_gen():
 
     class IntegerDivision(Op):
         signature = f8(f8,f8)
-        short_hand = {
+        shorthand = {
             '*' : '({0}//{1})',
             'js' : 'Math.floor({0}/{1})',
         }
@@ -165,7 +165,7 @@ def test_source_gen():
     # For other languages by default look in call_body 
     assert "Math.floor(a/b);\n" in IntegerDivision.make_source('js')
 
-    # Otherwise fall back on any defined short_hands
+    # Otherwise fall back on any defined shorthands
     IntegerDivision.call_body = {}
     assert "Math.floor(a/b)\n" in IntegerDivision.make_source('js')
 

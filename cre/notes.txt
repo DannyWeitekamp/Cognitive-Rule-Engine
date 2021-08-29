@@ -167,3 +167,10 @@ TODO:
 [] Make a common cre.Executables supertype for Ops, Vars, and Conditions
 [] Make Conditions work off of executables 
 [] Make All facts capable of taking a name, except maybe not Atoms?
+
+
+--Aug 29, 2021--
+
+Going to simply reorganize Conditions so that it builds a DNF of Literals (i.e. an Op + other stuff). The main DNF will just be a List(List(Literal)), but at initialization it will be reorganized into
+
+

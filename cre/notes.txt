@@ -159,3 +159,11 @@ There is also the consideration that in this case we can have NOT(x) kinds of te
 We need a way of declaring named facts using this shorthand. In principle this means that every fact should be able to take name as a kwarg, and have a name slot. 
 
 There is also the runtime consideration that FactCtor(Var, Var,...) is actually an Op of sorts... Maybe I already handled this 
+
+
+The first step to all of this is probably to make conditions work with Exectuables instead of with 
+
+TODO:
+[] Make a common cre.Executables supertype for Ops, Vars, and Conditions
+[] Make Conditions work off of executables 
+[] Make All facts capable of taking a name, except maybe not Atoms?

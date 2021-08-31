@@ -171,6 +171,38 @@ class OpTypeTemplate(types.StructRef):
 GenericOpType = OpTypeTemplate([(k,v) for k,v in op_fields_dict.items()])
 
 
+class UntypedOp():
+    '''An Op that has not been given a signature yet'''
+    def __init__(self,name,members):
+        self.name = name
+        self.members = members
+    @property
+    def arg_names(self):
+        if(not hasattr(self,"_arg_names")):
+            f = self.members['call']
+            py_func = f.py_func if isinstance(f, Dispatcher) else f
+            self._arg_names = inspect.getfullargspec(f)[0]
+        return self._arg_names
+
+    def __repr__(self):
+        return f'UntypedOp(name={self.name}, members={self.members}'
+
+    def __str__(self):
+        return f'{self.name}({", ".join(self.arg_names)})'
+
+
+    def __call__(self,*args):
+        call = njit(cache=True)(self.members['call'])
+        # print(call.overloads)
+        # with PrintElapse("get_call_template"):
+        (template,*rest) = call.get_call_template([v.head_type for v in args],{})
+        sig = template.cases[0]
+        self.members['signature'] = sig
+        return new_op(self.name, self.members)
+
+
+
+
 @njit(cache=True)
 def var_to_ptr(x):
     return _pointer_from_struct_incref(x)
@@ -250,8 +282,11 @@ def new_op(name, members):
     has_check = 'check' in members
     assert 'call' in members, "Op must have call() defined"
     assert hasattr(members['call'], '__call__'), "call() must be a function"
-    assert 'signature' in members, "Op must have signature"
+    # assert 'signature' in members, "Op must have signature"
     assert not (has_check and not hasattr(members['check'], '__call__')), "check() must be a function"
+
+    if('signature' not in members):
+        return UntypedOp(name,members)
     
     # See if call/check etc. are raw python functions and need to be wrapped in @jit.
     call_needs_jitting = not isinstance(members['call'], Dispatcher)
@@ -350,17 +385,23 @@ class OpMeta(type):
     def __call__(self,*args, **kwargs):
         ''' A decorator function that builds a new Op'''
         if(len(args) > 1): raise ValueError("Op() takes at most one position argument 'signature'.")
-        if(isinstance(args[0],(str, numba.core.typing.templates.Signature))):
-            kwargs['signature'] = args[0]
-        else:
-            raise ValueError(f"Unrecognized type {type(args[0])} for 'signature'")
-
+        
         def wrapper(call_func):
             assert hasattr(call_func,"__call__")
             name = call_func.__name__
             members = kwargs
             members["call"] = call_func
             return new_op(name, members)
+
+        if(isinstance(args[0],(str, numba.core.typing.templates.Signature))):
+            kwargs['signature'] = args[0]
+        elif(hasattr(args[0],'__call__')):
+            return wrapper(args[0])
+        else:
+            raise ValueError(f"Unrecognized type {type(args[0])} for 'signature'")
+
+
+        
 
         return wrapper
 

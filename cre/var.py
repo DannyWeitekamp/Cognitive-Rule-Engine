@@ -256,7 +256,7 @@ class Var(structref.StructRefProxy):
     def get_ptr(self):
         return get_var_ptr(self)
 
-@njit(cache=True)    
+@njit(i8(GenericVarType), cache=True)    
 def get_var_ptr(self):
     return _pointer_from_struct(self)
 

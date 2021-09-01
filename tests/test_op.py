@@ -290,8 +290,8 @@ if __name__ == "__main__":
     #     test_define_apply_op()
     # # with PrintElapse("test_op_singleton"):
     #     test_compose_op()
-    # # with PrintElapse("test_var_propagation"):
-    #     test_var_propagation()
+    with PrintElapse("test_var_propagation"):
+        test_var_propagation()
     #     test_order()
     # # with PrintElapse("test_auto_aliasing"):
     #     test_auto_aliasing()
@@ -300,6 +300,6 @@ if __name__ == "__main__":
 
         # test_commutes()
         # test_fact_args()
-    not_jit_compilable()
+    # not_jit_compilable()
             
 

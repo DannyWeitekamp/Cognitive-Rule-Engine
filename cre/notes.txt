@@ -171,6 +171,20 @@ TODO:
 
 --Aug 29, 2021--
 
-Going to simply reorganize Conditions so that it builds a DNF of Literals (i.e. an Op + other stuff). The main DNF will just be a List(List(Literal)), but at initialization it will be reorganized into
+Going to simply reorganize Conditions so that it builds a DNF of Literals (i.e. an Op + other stuff). The main DNF will just be a List(List(Literal)), but at initialization it will be reorganized such that every conjunct 
 
 
+--Sep 1, 2021--
+
+We need to be able to reconstruct the python object for an Op instance. The most straight forward way would probably be to reapply it's __class__. This could either be stored in the cre_context() and retrieved by some unique repr of the Op, or somehow stored in the struct or datamodel of the Op. 
+
+
+Op class:
+	repr: Op[Add](signature=float64(float64,float64), members={})
+	str: ...
+
+Op:
+	repr: Add(Add(a:float64, b:float64), c:float64) -> float64
+	str : ((a + b) + c)
+	expr_template : Add(Add({0},{1}),{2})
+	shorthand_template : (({0} + {1}) + {2})

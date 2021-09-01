@@ -7,7 +7,7 @@ from numba.typed import List, Dict
 from numba.types import ListType, DictType, unicode_type, void, Tuple
 from numba.experimental import structref
 from numba.experimental.structref import new, define_boxing, define_attributes, _Utils
-from numba.extending import overload_method, intrinsic, overload_attribute, intrinsic, lower_getattr_generic, overload, infer_getattr, lower_setattr_generic
+from numba.extending import NativeValue, box, unbox, overload_method, intrinsic, overload_attribute, intrinsic, lower_getattr_generic, overload, infer_getattr, lower_setattr_generic
 from numba.core.typing.templates import AttributeTemplate
 from numba.core.errors import NumbaError, NumbaPerformanceWarning
 from cre.caching import gen_import_str, unique_hash,import_from_cached, source_to_cache, source_in_cache, cache_safe_exec, get_cache_path
@@ -26,7 +26,7 @@ from cre.predicate_node import BasePredicateNode,BasePredicateNodeType, get_alph
  get_beta_predicate_node_definition, deref_attrs, define_alpha_predicate_node, define_beta_predicate_node, AlphaPredicateNode, BetaPredicateNode
 from cre.make_source import make_source, gen_def_func, gen_assign, resolve_template, gen_def_class
 from numba.core import imputils, cgutils
-from numba.core.datamodel import default_manager, models
+from numba.core.datamodel import default_manager, models, register_default
 from numba.experimental.function_type import _get_wrapper_address
 
 
@@ -163,10 +163,84 @@ op_fields_dict = {
     # "is_const" : i8[::1]
 }
 
-@structref.register
 class OpTypeTemplate(types.StructRef):
     def preprocess_fields(self, fields):
         return tuple((name, types.unliteral(typ)) for name, typ in fields)
+
+
+@register_default(OpTypeTemplate)
+class OpModel(models.StructModel):
+    """Model for a mutable struct.
+    A reference to the payload
+    """
+    def __init__(self, dmm, fe_typ):
+        dtype = fe_typ.get_data_type()
+        members = [
+            ("meminfo", types.MemInfoPointer(dtype)),
+            ("py_class", types.pyobject),
+        ]
+        super().__init__(dmm, fe_typ, members)
+
+
+# @structref.register
+
+default_manager.register(OpTypeTemplate, OpModel)
+define_attributes(OpTypeTemplate)
+
+
+def op_define_boxing(struct_type, obj_class):
+    """
+        Like structref.define_boxing but adds in __class__ to the datamodel
+    """
+    if struct_type is types.StructRef:
+        raise ValueError(f"cannot register {types.StructRef}")
+
+    obj_ctor = obj_class._numba_box_
+
+    print("op_define_boxing:", type(obj_ctor))
+
+    @box(struct_type)
+    def box_op(typ, val, c):
+        struct_ref = cgutils.create_struct_proxy(typ)(c.context, c.builder, value=val)
+        meminfo = struct_ref.meminfo
+        py_class = struct_ref.py_class
+
+        mip_type = types.MemInfoPointer(types.voidptr)
+        boxed_meminfo = c.box(mip_type, meminfo)
+        boxed_py_class = c.box(types.pyobject, py_class)
+
+        ctor_pyfunc = c.pyapi.unserialize(c.pyapi.serialize_object(obj_ctor))
+        ty_pyobj = c.pyapi.unserialize(c.pyapi.serialize_object(typ))
+
+        res = c.pyapi.call_function_objargs(
+            ctor_pyfunc, [ty_pyobj, boxed_meminfo, boxed_py_class],
+        )
+        c.pyapi.decref(ctor_pyfunc)
+        c.pyapi.decref(ty_pyobj)
+        c.pyapi.decref(boxed_meminfo)
+        c.pyapi.decref(boxed_py_class)
+        return res
+
+    @unbox(struct_type)
+    def unbox_op(typ, obj, c):
+        mi_obj = c.pyapi.object_getattr_string(obj, "_meminfo")
+        op_class_obj = c.pyapi.object_getattr_string(obj, "__class__")
+
+        mip_type = types.MemInfoPointer(types.voidptr)
+        mi = c.unbox(mip_type, mi_obj).value
+
+        op_class = c.unbox(types.pyobject, op_class_obj).value
+
+        struct_ref = cgutils.create_struct_proxy(typ)(c.context, c.builder)
+        struct_ref.meminfo = mi
+        struct_ref.py_class = op_class
+
+        out = struct_ref._getvalue()
+
+        c.pyapi.decref(mi_obj)
+        c.pyapi.decref(op_class_obj)
+        return NativeValue(out)
+
 
 GenericOpType = OpTypeTemplate([(k,v) for k,v in op_fields_dict.items()])
 
@@ -185,7 +259,7 @@ class UntypedOp():
         return self._arg_names
 
     def __repr__(self):
-        return f'UntypedOp(name={self.name}, members={self.members}'
+        return f'UntypedOp(name={self.name}, members={self.members})'
 
     def __str__(self):
         return f'{self.name}({", ".join(self.arg_names)})'
@@ -368,8 +442,8 @@ def call_op(self,*py_args):
 class OpMeta(type):
     ''' A the metaclass for op. Useful for singleton generation.
     '''
-    def __repr__(cls):
-        return cls.__name__ + f'({",".join(["?"] * len(cls.signature.args))})'
+    # def __repr__(cls):
+    #     return cls.__name__ + f'({",".join(["?"] * len(cls.signature.args))})'
 
     # This is similar to defining __init_subclass__ in Op inside except we can
     #    return whatever we want. In this case we return a singleton instance.
@@ -393,12 +467,13 @@ class OpMeta(type):
             members["call"] = call_func
             return new_op(name, members)
 
-        if(isinstance(args[0],(str, numba.core.typing.templates.Signature))):
-            kwargs['signature'] = args[0]
-        elif(hasattr(args[0],'__call__')):
-            return wrapper(args[0])
-        else:
-            raise ValueError(f"Unrecognized type {type(args[0])} for 'signature'")
+        if(len(args) == 1):
+            if(isinstance(args[0],(str, numba.core.typing.templates.Signature))):
+                kwargs['signature'] = args[0]
+            elif(hasattr(args[0],'__call__')):
+                return wrapper(args[0])
+            else:
+                raise ValueError(f"Unrecognized type {type(args[0])} for 'signature'")
 
 
         
@@ -459,6 +534,23 @@ class Op(structref.StructRefProxy,metaclass=OpMeta):
         setattr(cls, name+"_pyfunc", py_func)
         setattr(cls, name+"_sig", sig)
         setattr(cls, name+'_bytes', dill.dumps(py_func))#dedent(inspect.getsource(py_func)))
+
+
+    @classmethod
+    def _numba_box_(cls, ty, mi, py_cls=None):
+        # print(ty, mi, py_cls)
+        # instance = structref.StructRefProxy._numba_box_(cls, ty, mi)
+        instance = super(structref.StructRefProxy,cls).__new__(cls)
+        # print("instance)
+        # instance = 
+        instance._type = ty
+        instance._meminfo = mi
+        if(py_cls is not None):
+            instance.__class__ = py_cls
+
+        # print("CLASS:", py_cls)
+        # print("<< ", type(instance))
+        return instance
 
 
 
@@ -679,7 +771,7 @@ def set_shorthand_expr(self, expr):
 
 
 
-define_boxing(OpTypeTemplate,Op)   
+op_define_boxing(OpTypeTemplate,Op)   
 
 def g_nm(x,names):
     '''Helper function that helps with putting instances of Var

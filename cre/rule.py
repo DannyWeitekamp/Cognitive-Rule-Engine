@@ -29,10 +29,10 @@ from cre.context import cre_context
 from cre.utils import _cast_structref, _struct_from_pointer, _func_from_address
 from cre.var import Var
 from cre.fact import define_fact, gen_fact_import_str
-from cre.condition_node import get_linked_conditions_instance
+from cre.conditions import get_linked_conditions_instance
 from cre.memory import MemoryType
 from cre.matching import _get_ptr_matches, _struct_tuple_from_pointer_arr
-from cre.condition_node import ConditionsType
+from cre.conditions import ConditionsType
 import inspect, dill, pickle
 from textwrap import dedent
 

@@ -6,7 +6,7 @@ from numba.experimental import structref
 from numba.core.typeconv import Conversion
 
 def _gen_getter_jit(typ,attr):
-    return f'''@njit
+    return f'''@njit(cache=True)
 def {typ}_get_{attr}(self):
     return self.{attr}
 '''
@@ -65,6 +65,7 @@ class {typ}(structref.StructRefProxy):
 def define_structref_template(name, fields, define_constructor=True,define_boxing=True):
     if(isinstance(fields,dict)): [(k,v) for k,v in fields.items()]
     hash_code = unique_hash([name,fields])
+    print(name, hash_code)
     if(not source_in_cache(name,hash_code)):
         source = gen_structref_code(name, fields, define_constructor=define_constructor,
              define_boxing=define_boxing)

@@ -5,7 +5,7 @@ from cre.fact import define_fact
 from cre.rule import Rule, RuleEngine
 from cre.memory import Memory
 from cre.var import Var
-from cre.condition_node import NOT
+from cre.conditions import NOT
 from cre.utils import _pointer_from_struct
 
 @njit(cache=True)

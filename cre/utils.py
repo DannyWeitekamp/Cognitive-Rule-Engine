@@ -565,3 +565,13 @@ def assign_to_alias_in_parent_frame(x,alias):
         inspect.stack()[2][0].f_globals[alias] = x
 
 
+##### Helpful context for timing code ####
+import time
+class PrintElapse():
+    def __init__(self, name):
+        self.name = name
+    def __enter__(self):
+        self.t0 = time.time_ns()/float(1e6)
+    def __exit__(self,*args):
+        self.t1 = time.time_ns()/float(1e6)
+        print(f'{self.name}: {self.t1-self.t0:.2f} ms')

@@ -85,12 +85,10 @@ from cre.op import op_fields_dict, OpTypeTemplate, warn_cant_compile
 import dill
 nopython_call = {cls.nopython_call} 
 nopython_check = {cls.nopython_check} 
-'''
-    if(call_needs_jitting):
 
-        source +=f'''
 call_sig = dill.loads({dill.dumps(cls.call_sig)})
 call_pyfunc = dill.loads({cls.call_bytes})
+
 try:
     call = njit(call_sig,cache=True)(call_pyfunc)
 except NumbaError as e:
@@ -108,10 +106,11 @@ if(nopython_call==False):
 
 call_addr = _get_wrapper_address(call, call_sig)
 '''
-    if(check_needs_jitting):
+    if(hasattr(cls,'check')):
         source += f'''
 check_sig = dill.loads({dill.dumps(cls.check_sig)})
 check_pyfunc = dill.loads({cls.check_bytes})
+
 try:
     check = njit(check_sig,cache=True)(check_pyfunc)
 except NumbaError as e:
@@ -264,38 +263,44 @@ class UntypedOp():
 
     def __call__(self,*py_args):
 
-        # Fill types and check for all_const/not_var 
-        arg_types = [] 
-        all_const = True
-        any_not_var = False
-        for x in py_args:
-            arg_types.append(resolve_return_type(x))
-            if(isinstance(x,(OpMeta,OpComp, Op))):
-                all_const = False
-                any_not_var = True
-            elif(isinstance(x,(Var))):
-                all_const = False
-            else:
-                any_not_var = True
+        with PrintElapse("  get types"):
+            # Fill types and check for all_const/not_var 
+            arg_types = [] 
+            all_const = True
+            any_not_var = False
+            for x in py_args:
+                arg_types.append(resolve_return_type(x))
+                if(isinstance(x,(OpMeta,OpComp, Op))):
+                    all_const = False
+                    any_not_var = True
+                elif(isinstance(x,(Var))):
+                    all_const = False
+                else:
+                    any_not_var = True
 
-
-        call = njit(cache=True)(self.members['call'])
-
-        (template,*rest) = call.get_call_template(arg_types,{})
-        sig = template.cases[0]
-        self.members['signature'] = sig
+        with PrintElapse("  njit"):
+            if(not isinstance(self.members['call'],Dispatcher)):
+                self.members['call'] = njit(cache=True)(self.members['call'])
+            call = self.members['call']
+        print("<< N Overloads", len(call.overloads))
+        with PrintElapse("  get_call_template"):
+            # Note: get_call_template is an internal method of numba.Dispatcher 
+            (template,*rest) = call.get_call_template(arg_types,{})
+            sig = template.cases[0]
+            self.members['signature'] = sig
 
         
         # print("^^", op)
-        if(not all_const and any_not_var):
-            op = new_op(self.name, self.members)
-            return OpComp(op, *py_args).flatten()
-        elif(all_const):
-            return call(*py_args)
-        else:
-            var_ptrs = np.array([v.get_ptr() for v in py_args],dtype=np.int64)
-            op = new_op(self.name, self.members,var_ptrs=var_ptrs)
-            return op
+        with PrintElapse("  rest"):
+            if(not all_const and any_not_var):
+                op = new_op(self.name, self.members)
+                return OpComp(op, *py_args).flatten()
+            elif(all_const):
+                return call(*py_args)
+            else:
+                var_ptrs = np.array([v.get_ptr() for v in py_args],dtype=np.int64)
+                op = new_op(self.name, self.members,var_ptrs=var_ptrs)
+                return op
 
         # else:
         #     op_comp = OpComp(self,*py_args)
@@ -405,35 +410,38 @@ def new_op(name, members, var_ptrs=None):
     if('signature' not in members):
         return UntypedOp(name,members)
     
+    with PrintElapse("\thandling"):
     # See if call/check etc. are raw python functions and need to be wrapped in @jit.
-    call_needs_jitting = not isinstance(members['call'], Dispatcher)
-    check_needs_jitting = has_check and (not isinstance(members['check'],Dispatcher))
-    
-    # 'cls' is the class of the user defined Op (i.e. Add(a,b)).
-    cls = type.__new__(OpMeta,name,(Op,),members) 
-    # cls.__call__ = call_op
-    cls._handle_commutes()
-    cls._handle_nopython()
+        call_needs_jitting = not isinstance(members['call'], Dispatcher)
+        check_needs_jitting = has_check and (not isinstance(members['check'],Dispatcher))
+        
+        # 'cls' is the class of the user defined Op (i.e. Add(a,b)).
+        cls = type.__new__(OpMeta,name,(Op,),members) 
+        # cls.__call__ = call_op
+        cls._handle_commutes()
+        cls._handle_nopython()
 
-    if(call_needs_jitting): cls.process_method("call", cls.signature)
-    
-    if(has_check):
-        if(check_needs_jitting): cls.process_method("check", u1(*cls.signature.args))        
+    with PrintElapse("\tpickling"):
+        cls.process_method("call", cls.signature)
+        
+        if(has_check):
+            cls.process_method("check", u1(*cls.signature.args))        
     
     # If either call or check needs to be jitted then generate source code
     #  to do the jitting and put it in the cache. Or retrieve if already
     #  defined.  This way jit(cache=True) can reliably re-retreive.
-    if(call_needs_jitting or check_needs_jitting):
+    with PrintElapse("\tget_src"):
+        # if(call_needs_jitting or check_needs_jitting):
         name = cls.__name__
-        hash_code = unique_hash([cls.signature, cls.call_bytes,
-            cls.check_bytes if has_check else None])
 
-        cls.hash_code = hash_code
+        #Triggers getter
+        hash_code = cls.hash_code 
+        # print("HASH!!!", hash_code)
         if(not source_in_cache(name, hash_code) or getattr(cls,'cache',True) == False):
             source = gen_op_source(cls, call_needs_jitting, check_needs_jitting)
             source_to_cache(name,hash_code,source)
 
-        print(get_cache_path(name,hash_code))
+        # print(get_cache_path(name,hash_code))
 
         to_import = ['call','call_addr'] if call_needs_jitting else []
         if(check_needs_jitting): to_import += ['check', 'check_addr']
@@ -441,30 +449,31 @@ def new_op(name, members, var_ptrs=None):
         for key, value in l.items():
             setattr(cls, key, value)
 
-    # Make static so that self isn't the first argument for call/check.
-    cls.call = staticmethod(cls.call)
-    if(has_check): cls.check = staticmethod(cls.check)
+    with PrintElapse("\tgwap"):
+        # Make static so that self isn't the first argument for call/check.
+        cls.call = staticmethod(cls.call)
+        if(has_check): cls.check = staticmethod(cls.check)
 
-    # Get store the addresses for call/check
-    if(not call_needs_jitting): 
-        cls.call_sig = cls.signature
-        cls.call_addr = _get_wrapper_address(cls.call,cls.call_sig)
+        # Get store the addresses for call/check
+        if(not call_needs_jitting): 
+            cls.call_sig = cls.signature
+            cls.call_addr = _get_wrapper_address(cls.call,cls.call_sig)
 
-    if(not check_needs_jitting and has_check):
-        cls.check_sig = u1(*cls.signature.args)
-        cls.check_addr = _get_wrapper_address(cls.check,cls.check_sig)
+        if(not check_needs_jitting and has_check):
+            cls.check_sig = u1(*cls.signature.args)
+            cls.check_addr = _get_wrapper_address(cls.check,cls.check_sig)
 
     # Standardize shorthand definitions
     if(hasattr(cls,'shorthand') and 
         not isinstance(cls.shorthand,dict)):
         cls.shorthand = {'*' : cls.shorthand}
 
-    
-    if(cls.__name__ != "__GenerateOp__"):
-        context = cre_context()
-        op_inst = cls.make_singleton_inst(var_ptrs=var_ptrs)
-        context._register_op_inst(op_inst)
-        return op_inst
+    with PrintElapse("\tMakeInst"):
+        if(cls.__name__ != "__GenerateOp__"):
+            context = cre_context()
+            op_inst = cls.make_singleton_inst(var_ptrs=var_ptrs)
+            context._register_op_inst(op_inst)
+            return op_inst
 
     return cls
 
@@ -521,7 +530,8 @@ class OpMeta(type):
         return wrapper
 
     def __repr__(cls):
-        return f"cre.OpMeta(name={cls.__name__!r}, signature=[{cls.signature}])"
+        sig = getattr(cls,'signature',None)
+        return f"cre.OpMeta(name={cls.__name__!r}, signature=[{sig}])"
         
 
     def _handle_nopython(cls):
@@ -549,7 +559,6 @@ class OpMeta(type):
         else:
             assert(isinstance(cls.commutes,Iterable))
 
-        print(cls.commutes)
 
         right_commutes = {}#Dict.empty(i8,i8[::1])
         for i in range(len(cls.commutes)):
@@ -563,6 +572,28 @@ class OpMeta(type):
             f"cre.Op {cls.__name__!r} has invalid 'commutes' member {cls.commutes}. Signature arguments {k} and {commuting_set[j]} have different types {typ1} and {typ2}."
         cls.right_commutes = right_commutes
 
+    def process_method(cls,name,sig):
+        if(not hasattr(cls, name+"_pyfunc")):
+            func = getattr(cls,name)
+            if(isinstance(func, Dispatcher)):
+                py_func = func.py_func
+            else:
+                py_func = func
+
+            setattr(cls, name+"_pyfunc", py_func)
+            setattr(cls, name+"_sig", sig)
+            setattr(cls, name+'_bytes', dill.dumps(py_func))
+
+
+    @property
+    def hash_code(cls):
+        if(not hasattr(cls,'_hash_code')):
+            hash_code = unique_hash([cls.signature, cls.call_bytes,
+                    cls.check_bytes if hasattr(cls,'check') else None])
+
+            cls._hash_code = hash_code
+        return cls._hash_code
+
 
 
 class Op(structref.StructRefProxy,metaclass=OpMeta):
@@ -570,13 +601,8 @@ class Op(structref.StructRefProxy,metaclass=OpMeta):
         created by subclassing Op and defining a signature, call(), and 
         optional check() method. 
     '''
-    @classmethod
-    def process_method(cls,name,sig):
-        py_func = getattr(cls,name)
-        setattr(cls, name+"_pyfunc", py_func)
-        setattr(cls, name+"_sig", sig)
-        setattr(cls, name+'_bytes', dill.dumps(py_func))#dedent(inspect.getsource(py_func)))
-
+    # @classmethod
+    
 
     @classmethod
     def _numba_box_(cls, ty, mi, py_cls=None):
@@ -730,6 +756,12 @@ class Op(structref.StructRefProxy,metaclass=OpMeta):
         if(not hasattr(self,'_arg_names')):
             self._arg_names = extract_arg_names(self)
         return self._arg_names
+
+    @property
+    def hash_code(self):
+        return self.__class__.hash_code
+
+    
              
 
     def gen_expr(self, lang='python',
@@ -789,6 +821,8 @@ class Op(structref.StructRefProxy,metaclass=OpMeta):
             call_body = f'{ind}return {temp.format(*self.arg_names)}\n'
 
         return gen_def_func(lang,'call',", ".join(self.arg_names), call_body)
+
+
 
 
 @njit(cache=True)
@@ -951,7 +985,7 @@ class OpComp():
                 else:
                     constants[x] = op.signature.args[i]
             args.append(x)
-        print("<<",_vars)
+        # print("<<",_vars)
         self.op = op
         self.vars = _vars
         self.args = args
@@ -973,6 +1007,7 @@ class OpComp():
         ''' Flattens the OpComp into a single Op. Generates the source
              for the new Op as needed.'''
         if(not hasattr(self,'_generate_op')):
+            # print([type(x) for x in self.used_ops])
             hash_code = unique_hash([self.expr_template,*[(x.name,x.hash_code) for x in self.used_ops]])
             if(not source_in_cache('__GenerateOp__', hash_code)):
                 

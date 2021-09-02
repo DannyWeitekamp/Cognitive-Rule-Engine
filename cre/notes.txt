@@ -206,4 +206,7 @@ To handle all of these we should make a resolve_return_type function that can ta
 
 TODO:
 	[x] Fix bug with variables names not propogating w/ Op_comp
-	[] Make test cases for untypedOp
+	[x] Make test cases for untypedOp
+
+	[] Make dereffing Vars need to be compiled
+	[] Implement repr() for Op

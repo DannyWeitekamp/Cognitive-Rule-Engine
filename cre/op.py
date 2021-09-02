@@ -246,6 +246,7 @@ class UntypedOp():
     def __init__(self,name,members):
         self.name = name
         self.members = members
+        self.members['call'] = njit(cache=True)(self.members['call'])
     @property
     def arg_names(self):
         if(not hasattr(self,"_arg_names")):
@@ -279,28 +280,33 @@ class UntypedOp():
                     any_not_var = True
 
         with PrintElapse("  njit"):
-            if(not isinstance(self.members['call'],Dispatcher)):
-                self.members['call'] = njit(cache=True)(self.members['call'])
+            # if(not isinstance(self.members['call'],Dispatcher)):
+            #     self.members['call'] = njit(cache=True)(self.members['call'])
             call = self.members['call']
-        print("<< N Overloads", len(call.overloads))
+        # print("<< N Overloads", len(call.overloads))
         with PrintElapse("  get_call_template"):
-            # Note: get_call_template is an internal method of numba.Dispatcher 
-            (template,*rest) = call.get_call_template(arg_types,{})
-            sig = template.cases[0]
+            cres = call.overloads.get(tuple(arg_types))
+            # print("CRES:", cres.signature if cres else None)
+            if(cres is not None):
+                sig = cres.signature
+            else:
+                # Note: get_call_template is an internal method of numba.Dispatcher 
+                (template,*rest) = call.get_call_template(arg_types,{})
+                sig = template.cases[0]
             self.members['signature'] = sig
 
         
         # print("^^", op)
-        with PrintElapse("  rest"):
-            if(not all_const and any_not_var):
-                op = new_op(self.name, self.members)
-                return OpComp(op, *py_args).flatten()
-            elif(all_const):
-                return call(*py_args)
-            else:
-                var_ptrs = np.array([v.get_ptr() for v in py_args],dtype=np.int64)
-                op = new_op(self.name, self.members,var_ptrs=var_ptrs)
-                return op
+        # with PrintElapse("  rest"):
+        if(not all_const and any_not_var):
+            op = new_op(self.name, self.members)
+            return OpComp(op, *py_args).flatten()
+        elif(all_const):
+            return call(*py_args)
+        else:
+            var_ptrs = np.array([v.get_ptr() for v in py_args],dtype=np.int64)
+            op = new_op(self.name, self.members,var_ptrs=var_ptrs)
+            return op
 
         # else:
         #     op_comp = OpComp(self,*py_args)
@@ -431,23 +437,20 @@ def new_op(name, members, var_ptrs=None):
     #  to do the jitting and put it in the cache. Or retrieve if already
     #  defined.  This way jit(cache=True) can reliably re-retreive.
     with PrintElapse("\tget_src"):
-        # if(call_needs_jitting or check_needs_jitting):
-        name = cls.__name__
+        if(call_needs_jitting or check_needs_jitting):
+            name = cls.__name__
 
-        #Triggers getter
-        hash_code = cls.hash_code 
-        # print("HASH!!!", hash_code)
-        if(not source_in_cache(name, hash_code) or getattr(cls,'cache',True) == False):
-            source = gen_op_source(cls, call_needs_jitting, check_needs_jitting)
-            source_to_cache(name,hash_code,source)
+            #Triggers getter
+            hash_code = cls.hash_code 
+            if(not source_in_cache(name, hash_code) or getattr(cls,'cache',True) == False):
+                source = gen_op_source(cls, call_needs_jitting, check_needs_jitting)
+                source_to_cache(name,hash_code,source)
 
-        # print(get_cache_path(name,hash_code))
-
-        to_import = ['call','call_addr'] if call_needs_jitting else []
-        if(check_needs_jitting): to_import += ['check', 'check_addr']
-        l = import_from_cached(name, hash_code, to_import)
-        for key, value in l.items():
-            setattr(cls, key, value)
+            to_import = ['call','call_addr'] if call_needs_jitting else []
+            if(check_needs_jitting): to_import += ['check', 'check_addr']
+            l = import_from_cached(name, hash_code, to_import)
+            for key, value in l.items():
+                setattr(cls, key, value)
 
     with PrintElapse("\tgwap"):
         # Make static so that self isn't the first argument for call/check.
@@ -582,7 +585,14 @@ class OpMeta(type):
 
             setattr(cls, name+"_pyfunc", py_func)
             setattr(cls, name+"_sig", sig)
-            setattr(cls, name+'_bytes', dill.dumps(py_func))
+            
+            # Speed up by caching  dill.dumps() of py_func in the func instance
+            if(hasattr(py_func,'_cre_dill_bytes')):
+                setattr(cls, name+'_bytes', py_func._cre_dill_bytes)
+            else:
+                dill_bytes = dill.dumps(py_func)
+                setattr(cls, name+'_bytes', dill_bytes)
+                py_func._cre_dill_bytes = dill_bytes
 
 
     @property

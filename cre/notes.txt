@@ -188,3 +188,22 @@ Op:
 	str : ((a + b) + c)
 	expr_template : Add(Add({0},{1}),{2})
 	shorthand_template : (({0} + {1}) + {2})
+
+
+cases:
+	1) Add(Var(float,"x"),Var(float,"y"))
+	-Should produce a new instance of Add with the new Vars, and specialize Add if necessary.
+	2) Add(Add(Var(float,"x"),Var(float,"y")), Var(float,"z"))
+	-As above for the inner term, then make an OpComp that is flattened into an op
+	3) Add(1,2)
+	-Should specialize Add if needed and apply call()
+	4) Add(1,Var(f8,"y"))
+	-Should specialize Add if needed, make a new OpComp and then flatten it into an Op
+
+
+To handle all of these we should make a resolve_return_type function that can take a Var, Op, or Constant 
+
+
+TODO:
+	[x] Fix bug with variables names not propogating w/ Op_comp
+	[] Make test cases for untypedOp

@@ -147,8 +147,8 @@ from cre.var import GenericVarType
 
 op_fields_dict = {
     "name" : unicode_type,
-    "repr_expr" : unicode_type,
-    "shorthand_expr" : unicode_type,
+    "expr_template" : unicode_type,
+    "shorthand_template" : unicode_type,
     # Mapping variable ptrs to aliases
     "var_map" : DictType(i8, unicode_type),
     "inv_var_map" : DictType(unicode_type, i8),
@@ -170,8 +170,7 @@ class OpTypeTemplate(types.StructRef):
 
 @register_default(OpTypeTemplate)
 class OpModel(models.StructModel):
-    """Model for a mutable struct.
-    A reference to the payload
+    """Model for cre.Op. A reference to the structref payload, and the Op class.
     """
     def __init__(self, dmm, fe_typ):
         dtype = fe_typ.get_data_type()
@@ -196,8 +195,6 @@ def op_define_boxing(struct_type, obj_class):
         raise ValueError(f"cannot register {types.StructRef}")
 
     obj_ctor = obj_class._numba_box_
-
-    print("op_define_boxing:", type(obj_ctor))
 
     @box(struct_type)
     def box_op(typ, val, c):
@@ -265,15 +262,61 @@ class UntypedOp():
         return f'{self.name}({", ".join(self.arg_names)})'
 
 
-    def __call__(self,*args):
+    def __call__(self,*py_args):
+
+        # Fill types and check for all_const/not_var 
+        arg_types = [] 
+        all_const = True
+        any_not_var = False
+        for x in py_args:
+            arg_types.append(resolve_return_type(x))
+            if(isinstance(x,(OpMeta,OpComp, Op))):
+                all_const = False
+                any_not_var = True
+            elif(isinstance(x,(Var))):
+                all_const = False
+            else:
+                any_not_var = True
+
+
         call = njit(cache=True)(self.members['call'])
-        # print(call.overloads)
-        # with PrintElapse("get_call_template"):
-        (template,*rest) = call.get_call_template([v.head_type for v in args],{})
+
+        (template,*rest) = call.get_call_template(arg_types,{})
         sig = template.cases[0]
         self.members['signature'] = sig
-        return new_op(self.name, self.members)
 
+        
+        # print("^^", op)
+        if(not all_const and any_not_var):
+            op = new_op(self.name, self.members)
+            return OpComp(op, *py_args).flatten()
+        elif(all_const):
+            return call(*py_args)
+        else:
+            var_ptrs = np.array([v.get_ptr() for v in py_args],dtype=np.int64)
+            op = new_op(self.name, self.members,var_ptrs=var_ptrs)
+            return op
+
+        # else:
+        #     op_comp = OpComp(self,*py_args)
+        #     op = op_comp.flatten()
+        # return 
+
+def resolve_return_type(x):
+    if(isinstance(x,Var)):
+        return x.head_type
+    elif(isinstance(x,Op)):
+        return x.signature.return_type
+    elif(isinstance(x, OpComp)):
+        return x.op.signature.return_type
+    elif(isinstance(x, UntypedOp)):
+        raise ValueError(f"Cannot resolve return type of UntypedOp {x}")
+    elif(isinstance(x, (float,int))):
+        return types.float64
+    elif(isinstance(x, (str))):
+        return types.unicode_type
+
+        
 
 
 
@@ -351,7 +394,7 @@ def op_ctor(name, return_type_name, arg_type_names, var_ptrs, call_addr=0, call_
     return st
 
 
-def new_op(name, members):
+def new_op(name, members, var_ptrs=None):
     '''Creates a new custom Op with 'name' and 'members' '''
     has_check = 'check' in members
     assert 'call' in members, "Op must have call() defined"
@@ -368,7 +411,7 @@ def new_op(name, members):
     
     # 'cls' is the class of the user defined Op (i.e. Add(a,b)).
     cls = type.__new__(OpMeta,name,(Op,),members) 
-    cls.__call__ = call_op
+    # cls.__call__ = call_op
     cls._handle_commutes()
     cls._handle_nopython()
 
@@ -419,24 +462,24 @@ def new_op(name, members):
     
     if(cls.__name__ != "__GenerateOp__"):
         context = cre_context()
-        op_inst = cls.make_singleton_inst()
+        op_inst = cls.make_singleton_inst(var_ptrs=var_ptrs)
         context._register_op_inst(op_inst)
         return op_inst
 
     return cls
 
-def call_op(self,*py_args):
-    if(all([not isinstance(x,(Var,OpMeta,OpComp, Op)) for x in py_args])):
-        # If all of the arguments are constants then just call the Op
-        return self.call(*py_args)
-    else:
-        # Otherwise build an OpComp and flatten it into a new Op
-        op_comp = OpComp(self,*py_args)
-        op = op_comp.flatten()
-        op.op_comp = op_comp
-        set_repr_expr(op, op.gen_expr())
-        set_shorthand_expr(op, op.gen_expr(use_shorthand=True))
-        return op
+
+
+# def call_op(self,*py_args):
+#     if(all([not isinstance(x,(Var,OpMeta,OpComp, Op)) for x in py_args])):
+#         # If all of the arguments are constants then just call the Op
+#         return self.call(*py_args)
+#     else:
+#         # Otherwise build an OpComp and flatten it into a new Op
+#         op_comp = OpComp(self,*py_args)
+#         op = op_comp.flatten()
+        
+#         return op
 
         
 class OpMeta(type):
@@ -473,13 +516,12 @@ class OpMeta(type):
             elif(hasattr(args[0],'__call__')):
                 return wrapper(args[0])
             else:
-                raise ValueError(f"Unrecognized type {type(args[0])} for 'signature'")
-
-
-        
+                raise ValueError(f"Unrecognized type {type(args[0])} for 'signature'")        
 
         return wrapper
 
+    def __repr__(cls):
+        return f"cre.OpMeta(name={cls.__name__!r}, signature=[{cls.signature}])"
         
 
     def _handle_nopython(cls):
@@ -552,7 +594,13 @@ class Op(structref.StructRefProxy,metaclass=OpMeta):
         # print("<< ", type(instance))
         return instance
 
+    def get_var(self,i):
+        return get_var(self, i)
 
+    def as_op_comp(self):
+        if(hasattr(self,'op_comp')):
+            return self.op_comp            
+        return OpComp(self,*[self.get_var(i) for i in range(len(self.signature.args))])
 
     def __and__(self,other):
         from cre.conditions import op_to_cond, conditions_and
@@ -580,14 +628,25 @@ class Op(structref.StructRefProxy,metaclass=OpMeta):
     #         op_comp = OpComp(self,*py_args)
     #         op = op_comp.flatten()
     #         op.op_comp = op_comp
-    #         set_repr_expr(op, op.gen_expr())
-    #         set_shorthand_expr(op, op.gen_expr(use_shorthand=True))
+    #         set_expr_template(op, op.gen_expr())
+    #         set_shorthand_template(op, op.gen_expr(use_shorthand=True))
     #         return op
+
+    def __call__(self,*py_args):
+        if(all([not isinstance(x,(Var,OpMeta,OpComp, Op)) for x in py_args])):
+            # If all of the arguments are constants then just call the Op
+            return self.call(*py_args)
+        else:
+            # Otherwise build an OpComp and flatten it into a new Op
+            op_comp = OpComp(self,*py_args)
+            op = op_comp.flatten()
+            
+            return op
 
     def __str__(self):
         name = get_name(self)
         if(name == "__GenerateOp__"):
-            return self.repr_expr
+            return self.expr_template
         else:
             return op_str(self)
 
@@ -613,24 +672,26 @@ class Op(structref.StructRefProxy,metaclass=OpMeta):
             check_addr=cls.__dict__.get('check_addr',0),
             )
 
-        op_inst.arg_names = arg_names
+        op_inst._arg_names = arg_names
         # In the NRT the instance will be a GenericOpType, but on
         #   the python side we need it to be its own custom class
         op_inst.__class__ = cls
 
+        template_placeholders = [f'{{{i}}}' for i in range(len(arg_names))]
+
         #Make and store repr and shorthand expressions
-        repr_expr = op_inst.gen_expr(
-            arg_names=arg_names,
+        expr_template = op_inst.gen_expr(
+            arg_names=template_placeholders,
             use_shorthand=False,
         )
-        set_repr_expr(op_inst, repr_expr)
+        set_expr_template(op_inst, expr_template)
         if(hasattr(op_inst,"shorthand")):
-            set_shorthand_expr(op_inst, op_inst.gen_expr(
-                arg_names=arg_names,
+            set_shorthand_template(op_inst, op_inst.gen_expr(
+                arg_names=template_placeholders,
                 use_shorthand=True,
             ))
         else:
-            set_shorthand_expr(op_inst, repr_expr)
+            set_shorthand_template(op_inst, expr_template)
 
         return op_inst
 
@@ -648,12 +709,12 @@ class Op(structref.StructRefProxy,metaclass=OpMeta):
         return get_name(self)
 
     @property
-    def repr_expr(self):
-        return get_repr_expr(self)
+    def expr_template(self):
+        return get_expr_template(self)
 
     @property
-    def shorthand_expr(self):
-        return get_shorthand_expr(self)
+    def shorthand_template(self):
+        return get_shorthand_template(self)
 
     @property
     def var_map(self):
@@ -664,6 +725,12 @@ class Op(structref.StructRefProxy,metaclass=OpMeta):
         return get_return_type_name(self)
 
 
+    @property
+    def arg_names(self):
+        if(not hasattr(self,'_arg_names')):
+            self._arg_names = extract_arg_names(self)
+        return self._arg_names
+             
 
     def gen_expr(self, lang='python',
          arg_names=None, use_shorthand=False, **kwargs):
@@ -724,6 +791,18 @@ class Op(structref.StructRefProxy,metaclass=OpMeta):
         return gen_def_func(lang,'call',", ".join(self.arg_names), call_body)
 
 
+@njit(cache=True)
+def extract_arg_names(op):
+    out = List.empty_list(unicode_type)
+    for v_ptr in op.var_map:
+        v =_struct_from_pointer(GenericVarType, v_ptr)
+        out.append(v.alias)
+    return out
+
+
+
+
+
 
 ### Various jitted getters ###
 
@@ -732,16 +811,22 @@ def get_name(self):
     return self.name
 
 @njit(cache=True)
-def get_repr_expr(self):
-    return self.repr_expr
+def get_expr_template(self):
+    return self.expr_template
 
 @njit(cache=True)
-def get_shorthand_expr(self):
-    return self.shorthand_expr
+def get_shorthand_template(self):
+    return self.shorthand_template
 
 @njit(cache=True)
 def get_var_map(self):
     return self.var_map
+
+@njit(cache=True)
+def get_var(self,i):
+    v_ptr = List(self.var_map.keys())[i]
+    return _struct_from_pointer(GenericVarType,v_ptr)
+
 
 @njit(cache=True)
 def get_return_type_name(self):
@@ -761,12 +846,12 @@ def get_arg_seq(self):
 
 #### Various Setters ####
 @njit(cache=True)
-def set_repr_expr(self, expr):
-    self.repr_expr = expr
+def set_expr_template(self, expr):
+    self.expr_template = expr
 
 @njit(cache=True)
-def set_shorthand_expr(self, expr):
-    self.shorthand_expr = expr
+def set_shorthand_template(self, expr):
+    self.shorthand_template = expr
 
 
 
@@ -813,13 +898,13 @@ class OpComp():
 
     def _repr_arg_helper(self,x):
         if isinstance(x, Var):
-            return f'a{self.vars[x.base_ptr][1]}'
+            return f'{{{self.vars[x.base_ptr][1]}}}'
         elif(isinstance(x, OpComp)):
-            arg_names = [f'a{self.vars[v_p][1]}' for v_p in x.vars]
+            arg_names = [f'{{{self.vars[v_p][1]}}}' for v_p in x.vars]
             # print("arg_names", arg_names)
             return x.gen_expr('python',arg_names=arg_names)
         elif(isinstance(x,DerefInstr)):
-            return f'a{self.vars[x.var.base_ptr][1]}.{".".join(x.deref_attrs)}'
+            return f'{{{self.vars[x.var.base_ptr][1]}}}.{".".join(x.deref_attrs)}'
         else:
             return repr(x) 
 
@@ -836,7 +921,7 @@ class OpComp():
         # v_ptr_to_ind = {} 
 
         for i, x in enumerate(py_args):
-            if(isinstance(x, (OpMeta,Op))): x = x.op_comp
+            if(isinstance(x, Op)): x = x.as_op_comp()
             if(isinstance(x, OpComp)):
                 for v_ptr,(v,_,t) in x.vars.items():
                     if(v_ptr not in _vars):
@@ -866,7 +951,7 @@ class OpComp():
                 else:
                     constants[x] = op.signature.args[i]
             args.append(x)
-
+        print("<<",_vars)
         self.op = op
         self.vars = _vars
         self.args = args
@@ -876,8 +961,8 @@ class OpComp():
         # self.v_ptr_to_ind = v_ptr_to_ind
         
 
-        self.repr_expr = f"{op.name}({', '.join([self._repr_arg_helper(x) for x in self.args])})"  
-        self.name = self.repr_expr
+        self.expr_template = f"{op.name}({', '.join([self._repr_arg_helper(x) for x in self.args])})"  
+        self.name = self.expr_template
 
         instructions[self] = op.signature
 
@@ -888,7 +973,7 @@ class OpComp():
         ''' Flattens the OpComp into a single Op. Generates the source
              for the new Op as needed.'''
         if(not hasattr(self,'_generate_op')):
-            hash_code = unique_hash([self.repr_expr,*[(x.name,x.hash_code) for x in self.used_ops]])
+            hash_code = unique_hash([self.expr_template,*[(x.name,x.hash_code) for x in self.used_ops]])
             if(not source_in_cache('__GenerateOp__', hash_code)):
                 
                 source = self.gen_flattened_op_src(hash_code)
@@ -901,6 +986,9 @@ class OpComp():
                 var_ptrs[i] = v_p#v.get_ptr()
 
             op = self._generate_op = op_cls.make_singleton_inst(var_ptrs)
+            op.op_comp = self
+            set_expr_template(op, op.gen_expr())
+            set_shorthand_template(op, op.gen_expr(use_shorthand=True))
             
         return self._generate_op
 
@@ -1091,13 +1179,13 @@ class __GenerateOp__(Op):
 
     
     def __hash__(self):
-        return hash(self.repr_expr)
+        return hash(self.expr_template)
 
     def __str__(self):
         return self.name
 
     def __repr__(self):
-        return self.repr_expr
+        return self.expr_template
 
     def __call__(self,*args):
         flattened_inst = self.flatten()

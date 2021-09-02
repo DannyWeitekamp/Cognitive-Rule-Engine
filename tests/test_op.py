@@ -89,6 +89,9 @@ def test_var_propagation():
     op = Add3(x,y,z)
     assert str(op) == 'Add3(x,y,z)'
     assert [x.get_ptr(),y.get_ptr(),z.get_ptr()] == [*extract_var_ptrs(op)]
+    op = Add3(x,y,Add3(y,z,x))
+    assert str(op) == 'Add3(x,y,Add3(y,z,x))'
+    assert op(2,1,3) == 9
 
 def test_order():
     class Subtract(Op):
@@ -101,6 +104,22 @@ def test_order():
     a,b = Var(float,'a'), Var(float,'b')
     s2 = Subtract(b,Subtract(a,1))
     assert s2(3,2) == 2
+
+def test_untyped_op():
+    @Op
+    def Add3(a, b, c):
+        return a + b + c
+
+    x,y,z = Var(float,'x'),Var(float,'y'),Var(float,'z')
+    op = Add3(x,y,z)
+    assert str(op) == 'Add3(x,y,z)'
+    assert op(1,2,3)==6
+
+    op = Add3(x,y,Add3(y,z,x))
+    assert str(op) == 'Add3(x,y,Add3(y,z,x))'
+    assert op(2,1,3) == 9
+
+
 
 def test_auto_aliasing():
     class Add3(Op):
@@ -284,19 +303,19 @@ class PrintElapse():
 
 
 if __name__ == "__main__":
-    # with PrintElapse("test_op_singleton"):
-    #     test_op_singleton()
-    # # with PrintElapse("test_define_apply_op"):
-    #     test_define_apply_op()
-    # # with PrintElapse("test_op_singleton"):
-    #     test_compose_op()
+    with PrintElapse("test_op_singleton"):
+        test_op_singleton()
+    with PrintElapse("test_define_apply_op"):
+        test_define_apply_op()
+    with PrintElapse("test_op_singleton"):
+        test_compose_op()
     with PrintElapse("test_var_propagation"):
         test_var_propagation()
-    #     test_order()
-    # # with PrintElapse("test_auto_aliasing"):
-    #     test_auto_aliasing()
-    # # with PrintElapse("test_source_gen"):
-    #     test_source_gen()
+        # test_order()
+    with PrintElapse("test_auto_aliasing"):
+        test_auto_aliasing()
+    with PrintElapse("test_source_gen"):
+        test_source_gen()
 
         # test_commutes()
         # test_fact_args()

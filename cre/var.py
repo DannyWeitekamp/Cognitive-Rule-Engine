@@ -249,14 +249,14 @@ class Var(structref.StructRefProxy):
     def __setstate__(self, d):
         self.__dict__ = d
 
-    def __hash__(self):
-        ptr = get_var_ptr(self)
-        return ptr
+    # def __hash__(self):
+    #     ptr = 0#get_var_ptr(self)
+    #     return ptr
 
     def get_ptr(self):
         return get_var_ptr(self)
 
-@njit(i8(GenericVarType), cache=True)    
+@njit(cache=True)    
 def get_var_ptr(self):
     return _pointer_from_struct(self)
 

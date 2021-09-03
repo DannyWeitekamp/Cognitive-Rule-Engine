@@ -272,7 +272,7 @@ class ResolveCarry2(Rule):
         return (
             Var(Match,'match') & (match.rhs == "Carry2") & (match.full_fired == False) & 
             Var(TextField,'sel') & (match.sel == sel.name) & 
-            (match.input != "0") & 
+            (match.input != "0") #& 
             # ()
             # TODO: Maybe add exists
         )

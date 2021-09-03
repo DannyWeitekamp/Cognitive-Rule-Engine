@@ -152,15 +152,20 @@ def test_source_gen():
     DoublePlusOne = Add(Double,1)
     TimesDoublePlusOne = Multiply(DoublePlusOne,Var(float,'y'))
 
-    assert str(DoublePlusOne) == "Add(Multiply(x,2),1)"
-    assert str(TimesDoublePlusOne) == "Multiply(Add(Multiply(x,2),1),y)"
     assert TimesDoublePlusOne.check(-1,1) == False
     assert TimesDoublePlusOne.check(1,0) == False
     assert TimesDoublePlusOne.check(1,1) == True
-
+    
     assert TimesDoublePlusOne.gen_expr(use_shorthand=True) == '(((x*2)+1)*y)'
     assert TimesDoublePlusOne.gen_expr(use_shorthand=False) == 'Multiply(Add(Multiply(x,2),1),y)'
     assert TimesDoublePlusOne.gen_expr(lang='javascript',use_shorthand=True) == '(((x*2)+1)*y)'
+
+    assert str(DoublePlusOne) == "((x*2)+1)"
+    assert str(TimesDoublePlusOne) == "(((x*2)+1)*y)"
+    assert repr(DoublePlusOne) == "Add(Multiply(x:float64, 2), 1)"
+    assert repr(TimesDoublePlusOne) == "Multiply(Add(Multiply(x:float64, 2), 1), y:float64)"
+
+
 
     class IntegerDivision(Op):
         signature = f8(f8,f8)

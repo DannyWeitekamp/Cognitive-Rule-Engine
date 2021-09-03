@@ -208,5 +208,17 @@ TODO:
 	[x] Fix bug with variables names not propogating w/ Op_comp
 	[x] Make test cases for untypedOp
 
-	[] Make dereffing Vars need to be compiled
-	[] Implement repr() for Op
+	[x] Make dereffing Vars need to be compiled
+	[x] Implement repr() for Op
+
+
+--Sep 3, 2021--
+
+Next steps:
+	[] Overload <, >, <=, >=, ==, +, * , -, /
+	[] Make sure conditions str/repr properly <-- probably can be the same except that repr should probably reveal that it is a member of the Conditions class and reveal any active mem_link.
+	[] Define filter_op... the rest will probably just work...
+
+
+ 
+

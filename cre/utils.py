@@ -603,6 +603,9 @@ def getitem_typed_list(l,i):
     return l[i]
 
 def iter_typed_list(lst):
-    for i in range(len_typed_list(lst)):
-        yield getitem_typed_list(lst,i)
-        
+    if(isinstance(lst, (List))):
+        for i in range(len_typed_list(lst)):
+            yield getitem_typed_list(lst,i)
+    else:
+         return iter(lst)
+            

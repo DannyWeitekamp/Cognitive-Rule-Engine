@@ -264,34 +264,34 @@ class UntypedOp():
 
     def __call__(self,*py_args):
 
-        with PrintElapse("  get types"):
-            # Fill types and check for all_const/not_var 
-            arg_types = [] 
-            all_const = True
-            any_not_var = False
-            for x in py_args:
-                arg_types.append(resolve_return_type(x))
-                if(isinstance(x,(OpMeta,OpComp, Op)) or
-                   (isinstance(x, Var) and len(x.deref_offsets) > 0)):
-                    all_const = False
-                    any_not_var = True
-                elif(isinstance(x,(Var))):
-                    all_const = False
-                else:
-                    any_not_var = True
-
-        with PrintElapse("  njit"):
-            call = self.members['call']
-
-        with PrintElapse("  get_call_template"):
-            cres = call.overloads.get(tuple(arg_types))
-            if(cres is not None):
-                sig = cres.signature
+        # with PrintElapse("  get types"):
+        # Fill types and check for all_const/not_var 
+        arg_types = [] 
+        all_const = True
+        any_not_var = False
+        for x in py_args:
+            arg_types.append(resolve_return_type(x))
+            if(isinstance(x,(OpMeta,OpComp, Op)) or
+               (isinstance(x, Var) and len(x.deref_offsets) > 0)):
+                all_const = False
+                any_not_var = True
+            elif(isinstance(x,(Var))):
+                all_const = False
             else:
-                # Note: get_call_template is an internal method of numba.Dispatcher 
-                (template,*rest) = call.get_call_template(arg_types,{})
-                sig = template.cases[0]
-            self.members['signature'] = sig
+                any_not_var = True
+
+        # with PrintElapse("  njit"):
+        call = self.members['call']
+
+        # with PrintElapse("  get_call_template"):
+        cres = call.overloads.get(tuple(arg_types))
+        if(cres is not None):
+            sig = cres.signature
+        else:
+            # Note: get_call_template is an internal method of numba.Dispatcher 
+            (template,*rest) = call.get_call_template(arg_types,{})
+            sig = template.cases[0]
+        self.members['signature'] = sig
 
         
         # print("^^", op)
@@ -414,67 +414,67 @@ def new_op(name, members, var_ptrs=None):
     if('signature' not in members):
         return UntypedOp(name,members)
     
-    with PrintElapse("\thandling"):
+    # with PrintElapse("\thandling"):
     # See if call/check etc. are raw python functions and need to be wrapped in @jit.
-        call_needs_jitting = not isinstance(members['call'], Dispatcher)
-        check_needs_jitting = has_check and (not isinstance(members['check'],Dispatcher))
-        
-        # 'cls' is the class of the user defined Op (i.e. Add(a,b)).
-        cls = type.__new__(OpMeta,name,(Op,),members) 
-        # cls.__call__ = call_op
-        cls._handle_commutes()
-        cls._handle_nopython()
+    call_needs_jitting = not isinstance(members['call'], Dispatcher)
+    check_needs_jitting = has_check and (not isinstance(members['check'],Dispatcher))
+    
+    # 'cls' is the class of the user defined Op (i.e. Add(a,b)).
+    cls = type.__new__(OpMeta,name,(Op,),members) 
+    # cls.__call__ = call_op
+    cls._handle_commutes()
+    cls._handle_nopython()
 
-    with PrintElapse("\tpickling"):
-        cls.process_method("call", cls.signature)
-        
-        if(has_check):
-            cls.process_method("check", u1(*cls.signature.args))        
+    # with PrintElapse("\tpickling"):
+    cls.process_method("call", cls.signature)
+    
+    if(has_check):
+        cls.process_method("check", u1(*cls.signature.args))        
     
     # If either call or check needs to be jitted then generate source code
     #  to do the jitting and put it in the cache. Or retrieve if already
     #  defined.  This way jit(cache=True) can reliably re-retreive.
-    with PrintElapse("\tget_src"):
-        # if(call_needs_jitting or check_needs_jitting):
-        name = cls.__name__
+    # with PrintElapse("\tget_src"):
+    # if(call_needs_jitting or check_needs_jitting):
+    name = cls.__name__
 
-        #Triggers getter
-        hash_code = cls.hash_code 
-        if(not source_in_cache(name, hash_code) or getattr(cls,'cache',True) == False):
-            source = gen_op_source(cls, call_needs_jitting, check_needs_jitting)
-            source_to_cache(name,hash_code,source)
+    #Triggers getter
+    hash_code = cls.hash_code 
+    if(not source_in_cache(name, hash_code) or getattr(cls,'cache',True) == False):
+        source = gen_op_source(cls, call_needs_jitting, check_needs_jitting)
+        source_to_cache(name,hash_code,source)
 
-        to_import = ['call','call_addr'] if call_needs_jitting else []
-        if(check_needs_jitting): to_import += ['check', 'check_addr']
-        l = import_from_cached(name, hash_code, to_import)
-        for key, value in l.items():
-            setattr(cls, key, value)
+    to_import = ['call','call_addr'] if call_needs_jitting else []
+    if(check_needs_jitting): to_import += ['check', 'check_addr']
+    l = import_from_cached(name, hash_code, to_import)
+    for key, value in l.items():
+        setattr(cls, key, value)
 
-    with PrintElapse("\tgwap"):
-        # Make static so that self isn't the first argument for call/check.
-        cls.call = staticmethod(cls.call)
-        if(has_check): cls.check = staticmethod(cls.check)
+    # with PrintElapse("\tgwap"):
+    # Make static so that self isn't the first argument for call/check.
+    cls.call = staticmethod(cls.call)
+    if(has_check): cls.check = staticmethod(cls.check)
 
-        # Get store the addresses for call/check
-        if(not call_needs_jitting): 
-            cls.call_sig = cls.signature
-            cls.call_addr = _get_wrapper_address(cls.call,cls.call_sig)
+    # Get store the addresses for call/check
+    if(not call_needs_jitting): 
+        cls.call_sig = cls.signature
+        cls.call_addr = _get_wrapper_address(cls.call,cls.call_sig)
 
-        if(not check_needs_jitting and has_check):
-            cls.check_sig = u1(*cls.signature.args)
-            cls.check_addr = _get_wrapper_address(cls.check,cls.check_sig)
+    if(not check_needs_jitting and has_check):
+        cls.check_sig = u1(*cls.signature.args)
+        cls.check_addr = _get_wrapper_address(cls.check,cls.check_sig)
 
     # Standardize shorthand definitions
     if(hasattr(cls,'shorthand') and 
         not isinstance(cls.shorthand,dict)):
         cls.shorthand = {'*' : cls.shorthand}
 
-    with PrintElapse("\tMakeInst"):
-        if(cls.__name__ != "__GenerateOp__"):
-            context = cre_context()
-            op_inst = cls.make_singleton_inst(var_ptrs=var_ptrs)
-            context._register_op_inst(op_inst)
-            return op_inst
+    # with PrintElapse("\tMakeInst"):
+    if(cls.__name__ != "__GenerateOp__"):
+        context = cre_context()
+        op_inst = cls.make_singleton_inst(var_ptrs=var_ptrs)
+        context._register_op_inst(op_inst)
+        return op_inst
 
     return cls
 
@@ -678,11 +678,25 @@ class Op(structref.StructRefProxy,metaclass=OpMeta):
             return op
 
     def __str__(self):
-        name = get_name(self)
-        if(name == "__GenerateOp__"):
-            return self.expr_template
-        else:
-            return op_str(self)
+        return op_str(self)
+        # name = get_name(self)
+        # arg_names = op_get_arg_names(self)
+        # return self.shorthand_template % (arg_names)
+        # if(name == "__GenerateOp__"):
+        #     print("THIS!!!!!", self.expr_template)
+        #     return self.expr_template
+        # else:
+        #     return op_str(self)
+
+    def __repr__(self):
+        return op_repr(self)
+        # name = get_name(self)
+        # arg_names = op_get_arg_names(self)
+        # return self.expr_template % (arg_names)
+        # if(name == "__GenerateOp__"):
+        #     return self.expr_template
+        # else:
+        #     return op_repr(self)
 
     @classmethod
     def make_singleton_inst(cls,var_ptrs=None):
@@ -875,17 +889,53 @@ def get_var(self,i):
 def get_return_type_name(self):
     return self.return_type_name
 
-@njit(cache=True)
-def op_str(self):
-    return self.name + "(" + get_arg_seq(self) + ")"
+# @njit(cache=True)
+# def op_str(self):
+#     return self.name + "(" + get_arg_seq(self) + ")"
 
 @njit(cache=True)
-def get_arg_seq(self):
+def op_str(self):
+    s = self.shorthand_template
+    arg_names = op_get_arg_names(self)
+    for i,arg_name in enumerate(arg_names):
+        s =  s.replace(f'{{{i}}}',arg_name)
+    return s
+
+# @njit(cache=True)
+# def op_repr(self):
+#     return self.name + "(" + get_arg_seq(self,type_annotations=True) + ")"
+
+@njit(cache=True)
+def op_repr(self):
+    s = self.expr_template
+    arg_names = op_get_arg_names(self)
+    for i,arg_name in enumerate(arg_names):
+        s =  s.replace(f'{{{i}}}',f'{arg_name}:{self.arg_type_names[i]}')
+
+    #Add spaces after commas
+    s = s.replace(", ", ",")
+    s = s.replace(",", ", ")
+    return s
+
+@njit(cache=True)
+def get_arg_seq(self,type_annotations=False):
     s = ""
     for i,alias in enumerate(self.inv_var_map):
         s += alias
-        if(i < len(self.inv_var_map)-1): s += ","
+        if(type_annotations): 
+            v = _struct_from_pointer(GenericVarType, self.inv_var_map[alias])
+            s += ":" + v.base_type_name
+
+        if(i < len(self.inv_var_map)-1): 
+            s += "," + (" " if type_annotations else "")
     return s
+
+@njit(cache=True)
+def op_get_arg_names(self):
+    arg_names = List.empty_list(unicode_type)
+    for alias in self.inv_var_map:
+        arg_names.append(alias)
+    return arg_names
 
 #### Various Setters ####
 @njit(cache=True)
@@ -1032,8 +1082,9 @@ class OpComp():
 
             op = self._generate_op = op_cls.make_singleton_inst(var_ptrs)
             op.op_comp = self
-            set_expr_template(op, op.gen_expr())
-            set_shorthand_template(op, op.gen_expr(use_shorthand=True))
+            place_holder_arg_names = [f'{{{i}}}' for i in range(len(var_ptrs))]
+            set_expr_template(op, op.gen_expr(arg_names=place_holder_arg_names))
+            set_shorthand_template(op, op.gen_expr(arg_names=place_holder_arg_names, use_shorthand=True))
             
         return self._generate_op
 

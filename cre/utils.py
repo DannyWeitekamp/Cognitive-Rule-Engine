@@ -1,6 +1,7 @@
 from numba import types, njit, u1,u2,u4,u8, i8,i2, literally
 from numba.core.imputils import impl_ret_borrowed
 from numba.types import Tuple, void, ListType
+from numba.typed import List
 from numba.experimental.structref import _Utils, imputils
 from numba.extending import intrinsic
 from numba.core import cgutils
@@ -575,3 +576,33 @@ class PrintElapse():
     def __exit__(self,*args):
         self.t1 = time.time_ns()/float(1e6)
         print(f'{self.name}: {self.t1-self.t0:.2f} ms')
+
+
+##### Cacheable Version of Typed List Generation / Iteration ####
+
+@njit(cache=True)
+def _new_list(typ):
+    return List.empty_list(typ)
+
+@njit(cache=True)
+def _append_to_list(l, x):
+    return l.append(x)
+
+def as_typed_list(typ, it):
+    l = _new_list(typ)
+    for x in it:
+        _append_to_list(l,x)
+    return l
+
+@njit(cache=True)
+def len_typed_list(l):
+    return len(l)
+
+@njit(cache=True)
+def getitem_typed_list(l,i):
+    return l[i]
+
+def iter_typed_list(lst):
+    for i in range(len_typed_list(lst)):
+        yield getitem_typed_list(lst,i)
+        

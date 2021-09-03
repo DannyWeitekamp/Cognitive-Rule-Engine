@@ -17,7 +17,7 @@ from cre.memory import MemoryType, Memory, facts_for_t_id, fact_at_f_id
 # from cre.fact import define_fact, BaseFactType, cast_fact, DeferredFactRefType, Fact
 from cre.utils import (_struct_from_meminfo, _meminfo_from_struct, _cast_structref, cast_structref, decode_idrec, lower_getattr, _struct_from_pointer,  lower_setattr, lower_getattr,
                        _pointer_from_struct, _decref_pointer, _incref_pointer, _incref_structref, _pointer_from_struct_incref)
-from cre.utils import assign_to_alias_in_parent_frame
+from cre.utils import assign_to_alias_in_parent_frame, as_typed_list, iter_typed_list
 from cre.subscriber import base_subscriber_fields, BaseSubscriber, BaseSubscriberType, init_base_subscriber, link_downstream
 from cre.vector import VectorType
 from cre.fact import Fact, gen_fact_import_str, get_offsets_from_member_types
@@ -271,7 +271,8 @@ class UntypedOp():
             any_not_var = False
             for x in py_args:
                 arg_types.append(resolve_return_type(x))
-                if(isinstance(x,(OpMeta,OpComp, Op))):
+                if(isinstance(x,(OpMeta,OpComp, Op)) or
+                   (isinstance(x, Var) and len(x.deref_offsets) > 0)):
                     all_const = False
                     any_not_var = True
                 elif(isinstance(x,(Var))):
@@ -280,13 +281,10 @@ class UntypedOp():
                     any_not_var = True
 
         with PrintElapse("  njit"):
-            # if(not isinstance(self.members['call'],Dispatcher)):
-            #     self.members['call'] = njit(cache=True)(self.members['call'])
             call = self.members['call']
-        # print("<< N Overloads", len(call.overloads))
+
         with PrintElapse("  get_call_template"):
             cres = call.overloads.get(tuple(arg_types))
-            # print("CRES:", cres.signature if cres else None)
             if(cres is not None):
                 sig = cres.signature
             else:
@@ -437,20 +435,20 @@ def new_op(name, members, var_ptrs=None):
     #  to do the jitting and put it in the cache. Or retrieve if already
     #  defined.  This way jit(cache=True) can reliably re-retreive.
     with PrintElapse("\tget_src"):
-        if(call_needs_jitting or check_needs_jitting):
-            name = cls.__name__
+        # if(call_needs_jitting or check_needs_jitting):
+        name = cls.__name__
 
-            #Triggers getter
-            hash_code = cls.hash_code 
-            if(not source_in_cache(name, hash_code) or getattr(cls,'cache',True) == False):
-                source = gen_op_source(cls, call_needs_jitting, check_needs_jitting)
-                source_to_cache(name,hash_code,source)
+        #Triggers getter
+        hash_code = cls.hash_code 
+        if(not source_in_cache(name, hash_code) or getattr(cls,'cache',True) == False):
+            source = gen_op_source(cls, call_needs_jitting, check_needs_jitting)
+            source_to_cache(name,hash_code,source)
 
-            to_import = ['call','call_addr'] if call_needs_jitting else []
-            if(check_needs_jitting): to_import += ['check', 'check_addr']
-            l = import_from_cached(name, hash_code, to_import)
-            for key, value in l.items():
-                setattr(cls, key, value)
+        to_import = ['call','call_addr'] if call_needs_jitting else []
+        if(check_needs_jitting): to_import += ['check', 'check_addr']
+        l = import_from_cached(name, hash_code, to_import)
+        for key, value in l.items():
+            setattr(cls, key, value)
 
     with PrintElapse("\tgwap"):
         # Make static so that self isn't the first argument for call/check.
@@ -586,7 +584,7 @@ class OpMeta(type):
             setattr(cls, name+"_pyfunc", py_func)
             setattr(cls, name+"_sig", sig)
             
-            # Speed up by caching  dill.dumps() of py_func in the func instance
+            # Speed up by caching dill.dumps(py_func) inside py_func object
             if(hasattr(py_func,'_cre_dill_bytes')):
                 setattr(cls, name+'_bytes', py_func._cre_dill_bytes)
             else:
@@ -697,7 +695,8 @@ class Op(structref.StructRefProxy,metaclass=OpMeta):
             var_ptrs = new_var_ptrs_from_types(cls.call_sig.args, arg_names)
 
         # Make the op instance
-        arg_type_names = List([str(x) for x in cls.signature.args])
+        arg_type_names = as_typed_list(unicode_type,
+                            [str(x) for x in cls.signature.args])
         sig = cls.signature
         op_inst = op_ctor(
             cls.__name__,
@@ -919,11 +918,11 @@ class DerefInstr():
 
     @property
     def template(self):
-        return f'{{}}.{".".join(list(self.deref_attrs))}'
+        return f'{{}}.{".".join(list(iter_typed_list(self.deref_attrs)))}'
 
     def _get_hashable(self):
         if(not hasattr(self,"_hashable")):
-            self._hashable = (self.var.base_ptr, tuple(*self.deref_attrs))
+            self._hashable = (self.var.base_ptr, tuple(iter_typed_list(self.deref_attrs)))
         return self._hashable
 
     def __eq__(self, other):
@@ -948,7 +947,8 @@ class OpComp():
             # print("arg_names", arg_names)
             return x.gen_expr('python',arg_names=arg_names)
         elif(isinstance(x,DerefInstr)):
-            return f'{{{self.vars[x.var.base_ptr][1]}}}.{".".join(x.deref_attrs)}'
+            deref_attrs = list(iter_typed_list(x.deref_attrs))
+            return f'{{{self.vars[x.var.base_ptr][1]}}}.{".".join(deref_attrs)}'
         else:
             return repr(x) 
 

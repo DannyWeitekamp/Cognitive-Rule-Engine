@@ -406,7 +406,7 @@ from cre.sc_planner2 import SC_Record, SC_Record_Entry, SC_Record_EntryType
 ''' 
     imp_targets = ['call'] + (['check'] if has_check else [])
     src += f'''{gen_import_str(type(op).__name__,
-                 op.hash_code, imp_targets)}\n\n'''
+                 op.long_hash, imp_targets)}\n\n'''
 
     src += "".join([f'typ{i}'+", " for i in range(len(typs))]) + \
              f'= dill.loads({dill.dumps(tuple(typs.keys()))})\n'
@@ -509,7 +509,7 @@ def apply_multi(op, planner, depth):
 
     # If it doesn't already exist generate and inject '_apply_multi' into 'op'
     if(not hasattr(op,'_apply_multi')):
-        hash_code = unique_hash(['_apply_multi',op.hash_code])  
+        hash_code = unique_hash(['_apply_multi',op.long_hash])  
         print(get_cache_path('apply_multi',hash_code))
         if(not source_in_cache('apply_multi',hash_code)):
             src = gen_apply_multi_source(op)
@@ -908,7 +908,9 @@ def gen_op_comps_from_expl_tree(tree):
         
         if(expl_tree_entry_is_op(tree_entry)):
             op = expl_tree_entry_get_op(tree_entry)
-            op = op.recover_singleton_inst()
+            # print(op)
+            # op = op.recover_singleton_inst()
+            # print(op)
             child_generators = []
             for j in range(expl_tree_entry_num_args(tree_entry)):
                 child_tree = expl_tree_entry_jth_arg(tree_entry,j)

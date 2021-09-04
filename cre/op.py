@@ -247,6 +247,7 @@ class UntypedOp():
         self.name = name
         self.members = members
         self.members['call'] = njit(cache=True)(self.members['call'])
+        self._specialize_cache = {}
     @property
     def arg_names(self):
         if(not hasattr(self,"_arg_names")):
@@ -280,31 +281,37 @@ class UntypedOp():
             else:
                 any_not_var = True
 
-        # with PrintElapse("  njit"):
         call = self.members['call']
-
-        # with PrintElapse("  get_call_template"):
-        cres = call.overloads.get(tuple(arg_types))
-        if(cres is not None):
-            sig = cres.signature
-        else:
-            # Note: get_call_template is an internal method of numba.Dispatcher 
-            (template,*rest) = call.get_call_template(arg_types,{})
-            sig = template.cases[0]
-        self.members['signature'] = sig
-
-        
-        # print("^^", op)
-        # with PrintElapse("  rest"):
-        if(not all_const and any_not_var):
-            op = new_op(self.name, self.members)
-            return OpComp(op, *py_args).flatten()
-        elif(all_const):
+        if(all_const):
             return call(*py_args)
-        else:
-            var_ptrs = np.array([v.get_ptr() for v in py_args],dtype=np.int64)
-            op = new_op(self.name, self.members,var_ptrs=var_ptrs)
-            return op
+
+
+        with PrintElapse("  get_call_template"):
+            cres = call.overloads.get(tuple(arg_types))
+            if(cres is not None):
+                sig = cres.signature
+            else:
+                # Note: get_call_template is an internal method of numba.Dispatcher 
+                (template,*rest) = call.get_call_template(arg_types,{})
+                sig = template.cases[0]
+            # self.members['signature'] = sig
+            members = {**self.members, 'signature': sig}
+
+        with PrintElapse(f"  rest {self.name} {sig}"):
+            if(any_not_var):
+                op = new_op(self.name, members)
+                return OpComp(op, *py_args).flatten()
+            else:
+                var_ptrs = np.array([v.get_ptr() for v in py_args],dtype=np.int64)
+                # Retreive from Cache/Make typed version 
+                if(sig not in self._specialize_cache):
+                    print("No Spec")
+                    op_cls = new_op(self.name, members,return_class=True)
+                    self._specialize_cache[sig] = op_cls
+                op_cls = self._specialize_cache[sig]
+                with PrintElapse(f"    make_singleton_inst"):
+                    return op_cls.make_singleton_inst(var_ptrs=var_ptrs)
+
 
         # else:
         #     op_comp = OpComp(self,*py_args)
@@ -376,7 +383,9 @@ def gen_placeholder_aliases(var_ptrs):
     return generated_aliases
 
 @njit(cache=True)
-def op_ctor(name, return_type_name, arg_type_names, var_ptrs, call_addr=0, call_multi_addr=0, check_addr=0):
+def op_ctor(name, return_type_name, arg_type_names, var_ptrs, 
+            expr_template="MOOSE", shorthand_template="ROOF",
+            call_addr=0, call_multi_addr=0, check_addr=0):
     '''The constructor for an Op instance that can be passed to the numba runtime'''
     st = new(GenericOpType)
     st.name = name
@@ -396,14 +405,18 @@ def op_ctor(name, return_type_name, arg_type_names, var_ptrs, call_addr=0, call_
         
         st.var_map[var_ptr] = alias
         st.inv_var_map[alias] = var_ptr
+
+    st.expr_template = expr_template
+    st.shorthand_template = shorthand_template
             
     st.call_addr = call_addr
     st.call_multi_addr = call_multi_addr
     st.check_addr = check_addr
+
     return st
 
 
-def new_op(name, members, var_ptrs=None):
+def new_op(name, members, var_ptrs=None, return_class=False):
     '''Creates a new custom Op with 'name' and 'members' '''
     has_check = 'check' in members
     assert 'call' in members, "Op must have call() defined"
@@ -425,11 +438,13 @@ def new_op(name, members, var_ptrs=None):
     cls._handle_commutes()
     cls._handle_nopython()
 
-    # with PrintElapse("\tpickling"):
-    cls.process_method("call", cls.signature)
+    with PrintElapse("\tprocess_method"):
+        cls.process_method("call", cls.signature)
     
     if(has_check):
-        cls.process_method("check", u1(*cls.signature.args))        
+        cls.process_method("check", u1(*cls.signature.args))
+
+    cls._handle_defaults()  
     
     # If either call or check needs to be jitted then generate source code
     #  to do the jitting and put it in the cache. Or retrieve if already
@@ -450,33 +465,31 @@ def new_op(name, members, var_ptrs=None):
     for key, value in l.items():
         setattr(cls, key, value)
 
-    # with PrintElapse("\tgwap"):
-    # Make static so that self isn't the first argument for call/check.
-    cls.call = staticmethod(cls.call)
-    if(has_check): cls.check = staticmethod(cls.check)
+    with PrintElapse("\tgwap"):
+        # Make static so that self isn't the first argument for call/check.
+        cls.call = staticmethod(cls.call)
+        if(has_check): cls.check = staticmethod(cls.check)
 
-    # Get store the addresses for call/check
-    if(not call_needs_jitting): 
-        cls.call_sig = cls.signature
-        cls.call_addr = _get_wrapper_address(cls.call,cls.call_sig)
+        # Get store the addresses for call/check
+        if(not call_needs_jitting): 
+            cls.call_sig = cls.signature
+            cls.call_addr = _get_wrapper_address(cls.call,cls.call_sig)
 
-    if(not check_needs_jitting and has_check):
-        cls.check_sig = u1(*cls.signature.args)
-        cls.check_addr = _get_wrapper_address(cls.check,cls.check_sig)
+        if(not check_needs_jitting and has_check):
+            cls.check_sig = u1(*cls.signature.args)
+            cls.check_addr = _get_wrapper_address(cls.check,cls.check_sig)
 
-    # Standardize shorthand definitions
-    if(hasattr(cls,'shorthand') and 
-        not isinstance(cls.shorthand,dict)):
-        cls.shorthand = {'*' : cls.shorthand}
+        # Standardize shorthand definitions
+        if(hasattr(cls,'shorthand') and 
+            not isinstance(cls.shorthand,dict)):
+            cls.shorthand = {'*' : cls.shorthand}
 
-    # with PrintElapse("\tMakeInst"):
-    if(cls.__name__ != "__GenerateOp__"):
-        context = cre_context()
-        op_inst = cls.make_singleton_inst(var_ptrs=var_ptrs)
-        context._register_op_inst(op_inst)
-        return op_inst
+        # with PrintElapse("\tMakeInst"):
+        if(cls.__name__ != "__GenerateOp__" and not return_class):
+            op_inst = cls.make_singleton_inst(var_ptrs=var_ptrs)
+            return op_inst
 
-    return cls
+        return cls
 
 
 
@@ -572,6 +585,21 @@ class OpMeta(type):
                     assert typ1==typ2, \
             f"cre.Op {cls.__name__!r} has invalid 'commutes' member {cls.commutes}. Signature arguments {k} and {commuting_set[j]} have different types {typ1} and {typ2}."
         cls.right_commutes = right_commutes
+
+    def _handle_defaults(cls):
+        # By default use the variable names that the user defined in the call() fn.
+        cls.default_arg_names = inspect.getfullargspec(cls.call_pyfunc)[0]
+        cls.default_var_ptrs = new_var_ptrs_from_types(cls.call_sig.args, cls.default_arg_names)
+
+        cls.arg_type_names = as_typed_list(unicode_type,
+                            [str(x) for x in cls.signature.args])
+
+        if(not hasattr(cls,'_expr_template')):
+            cls._expr_template = f"{cls.__name__}({','.join([f'{{{i}}}' for i in range(len(cls.arg_type_names))])})"  
+        
+        cls._shorthand_template = cls.shorthand if(hasattr(cls,'shorthand')) else cls._expr_template
+        
+
 
     def process_method(cls,name,sig):
         if(not hasattr(cls, name+"_pyfunc")):
@@ -688,54 +716,62 @@ class Op(structref.StructRefProxy,metaclass=OpMeta):
     def make_singleton_inst(cls,var_ptrs=None):
         '''Creates a singleton instance of the user defined subclass of Op.
             These instances unbox into the NRT as GenericOpType.
-        '''
-        # Use the variable names that the user defined in the call() fn.
-        arg_names = inspect.getfullargspec(cls.call.py_func)[0]
-        if(var_ptrs is None):
-            var_ptrs = new_var_ptrs_from_types(cls.call_sig.args, arg_names)
-
+        '''        
+        if(var_ptrs is None): var_ptrs = cls.default_var_ptrs
+        # print("---------------")
+        # print(cls.__name__,
+        #     str(cls.signature.return_type),
+        #     cls.arg_type_names,
+        #     var_ptrs,
+        #     cls._expr_template,
+        #     cls._shorthand_template,
+        #     cls.call_addr,
+        #     cls.__dict__.get('check_addr',0),)
         # Make the op instance
-        arg_type_names = as_typed_list(unicode_type,
-                            [str(x) for x in cls.signature.args])
-        sig = cls.signature
         op_inst = op_ctor(
             cls.__name__,
-            str(sig.return_type),
-            arg_type_names,
+            str(cls.signature.return_type),
+            cls.arg_type_names,
             var_ptrs,
+            str(cls._expr_template),
+            str(cls._shorthand_template),
             call_addr=cls.call_addr,
             check_addr=cls.__dict__.get('check_addr',0),
             )
+        
+        op_inst.__class__ = cls
+        # set_expr_template(op_inst, cls._expr_template)
+        # set_shorthand_template(op_inst, cls._shorthand_template)
+        
 
-        op_inst._arg_names = arg_names
         # In the NRT the instance will be a GenericOpType, but on
         #   the python side we need it to be its own custom class
-        op_inst.__class__ = cls
+        
 
-        template_placeholders = [f'{{{i}}}' for i in range(len(arg_names))]
+        # template_placeholders = [f'{{{i}}}' for i in range(len(arg_names))]
 
         #Make and store repr and shorthand expressions
-        expr_template = op_inst.gen_expr(
-            arg_names=template_placeholders,
-            use_shorthand=False,
-        )
-        set_expr_template(op_inst, expr_template)
-        if(hasattr(op_inst,"shorthand")):
-            set_shorthand_template(op_inst, op_inst.gen_expr(
-                arg_names=template_placeholders,
-                use_shorthand=True,
-            ))
-        else:
-            set_shorthand_template(op_inst, expr_template)
+        # expr_template = op_inst.gen_expr(
+        #     arg_names=template_placeholders,
+        #     use_shorthand=False,
+        # )
+        # set_expr_template(op_inst, expr_template)
+        # if(hasattr(op_inst,"shorthand")):
+        #     set_shorthand_template(op_inst, op_inst.gen_expr(
+        #         arg_names=template_placeholders,
+        #         use_shorthand=True,
+        #     ))
+        # else:
+        #     set_shorthand_template(op_inst, expr_template)
 
         return op_inst
 
-    def recover_singleton_inst(self,context=None):
-        '''Sometimes numba needs to emit an op instance 
-         that isn't the singleton instance. This recovers
-         the singleton instance from the cre_context'''
-        context = cre_context(context)
-        return context.op_instances[self.name]
+    # def recover_singleton_inst(self,context=None):
+    #     '''Sometimes numba needs to emit an op instance 
+    #      that isn't the singleton instance. This recovers
+    #      the singleton instance from the cre_context'''
+    #     context = cre_context(context)
+    #     return context.op_instances[self.name]
 
 
 
@@ -1168,13 +1204,14 @@ class OpComp():
              for the new Op as needed.'''
         if(not hasattr(self,'_generate_op')):
             # print([type(x) for x in self.used_ops])
-            long_hash = unique_hash([self.expr_template,*[(x.name,x.long_hash) for x in self.used_ops]])
+            long_hash = unique_hash([self.expr_template,*[op.unq for _,op in self.used_ops.values()]])
             if(not source_in_cache('__GenerateOp__', long_hash)):
-                
                 source = self.gen_flattened_op_src(long_hash)
                 source_to_cache('__GenerateOp__', long_hash, source)
             l = import_from_cached('__GenerateOp__', long_hash, ['__GenerateOp__'])
             op_cls = self._generate_op_cls = l['__GenerateOp__']
+            # print("<<",type(op_cls))
+            # print(get_cache_path('__GenerateOp__',long_hash))
 
             var_ptrs = np.empty(len(self.vars),dtype=np.int64)
             for i,v_p in enumerate(self.vars):
@@ -1193,24 +1230,23 @@ class OpComp():
         ''' Returns a dictionary keyed by ops used in the OpComp expression.
             values are unique integers 0,1,2 etc.'''
         if(not hasattr(self,'_used_ops')):
-            used_ops = {}
+            _used_ops = {}
             # Since __equal__() is overloaded it's best to use .unq as unqiue keys
-            used_unqs = set() 
+            # used_unqs = set() 
             oc = 0
             for i,instr in enumerate(self.instructions):
-                if(isinstance(instr, OpComp) and
-                   instr.op.unq not in used_unqs):
-                    used_unqs.add(instr.op.unq)
-                    used_ops[instr.op] = (oc,instr.op.signature)
+                if(isinstance(instr, OpComp) and instr.op.unq not in _used_ops):
+                    _used_ops[instr.op.unq] = (oc,instr.op)
                     oc += 1
-            self._used_ops = used_ops
+            # print("**", _used_ops)
+            self._used_ops = _used_ops
         return self._used_ops
 
     #### Code Generation Methods ####
     def gen_op_imports(self,lang='python'):
         ''' Generates import expressions for any 'used_ops' in the OpComp'''
         op_imports = ""
-        for i,(op,(_,sig)) in enumerate(self.used_ops.items()):
+        for i,(_,op) in enumerate(self.used_ops.values()):
             to_import = {"call_sig" : f'call_sig{i}',
                 "call" : f'call{i}'}
             if(hasattr(op,"check")):
@@ -1252,15 +1288,15 @@ class OpComp():
             names[instr] = f'i{i}'
 
         if(op_call_fnames is None):
-            op_call_fnames = {op : f'{op.name}.call' for op in self.used_ops}
+            op_call_fnames = {op : f'{op.name}.call' for _,op in self.used_ops.values()}
         for op, n in op_call_fnames.items(): names[(op.unq,'call')] = n
             
         if(op_check_fnames is None):
-            op_check_fnames = {op : f'{op.name}.check' for op in self.used_ops}
+            op_check_fnames = {op : f'{op.name}.check' for _,op in self.used_ops.values()}
         for op, n in op_check_fnames.items(): names[(op.unq,'check')] = n
             
         if(op_fnames is None):
-            op_fnames = {op : op.name for op in self.used_ops}
+            op_fnames = {op : op.name for _,op in self.used_ops.values()}
         for op, n in op_fnames.items(): names[op.unq] = n
             
         if(skip_consts):
@@ -1318,9 +1354,11 @@ class OpComp():
         check_body = const_defs
         final_k = "True"
         for i,instr in enumerate(self.instructions):
-            j,_ = self.used_ops[instr]
+            # print(type(self))
+            # print(self.used_ops)
+            # j,_ = self.used_ops[instr]
             inp_seq = ", ".join([g_nm(x,names) for x in instr.args])
-            if(hasattr(instr, 'check')):
+            if(hasattr(instr.op,'check')):#hasattr(instr, 'check')):
                 check_fname = names[(instr.op.unq,'check')]
                 check_body += f"{ind}{gen_assign(lang, f'k{i}', f'{check_fname}({inp_seq}')})\n"
                 check_body += f"{ind}if(not k{i}): return 0\n"
@@ -1336,12 +1374,12 @@ class OpComp():
         '''Generates python source for the equivalant flattened Op'''
         op_imports = self.gen_op_imports('python')
         
-        op_call_fnames = {op : f'call{j}' for op,(j,_) in self.used_ops.items()}
+        op_call_fnames = {op : f'call{j}' for j,op in self.used_ops.values()}
         call_src = self.gen_call('python', op_call_fnames=op_call_fnames)
 
-        has_check = any([hasattr(op, 'check') for op in self.used_ops])
+        has_check = any([hasattr(op, 'check') for _,op in self.used_ops.values()])
         if(has_check):
-            op_check_fnames = {op : f'check{j}' for op,(j,_) in self.used_ops.items()}
+            op_check_fnames = {op : f'check{j}' for j,op in self.used_ops.values()}
             check_src = self.gen_check('python', op_call_fnames=op_call_fnames, op_check_fnames=op_check_fnames)
         return_type = list(self.instructions.values())[-1].return_type
         call_sig = return_type(*self.arg_types)

@@ -136,9 +136,9 @@ class CREContext(object):
 
         # for x in ["<#ANY>",'','?sel']:
         #   self.enumerize_value(x)
-    def _register_op_inst(self,op_inst):
-        self.op_instances[op_inst.name] = op_inst
-        self.type_registry[op_inst.name] = op_inst.__class__
+    # def _register_op_inst(self,op_inst):
+    #     self.op_instances[op_inst.name] = op_inst
+    #     self.type_registry[op_inst.name] = op_inst.__class__
 
 
     def _register_fact_type(self, name, spec,

@@ -347,6 +347,7 @@ with PrintElapse("gen_iters"):
     print()
 
 if __name__ == "__main__":
+    test_build_explanation_tree()
     pass
     # test_apply_multi()
     # test_insert_record()
@@ -359,7 +360,7 @@ if __name__ == "__main__":
     # gen = foo_gen()
     # for i in gen:
     #     print(i)
-    _test_declare_fact()
+    # _test_declare_fact()
 # from numba import njit, i8
 # from numba.typed import Dict
 # from numba.types import ListType

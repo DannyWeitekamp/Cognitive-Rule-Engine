@@ -14,13 +14,13 @@ def LessThanEq(a, b):
     return a <= b
 
 
-@Op(shorthand = '({0} < {1})')
+@Op(shorthand = '({0} > {1})')
 def GreaterThan(a, b):
-    return a < b
+    return a > b
 
-@Op(shorthand = '({0} <= {1})')
+@Op(shorthand = '({0} >= {1})')
 def GreaterThanEq(a, b):
-    return a <= b
+    return a >= b
 
 
 @Op(shorthand = '({0} + {1})', commutes=True)
@@ -41,6 +41,15 @@ def denom_not_zero(a,b):
 @Op(shorthand = '({0} / {1})', check=denom_not_zero)
 def Divide(a, b):
     return a / b
+
+@Op(shorthand = '({0} // {1})', check=denom_not_zero)
+def FloorDivide(a, b):
+    return a // b
+
+@Op(shorthand = '({0} ** {1})', check=denom_not_zero)
+def Power(a, b):
+    return a ** b
+
 
 
 

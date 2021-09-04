@@ -224,19 +224,83 @@ class Var(structref.StructRefProxy):
             return var_cmp_beta(self,op_str,other, negate)
     
 
-    def __lt__(self,other): return self._cmp_helper("<",other,False)
-    def __le__(self,other): return self._cmp_helper("<=",other,False)
-    def __gt__(self,other): return self._cmp_helper(">",other,False)
-    def __ge__(self,other): return self._cmp_helper(">=",other,False)
-    def __eq__(self,other): return self._cmp_helper("==",other,False)
-    def __ne__(self,other): return self._cmp_helper("==",other,True)
+    def __lt__(self, other): 
+        from cre.default_ops import LessThan
+        return LessThan(self, other)
+    def __le__(self, other): 
+        from cre.default_ops import LessThanEq
+        return LessThanEq(self, other)
+    def __gt__(self, other): 
+        from cre.default_ops import GreaterThan
+        return GreaterThan(self, other)
+    def __ge__(self, other):
+        from cre.default_ops import GreaterThanEq
+        return GreaterThanEq(self, other)
+    def __eq__(self, other): 
+        from cre.default_ops import Equals
+        return Equals(self, other)
+    def __ne__(self, other): 
+        from cre.default_ops import Equals
+        return ~Equals(self, other)
+
+    def __add__(self, other):
+        from cre.default_ops import Add
+        return Add(self, other)
+
+    def __radd__(self, other):
+        from cre.default_ops import Add
+        return Add(other, self)
+
+    def __sub__(self, other):
+        from cre.default_ops import Subtract
+        return Subtract(self, other)
+
+    def __rsub__(self, other):
+        from cre.default_ops import Subtract
+        return Subtract(other, self)
+
+    def __mul__(self, other):
+        from cre.default_ops import Multiply
+        return Multiply(self, other)
+
+    def __rmul__(self, other):
+        from cre.default_ops import Multiply
+        return Multiply(other, self)
+
+    def __truediv__(self, other):
+        from cre.default_ops import Divide
+        return Divide(self, other)
+
+    def __rtruediv__(self, other):
+        from cre.default_ops import Divide
+        return Divide(other, self)
+
+    def __floordiv__(self, other):
+        from cre.default_ops import FloorDivide
+        return FloorDivide(self, other)
+
+    def __rfloordiv__(self, other):
+        from cre.default_ops import FloorDivide
+        return FloorDivide(other, self)
+
+    def __pow__(self, other):
+        from cre.default_ops import Power
+        return Power(self, other)
+
+    def __rpow__(self, other):
+        from cre.default_ops import Power
+        return Power(other, self)
 
     def __and__(self, other):
-        from cre.conditions import conditions_and
+        from cre.conditions import conditions_and, op_to_cond
+        from cre.op import Op
+        if(isinstance(other,Op)): other = op_to_cond(other)
         return conditions_and(self, other)
 
     def __or__(self, other):
-        from cre.conditions import conditions_or
+        from cre.conditions import conditions_or, op_to_cond
+        from cre.op import Op
+        if(isinstance(other,Op)): other = op_to_cond(other)
         return conditions_or(self, other)
 
     def __invert__(self):

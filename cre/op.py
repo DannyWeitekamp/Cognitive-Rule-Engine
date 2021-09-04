@@ -439,14 +439,14 @@ def new_op(name, members, var_ptrs=None):
     name = cls.__name__
 
     #Triggers getter
-    hash_code = cls.hash_code 
-    if(not source_in_cache(name, hash_code) or getattr(cls,'cache',True) == False):
+    long_hash = cls.long_hash 
+    if(not source_in_cache(name, long_hash) or getattr(cls,'cache',True) == False):
         source = gen_op_source(cls, call_needs_jitting, check_needs_jitting)
-        source_to_cache(name,hash_code,source)
+        source_to_cache(name,long_hash,source)
 
     to_import = ['call','call_addr'] if call_needs_jitting else []
     if(check_needs_jitting): to_import += ['check', 'check_addr']
-    l = import_from_cached(name, hash_code, to_import)
+    l = import_from_cached(name, long_hash, to_import)
     for key, value in l.items():
         setattr(cls, key, value)
 
@@ -594,13 +594,13 @@ class OpMeta(type):
 
 
     @property
-    def hash_code(cls):
-        if(not hasattr(cls,'_hash_code')):
-            hash_code = unique_hash([cls.signature, cls.call_bytes,
+    def long_hash(cls):
+        if(not hasattr(cls,'_long_hash')):
+            long_hash = unique_hash([cls.signature, cls.call_bytes,
                     cls.check_bytes if hasattr(cls,'check') else None])
 
-            cls._hash_code = hash_code
-        return cls._hash_code
+            cls._long_hash = long_hash
+        return cls._long_hash
 
 
 
@@ -636,21 +636,7 @@ class Op(structref.StructRefProxy,metaclass=OpMeta):
             return self.op_comp            
         return OpComp(self,*[self.get_var(i) for i in range(len(self.signature.args))])
 
-    def __and__(self,other):
-        from cre.conditions import op_to_cond, conditions_and
-        self = op_to_cond(self)
-        if(isinstance(other, Op)): other = op_to_cond(other)
-        return conditions_and(self, other)
-
-    def __or__(self,other):
-        from cre.conditions import op_to_cond, conditions_or
-        self = op_to_cond(self)
-        if(isinstance(other, Op)): other = op_to_cond(other)
-        return conditions_or(self, other)
-
-    def __invert__(self):
-        from cre.conditions import literal_ctor, literal_to_cond, literal_not
-        return literal_to_cond(literal_not(literal_ctor(self)))
+    
     #     pass
     # def __call__(self,*py_args):
         
@@ -781,8 +767,105 @@ class Op(structref.StructRefProxy,metaclass=OpMeta):
         return self._arg_names
 
     @property
-    def hash_code(self):
-        return self.__class__.hash_code
+    def long_hash(self):
+        return self.__class__.long_hash
+
+
+    @property
+    def unq(self):
+        '''Returns a unique tuple for the the Op, useful for use
+           in dictionary keys since the Op overloads __eq__ and thus
+           cannot be a dictionary key '''
+        if(not hasattr(self,'_unq')):
+            self._unq = (self.name, self.long_hash)
+        return self._unq
+
+
+    def __hash__(self):
+        return hash(self.long_hash)
+
+    def __lt__(self, other): 
+        from cre.default_ops import LessThan
+        return LessThan(self, other)
+    def __le__(self, other): 
+        from cre.default_ops import LessThanEq
+        return LessThanEq(self, other)
+    def __gt__(self, other): 
+        from cre.default_ops import GreaterThan
+        return GreaterThan(self, other)
+    def __ge__(self, other):
+        from cre.default_ops import GreaterThanEq
+        return GreaterThanEq(self, other)
+    def __eq__(self, other): 
+        from cre.default_ops import Equals
+        return Equals(self, other)
+    def __ne__(self, other): 
+        from cre.default_ops import Equals
+        return ~Equals(self, other)
+
+    def __add__(self, other):
+        from cre.default_ops import Add
+        return Add(self, other)
+
+    def __radd__(self, other):
+        from cre.default_ops import Add
+        return Add(other, self)
+
+    def __sub__(self, other):
+        from cre.default_ops import Subtract
+        return Subtract(self, other)
+
+    def __rsub__(self, other):
+        from cre.default_ops import Subtract
+        return Subtract(other, self)
+
+    def __mul__(self, other):
+        from cre.default_ops import Multiply
+        return Multiply(self, other)
+
+    def __rmul__(self, other):
+        from cre.default_ops import Multiply
+        return Multiply(other, self)
+
+    def __truediv__(self, other):
+        from cre.default_ops import Divide
+        return Divide(self, other)
+
+    def __rtruediv__(self, other):
+        from cre.default_ops import Divide
+        return Divide(other, self)
+
+    def __floordiv__(self, other):
+        from cre.default_ops import FloorDivide
+        return FloorDivide(self, other)
+
+    def __rfloordiv__(self, other):
+        from cre.default_ops import FloorDivide
+        return FloorDivide(other, self)
+
+    def __pow__(self, other):
+        from cre.default_ops import Power
+        return Power(self, other)
+
+    def __rpow__(self, other):
+        from cre.default_ops import Power
+        return Power(other, self)
+
+    def __and__(self,other):
+        from cre.conditions import op_to_cond, conditions_and
+        self = op_to_cond(self)
+        if(isinstance(other, Op)): other = op_to_cond(other)
+        return conditions_and(self, other)
+
+    def __or__(self,other):
+        from cre.conditions import op_to_cond, conditions_or
+        self = op_to_cond(self)
+        if(isinstance(other, Op)): other = op_to_cond(other)
+        return conditions_or(self, other)
+
+    def __invert__(self):
+        from cre.conditions import literal_ctor, literal_to_cond, literal_not
+        return literal_to_cond(literal_not(literal_ctor(self)))
 
     
              
@@ -982,6 +1065,23 @@ class DerefInstr():
         return hash(self._get_hashable())
 
 
+# class InstrProxy():
+#     '''A proxy class to wrap an Op or OpComp that safely implements 
+#         __eq__ and __hash__'''
+#     def __init__(self,op_comp):
+#         if(isinstance(op_comp, Op)):
+#             op_comp = op.as_op_comp()
+#         self.op_comp = op_comp
+#         self._hash = hash(self.op_comp.used_ops)
+
+#     def __str__(self):
+#         return str(self.op_comp)
+
+#     def __repr__(self):
+#         return f"InstrProxy({self.op_comp})"
+
+#     def __eq__(self):
+
 
 
 
@@ -1068,12 +1168,12 @@ class OpComp():
              for the new Op as needed.'''
         if(not hasattr(self,'_generate_op')):
             # print([type(x) for x in self.used_ops])
-            hash_code = unique_hash([self.expr_template,*[(x.name,x.hash_code) for x in self.used_ops]])
-            if(not source_in_cache('__GenerateOp__', hash_code)):
+            long_hash = unique_hash([self.expr_template,*[(x.name,x.long_hash) for x in self.used_ops]])
+            if(not source_in_cache('__GenerateOp__', long_hash)):
                 
-                source = self.gen_flattened_op_src(hash_code)
-                source_to_cache('__GenerateOp__', hash_code, source)
-            l = import_from_cached('__GenerateOp__', hash_code, ['__GenerateOp__'])
+                source = self.gen_flattened_op_src(long_hash)
+                source_to_cache('__GenerateOp__', long_hash, source)
+            l = import_from_cached('__GenerateOp__', long_hash, ['__GenerateOp__'])
             op_cls = self._generate_op_cls = l['__GenerateOp__']
 
             var_ptrs = np.empty(len(self.vars),dtype=np.int64)
@@ -1094,9 +1194,13 @@ class OpComp():
             values are unique integers 0,1,2 etc.'''
         if(not hasattr(self,'_used_ops')):
             used_ops = {}
+            # Since __equal__() is overloaded it's best to use .unq as unqiue keys
+            used_unqs = set() 
             oc = 0
             for i,instr in enumerate(self.instructions):
-                if(isinstance(instr, OpComp) and instr.op not in used_ops):
+                if(isinstance(instr, OpComp) and
+                   instr.op.unq not in used_unqs):
+                    used_unqs.add(instr.op.unq)
                     used_ops[instr.op] = (oc,instr.op.signature)
                     oc += 1
             self._used_ops = used_ops
@@ -1112,7 +1216,7 @@ class OpComp():
             if(hasattr(op,"check")):
                 to_import.update({"check" : f'check{i}', "check_sig" : f'check_sig{i}'})
 
-            op_imports += gen_import_str(op.name, op.hash_code, to_import) + "\n"
+            op_imports += gen_import_str(op.name, op.long_hash, to_import) + "\n"
         return op_imports
 
         
@@ -1149,15 +1253,15 @@ class OpComp():
 
         if(op_call_fnames is None):
             op_call_fnames = {op : f'{op.name}.call' for op in self.used_ops}
-        for op, n in op_call_fnames.items(): names[(op,'call')] = n
+        for op, n in op_call_fnames.items(): names[(op.unq,'call')] = n
             
         if(op_check_fnames is None):
             op_check_fnames = {op : f'{op.name}.check' for op in self.used_ops}
-        for op, n in op_check_fnames.items(): names[(op,'check')] = n
+        for op, n in op_check_fnames.items(): names[(op.unq,'check')] = n
             
         if(op_fnames is None):
             op_fnames = {op : op.name for op in self.used_ops}
-        for op, n in op_fnames.items(): names[op] = n
+        for op, n in op_fnames.items(): names[op.unq] = n
             
         if(skip_consts):
             return names, arg_names
@@ -1201,7 +1305,7 @@ class OpComp():
                 call_body += f"{ind}{gen_assign(lang, f'i{i}', deref_str)}\n"
             else:
                 inp_seq = ", ".join([g_nm(x,names) for x in instr.args])
-                call_fname = names[(instr.op,'call')]
+                call_fname = names[(instr.op.unq,'call')]
                 call_body += f"{ind}{gen_assign(lang, f'i{i}', f'{call_fname}({inp_seq})')}\n"
 
         tail = f'{ind}return i{len(self.instructions)-1}\n'
@@ -1214,21 +1318,21 @@ class OpComp():
         check_body = const_defs
         final_k = "True"
         for i,instr in enumerate(self.instructions):
-            j,_ = self.used_ops[instr.op]
+            j,_ = self.used_ops[instr]
             inp_seq = ", ".join([g_nm(x,names) for x in instr.args])
-            if(hasattr(instr.op, 'check')):
-                check_fname = names[(instr.op,'check')]
+            if(hasattr(instr, 'check')):
+                check_fname = names[(instr.op.unq,'check')]
                 check_body += f"{ind}{gen_assign(lang, f'k{i}', f'{check_fname}({inp_seq}')})\n"
                 check_body += f"{ind}if(not k{i}): return 0\n"
                 final_k = f'k{i}'
             if(i < len(self.instructions)-1):
-                call_fname = names[(instr.op,'call')]
+                call_fname = names[(instr.op.unq,'call')]
                 check_body += f"{ind}{gen_assign(lang, f'i{i}', f'{call_fname}({inp_seq})')}\n"
         tail = f"{ind}return {final_k}\n" 
         return gen_def_func(lang, fname, ", ".join(arg_names), check_body, tail)
 
     
-    def gen_flattened_op_src(self, hash_code, ind='    '):
+    def gen_flattened_op_src(self, long_hash, ind='    '):
         '''Generates python source for the equivalant flattened Op'''
         op_imports = self.gen_op_imports('python')
         
@@ -1269,7 +1373,7 @@ class __GenerateOp__(Op):
     signature = call_sig
     call = call
     {"check = check" if(has_check) else ""}
-    hash_code = {hash_code!r}
+    _long_hash = {long_hash!r}
 '''
         return source
 

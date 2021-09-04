@@ -295,6 +295,175 @@ def not_jit_compilable():
         assert BOOPMap(BOOP("A",1.0)).B == 10.0
         assert BOOPMap.call(BOOP("A",1.0)).B == 10.0
 
+def test_var_cmp_overloads():
+    x, y = Var(f8,'x'), Var(f8,'y')
+
+    #--beta cmp--
+    op = x < y
+    assert str(op) == "(x < y)"
+    op = x <= y
+    assert str(op) == "(x <= y)"
+    op = x > y
+    assert str(op) == "(x > y)"
+    op = x >= y
+    assert str(op) == "(x >= y)"
+    op = x == y
+    assert str(op) == "(x == y)"
+
+    #--left cmp--
+    op = 1 < y
+    assert str(op) == "(y > 1)"
+    op = 1 <= y
+    assert str(op) == "(y >= 1)"
+    op = 1 > y
+    assert str(op) == "(y < 1)"
+    op = 1 >= y
+    assert str(op) == "(y <= 1)"
+    op = 1 == y
+    assert str(op) == "(y == 1)"
+
+    #--right cmp--
+    op = x < 1
+    assert str(op) == "(x < 1)"
+    op = x <= 1
+    assert str(op) == "(x <= 1)"
+    op = x > 1
+    assert str(op) == "(x > 1)"
+    op = x >= 1
+    assert str(op) == "(x >= 1)"
+    op = x == 1
+    assert str(op) == "(x == 1)"
+
+def test_var_arith_overloads():
+    x, y = Var(f8,'x'), Var(f8,'y')
+
+    #--beta arith--
+    op = x + y
+    assert str(op) == "(x + y)"
+    op = x - y
+    assert str(op) == "(x - y)"
+    op = x * y
+    assert str(op) == "(x * y)"
+    op = x / y
+    assert str(op) == "(x / y)"
+    op = x // y
+    assert str(op) == "(x // y)"
+    op = x ** y
+    assert str(op) == "(x ** y)"
+
+    #--left arith--
+    op = 1 + y
+    assert str(op) == "(1 + y)"
+    op = 1 - y
+    assert str(op) == "(1 - y)"
+    op = 1 * y
+    assert str(op) == "(1 * y)"
+    op = 1 / y
+    assert str(op) == "(1 / y)"
+    op = 1 // y
+    assert str(op) == "(1 // y)"
+    op = 1 ** y
+    assert str(op) == "(1 ** y)"
+
+    #--right arith--
+    op = x + 1
+    assert str(op) == "(x + 1)"
+    op = x - 1
+    assert str(op) == "(x - 1)"
+    op = x * 1
+    assert str(op) == "(x * 1)"
+    op = x / 1
+    assert str(op) == "(x / 1)"
+    op = x // 1
+    assert str(op) == "(x // 1)"
+    op = x ** 1
+    assert str(op) == "(x ** 1)"
+
+
+
+def test_op_cmp_overloads():
+    x, y, z = Var(f8,'x'), Var(f8,'y'), Var(f8,'z')
+
+    #--beta cmp--
+    op = (x + z) < (y + z)
+    assert str(op) == "((x + z) < (y + z))"
+    op = (x + z) <= (y + z)
+    assert str(op) == "((x + z) <= (y + z))"
+    op = (x + z) > (y + z)
+    assert str(op) == "((x + z) > (y + z))"
+    op = (x + z) >= (y + z)
+    assert str(op) == "((x + z) >= (y + z))"
+    op = (x + z) == (y + z)
+    assert str(op) == "((x + z) == (y + z))"
+
+    # #--left cmp--
+    op = 1 < (y + z)
+    assert str(op) == "((y + z) > 1)"
+    op = 1 <= (y + z)
+    assert str(op) == "((y + z) >= 1)"
+    op = 1 > (y + z)
+    assert str(op) == "((y + z) < 1)"
+    op = 1 >= (y + z)
+    assert str(op) == "((y + z) <= 1)"
+    op = 1 == (y + z)
+    assert str(op) == "((y + z) == 1)"
+
+    # #--right cmp--
+    op = (x + z) < 1
+    assert str(op) == "((x + z) < 1)"
+    op = (x + z) <= 1
+    assert str(op) == "((x + z) <= 1)"
+    op = (x + z) > 1
+    assert str(op) == "((x + z) > 1)"
+    op = (x + z) >= 1
+    assert str(op) == "((x + z) >= 1)"
+    op = (x + z) == 1
+    assert str(op) == "((x + z) == 1)"
+
+def test_op_arith_overloads ():
+    x, y, z = Var(f8,'x'), Var(f8,'y'), Var(f8,'z')
+
+    #--beta cmp--
+    op = (x + z) + (y + z)
+    assert str(op) == "((x + z) + (y + z))"
+    op = (x + z) - (y + z)
+    assert str(op) == "((x + z) - (y + z))"
+    op = (x + z) * (y + z)
+    assert str(op) == "((x + z) * (y + z))"
+    op = (x + z) / (y + z)
+    assert str(op) == "((x + z) / (y + z))"
+    op = (x + z) // (y + z)
+    assert str(op) == "((x + z) // (y + z))"
+    op = (x + z) ** (y + z)
+    assert str(op) == "((x + z) ** (y + z))"
+
+    # #--left cmp--
+    op = 1 + (y + z)
+    assert str(op) == "((y + z) + 1)"
+    op = 1 - (y + z)
+    assert str(op) == "((y + z) - 1)"
+    op = 1 * (y + z)
+    assert str(op) == "((y + z) * 1)"
+    op = 1 / (y + z)
+    assert str(op) == "((y + z) / 1)"
+    op = 1 // (y + z)
+    assert str(op) == "((y + z) // 1)"
+    op = 1 ** (y + z)
+    assert str(op) == "((y + z) ** 1)"
+
+    # #--right cmp--
+    op = (x + z) + 1
+    assert str(op) == "((x + z) + 1)"
+    op = (x + z) - 1
+    assert str(op) == "((x + z) - 1)"
+    op = (x + z) * 1
+    assert str(op) == "((x + z) * 1)"
+    op = (x + z) / 1
+    assert str(op) == "((x + z) / 1)"
+    op = (x + z) // 1
+    assert str(op) == "((x + z) // 1)"
+    op = (x + z) ** 1
+    assert str(op) == "((x + z) ** 1)"
 
 import time
 class PrintElapse():
@@ -308,19 +477,20 @@ class PrintElapse():
 
 
 if __name__ == "__main__":
-    with PrintElapse("test_op_singleton"):
-        test_op_singleton()
-    with PrintElapse("test_define_apply_op"):
-        test_define_apply_op()
-    with PrintElapse("test_op_singleton"):
-        test_compose_op()
-    with PrintElapse("test_var_propagation"):
-        test_var_propagation()
-        # test_order()
-    with PrintElapse("test_auto_aliasing"):
-        test_auto_aliasing()
-    with PrintElapse("test_source_gen"):
-        test_source_gen()
+    test_op_cmp_overloads()
+    # with PrintElapse("test_op_singleton"):
+    #     test_op_singleton()
+    # with PrintElapse("test_define_apply_op"):
+    #     test_define_apply_op()
+    # with PrintElapse("test_op_singleton"):
+    #     test_compose_op()
+    # with PrintElapse("test_var_propagation"):
+    #     test_var_propagation()
+    #     # test_order()
+    # with PrintElapse("test_auto_aliasing"):
+    #     test_auto_aliasing()
+    # with PrintElapse("test_source_gen"):
+    #     test_source_gen()
 
         # test_commutes()
         # test_fact_args()

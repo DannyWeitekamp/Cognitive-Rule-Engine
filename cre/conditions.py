@@ -16,7 +16,7 @@ from cre.utils import _struct_from_meminfo, _meminfo_from_struct, _cast_structre
 from cre.utils import assign_to_alias_in_parent_frame
 from cre.subscriber import base_subscriber_fields, BaseSubscriber, BaseSubscriberType, init_base_subscriber, link_downstream
 from cre.vector import VectorType
-from cre.op import GenericOpType
+from cre.op import GenericOpType, op_str, op_repr
 # from cre.predicate_node import BasePredicateNode,BasePredicateNodeType, get_alpha_predicate_node_definition, \
  # get_beta_predicate_node_definition, deref_attrs, define_alpha_predicate_node, define_beta_predicate_node, AlphaPredicateNode, BetaPredicateNode, \
  # LiteralLinkDataType, generate_link_data
@@ -107,15 +107,15 @@ class Literal(structref.StructRefProxy):
         return literal_ctor(*args)
         # return structref.StructRefProxy.__new__(cls, *args)
     def __str__(self):
-        return literal_get_str_val(self)
+        return literal_str(self)
 
     @property
     def op(self):
         return literal_get_pred_node(self)
 
 @njit(cache=True)
-def literal_get_str_val(self):
-    return self.op.shorthand_expr
+def literal_str(self):
+    return op_str(self.op)
 
 @njit(cache=True)
 def literal_get_op(self):
@@ -125,7 +125,7 @@ define_boxing(LiteralTypeTemplate, Literal)
 LiteralType = LiteralTypeTemplate(literal_fields)
 
 @njit(LiteralType(GenericOpType),cache=True)
-@overload(Literal)
+# @overload(Literal)
 def literal_ctor(op):
     st = new(LiteralType)
     st.op = op
@@ -140,10 +140,10 @@ def literal_ctor(op):
 
 #TODO: STR
 @overload(str)
-def literal_str(self):
+def _literal_str(self):
     if(not isinstance(self, LiteralTypeTemplate)): return
     def impl(self):
-        return literal_get_str_val(self)
+        return literal_str(self)
     return impl
 
 @njit(cache=True)
@@ -177,7 +177,8 @@ def literal_to_cond(lit):
     # if(right_var is not None):
     #     _vars.append(right_var)
     # pt.negated = negated
-    c = Conditions(_vars, dnf)
+    c = _conditions_ctor_var_list(_vars, dnf)
+    # c = Conditions(_vars, dnf)
     return c
 
 @njit(cache=True)
@@ -489,8 +490,10 @@ def build_var_list(var_map):
 def _conditions_and(left, right):
     '''AND is distributive
     AND((ab+c), (de+f)) = abde+abf+cde+cf'''
-    return Conditions(build_var_map(left.vars,right.vars),
-                      dnf_and(left.dnf, right.dnf))
+    return _conditions_ctor_var_map(
+                build_var_map(left.vars,right.vars),
+                dnf_and(left.dnf, right.dnf)
+            )
 
 # @njit(cache=True)
 # def conditions_and_var(left,right):
@@ -511,7 +514,7 @@ def _conditions_and(left, right):
 
 # @njit(cache=True)
 @generated_jit(cache=True)    
-def conditions_and(self,other):
+def conditions_and(self, other):
     if(isinstance(other, VarTypeTemplate)):
         if(isinstance(self,VarTypeTemplate)):
             def impl(self,other):

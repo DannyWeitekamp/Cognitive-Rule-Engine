@@ -286,37 +286,28 @@ class UntypedOp():
             return call(*py_args)
 
 
-        with PrintElapse("  get_call_template"):
-            cres = call.overloads.get(tuple(arg_types))
-            if(cres is not None):
-                sig = cres.signature
-            else:
-                # Note: get_call_template is an internal method of numba.Dispatcher 
-                (template,*rest) = call.get_call_template(arg_types,{})
-                sig = template.cases[0]
-            # self.members['signature'] = sig
-            members = {**self.members, 'signature': sig}
+        cres = call.overloads.get(tuple(arg_types))
+        if(cres is not None):
+            sig = cres.signature
+        else:
+            # Note: get_call_template is an internal method of numba.Dispatcher 
+            (template,*rest) = call.get_call_template(arg_types,{})
+            sig = template.cases[0]
+        # self.members['signature'] = sig
+        members = {**self.members, 'signature': sig}
 
-        with PrintElapse(f"  rest {self.name} {sig}"):
-            if(any_not_var):
-                op = new_op(self.name, members)
-                return OpComp(op, *py_args).flatten()
-            else:
-                var_ptrs = np.array([v.get_ptr() for v in py_args],dtype=np.int64)
-                # Retreive from Cache/Make typed version 
-                if(sig not in self._specialize_cache):
-                    print("No Spec")
-                    op_cls = new_op(self.name, members,return_class=True)
-                    self._specialize_cache[sig] = op_cls
-                op_cls = self._specialize_cache[sig]
-                with PrintElapse(f"    make_singleton_inst"):
-                    return op_cls.make_singleton_inst(var_ptrs=var_ptrs)
+        if(any_not_var):
+            op = new_op(self.name, members)
+            return OpComp(op, *py_args).flatten()
+        else:
+            var_ptrs = np.array([v.get_ptr() for v in py_args],dtype=np.int64)
+            # Retreive from Cache/Make typed version 
+            if(sig not in self._specialize_cache):
+                op_cls = new_op(self.name, members,return_class=True)
+                self._specialize_cache[sig] = op_cls
+            op_cls = self._specialize_cache[sig]
+            return op_cls.make_singleton_inst(var_ptrs=var_ptrs)
 
-
-        # else:
-        #     op_comp = OpComp(self,*py_args)
-        #     op = op_comp.flatten()
-        # return 
 
 def resolve_return_type(x):
     if(isinstance(x,Var)):
@@ -438,8 +429,8 @@ def new_op(name, members, var_ptrs=None, return_class=False):
     cls._handle_commutes()
     cls._handle_nopython()
 
-    with PrintElapse("\tprocess_method"):
-        cls.process_method("call", cls.signature)
+    # with PrintElapse("\tprocess_method"):
+    cls.process_method("call", cls.signature)
     
     if(has_check):
         cls.process_method("check", u1(*cls.signature.args))
@@ -465,31 +456,31 @@ def new_op(name, members, var_ptrs=None, return_class=False):
     for key, value in l.items():
         setattr(cls, key, value)
 
-    with PrintElapse("\tgwap"):
-        # Make static so that self isn't the first argument for call/check.
-        cls.call = staticmethod(cls.call)
-        if(has_check): cls.check = staticmethod(cls.check)
+    # with PrintElapse("\tgwap"):
+    # Make static so that self isn't the first argument for call/check.
+    cls.call = staticmethod(cls.call)
+    if(has_check): cls.check = staticmethod(cls.check)
 
-        # Get store the addresses for call/check
-        if(not call_needs_jitting): 
-            cls.call_sig = cls.signature
-            cls.call_addr = _get_wrapper_address(cls.call,cls.call_sig)
+    # Get store the addresses for call/check
+    if(not call_needs_jitting): 
+        cls.call_sig = cls.signature
+        cls.call_addr = _get_wrapper_address(cls.call,cls.call_sig)
 
-        if(not check_needs_jitting and has_check):
-            cls.check_sig = u1(*cls.signature.args)
-            cls.check_addr = _get_wrapper_address(cls.check,cls.check_sig)
+    if(not check_needs_jitting and has_check):
+        cls.check_sig = u1(*cls.signature.args)
+        cls.check_addr = _get_wrapper_address(cls.check,cls.check_sig)
 
-        # Standardize shorthand definitions
-        if(hasattr(cls,'shorthand') and 
-            not isinstance(cls.shorthand,dict)):
-            cls.shorthand = {'*' : cls.shorthand}
+    # Standardize shorthand definitions
+    if(hasattr(cls,'shorthand') and 
+        not isinstance(cls.shorthand,dict)):
+        cls.shorthand = {'*' : cls.shorthand}
 
-        # with PrintElapse("\tMakeInst"):
-        if(cls.__name__ != "__GenerateOp__" and not return_class):
-            op_inst = cls.make_singleton_inst(var_ptrs=var_ptrs)
-            return op_inst
+    # with PrintElapse("\tMakeInst"):
+    if(cls.__name__ != "__GenerateOp__" and not return_class):
+        op_inst = cls.make_singleton_inst(var_ptrs=var_ptrs)
+        return op_inst
 
-        return cls
+    return cls
 
 
 

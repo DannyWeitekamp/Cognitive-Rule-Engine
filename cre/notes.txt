@@ -215,9 +215,77 @@ TODO:
 --Sep 3, 2021--
 
 Next steps:
-	[] Overload <, >, <=, >=, ==, +, * , -, /
+	[x] Overload <, >, <=, >=, ==, +, * , -, /
 	[] Make sure conditions str/repr properly <-- probably can be the same except that repr should probably reveal that it is a member of the Conditions class and reveal any active mem_link.
 	[] Define filter_op... the rest will probably just work...
+
+---Sep 4, 2021---
+
+Thoughts... I've gone back and forth between keeping alpha and beta bits seperate. It seems uncessary now that everything just uses literals/ops. It would make sense to just have the dnf be a list of lists,
+and then at initialization things would be reordered into a structure with order:
+	Dim 0: slot = argmax(left_var_num, right_var_num,...)
+	Dim 1: slot = 
+		(Indexed alphas < alphas) < (betas) < ...
+
+
+distr_dnf:
+Bins for each Var
+Alphas need to be in their own bin
+betas need to be in their own bin
+After alphas are taken care of then they need to be passed to various betas.
+In principle this means finding connected components among the betas
+ 1) ? each conjunct. <----
+ 2) ? each dnf?
+And then picking some order that they should be checked.
+
+Dictionaries are probably going to need to be the main data structure.
+If on the left a dictionary is provided with keys [a_i,b_j,c_k]
+and on the right a dictionary with keys [d_l,] is provided
+then all [a,b,c] x [d,] should be checked for d < b and the output dictionary of passing values should be of [a,b,c,d]. Now how can we keep this result and only check diffed facts. In this instance we only care
+about changes in b's and d's. The nodes being inputted into this
+node should probably...
+
+We need to keep track of all facts that have changed since we last updated,
+so if the Conditions object's queue is just a bunch of FIDs that have changed then we need a way of querying these FIDs to see whether the current literal needs updating. This goes for the FIDs of facts that are only indirectly involved through dereferencing. This means we probably need to either:
+	1) Not embed the dereferences in the op, and call deref_attrs 
+	2) Keep some meta-data about the dereferences... which in practice means computing the intermediates anyway.
+
+So then there really needs to be a 'depends' dictionary of FID->??
+
+Maybe there only needs to be a depends dictionary and the rest is just vectors. For example a 2d vector is passed for [a,b,c] x [d,] and then [a,b,c,d] is a new vector. Along the way the 'depends' dictionary is filled with the FIDs for all d's and b's (plus FIDs for dereferences) as keys and the values are the indicies of the relevant values within the left, right and resultant vectors. In the case of retractions these vectors would need to be filled with zeros and the missing spots remembered.
+
+Now on a retraction:
+	an FID is put in the change queue. At the first node it is checked against the 'depends' (if the FID doesn't have an attr_id then the relevant one should be assumed), the output vector that the depends points to should be updated with the change. (Seems like we probably don't need to edit the input vectors after all, since they would have already been altered by the previous node). In the next nodes we do the same thing... checking the entire change queue against the 'depends' of the node... If a change in left makes left + right fail then we need to remove right from 'depends' as well.
+
+	So probably in order for 'depends' to clean itself up properly it should be something like (output_index, ...FIDs to remove from self)... but maybe this doesn't work because other Left FID could still be needed by another output. Maybe 'depends' should be a nested dict(dict())???
+
+In the original RETE everything works by propogation, the set of matches are literally passed along... does that not work here? What is missing...
+
+The question is when something goes missing how to we remove only that thing from the output of a node... maybe we just search for it?
+
+This is kind of the same problem I was having without even doing it this way, and the solution involved keeping around a consistency matrix... which probably would work fine here too... just the outputs would be different. 
+
+Okay so looking back it seems that there is a truth_values matrix and a consistency matrix and the output is created by finding the true points in the truth table.
+
+The consistency table is certainly convenient in some ways... Although it seems probably too intimately connect to the left/right fact vector sizes. So how can we make for a more minimal data structure...
+
+At the end of the day the ONLY thing a node needs to achieve is consistency between it's inputs and output. So we can probably achieve something similar to the consistency matrix by just keeping two 'depends' dictionaries for the left and right... where I guess the keys are just the same as the inputs. This gets us back to passing around dictionaries. 
+
+What if we did this. The Conditions object passes the items in the change queue along to their respective alpha nodes. The alpha nodes maintain their own change queues (which are maybe just cleared after each update) and when a downstream nodes goes to update, it rechecks the pairs in the union of left_change * right_all and left_all * right_changes. As a result of rechecking we might need to add or remove items ->  would alter the current node's change queue. 
+
+Should node change queues consist of indicies or [...FIDs]? Indicies only work if we're using holey vectors.
+
+To really update the outputs we either need to know where each output goes in an array or we need to just use a set/dictionary and add/del keys.
+
+We'll need to use dictionaries. So then the change queue is just a dictionary of added things and removed things. For removed things we need to do the usual inner product and just take out any that are already in the output. For added things we do the same but only add them in if they evaluate to true.
+
+
+
+
+
+
+
+
 
 
  

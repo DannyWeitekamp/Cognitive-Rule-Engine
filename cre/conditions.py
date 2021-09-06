@@ -148,7 +148,7 @@ def _literal_str(self):
 
 @njit(cache=True)
 def literal_copy(self):
-    st = new(Literal)
+    st = new(LiteralType)
     # st.str_val = self.str_val
     st.op = self.op
     st.var_base_ptrs = self.var_base_ptrs
@@ -168,8 +168,8 @@ def literal_not(self):
 @njit(cache=True)
 def literal_to_cond(lit):
     dnf = new_dnf(1)
-    ind = 0 if (lit.is_alpha) else 1
-    dnf[0][ind].append(lit)
+    # ind = 0 if (lit.is_alpha) else 1
+    dnf[0].append(lit)
     _vars = List.empty_list(GenericVarType)
 
     for ptr in lit.var_base_ptrs:
@@ -192,8 +192,9 @@ def op_to_cond(op):
 
 ## dnf_type ##
 literal_list_type = ListType(LiteralType)
-ab_conjunct_type = Tuple((literal_list_type, literal_list_type))
-dnf_type = ListType(ab_conjunct_type)
+conjunct_type = literal_list_type
+# ab_conjunct_type = #Tuple((literal_list_type, literal_list_type))
+dnf_type = ListType(conjunct_type)
 
 ## distr_dnf_type ##e
 literal_list_list_type = ListType(literal_list_type)
@@ -314,9 +315,9 @@ def impl_get_matches(self,mem=None):
 
 @njit(cache=True)
 def new_dnf(n):
-    dnf = List.empty_list(ab_conjunct_type)
+    dnf = List.empty_list(conjunct_type)
     for i in range(n):
-        dnf.append((List.empty_list(LiteralType), List.empty_list(LiteralType)) )
+        dnf.append(List.empty_list(LiteralType))
     return dnf
 
 @njit(cache=True)
@@ -412,22 +413,22 @@ def conditions_str(self,add_non_conds=False):
     #     if(j < len(self.vars)-1): s += ", "
     # s += '\n'
     used_var_ptrs = Dict.empty(i8,u1)
-    for j, (alpha_conjunct, beta_conjunct) in enumerate(self.dnf):
-        for i, alpha_lit in enumerate(alpha_conjunct):
-            s += "~" if alpha_lit.negated else ""
-            s += str(alpha_lit)
-            if(i < len(alpha_conjunct)-1 or
-                len(beta_conjunct)): s += " & "
+    for j, conjunct in enumerate(self.dnf):
+        for i, lit in enumerate(conjunct):
+            s += "~" if lit.negated else ""
+            s += str(lit)
+            if(i < len(conjunct)-1): s += " & "
             if(add_non_conds): 
-                used_var_ptrs[alpha_lit.var_base_ptrs[0]] = u1(1)
+                for var_ptr in lit.var_base_ptrs:
+                    used_var_ptrs[var_ptr] = u1(1)
 
-        for i, beta_lit in enumerate(beta_conjunct):
-            s += "~" if beta_lit.negated else ""
-            s += str(beta_lit)
-            if(i < len(beta_conjunct)-1): s += " & "
-            if(add_non_conds): 
-                used_var_ptrs[beta_lit.var_base_ptrs[0]] = u1(1)
-                used_var_ptrs[beta_lit.var_base_ptrs[1]] = u1(1)
+        # for i, beta_lit in enumerate(beta_conjunct):
+        #     s += "~" if beta_lit.negated else ""
+        #     s += str(beta_lit)
+        #     if(i < len(beta_conjunct)-1): s += " & "
+        #     if(add_non_conds): 
+        #         used_var_ptrs[beta_lit.var_base_ptrs[0]] = u1(1)
+        #         used_var_ptrs[beta_lit.var_base_ptrs[1]] = u1(1)
 
         if(j < len(self.dnf)-1): s += " |\\\n"
 
@@ -543,12 +544,12 @@ def dnf_and(l_dnf, r_dnf):
     for i, l_conjunct in enumerate(l_dnf):
         for j, r_conjunct in enumerate(r_dnf):
             k = i*len(r_dnf) + j
-            # for x in l_conjunct: dnf[k].append(x)
-            # for x in r_conjunct: dnf[k].append(x)
-            for x in l_conjunct[0]: dnf[k][0].append(x)
-            for x in r_conjunct[0]: dnf[k][0].append(x)
-            for x in l_conjunct[1]: dnf[k][1].append(x)
-            for x in r_conjunct[1]: dnf[k][1].append(x)
+            for x in l_conjunct: dnf[k].append(x)
+            for x in r_conjunct: dnf[k].append(x)
+            # for x in l_conjunct[0]: dnf[k][0].append(x)
+            # for x in r_conjunct[0]: dnf[k][0].append(x)
+            # for x in l_conjunct[1]: dnf[k][1].append(x)
+            # for x in r_conjunct[1]: dnf[k][1].append(x)
     return dnf
 
 
@@ -587,31 +588,34 @@ def conditions_or(self,other):
 def dnf_or(l_dnf, r_dnf):
     dnf = new_dnf(len(l_dnf)+len(r_dnf))
     for i, conjuct in enumerate(l_dnf):
-        # for x in conjuct: dnf[i].append(x)
-        for x in conjuct[0]: dnf[i][0].append(x)
-        for x in conjuct[1]: dnf[i][1].append(x)
+        for x in conjuct: dnf[i].append(x)
+        # for x in conjuct[0]: dnf[i][0].append(x)
+        # for x in conjuct[1]: dnf[i][1].append(x)
 
     for i, conjuct in enumerate(r_dnf):
         k = len(l_dnf)+i
-        # for x in conjuct: dnf[k].append(x)
-        for x in conjuct[0]: dnf[k][0].append(x)
-        for x in conjuct[1]: dnf[k][1].append(x)
+        for x in conjuct: dnf[k].append(x)
+        # for x in conjuct[0]: dnf[k][0].append(x)
+        # for x in conjuct[1]: dnf[k][1].append(x)
 
     return dnf
 
 @njit(cache=True)
 def dnf_not(c_dnf):
     dnfs = List.empty_list(dnf_type)
+    # return new_dnf(len(c_dnf))
     for i, conjunct in enumerate(c_dnf):
-        dnf = new_dnf(len(conjunct[0])+len(conjunct[1]))
-        for j, term in enumerate(conjunct[0]):
-            dnf[j][0].append(literal_not(term))
-        for j, term in enumerate(conjunct[1]):
-            k = len(conjunct[0]) + j
-            dnf[k][1].append(literal_not(term))
+        dnf = new_dnf(len(conjunct))
+        for j, lit in enumerate(conjunct):
+            # dnf[j].append(lit)
+            dnf[j].append(literal_not(lit))
+        # for j, term in enumerate(conjunct[0]):
+    #     #     dnf[j][0].append(literal_not(term))
+    #     # for j, term in enumerate(conjunct[1]):
+    #     #     k = len(conjunct[0]) + j
+    #     #     dnf[k][1].append(literal_not(term))
         dnfs.append(dnf)
 
-    # print("PHAZZZZZZ")
     out_dnf = dnfs[0]
     for i in range(1,len(dnfs)):
         out_dnf = dnf_and(out_dnf,dnfs[i])
@@ -819,7 +823,7 @@ def get_linked_conditions_instance(conds, mem, copy=False):
 def initialize_conditions(conds):
     distr_dnf = List.empty_list(distr_ab_conjunct_type)
     n_vars = len(conds.vars)
-    for ac, bc in conds.dnf:
+    for conjunct in conds.dnf:
         alpha_conjuncts = List.empty_list(literal_list_type)
         beta_conjuncts = List.empty_list(literal_list_type)
         

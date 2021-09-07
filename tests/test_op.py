@@ -466,6 +466,21 @@ def test_op_arith_overloads ():
     op = (x + z) ** 1
     assert str(op) == "((x + z) ** 1)"
 
+
+def test_boxing():
+    x, y = Var(f8,'x'), Var(f8,'y')
+
+    @njit(cache=True)
+    def return_same(x):
+        return x
+
+    _Add = return_same(x + y)
+    _Add = return_same(_Add)
+    _Add = return_same(_Add)
+    assert str(_Add) == "(x + y)"
+    # print(_Add, type(_Add))
+
+
 import time
 class PrintElapse():
     def __init__(self, name):
@@ -478,7 +493,8 @@ class PrintElapse():
 
 
 if __name__ == "__main__":
-    test_op_arith_overloads()
+    test_boxing()
+    # test_op_arith_overloads()
     # test_op_cmp_overloads()
     # with PrintElapse("test_op_singleton"):
     #     test_op_singleton()

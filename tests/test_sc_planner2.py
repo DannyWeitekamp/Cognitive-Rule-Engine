@@ -210,6 +210,7 @@ def test_forward_chain_one():
 
 def setup_retrace(n=5):
     Add, Multiply, Concatenate = get_base_ops()
+    print(repr(Add), repr(Multiply), repr(Concatenate))
     planner = setup_float(n=n)
     planner = setup_str(planner,n=n)
     forward_chain_one(planner, [Add,Multiply,Concatenate])

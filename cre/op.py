@@ -197,6 +197,7 @@ def op_define_boxing(struct_type, obj_class):
 
     @box(struct_type)
     def box_op(typ, val, c):
+        ''' NRT -> Python '''
         struct_ref = cgutils.create_struct_proxy(typ)(c.context, c.builder, value=val)
         meminfo = struct_ref.meminfo
         py_class = struct_ref.py_class
@@ -219,6 +220,7 @@ def op_define_boxing(struct_type, obj_class):
 
     @unbox(struct_type)
     def unbox_op(typ, obj, c):
+        ''' Python -> NRT '''
         mi_obj = c.pyapi.object_getattr_string(obj, "_meminfo")
         op_class_obj = c.pyapi.object_getattr_string(obj, "__class__")
 
@@ -234,7 +236,7 @@ def op_define_boxing(struct_type, obj_class):
         out = struct_ref._getvalue()
 
         c.pyapi.decref(mi_obj)
-        c.pyapi.decref(op_class_obj)
+        # c.pyapi.decref(op_class_obj) <- Don't decref this
         return NativeValue(out)
 
 
@@ -636,12 +638,15 @@ class Op(structref.StructRefProxy,metaclass=OpMeta):
         # print(ty, mi, py_cls)
         # instance = structref.StructRefProxy._numba_box_(cls, ty, mi)
         instance = super(structref.StructRefProxy,cls).__new__(cls)
-        # print("instance)
-        # instance = 
         instance._type = ty
         instance._meminfo = mi
-        if(py_cls is not None):
-            instance.__class__ = py_cls
+        if(isinstance(py_cls,OpMeta)):# is not None):
+            instance.__class__ = py_cls# is not None):
+
+
+
+        # else:
+        #     raise ValueError()
 
         # print("CLASS:", py_cls)
         # print("<< ", type(instance))

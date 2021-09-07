@@ -280,6 +280,205 @@ To really update the outputs we either need to know where each output goes in an
 We'll need to use dictionaries. So then the change queue is just a dictionary of added things and removed things. For removed things we need to do the usual inner product and just take out any that are already in the output. For added things we do the same but only add them in if they evaluate to true.
 
 
+-- Sep 6, 2021 --
+
+Some thoughts... if x.B.B.A < y.B.A then one match to this depends on 10 (really 12) possible changes.
+
+	-- Fact Retractions --
+	-retraction of x
+	-retraction of y
+
+	-- Deref retractions / Modifications --
+	-modification of x.B
+	-retraction of x.B
+	-modification of x.B.B
+	-retraction of x.B.B
+	-modification of y.B
+	-retraction of y.B
+
+	-- Head modifications --
+	-modification of x.B.B.A
+	-modification of y.B.A
+
+	--- These two can be baked into retraction of x/y ---
+	-x being retracted from the output of left
+	-y being retracted from the output of right
+
+Our 'depends' dictionary would need to have all of these possibilities
+as keys and the values would need to be a list of outputs + the other keys that are depended upon.
+
+If an output is invalidated then we need to remove all of its depends, but not any that are also part of another output. So we need some kind of refcounting solution.
+
+So DependencyEntry would have:
+	"count" : int 
+	"outputs" : List() ???
+
+
+This just seems like a ton of overhead... but maybe it's necessary?
+The overhead for just one node might be more than conservatively rechecking everything.
+
+
+Thought... how are things simplified if only considering fact retractions, declarations and head modifications?
+
+What if every output kept track of it's own list of nodes + outputs that need to be retracted or rechecked. A node can edit this list, and signal a change. So if it is retracted all of its downstream dependencies are retracted. Is this that different from the 'depends' dict? A little bit because it reduces...
+
+What if the fact itself keeps track of things that depend on it. So when a modification occurs it can signal a checked. 
+
+
+
+
+'depends' = idrec -> array of pointers to OutputEntries()
+	the output entries have other idrecs... we don't need to clean them
+	out because the OutputEntry instance can just be marked as invalid
+
+ConditionNode
+	"inputs" : ListType(??),
+    "output" : Vector(*OutputEntryType),
+    "arg_indicies" : i8[::1],
+    "literal" : LiteralType,
+	"t_ids" : i8[::1],
+	"depends" : DictType(i8, ListType(OutputEntryType))
+	"fail_depends" : DictType(i8, i8)
+
+
+OutputEntry
+	"is_valid" : u1,
+	"index" : i8,
+	"f_ids" : u8[::1], #maybe u4[::1]
+	"depends_idrecs" : u8[::1]
+
+When update is called:
+	1) look through the .mem's change_queue and check for
+		(idrec ~ left_t_id | idrec ~ right_t_id)
+
+		Also go through the the change queues of the inputs and use the equivalent idrecs for the node that would be created from the f_ids of the changed OutputEntries.
+
+		Accumulate these changes... clobber declarations/retractions chronologically. Do on .mem first then the inputs.
+
+		#if any of the .mem ones are in deref_fails then go to the OutputEntry associated with the input and add it to the appropriate left/right change set.
+
+
+for each change:
+	if(change ~ DEC):
+		try left_changes * all_right
+		try right_changes * all_left
+		
+		if(!passes because of deref):
+			add to deref_fails
+
+		if(passes):
+			make the output entry
+			add fids encountered into depends
+			self.changed_entries.append((DEC, output_entry))
+
+	else:
+		if(idrec in depends):
+			for output_entry in depends[idrec]:
+				passes = ?passes(output_entry) if(change ~ MOD) else False
+				if(not passes):
+					if(output_entry.is_valid):
+						outputs.remove(output_entry)
+						output_entry.is_valid = False
+
+					self.changed_entries.append((RET,output_entry))
+					
+
+
+Maybe it makes more sense to treat deref failures per input, so for example for the left inputs we try to deref everything and we see where it stops.  
+
+
+So,
+	left_deref_depends : idrec -> List(DerefRecord)
+	right_deref_depends : idrec -> List(DerefRecord)
+
+	when one of these changes we need to reattempt to find the fid of the head fact.
+
+	so now once all of these get processed we should only have to worry about base_fids in the depends dict?
+
+	From these we should be able to come up with a 
+	'left_deref_records' and 'right_deref_records' and in the case that something changes (a deref chain now succeeds/fails/alters it's head) there is now an effective set of left_changes and right_changes which are just the base fids.
+
+
+Psuedo code round 2:
+
+ConditionNode
+	"inputs" : ListType(??),
+    "output" : Vector(*OutputEntryType),
+    "arg_indicies" : i8[::1],
+    "literal" : LiteralType,
+	"deref_t_ids" : i8[::1],
+	"depends" : DictType(i8, ListType(OutputEntryType))
+	"deref_depends : List(DictType(i8, ListType(DerefRecord)))"
+	"deref_consistencies" : List(vector(i8))"
+
+
+OutputEntry
+	"is_valid" : u1,
+	"index" : i8,
+	"f_ids" : u8[::1], #maybe u4[::1]
+	"depends_idrecs" : u8[::1]
+
+DerefRecord = {
+	"is_valid" : u1,
+	"consistency_index" : u1,
+	"fids" : i8[::1],
+}
+
+
+
+for idrec in self.mem.change_queue:
+	chg_typ, f_id = idrec
+	for i in range(n_args):
+		if(f_id in deref_depends[i]):
+			
+			if(chg_typ == DEC):
+
+			else:
+				deref_record = deref_depends[i][f_id]
+				deref_consistencies[i].remove([deref_record.consistency_index]
+
+
+
+
+Maybe it's better to just have a seperate DerefNode that lives inside each alpha/beta node. 
+
+So DerefNode takes in the .output of all .inputs and produces a change_set that can be used by the alpha/beta node.
+
+Cases:
+	r1) retract(z)
+	r2) retract(z.B)
+
+	m1) modify(z.B)
+	m2) modify(z.B.A)
+
+	d) declare(z)
+
+	//declare(z.B) <-This isn't possible. It would either be linked at instantiation or change with a subsequent modify.
+
+Two things need to be up to date after an update:
+	1) .outputs : Vector(*OutputEntry),
+	2) .retracted_inds: Vector(i8) 
+	3) .inds_of_diffs : Vector(i8) <- Indicies that need to be rechecked downstream
+
+
+d:
+	Only triggered by changes in .input.inds_of_diffs
+	- .input.output.add(input.inds_of_diffs) needs to be in self.output
+	- if .retracted_inds was nonempty then there should be one fewer
+	- whatever index was used when added needs to be in .inds_of_diffs
+	Should ignore other declarations
+
+r1:
+	triggered by changes in .input.inds_of_diffs?
+	- 
+
+
+
+
+
+
+
+
 
 
 

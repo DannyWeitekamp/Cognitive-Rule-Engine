@@ -478,6 +478,18 @@ r1:
 
 
 
+--- Sept 7 ----
+
+It dawned on me that there is potentially a lot of duplicate checking in normal RETE. For example if I am checking (b < c) then the matches of for instance a beta check (a < b) previous in the graph might produce multiple matches to the same b. We could alternative keep around data structures like: 
+
+{b -> [a1,a2,a3]}
+{a -> [b1,b2,b3]}
+
+Probably only need one or the other, although the other one potentially double as a 'depends' dictionary at least for base declarations/retractions.
+
+Reconstructing the match would then involve rebuilding the matches backwards through a set of nodes marked as resolution nodes... 
+
+
 
 
 

@@ -2,7 +2,7 @@ from numba import f8, njit
 from numba.core.errors import NumbaPerformanceWarning
 from numba.types import  FunctionType, unicode_type
 import numpy as np
-from cre.op import Op
+from cre.op import Op, GenericOpType
 from cre.var import Var
 from cre.utils import _func_from_address
 from cre.context import cre_context
@@ -470,7 +470,7 @@ def test_op_arith_overloads ():
 def test_boxing():
     x, y = Var(f8,'x'), Var(f8,'y')
 
-    @njit(cache=True)
+    @njit(GenericOpType(GenericOpType,), cache=True)
     def return_same(x):
         return x
 

@@ -101,7 +101,7 @@ class Var(structref.StructRefProxy):
         # print("after")
         return st
         # return structref.StructRefProxy.__new__(cls, *args)
-
+        
     def _handle_deref(self, attr_or_ind):
         '''Helper function that... '''
         
@@ -117,7 +117,8 @@ class Var(structref.StructRefProxy):
             if(isinstance(head_type,DeferredFactRefType)):
                 head_type = cre_context().type_registry[head_type._fact_name]
             # head_type = fact_type.field_dict[attr]
-            offset = fact_type._attr_offsets[list(fd.keys()).index(attr)]
+            a_id = list(fd.keys()).index(attr)
+            offset = fact_type._attr_offsets[a_id]
             deref_type = 'attr'
         else:
             # LIST case
@@ -127,6 +128,7 @@ class Var(structref.StructRefProxy):
             head_type = self.head_type.item_type
 
             attr = str(attr_or_ind)
+            a_id = 0
             offset = int(attr_or_ind)*listtype_sizeof_item(self.head_type)
             deref_type = 'list'
 
@@ -139,7 +141,7 @@ class Var(structref.StructRefProxy):
             struct_type = GenericVarType
         #CHECK THAT PTRS ARE SAME HERE
         head_type_name = str(head_type)
-        new = new_appended_var(struct_type, self, attr, offset, head_type_name, deref_type)
+        new = new_appended_var(struct_type, self, attr, a_id, offset, head_type_name, deref_type)
         new._base_type = base_type
         new._head_type = head_type
         # new = var_ctor(struct_type, str(type_name), var_get_alias(self))
@@ -495,11 +497,11 @@ class StructAttribute(AttributeTemplate):
 #### getattr and dereferencing ####
 
 @njit(cache=True)
-def new_appended_var(struct_type, base_var, attr, offset, head_type_name, typ='attr'):
+def new_appended_var(struct_type, base_var, attr, a_id, offset, head_type_name, typ='attr'):
     _incref_structref(base_var)
     st = new(struct_type)
     var_memcopy(base_var,st)
-    var_append_deref(st,attr,offset, head_type_name, typ)
+    var_append_deref(st,attr, a_id, offset, head_type_name, typ)
     return st
 
 
@@ -526,7 +528,7 @@ def var_memcopy(self,st):
     
 
 @njit(cache=True)
-def var_append_deref(self,attr,offset, head_type_name, typ='attr'):
+def var_append_deref(self, attr, a_id, offset, head_type_name, typ='attr'):
     lower_getattr(self,"deref_attrs").append(attr)
     old_deref_offsets = lower_getattr(self,"deref_offsets")
     L = len(old_deref_offsets)
@@ -537,6 +539,7 @@ def var_append_deref(self,attr,offset, head_type_name, typ='attr'):
     elif(typ == 'list'):
         new_deref_offsets[L].type = u1(OFFSET_TYPE_LIST)
 
+    new_deref_offsets[L].a_id = u1(a_id)
     new_deref_offsets[L].offset = i8(offset)
 
     lower_setattr(self,'deref_offsets', new_deref_offsets)
@@ -563,7 +566,7 @@ def var_getattr_impl(context, builder, typ, val, attr):
         st = ctor(context, builder, value=val)._getvalue()
 
         def new_var_and_append(self):
-            return new_appended_var(typ, self, attr, offset,'attr')
+            return new_appended_var(typ, self, attr, a_id, offset,'attr')
             # st = new(typ)
             # var_memcopy(self,st)
             # var_append_deref(st,attr,offset)

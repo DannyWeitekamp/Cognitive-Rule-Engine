@@ -1,5 +1,5 @@
-# from numba.typed import DictType
-from numba.types import DictType
+from numba.typed import Dict, List
+from numba.types import DictType, ListType
 from numba import i8, types
 from cre.caching import unique_hash, source_in_cache, import_from_cached, source_to_cache
 from numba.experimental import structref
@@ -63,7 +63,7 @@ class {typ}(structref.StructRefProxy):
 #     return l[f"{typ}TypeTemplate"](fields=fields)
 
 def define_structref_template(name, fields, define_constructor=True,define_boxing=True):
-    if(isinstance(fields,dict)): [(k,v) for k,v in fields.items()]
+    if(isinstance(fields,dict)): fields = [(k,v) for k,v in fields.items()]
     hash_code = unique_hash([name,fields])
     print(name, hash_code)
     if(not source_in_cache(name,hash_code)):
@@ -76,6 +76,7 @@ def define_structref_template(name, fields, define_constructor=True,define_boxin
     return ctor,template
 
 def define_structref(name, fields, define_constructor=True,define_boxing=True):
+    if(isinstance(fields,dict)): fields = [(k,v) for k,v in fields.items()]
     ctor, template = define_structref_template(name,fields, define_constructor=define_constructor,define_boxing=define_boxing)
     struct_type = template(fields=fields)
     struct_type._hash_code = ctor._hash_code

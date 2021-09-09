@@ -21,9 +21,17 @@ BOOP, BOOPType = define_structref("BOOP", [("A", unicode_type), ("B", i8)])
 ##### test_encode_decode #####
 
 def test_encode_decode():
-    id_rec = encode_idrec(7,8,9)
-    assert isinstance(id_rec,int)
-    assert decode_idrec(id_rec) == (7,8,9)
+    idrec = encode_idrec(7,8,9)
+    assert isinstance(idrec,int)
+    assert decode_idrec(idrec) == (7,8,9)
+
+    idrec = encode_idrec(0x0000,1099511627775,255)
+    assert isinstance(idrec,int)
+    assert decode_idrec(idrec) == (0x0000,1099511627775,255)
+
+    idrec = encode_idrec(0xFFFF,1099511627775,255)
+    assert isinstance(idrec,int)
+    assert decode_idrec(idrec) == (0xFFFF,1099511627775,255)
 
 
 #### test_structref_to_meminfo ####

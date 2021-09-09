@@ -15,7 +15,7 @@ from numba.core.datamodel import default_manager, models
 
 #### deref_type ####
 
-_deref_type = np.dtype([('type', np.uint8), ('offset', np.int64)])
+_deref_type = np.dtype([('type', np.uint8), ('a_id', np.uint8), ('offset', np.int64)])
 deref_type = numba.from_dtype(_deref_type)
 
 OFFSET_TYPE_ATTR = 0
@@ -26,8 +26,8 @@ OFFSET_TYPE_LIST = 1
 @njit(Tuple([u2,u8,u1])(u8),cache=True)
 def decode_idrec(idrec):
     t_id = idrec >> 48
-    f_id = (idrec >> 8) & 0x000FFFFF
-    a_id = idrec & 0xF
+    f_id = (idrec >> 8) & 1099511627775 #i.e. ((~u8(0)) >> 24) 
+    a_id = idrec & 0xFF
     return (t_id, f_id, a_id)
 
 

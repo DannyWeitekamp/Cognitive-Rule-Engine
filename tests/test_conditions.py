@@ -137,9 +137,9 @@ def test_initialize():
         l1, l2 = Var(BOOPType,"l1"), Var(BOOPType,"l2")
         r1, r2 = Var(BOOPType,"r1"), Var(BOOPType,"r2")
 
-        c = (l1.B < 1) & (l1.B > 7) & (l2.B < r1.B) & (r2.B < l1.B) |\
-             (l2.B < 1) & (l2.B > 7) & (l2.B < r1.B) & (r1.B < r2.B) |\
-             (l2.B < 1) & (l2.B > 7) & (l2.B < r1.B) & (l1.B < l2.B)
+        c = (l1.B < 1) & (l1.B > 7) & (l2.B < r1.B) & (r2.B < l1.B)# |\
+             # (l2.B < 1) & (l2.B > 7) & (l2.B < r1.B) & (r1.B < r2.B) |\
+             # (l2.B < 1) & (l2.B > 7) & (l2.B < r1.B) & (l1.B < l2.B)
 
         assert [x.alias for x in cond_get_vars(c)] == ['l1','l2','r1','r2']
 
@@ -159,6 +159,7 @@ def get_pointer(st):
     return _pointer_from_struct(st)
 
 def test_link():
+    print("START TEST LINK")
     with cre_context() as context:
         # BOOP, BOOPType = define_fact("BOOP",{"A": "string", "B" : "number"})
         
@@ -169,7 +170,7 @@ def test_link():
              (l2.B < 1) & (l2.B > 7) & (l2.B < r1.B) & (r1.B < r2.B) |\
              (l2.B < 1) & (l2.B > 7) & (l2.B < r1.B) & (l1.B < l2.B)
 
-
+        print(c)
         mem = Memory()
         cl = get_linked_conditions_instance(c, mem)
 
@@ -233,21 +234,21 @@ def test_list_operations():
 
 
 if(__name__ == "__main__"):
-    test_list_operations()
+    # test_list_operations()
     # test_link()
-    # test_initialize()
-    # for i in range(10):
-    #     t0 = time_ns()
-    #     test_build_conditions()
-    #     print(f'{(time_ns()-t0)/1e6} ms')
-    # for i in range(10):
-    #     t0 = time_ns()
-    #     test_unconditioned()
-    #     print(f'{(time_ns()-t0)/1e6} ms')
-    # test_multiple_deref()
-    # test_existential_not()
-# # bar.py_func()
-    # bar()
+    test_initialize()
+    for i in range(10):
+        t0 = time_ns()
+        test_build_conditions()
+        print(f'{(time_ns()-t0)/1e6} ms')
+    for i in range(10):
+        t0 = time_ns()
+        test_unconditioned()
+        print(f'{(time_ns()-t0)/1e6} ms')
+    test_multiple_deref()
+    test_existential_not()
+# bar.py_func()
+    bar()
 
     
     # exit()

@@ -492,9 +492,154 @@ Reconstructing the match would then involve rebuilding the matches backwards thr
 
 
 
+--- Sept 8 ---
+
+The most straight-forward thing is probably going to be to define a function call_head() which executes the parts of the Op that are not DerefInstrs, and then leave the DerefInstrs parts to some generic piece like deref_attrs which will apply the dereferencing up to the address of the head value, and inject the fids of anything along the way into 'depends'
+
+An alternative would be to break any DerefInstrs into seperate literals. I'm not sure that having them in seperate nodes would really be simpler though. It might help with nools translation... but would complicate the Conditions object with more bindable vars.
 
 
 
+
+
+
+
+DerefRecord = {
+    # Pointers to the Dict(i8,u1)s inside deref_depends
+    "parent_ptrs" : i8[::1], 
+    "arg_ind" : i8,
+    "was_successful" : u1,
+}
+
+
+#Example Deref a.B.B.B.A
+# dep_idrecs = [(1, MOD[a.B]), (2, RETRACT[a.B]),
+#				(2, MOD[a.B.B]), (3, RETRACT[a.B.B]),
+				(3, MOD[a.B.B.B]), (4, RETRACT[a.B.B.B]),
+				(4, MOD[a.B.B.B.A])
+					  ]
+
+
+
+
+dict_i8_u1_type = DictType(i8,u1)
+
+def invalidate_deref_rec(rec):
+	r_ptr = _pointer_from_struct(rec)
+	for ptr in parent_ptrs:
+		parent = _dict_from_ptr(dict_i8_u1_type, ptr)
+		del parent[r_ptr]
+		_decref_structref(rec)
+
+
+def _make_deref_record_parent(idrec, r_ptr):
+	p = self.deref_depends.get(idrec,None)
+	if(p0 is None):	
+		p0 = self.deref_depends[idrec] = Dict(i8,u1)
+	p[r_ptr] = 1
+	return _pointer_from_struct(p0)
+
+
+def validate_deref(k, f_id):
+	'''Try to get the head_ptr of 'f_id' in input 'k'. Inject a DerefRecord regardless of the result '''
+	t_id = self.t_ids[k]
+	base_ptr = mem.facts[t_id][f_id]
+	deref_f_ids, head_ptr = apply_deref(base_ptr,...)
+
+	was_successful = (head_ptr != 0)
+
+	parent_ptrs = np.empty(len(deref_idrecs), dtype=np.int64)
+	r = DerefRecord(parent_ptrs, self.arg_inds[k], was_successful)
+	r_ptr = _pointer_from_struct_incref(r)
+	for i in range(len(deref_f_ids)):
+		idrec0 = encode_idrec(?t_id, ?f_id, ??MODIFY)
+		idrec1 = encode_idrec(?t_id, ?f_id, RETRACT)
+
+		parent_ptrs[i*2] = _make_deref_record_parent(idrec0, r_ptr)
+		parent_ptrs[i*2-1] = _make_deref_record_parent(idrec1, r_ptr)
+
+	idrec0 = encode_idrec(?t_id, ?f_id, ??MODIFY)
+	parent_ptrs[-1] = _make_deref_record_parent(idrec0, r_ptr)
+
+
+	return head_ptr
+
+	
+def validate_head_or_retract(self,k,f_id, a_id):
+	'''Update the head_ptr dictionaries by following the deref chains of DECLARE/MODIFY changes, and make retractions for an explicit RETRACT or a failure in the deref chain.''
+	if(a_id0 != RETRACT):
+		head_ptr = validate_deref(k, f_id0)
+		if(head_ptr > 0): 
+			self.inp_head_ptrs[k][f_id0] = head_ptr
+			continue
+		
+	# At this point we are definitely RETRACT
+	clear0 = self.outputs[k][a_id0]:
+	for x in clear0:
+		del self.outputs[1 if k else 0][x]
+	del self.outputs[k][a_id]
+	del self.inp_head_ptrs[k][f_id]
+
+
+
+def filter_beta(self):
+	arg_change_sets = List([Dict(i8,u1), Dict(i8,u1)])
+
+	### 'relevant_global_diffs' is the set of self.mem.change_queue items relevant to intermediate derefs computed for this literal, and modification of the head attribute. Shouldn't happen frequently ###
+	for idrec in self.relevant_global_diffs:
+		if(idrec in self.deref_depends and len(self.deref_depends) > 0):
+			deref_records = self.deref_depends[idrec]
+
+			# Invalidate old DerefRecords
+			for r in deref_records:
+				r.invalidate()
+				_, base_f_id, _ = decode_idrec(r.dep_idrecs[0])
+
+				# Any change in the deref chain counts as a MODIFY
+				arg_change_sets[r.arg_ind][base_f_id] = MODIFY
+
+
+	### Make sure the arg_change_sets are up to date
+	for i, inp in enumerate(self.inputs.change_set):
+		arg_change_sets_i = arg_change_sets[i]
+		if(len(arg_change_sets_i) > 0):
+			 for f_id in inp.change_set:
+			 	arg_change_sets_i.add(idrec)
+		else:
+			arg_change_sets[i] = inp.change_set
+
+
+	### Update the head_ptr dictionaries by following the deref chains of DECLARE/MODIFY changes, and make retractions for an explicit RETRACT or a failure in the deref chain.
+	for f_id0, a_id0 in arg_change_sets[0].items():
+		validate_head_or_retract(self, f_id0, a_id0)
+
+	for f_id1, a_id1 in arg_change_sets[1].items():
+		validate_head_or_retract(self, f_id1, a_id1)
+
+	### Check all pairs at this point we should only be dealing with DECLARE/MODIFY changes
+	for f_id0, a_id0 in arg_change_sets[0].items():
+		h_ptr0 = self.head_ptrs[0][f_id0]
+		if(a_id0 != RETRACT):
+	        for h_ptr1 in self.head_ptrs[1]
+	            check_pair(h_ptr0, h_ptr1, a_id0)
+			
+    for f_id1, a_id1 in arg_change_sets[1].items():
+    	if(a_id1 != RETRACT):
+    		h_ptr1 = self.head_ptrs[1][f_id1]
+	        for f_id0, h_ptr0 in self.head_ptrs[0].items()
+	        	if(f_id0 not in arg_change_sets[0]):
+	            	check_pair(h_ptr0, h_ptr1, a_id1)
+
+def check_pair(self, h_ptr0, h_ptr1, chg_typ):
+	passes = self.call_head_ptrs(h_ptr0, h_ptr1)
+
+	# For any MODIFY type of change
+	if(not passes and chg_typ != DECLARE):
+
+	else:
+
+
+See 'speed_experiments/bench_beta_data_structures.py' it seems like doing the full rete is probably worth it
 
 
 

@@ -887,6 +887,7 @@ class Op(structref.StructRefProxy,metaclass=OpMeta):
         from cre.conditions import op_to_cond, conditions_and
         self = op_to_cond(self)
         if(isinstance(other, Op)): other = op_to_cond(other)
+        print("<<", type(self), type(other))
         return conditions_and(self, other)
 
     def __or__(self,other):
@@ -1206,8 +1207,8 @@ class OpComp():
                 source_to_cache('__GenerateOp__', long_hash, source)
             l = import_from_cached('__GenerateOp__', long_hash, ['__GenerateOp__'])
             op_cls = self._generate_op_cls = l['__GenerateOp__']
-            # print("<<",type(op_cls))
-            # print(get_cache_path('__GenerateOp__',long_hash))
+            print("<<",type(op_cls))
+            print(get_cache_path('__GenerateOp__',long_hash))
 
             var_ptrs = np.empty(len(self.vars),dtype=np.int64)
             for i,v_p in enumerate(self.vars):
@@ -1330,40 +1331,73 @@ class OpComp():
     def gen_call(self, lang='python', fname="call", ind='    ', **kwargs):
         '''Generates source for the equivalent call function for the OpComp'''
         names, arg_names, const_defs = self._call_check_prereqs(lang, **kwargs)
-        call_body = const_defs
+        body = const_defs
         for i,instr in enumerate(self.instructions):
             if(isinstance(instr, DerefInstr)):
                 deref_str = f'{g_nm(instr.var,names)}.{".".join(instr.deref_attrs)}'
-                call_body += f"{ind}{gen_assign(lang, f'i{i}', deref_str)}\n"
+                body += f"{ind}{gen_assign(lang, f'i{i}', deref_str)}\n"
             else:
                 inp_seq = ", ".join([g_nm(x,names) for x in instr.args])
                 call_fname = names[(instr.op.unq,'call')]
-                call_body += f"{ind}{gen_assign(lang, f'i{i}', f'{call_fname}({inp_seq})')}\n"
+                body += f"{ind}{gen_assign(lang, f'i{i}', f'{call_fname}({inp_seq})')}\n"
 
         tail = f'{ind}return i{len(self.instructions)-1}\n'
-        return gen_def_func(lang, fname, ", ".join(arg_names), call_body, tail)
+        return gen_def_func(lang, fname, ", ".join(arg_names), body, tail)
+
+    def gen_match(self, lang='python', fname="match", ind='    ', **kwargs):
+        '''Generates source for the equivalent check function for the OpComp'''
+        names, arg_names, const_defs = self._call_check_prereqs(lang, **kwargs)
+        print(names)
+        body = const_defs
+        final_k = "True"
+        for i,instr in enumerate(self.instructions):
+            
+            if(isinstance(instr, DerefInstr)):
+                deref_str = f'{g_nm(instr.var,names)}.{".".join(instr.deref_attrs)}'
+                body += f"{ind}{gen_assign(lang, f'i{i}', deref_str)}\n"
+            else:
+                inp_seq = ", ".join([g_nm(x,names) for x in instr.args])
+                if(hasattr(instr.op,'check')):#hasattr(instr, 'check')):
+                    check_fname = names[(instr.op.unq,'check')]
+                    print("CHECK", (instr.op.unq,'check'), check_fname)
+                    body += f"{ind}{gen_assign(lang, f'k{i}', f'{check_fname}({inp_seq}')})\n"
+                    body += f"{ind}if(not k{i}): return 0\n"
+
+                call_fname = names[(instr.op.unq,'call')]
+                body += f"{ind}{gen_assign(lang, f'i{i}', f'{call_fname}({inp_seq})')}\n"
+            # call_fname = names[(instr.op.unq,'call')]
+            # check_body += f"{ind}{gen_assign(lang, f'i{i}', f'{call_fname}({inp_seq})')}\n"
+        tail = f"{ind}return i{len(self.instructions)-1}\n"
+        return gen_def_func(lang, fname, ", ".join(arg_names), body, tail)
 
 
     def gen_check(self, lang='python', fname="check", ind='    ', **kwargs):
         '''Generates source for the equivalent check function for the OpComp'''
         names, arg_names, const_defs = self._call_check_prereqs(lang, **kwargs)
-        check_body = const_defs
+        print(names)
+        body = const_defs
         final_k = "True"
         for i,instr in enumerate(self.instructions):
             # print(type(self))
             # print(self.used_ops)
             # j,_ = self.used_ops[instr]
-            inp_seq = ", ".join([g_nm(x,names) for x in instr.args])
-            if(hasattr(instr.op,'check')):#hasattr(instr, 'check')):
-                check_fname = names[(instr.op.unq,'check')]
-                check_body += f"{ind}{gen_assign(lang, f'k{i}', f'{check_fname}({inp_seq}')})\n"
-                check_body += f"{ind}if(not k{i}): return 0\n"
-                final_k = f'k{i}'
-            if(i < len(self.instructions)-1):
-                call_fname = names[(instr.op.unq,'call')]
-                check_body += f"{ind}{gen_assign(lang, f'i{i}', f'{call_fname}({inp_seq})')}\n"
+            if(isinstance(instr, DerefInstr)):
+                deref_str = f'{g_nm(instr.var,names)}.{".".join(instr.deref_attrs)}'
+                body += f"{ind}{gen_assign(lang, f'i{i}', deref_str)}\n"
+            else:
+                inp_seq = ", ".join([g_nm(x,names) for x in instr.args])
+                if(hasattr(instr.op,'check')):#hasattr(instr, 'check')):
+                    check_fname = names[(instr.op.unq,'check')]
+                    print("CHECK", (instr.op.unq,'check'), check_fname)
+                    body += f"{ind}{gen_assign(lang, f'k{i}', f'{check_fname}({inp_seq}')})\n"
+                    body += f"{ind}if(not k{i}): return 0\n"
+                    final_k = f'k{i}'
+
+                if(i < len(self.instructions)-1):
+                    call_fname = names[(instr.op.unq,'call')]
+                    body += f"{ind}{gen_assign(lang, f'i{i}', f'{call_fname}({inp_seq})')}\n"
         tail = f"{ind}return {final_k}\n" 
-        return gen_def_func(lang, fname, ", ".join(arg_names), check_body, tail)
+        return gen_def_func(lang, fname, ", ".join(arg_names), body, tail)
 
     
     def gen_flattened_op_src(self, long_hash, ind='    '):
@@ -1377,6 +1411,9 @@ class OpComp():
         if(has_check):
             op_check_fnames = {op : f'check{j}' for j,op in self.used_ops.values()}
             check_src = self.gen_check('python', op_call_fnames=op_call_fnames, op_check_fnames=op_check_fnames)
+            match_src = self.gen_match('python', op_call_fnames=op_call_fnames, op_check_fnames=op_check_fnames)
+        else:
+            match_src = self.gen_match('python', op_call_fnames=op_call_fnames)
         return_type = list(self.instructions.values())[-1].return_type
         call_sig = return_type(*self.arg_types)
         check_sig = u1(*self.arg_types)
@@ -1396,6 +1433,9 @@ check_sig = dill.loads({dill.dumps(check_sig)})
 
 @njit(call_sig,cache=True)
 {call_src}
+
+@njit(call_sig,cache=True)
+{match_src}
 '''
         if(has_check): source +=f'''
 @njit(check_sig,cache=True)

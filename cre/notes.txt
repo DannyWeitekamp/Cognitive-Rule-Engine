@@ -644,5 +644,27 @@ See 'speed_experiments/bench_beta_data_structures.py' it seems like doing the fu
 
 
 
- 
+ ---- Sept 9 ----
+
+ We need to be able to do call() with and without check() we also need to be able to apply call from head_ptrs 
+
+ So we could do:
+
+ 	@njit(head_sig)
+ 	call_head():
+ 		....
+
+ 	@njit(head_sig)
+ 	call_head_ptrs():
+ 		....
+ 		call_head(...)
+
+ 	@njit(head_sig)
+ 	call():
+ 		....
+ 		call_head(...)
+
+Do I even need check()? It seems unecessary, the user can just raise their own exception.
+
+
 

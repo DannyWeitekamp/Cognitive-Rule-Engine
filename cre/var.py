@@ -204,8 +204,8 @@ class Var(structref.StructRefProxy):
         else: 
             base = f'{prefix}({self.base_type_name})'
 
-        deref_strs = [f"[{a}]" if t==OFFSET_TYPE_LIST else "." + a 
-                for (t,_), a in zip(self.deref_offsets, self.deref_attrs)]
+        deref_strs = [f"[{a}]" if o[0]==OFFSET_TYPE_LIST else "." + a 
+                for o, a in zip(self.deref_offsets, self.deref_attrs)]
         s = base + "".join(deref_strs)
         # print(self.is_not)
          # s = f'NOT({s})'

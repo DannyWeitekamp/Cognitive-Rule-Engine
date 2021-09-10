@@ -16,7 +16,7 @@ from cre.utils import _struct_from_meminfo, _meminfo_from_struct, _cast_structre
 from cre.utils import assign_to_alias_in_parent_frame
 from cre.subscriber import base_subscriber_fields, BaseSubscriber, BaseSubscriberType, init_base_subscriber, link_downstream
 from cre.vector import VectorType
-from cre.op import GenericOpType, op_str, op_repr
+from cre.op import GenericOpType, op_str, op_repr, Op
 # from cre.predicate_node import BasePredicateNode,BasePredicateNodeType, get_alpha_predicate_node_definition, \
  # get_beta_predicate_node_definition, deref_attrs, define_alpha_predicate_node, define_beta_predicate_node, AlphaPredicateNode, BetaPredicateNode, \
  # LiteralLinkDataType, generate_link_data
@@ -252,8 +252,10 @@ class Conditions(structref.StructRefProxy):
     def __str__(self):
         return conditions_str(self)
     def __and__(self, other):
+        if(isinstance(other,Op)): other = op_to_cond(other)
         return conditions_and(self, other)
     def __or__(self, other):
+        if(isinstance(other,Op)): other = op_to_cond(other)
         return conditions_or(self, other)
     def __not__(self):
         return conditions_not(self)

@@ -493,25 +493,25 @@ class PrintElapse():
 
 
 if __name__ == "__main__":
-    test_boxing()
-    test_op_arith_overloads()
-    test_op_cmp_overloads()
-    with PrintElapse("test_op_singleton"):
-        test_op_singleton()
-    with PrintElapse("test_define_apply_op"):
-        test_define_apply_op()
-    with PrintElapse("test_op_singleton"):
-        test_compose_op()
-    with PrintElapse("test_var_propagation"):
-        test_var_propagation()
-        test_order()
-    with PrintElapse("test_auto_aliasing"):
-        test_auto_aliasing()
-    with PrintElapse("test_source_gen"):
-        test_source_gen()
+    # test_boxing()
+    # test_op_arith_overloads()
+    # test_op_cmp_overloads()
+    # with PrintElapse("test_op_singleton"):
+    #     test_op_singleton()
+    # with PrintElapse("test_define_apply_op"):
+    #     test_define_apply_op()
+    # with PrintElapse("test_op_singleton"):
+    #     test_compose_op()
+    # with PrintElapse("test_var_propagation"):
+    #     test_var_propagation()
+    #     test_order()
+    # # with PrintElapse("test_auto_aliasing"):
+    # #     test_auto_aliasing()
+    # with PrintElapse("test_source_gen"):
+    #     test_source_gen()
 
-        test_commutes()
-        test_fact_args()
-    not_jit_compilable()
+    #     test_commutes()
+    test_fact_args()
+    # not_jit_compilable()
             
 

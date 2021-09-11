@@ -1162,7 +1162,7 @@ class OpComp():
         instructions = {}
         args = []
         arg_types = []
-        head_types = []
+        head_types = {}
         # v_ptr_to_ind = {} 
 
         for i, x in enumerate(py_args):
@@ -1176,15 +1176,17 @@ class OpComp():
                         _vars[v_ptr] = (v,len(arg_types),t)
                         # v_ptr_to_ind[] = len(arg_types)
                         arg_types.append(t)
-                        head_types.append((v, v.head_type))
+                        # head_types[v_ptr] = v.head_type
                     
 
                 for c,t in x.constants.items():
                     constants[c] = t
                 for instr, sig in x.instructions.items():
-                    if(isinstance(instr, DerefInstr) and instr not in instructions):
-                        head_types.append((instr, instr.var.head_type))
+                    # if(isinstance(instr, DerefInstr) and instr not in instructions):
+                    #     head_types[instr] = instr.var.head_type
                     instructions[instr] = sig
+                for var_ptr_or_instr, typ in x.head_types.items():
+                    head_types[var_ptr_or_instr] = typ
             else:
                 if(isinstance(x,Var)):
                     v_ptr = x.base_ptr
@@ -1195,11 +1197,11 @@ class OpComp():
                     
                     if(x.base_type != x.head_type):
                         d_instr = DerefInstr(x)
-                        if(d_instr not in instructions): head_types.append((d_instr, x.head_type))    
+                        if(d_instr not in instructions): head_types[d_instr] = x.head_type
                         instructions[d_instr] = x.head_type(x.base_type,)
                         x = d_instr
                     else:
-                        head_types.append((x, x.head_type))
+                        head_types[v_ptr] =  x.head_type
                         
 
                         
@@ -1319,11 +1321,12 @@ class OpComp():
             # arg_names = self._gen_arg_seq(lang, arg_names, names)
             arg_names = [f'a{i}' for i in range(len(self.head_types))]
             print(">>",self.head_types)
-            for i, (var_or_instr, typ) in enumerate(self.head_types):
-                if(isinstance(var_or_instr, Var)):
-                    names[var_or_instr.base_ptr] = arg_names[i]
-                else:
-                    names[var_or_instr] = arg_names[i]
+            for i, (var_ptr_or_instr, typ) in enumerate(self.head_types.items()):
+                # if(isinstance(var_or_instr, Var)):
+                    # names[var_ptr_or_instr] = arg_names[i]
+                names[var_ptr_or_instr] = arg_names[i]
+                # else:
+                    # names[var_or_instr] = arg_names[i]
 
             for i,instr in enumerate(self.instructions):
                 if(not isinstance(instr, DerefInstr)):
@@ -1419,7 +1422,7 @@ class OpComp():
                         
                 # inps += [g_nm(x,names) ]
 
-        inp_seq = ", ".join([g_nm(v_ptr_or_dref,names) for v_ptr_or_dref,_ in self.head_types])
+        inp_seq = ", ".join([g_nm(v_ptr_or_dref,names) for v_ptr_or_dref,_ in self.head_types.items()])
         # inp_seq = ",".join(inps.keys())
         tail = f"{ind}return {wrapped_fname}({inp_seq})\n"
         return gen_def_func(lang, fname, ", ".join(arg_names), body, tail)        
@@ -1539,7 +1542,7 @@ import dill
 {op_imports}
 
 call_sig = dill.loads({dill.dumps(call_sig)})
-head_types = dill.loads({dill.dumps([x[1] for x in head_types])})
+head_types = dill.loads({dill.dumps([x for x in head_types.values()])})
 
 {"".join([f'h{i}_type,' for i in range(len(head_types))])} = head_types
 

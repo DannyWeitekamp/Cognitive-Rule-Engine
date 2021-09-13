@@ -139,7 +139,7 @@ def get_fact_attr_ptr(typingctx, inst_type, attr_type):
         return ret
     return u8(inst_type,attr_type), codegen
 
-def fact_setattr_codegen(context, builder, sig, args, attr):
+def fact_setattr_codegen(context, builder, sig, args, attr, mutability_protected=False):
     from cre.fact import Fact, BaseFactType
     if(len(args) == 2):
         [inst_type, val_type] = sig.args
@@ -149,6 +149,14 @@ def fact_setattr_codegen(context, builder, sig, args, attr):
         [instance, _, val] = args
     utils = _Utils(context, builder, inst_type)
     dataval = utils.get_data_struct(instance)
+
+    if(mutability_protected):
+        idrec = getattr(dataval, "idrec")
+        idrec_set = builder.icmp_signed('!=', idrec, idrec.type(-1))
+        with builder.if_then(idrec_set):
+            msg =("Facts objects are immutable once declared. Use mem.modify instead.",)
+            context.call_conv.return_user_exc(builder, AttributeError, msg)
+
     
     field_type = inst_type.field_dict[attr]
     if(isinstance(field_type, (ListType,Fact))):
@@ -189,8 +197,6 @@ def fact_setattr_codegen(context, builder, sig, args, attr):
 
 @intrinsic
 def fact_lower_setattr(typingctx, inst_type, attr_type, val_type):
-
-    print("&&&", attr_type)
     if (isinstance(attr_type, types.Literal) and 
         isinstance(inst_type, types.StructRef)):
         # print("BB", isinstance(inst_type, types.StructRef), inst_type, attr_type)
@@ -198,33 +204,23 @@ def fact_lower_setattr(typingctx, inst_type, attr_type, val_type):
         attr = attr_type.literal_value
         def codegen(context, builder, sig, args):
             fact_setattr_codegen(context, builder, sig, args, attr)
-            # [instance, attr_v, val] = args
+  
+        sig = types.void(inst_type, attr_type, val_type)
+        # print(sig)
+        return sig, codegen
 
-            # utils = _Utils(context, builder, inst_type)
-            # dataval = utils.get_data_struct(instance)
-            # # cast val to the correct type
-            # field_type = inst_type.field_dict[attr]
 
-            # if(hasattr(inst_type,'spec') and attr in inst_type.spec and
-            #     isinstance(field_type, (ListType,Fact,types.Optional))):
-
-            #     # print(":::>", isinstance(val_type,types.Optional))
-            #     val_type = val_type.typ if isinstance(val_type,types.Optional) else val_type
-            #     val = _nonoptional(val)
-
-            #     casted = _obj_cast_codegen(context, builder, val, val_type, field_type,False)
-            # else:
-            #     casted = context.cast(builder, val, val_type, field_type)
-            
-
-            # # read old
-            # old_value = getattr(dataval, attr)
-            # # incref new value
-            # context.nrt.incref(builder, val_type, casted)
-            # # decref old value (must be last in case new value is old value)
-            # context.nrt.decref(builder, val_type, old_value)
-            # # write new
-            # setattr(dataval, attr, casted)
+@intrinsic
+def fact_mutability_protected_setattr(typingctx, inst_type, attr_type, val_type):
+    if (isinstance(attr_type, types.Literal) and 
+        isinstance(inst_type, types.StructRef)):
+        # print("BB", isinstance(inst_type, types.StructRef), inst_type, attr_type)
+        
+        attr = attr_type.literal_value
+        def codegen(context, builder, sig, args):
+            fact_setattr_codegen(context, builder, sig, args, attr, 
+                mutability_protected=True)
+  
         sig = types.void(inst_type, attr_type, val_type)
         # print(sig)
         return sig, codegen
@@ -235,6 +231,7 @@ def define_attributes(struct_typeclass):
     """
     Copied from numba.experimental.structref 0.51.2, but added protected mutability
     """
+    print("REGISTER FACT")
     @infer_getattr
     class StructAttribute(AttributeTemplate):
         key = struct_typeclass
@@ -278,14 +275,8 @@ def define_attributes(struct_typeclass):
     @lower_setattr_generic(struct_typeclass)
     def struct_setattr_impl(context, builder, sig, args, attr):
         
+        dataval = fact_setattr_codegen(context, builder, sig, args, attr, mutability_protected=True)
         
-        dataval = fact_setattr_codegen(context, builder, sig, args, attr)
-        if(attr not in [x[0] for x in base_fact_fields]):
-            idrec = getattr(dataval, "idrec")
-            idrec_set = builder.icmp_signed('!=', idrec, idrec.type(-1))
-            with builder.if_then(idrec_set):
-                msg =("Facts objects are immutable once declared. Use mem.modify instead.",)
-                context.call_conv.return_user_exc(builder, AttributeError, msg)
 
         # [inst_type, val_type] = sig.args
         # [instance, val] = args

@@ -229,6 +229,8 @@ def get_backtrack_flag(self):
 
 @structref.register
 class MemoryTypeTemplate(types.StructRef):
+    def __str__(self):
+        return "cre.Memory"
     def preprocess_fields(self, fields):
         return tuple((name, types.unliteral(typ)) for name, typ in fields)
 

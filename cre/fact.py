@@ -353,18 +353,18 @@ def gen_repr_attr_code(a,t,typ_name):
     else:
         return f'{a}={{repr(self.{a})}}' 
 
-def gen_assign_str(a,t):
-    # if(isinstance(t,fact_types)):
-        # s = f"_pointer_from_struct_incref({a}) if ({a} is not None) else 0"
-    # elif(isinstance(t,ListType) and isinstance(t.dtype,fact_types)):
-    #     # s = f"{a}_c = _cast_list(base_list_type,{a})\n    "
-    #     # s += f"st.{a} = {a}_c" 
-    #     # s = f"st.{a} = _cast_list(base_list_type,{a})" 
-    #     s = f"st.{a} = {a}"
-    # else:
-    s = f"{a}"
+# def gen_assign_str(a,t):
+#     # if(isinstance(t,fact_types)):
+#         # s = f"_pointer_from_struct_incref({a}) if ({a} is not None) else 0"
+#     # elif(isinstance(t,ListType) and isinstance(t.dtype,fact_types)):
+#     #     # s = f"{a}_c = _cast_list(base_list_type,{a})\n    "
+#     #     # s += f"st.{a} = {a}_c" 
+#     #     # s = f"st.{a} = _cast_list(base_list_type,{a})" 
+#     #     s = f"st.{a} = {a}"
+#     # else:
+#     s = f"{a}"
 
-    return f"st.{a} = " + s
+#     return f"st.{a} = " + s
 
 
 
@@ -396,7 +396,7 @@ def gen_fact_code(typ, fields, fact_num, ind='    '):
 
     # assign_str = lambda a,t: f"st.{a} = " + (f"_pointer_from_struct_incref({a}) if ({a} is not None) else 0" \
     #                         if isinstance(t,fact_types) else f"{a}")
-    init_fields = f'\n{ind}'.join([gen_assign_str(k,v) for k,v in fields])
+    init_fields = f'\n{ind}'.join([f"fact_lower_setattr(st,'{k}',{k})" for k,v in fields])
 
     str_temp = ", ".join([gen_repr_attr_code(k,v,typ) for k,v in fields])
 
@@ -416,7 +416,7 @@ from numba.core.types import unicode_type, ListType
 from numba.experimental import structref
 from numba.experimental.structref import new#, define_boxing
 from numba.core.extending import overload
-from cre.fact_intrinsics import define_boxing, get_fact_attr_ptr, _register_fact_structref, fact_lower_setattr
+from cre.fact_intrinsics import define_boxing, get_fact_attr_ptr, _register_fact_structref, fact_mutability_protected_setattr, fact_lower_setattr
 from cre.fact import repr_list_attr, repr_fact_attr,  FactProxy, Fact{", BaseFactType, base_list_type, fact_to_ptr" if typ != "BaseFact" else ""}
 from cre.utils import struct_get_attr_offset, _pointer_from_struct,  _pointer_from_struct_incref, _struct_from_pointer, _cast_list
 {fact_imports}
@@ -439,8 +439,8 @@ class {typ}TypeTemplate(Fact):
 @njit(cache=True)
 def ctor({param_defaults_list}):
     st = new({typ}Type)
-    st.idrec = -1
-    st.fact_num = {fact_num}
+    fact_lower_setattr(st,'idrec',u8(-1))
+    fact_lower_setattr(st,'fact_num',{fact_num})
     {init_fields}
     return st
 
@@ -448,7 +448,7 @@ def ctor({param_defaults_list}):
 
 @njit(cache=True)
 def lower_setattr(self,attr,val):
-    fact_lower_setattr(self,literally(attr),val)
+    fact_mutability_protected_setattr(self,literally(attr),val)
         
 class {typ}(FactProxy):
     __numba_ctor = ctor
@@ -515,6 +515,8 @@ def _fact_from_fields(name, fields, context=None):
         source = gen_fact_code(name,fields,fact_num)
         source_to_cache(name, hash_code, source)
         add_to_fact_registry(name, hash_code)
+
+    print(get_cache_path(name,hash_code))
         
     fact_ctor, fact_type = import_from_cached(name, hash_code,[name,name+"Type"]).values()
     fact_ctor._hash_code = hash_code

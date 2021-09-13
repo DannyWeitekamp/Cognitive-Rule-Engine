@@ -298,15 +298,15 @@ def _test_reference_type():
 
 if __name__ == "__main__":
     # test_list_type()
-
-    _test_list_type()
-    _test_reference_type()
+    
+    # _test_list_type()
+    # _test_reference_type()
     # test__standardize_spec()
     # test__merge_spec_inheritance()
     # test_define_fact()
     # test_inheritence()
     # test_cast_fact()
-    # test_protected_mutability()
+    test_protected_mutability()
 
     # _test_reference_type()
 

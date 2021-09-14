@@ -129,8 +129,8 @@ LiteralType = LiteralTypeTemplate(literal_fields)
 def literal_ctor(op):
     st = new(LiteralType)
     st.op = op
-    st.var_base_ptrs = np.empty(len(op.var_map),dtype=np.int64)
-    for i, ptr in enumerate(op.var_map):
+    st.var_base_ptrs = np.empty(len(op.base_var_map),dtype=np.int64)
+    for i, ptr in enumerate(op.base_var_map):
         st.var_base_ptrs[i] = ptr
     st.negated = 0
     st.is_alpha = u1(len(st.var_base_ptrs) == 1)
@@ -216,7 +216,7 @@ conditions_fields_dict = {
     'dnf': dnf_type,
 
     # A mapping from Var pointers to their associated index
-    'var_map': DictType(i8,i8),
+    'base_var_map': DictType(i8,i8),
 
     # Wether or not the conditions object has been initialized
     'is_initialized' : u1,
@@ -327,17 +327,17 @@ def _conditions_ctor_single_var(_vars,dnf=None):
     st = new(ConditionsType)
     st.vars = List.empty_list(GenericVarType)
     st.vars.append(_struct_from_pointer(GenericVarType,_vars.base_ptr)) 
-    st.var_map = build_var_map(st.vars)
-    # print("A",st.var_map)
+    st.base_var_map = build_base_var_map(st.vars)
+    # print("A",st.base_var_map)
     st.dnf = dnf if(dnf) else new_dnf(1)
     st.is_initialized = False
     return st
 
 @njit(cache=True)
-def _conditions_ctor_var_map(_vars,dnf=None):
+def _conditions_ctor_base_var_map(_vars,dnf=None):
     st = new(ConditionsType)
     st.vars = build_var_list(_vars)
-    st.var_map = _vars.copy() # is shallow copy
+    st.base_var_map = _vars.copy() # is shallow copy
     st.dnf = dnf if(dnf) else new_dnf(len(_vars))
     st.is_initialized = False
     return st
@@ -349,8 +349,8 @@ def _conditions_ctor_var_list(_vars,dnf=None):
     for x in _vars:
         st.vars.append(_struct_from_pointer(GenericVarType,x.base_ptr))
     # st.vars = List([ for x in _vars])
-    st.var_map = build_var_map(st.vars)
-    # print("C",st.var_map)
+    st.base_var_map = build_base_var_map(st.vars)
+    # print("C",st.base_var_map)
     st.dnf = dnf if(dnf) else new_dnf(len(_vars))
     st.is_initialized = False
     return st
@@ -364,9 +364,9 @@ def conditions_ctor(_vars, dnf=None):
         def impl(_vars,dnf=None):
             return _conditions_ctor_single_var(_vars,dnf)
     elif(isinstance(_vars,DictType)):
-         # _vars is a valid var_map dictionary
+         # _vars is a valid base_var_map dictionary
         def impl(_vars,dnf=None):
-            return _conditions_ctor_var_map(_vars,dnf)
+            return _conditions_ctor_base_var_map(_vars,dnf)
     elif(isinstance(_vars,ListType)):
         def impl(_vars,dnf=None):
             return _conditions_ctor_var_list(_vars,dnf)
@@ -460,28 +460,28 @@ def overload_conds_str(self):
 # OR((ab+c), (de+f)) = ab+c+de+f
 
 @njit(cache=True)
-def build_var_map(left_vars,right_vars=None):
+def build_base_var_map(left_vars,right_vars=None):
     ''' Builds a dictionary that maps pointers to Var objects
           to indicies.
     '''
-    var_map = Dict.empty(i8,i8)
+    base_var_map = Dict.empty(i8,i8)
     for v in left_vars:
         ptr = v.base_ptr
-        if(ptr not in var_map):
-            var_map[ptr] = len(var_map)
+        if(ptr not in base_var_map):
+            base_var_map[ptr] = len(base_var_map)
     if(right_vars is not None):
         for v in right_vars:
             ptr = v.base_ptr
-            if(ptr not in var_map):
-                var_map[ptr] = len(var_map)
+            if(ptr not in base_var_map):
+                base_var_map[ptr] = len(base_var_map)
                 
-    return var_map
+    return base_var_map
 
 @njit(cache=True)
-def build_var_list(var_map):
-    '''Makes a Var list from a var_map'''
+def build_var_list(base_var_map):
+    '''Makes a Var list from a base_var_map'''
     var_list = List.empty_list(GenericVarType)
-    for ptr in var_map:
+    for ptr in base_var_map:
         var_list.append(_struct_from_pointer(GenericVarType,ptr))
     return var_list
 
@@ -493,8 +493,8 @@ def build_var_list(var_map):
 def _conditions_and(left, right):
     '''AND is distributive
     AND((ab+c), (de+f)) = abde+abf+cde+cf'''
-    return _conditions_ctor_var_map(
-                build_var_map(left.vars,right.vars),
+    return _conditions_ctor_base_var_map(
+                build_base_var_map(left.vars,right.vars),
                 dnf_and(left.dnf, right.dnf)
             )
 
@@ -559,7 +559,7 @@ def dnf_and(l_dnf, r_dnf):
 def _conditions_or(left,right):
     '''OR is additive like
     OR((ab+c), (de+f)) = ab+c+de+f'''
-    return Conditions(build_var_map(left.vars,right.vars),
+    return Conditions(build_base_var_map(left.vars,right.vars),
                       dnf_or(left.dnf, right.dnf))
 
 @generated_jit(cache=True)    
@@ -734,7 +734,7 @@ def conditions_not(c):
         #  ~(ab+c) = ~(ab)c' = (a'+b')c' = a'c'+b'c'
         def impl(c):
             dnf = dnf_not(c.dnf)
-            return Conditions(c.var_map, dnf)
+            return Conditions(c.base_var_map, dnf)
     elif(isinstance(c,VarTypeTemplate)):
         # If we applied to a var then serves as NOT()
         def impl(c):
@@ -748,7 +748,7 @@ def conditions_not(c):
     '''NOT inverts the qualifiers and terms like
     NOT(ab+c) = NOT(ab)+c = (a'+b')c' = a'c'+b'c'''
     dnf = dnf_not(c.dnf)
-    return Conditions(c.var_map, dnf)
+    return Conditions(c.base_var_map, dnf)
 
 
 
@@ -806,7 +806,7 @@ def get_linked_conditions_instance(conds, mem, copy=False):
         for term in alpha_conjunct: link_literal_instance(term, mem)
         for term in beta_conjunct: link_literal_instance(term, mem)
     if(copy):
-        new_conds = Conditions(conds.var_map, dnf)
+        new_conds = Conditions(conds.base_var_map, dnf)
         if(conds.is_initialized): initialize_conditions(new_conds)
         conds = new_conds
 
@@ -832,15 +832,15 @@ def initialize_conditions(conds):
         for _ in range(n_vars): alpha_conjuncts.append(List.empty_list(LiteralType))
         
         for term in ac:
-            i = conds.var_map[term.var_base_ptrs[0]]
+            i = conds.base_var_map[term.var_base_ptrs[0]]
             alpha_conjuncts[i].append(term)
 
         
 
         beta_inds = -np.ones((n_vars,n_vars),dtype=np.int64)
         for term in bc:
-            i = conds.var_map[term.var_base_ptrs[0]]
-            j = conds.var_map[term.var_base_ptrs[1]]
+            i = conds.base_var_map[term.var_base_ptrs[0]]
+            j = conds.base_var_map[term.var_base_ptrs[1]]
             if(beta_inds[i,j] == -1):
                 k = len(beta_conjuncts)
                 beta_inds[i,j] = k
@@ -878,8 +878,8 @@ def initialize_conditions(conds):
 #         for term in conjunct:
 #             ptr = term.var_base_ptrs[0]
 #             # ptr = _pointer_from_struct(l_var)
-#             # print(">>>", ptr, conds.var_map)
-#             ind = conds.var_map[ptr]
+#             # print(">>>", ptr, conds.base_var_map)
+#             ind = conds.base_var_map[ptr]
 #             # print(ind, len(a_is_in_this_conj))
 
 #             if(term.is_alpha):

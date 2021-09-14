@@ -43,16 +43,17 @@ base_rete_node_field_dict = {
     "arg_inds" : i8[::1],
     "t_ids" : u2[::1],
     "vars" : ListType(GenericVarType),
-    "inp_head_ptrs" : ListType(DictType(u8,i8)),
+    "inp_head_ptrs" : ListType(DictType(u8,i8[::1])),
     "inputs" : types.Any,
     "outputs" : ListType(DictType(u8,DictType(u8,u1))),
 }
 
 BaseReteNode, BaseReteNodeType = define_structref("BaseReteNode", base_rete_node_field_dict, define_constructor=False)
 
+i8_arr_typ = i8[::1]
 
 @njit(cache=True)
-def node_ctor(mem, _vars, t_ids, arg_inds ):
+def node_ctor(mem, _vars, t_ids, arg_inds):
     st = new(BaseReteNodeType)
     st.mem = mem
     st.deref_depends = Dict.empty(u8,dict_i8_u1_type)
@@ -62,14 +63,13 @@ def node_ctor(mem, _vars, t_ids, arg_inds ):
 
     inp_head_ptrs = List.empty_list(dict_u8_i8_type)
     for i in range(len(_vars)):
-        inp_head_ptrs.append(Dict.empty(u8,i8))
+        inp_head_ptrs.append(Dict.empty(u8, i8_arr_typ))
     st.inp_head_ptrs = inp_head_ptrs
 
     outputs = List.empty_list(outputs_typ)
     for i in range(len(_vars)):
         outputs.append(Dict.empty(u8,dict_u8_u1_type))
     st.outputs = outputs
-
 
     return st
 
@@ -136,13 +136,14 @@ def make_deref_record_parent(deref_depends, idrec, r_ptr):
     p[r_ptr] = u1(1)
     return _pointer_from_struct(p)
 
-@njit(i8(BaseReteNodeType, i8, u8),cache=True)
-def validate_deref(self, k, f_id):
+# @njit(i8(BaseReteNodeType, u2, u8, deref_type[::1]),cache=True)
+@njit(cache=True)
+def validate_deref(self, base_t_id, f_id, deref_offsets):
     '''Try to get the head_ptr of 'f_id' in input 'k'. Inject a DerefRecord regardless of the result '''
-    t_id = self.t_ids[k]
-    facts = _struct_from_pointer(VectorType,self.mem.mem_data.facts[t_id])
+    # t_id = self.t_ids[k]
+    facts = _struct_from_pointer(VectorType, self.mem.mem_data.facts[base_t_id])
     base_ptr = facts.data[f_id]
-    deref_offsets = self.vars[k].deref_offsets
+    # deref_offsets = self.vars[k].deref_offsets
     head_ptr, rel_idrecs  = deref_head_and_relevant_idrecs(base_ptr,deref_offsets)
     was_successful = (head_ptr != 0)
     parent_ptrs = np.empty(len(rel_idrecs), dtype=np.int64)
@@ -154,16 +155,22 @@ def validate_deref(self, k, f_id):
 
     return head_ptr
 
-@njit(void(BaseReteNodeType, i8,u8,u1),locals={"f_id" : u8}, cache=True)
-def validate_head_or_retract(self, k, f_id, a_id):
+# @njit(void(BaseReteNodeType, i8,u8,u1),locals={"f_id" : u8}, cache=True)
+@njit(locals={"f_id" : u8}, cache=True)
+def validate_head_or_retract(self, arg_ind, f_id, a_id):
     '''Update the head_ptr dictionaries by following the deref
      chains of DECLARE/MODIFY changes, and make retractions
     for an explicit RETRACT or a failure in the deref chain.'''
     if(a_id != RETRACT):
-        head_ptr = validate_deref(self, k, f_id)
-        print(head_ptr)
+        base_t_id = self.t_ids[arg_ind]
+        start, length = self.head_ranges[arg_ind]
+        head_ptrs = np.empty((length,),dtype=np.int64)
+        for i in range(length):
+            deref_offsets = self.head_vars[start+i].deref_offsets
+            head_ptrs[i] = validate_deref(self, base_t_id, f_id, deref_offsets)
+        # print(head_ptr)
         if(head_ptr != 0): 
-            self.inp_head_ptrs[k][f_id] = head_ptr
+            self.inp_head_ptrs[k][f_id] = head_ptrs
             return
         
     # At this point we are definitely RETRACT
@@ -171,14 +178,16 @@ def validate_head_or_retract(self, k, f_id, a_id):
     for x in to_clear:
         other_out = self.outputs[1 if k else 0][x]
         del other_out[a_id]
-    del self.outputs[k][a_id]
-    del self.inp_head_ptrs[k][f_id]
+    del self.outputs[k][a_id] 
+    del self.inp_head_ptrs[k][f_id]  
 
 
 def filter_beta(self):
     arg_change_sets = List([Dict(i8,u1), Dict(i8,u1)])
 
-    ### 'relevant_global_diffs' is the set of self.mem.change_queue items relevant to intermediate derefs computed for this literal, and modification of the head attribute. Shouldn't happen frequently ###
+    ### 'relevant_global_diffs' is the set of self.mem.change_queue
+    # items relevant to intermediate derefs computed for this literal,
+    # and modification of the head attribute. Shouldn't happen frequently ###
     for idrec in self.relevant_global_diffs:
         if(idrec in self.deref_depends and len(self.deref_depends) > 0):
             deref_records = self.deref_depends[idrec]
@@ -202,7 +211,8 @@ def filter_beta(self):
             arg_change_sets[i] = inp.change_set
 
 
-    ### Update the head_ptr dictionaries by following the deref chains of DECLARE/MODIFY changes, and make retractions for an explicit RETRACT or a failure in the deref chain.
+    # Update the head_ptr dictionaries by following the deref chains of DECLARE/MODIFY 
+    # changes, and make retractions for an explicit RETRACT or a failure in the deref chain.
     for f_id0, a_id0 in arg_change_sets[0].items():
         validate_head_or_retract(self, f_id0, a_id0)
 
@@ -245,7 +255,9 @@ if __name__ == "__main__":
 
 """
 
+Notes: 
 
+What is needed by 
 
     
 

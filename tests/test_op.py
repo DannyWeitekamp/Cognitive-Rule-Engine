@@ -3,6 +3,7 @@ from numba.core.errors import NumbaPerformanceWarning
 from numba.types import  FunctionType, unicode_type
 import numpy as np
 from cre.op import Op, GenericOpType
+from cre.default_ops import Add
 from cre.var import Var
 from cre.utils import _func_from_address
 from cre.context import cre_context
@@ -74,8 +75,8 @@ def test_compose_op():
 @njit(cache=True)
 def extract_var_ptrs(op):
     '''Defined just to reduce runtime on test below'''
-    out =np.empty(len(op.var_map),dtype=np.int64)
-    for i,x in enumerate(op.var_map):
+    out =np.empty(len(op.base_var_map),dtype=np.int64)
+    for i,x in enumerate(op.base_var_map):
         out[i] =x 
     return out
 
@@ -481,6 +482,33 @@ def test_boxing():
     # print(_Add, type(_Add))
 
 
+def test_head_ptrs_ranges():
+    with cre_context("_test_head_map"):
+        BOOP, BOOPType = define_fact("BOOP",{"nxt" : "BOOP", "val" : f8})
+
+        x, y, z = Var(BOOP,"x"), Var(BOOP,"y"), Var(BOOP,"z")
+
+        op = Add(x.val,Add(y.val,x.val))
+        # print(op, op.head_var_ptrs, op.head_ranges)
+        # print(gen_head_inds(op))
+        assert len(op.head_var_ptrs) == 2
+        assert op.head_ranges.tolist() == [(0,1), (1,1)]
+
+        op = Add(x.val,Add(y.val,x.nxt.val))
+        # print(op, op.head_var_ptrs, op.head_ranges)
+        # print(gen_head_inds(op))
+        assert len(op.head_var_ptrs) == 3
+        assert op.head_ranges.tolist() == [(0,2), (2,1)]
+        
+
+
+        op = Add(Add(y.val,x.val),Add(z.val,Add(x.nxt.val,z.nxt.val)))
+        # print(op, op.head_var_ptrs, op.head_ranges)
+        # print(gen_head_inds(op))
+        assert len(op.head_var_ptrs) == 5
+        assert op.head_ranges.tolist() == [(0,1), (1,2), (3,2)]
+
+
 import time
 class PrintElapse():
     def __init__(self, name):
@@ -511,7 +539,8 @@ if __name__ == "__main__":
     #     test_source_gen()
 
     #     test_commutes()
-    test_fact_args()
+    # test_fact_args()
+    test_head_ptrs_ranges()
     # not_jit_compilable()
             
 

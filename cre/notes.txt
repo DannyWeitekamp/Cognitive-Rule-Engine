@@ -666,5 +666,18 @@ See 'speed_experiments/bench_beta_data_structures.py' it seems like doing the fu
 
 Do I even need check()? It seems unecessary, the user can just raise their own exception.
 
+----- Sept 13 -----
+
+There is a common structure to all nodes alpha/beta with regard to dereferencing to heads. Every Op has a set of arguments and a resulting set of head ptrs, so the first step is always to:
+
+1) Retract any relevant idrecs from depends from the global change set
+2) Re-evaluate the changes and make sure that the head ptrs are up to date
+
+There are potentially more head_ptrs than inputs since in principle we can do something like x.B.A < x.B.B.A
+
+How should we deal with this?
+
+Internally we need to be able to loop over the arg level and know which f_ids have changes queued. But we also need to be able to dereference any number of vars associated with the same arg. So The function validate_head_or_retract() should probably actually be validate_heads_or_retract(), since there can be multiple heads for the same arg. Internally we might construct an array 'head_ranges' that indicates the indicies in head_ptrs associated with each var. Then when we loop through the invalidated f_ids we can just extract 
+what we need
 
 

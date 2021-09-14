@@ -4,28 +4,31 @@ from numba.typed import Dict, List
 from numba.types import DictType, ListType
 from cre.memory import Memory
 from cre.fact import define_fact
-from cre.var import Var
-from cre.utils import pointer_from_struct, decode_idrec, encode_idrec
+from cre.var import Var, GenericVarType
+from cre.utils import pointer_from_struct, decode_idrec, encode_idrec, _struct_from_pointer
 from cre.rete import (deref_head_and_relevant_idrecs, RETRACT,
      DerefRecord, make_deref_record_parent, invalidate_deref_rec,
      validate_deref, validate_head_or_retract)
+from cre.context import cre_context
+from cre.default_ops import Add
 
 
-def setup_deref_tests():
-    BOOP, BOOPType = define_fact("BOOP",{"nxt" : "BOOP", "val" : f8})
-    mem = Memory()
+def setup_deref_tests(ctx=None):
+    with cre_context(ctx):
+        BOOP, BOOPType = define_fact("BOOP",{"nxt" : "BOOP", "val" : f8})
+        mem = Memory()
 
-    a5 = BOOP(nxt=None, val=5)
-    a4 = BOOP(nxt=a5, val=5)
-    a3 = BOOP(nxt=a4, val=5)
-    a2 = BOOP(nxt=a3, val=5)
-    a1 = BOOP(nxt=a2, val=5)
-    mem.declare(a1)
-    mem.declare(a2)
-    mem.declare(a3)
-    mem.declare(a4)
-    mem.declare(a5)
-    return (mem, BOOP, BOOPType), (a1,a2,a3,a4,a5)
+        a5 = BOOP(nxt=None, val=5)
+        a4 = BOOP(nxt=a5, val=5)
+        a3 = BOOP(nxt=a4, val=5)
+        a2 = BOOP(nxt=a3, val=5)
+        a1 = BOOP(nxt=a2, val=5)
+        mem.declare(a1)
+        mem.declare(a2)
+        mem.declare(a3)
+        mem.declare(a4)
+        mem.declare(a5)
+        return (mem, BOOP, BOOPType), (a1,a2,a3,a4,a5)
 
 
 
@@ -124,6 +127,7 @@ def _test_validate_deref():
 
 
     v = Var(BOOP,"a").nxt.val
+    deref_offsets = v.deref_offsets
     a_n, a_v = [x[1] for x in v.deref_offsets]
 
     t_id, f_id, _ = decode_idrec(a1.idrec)
@@ -136,23 +140,23 @@ def _test_validate_deref():
     print(node)
 
     _, f_id, _ = decode_idrec(a1.idrec)
-    head_ptr = validate_deref(node,0,f_id)
+    head_ptr = validate_deref(node,f_id, deref_offsets)
     print(head_ptr)
 
     _, f_id, _ = decode_idrec(a2.idrec)
-    head_ptr = validate_deref(node,0,f_id)
+    head_ptr = validate_deref(node,f_id, deref_offsets)
     print(head_ptr)
 
     _, f_id, _ = decode_idrec(a3.idrec)
-    head_ptr = validate_deref(node,0,f_id)
+    head_ptr = validate_deref(node,f_id, deref_offsets)
     print(head_ptr)
 
     _, f_id, _ = decode_idrec(a4.idrec)
-    head_ptr = validate_deref(node,0,f_id)
+    head_ptr = validate_deref(node,f_id, deref_offsets)
     print(head_ptr)
 
     _, f_id, _ = decode_idrec(a5.idrec)
-    head_ptr = validate_deref(node,0,f_id)
+    head_ptr = validate_deref(node,f_id, deref_offsets)
     print(head_ptr)
 
 
@@ -194,6 +198,31 @@ def _test_validate_head_or_retract():
     # head_ptr = validate_head_or_retract(node,0,f_id,0)
     # print(head_ptr)
 
+i8_arr = i8[::1]
+i8_list = ListType(i8)
+@njit(cache=True)
+def gen_head_inds(op):
+    var_order = List.empty_list(i8)
+    head_inds = List.empty_list(i8_list)
+    for i,base_ptr in enumerate(op.base_var_map):
+        var_order.append(base_ptr)
+        head_inds.append(List.empty_list(i8))
+    
+    for head_ptr in op.head_var_ptrs:
+        head_var = _struct_from_pointer(GenericVarType, head_ptr)
+        base_ind = var_order.index(head_var.base_ptr)
+        head_ind = np.min(np.nonzero((op.head_var_ptrs==head_ptr))[0])
+        head_inds[base_ind].append(head_ind)
+
+    return head_inds
+
+
+# @njit(cache=True)
+# def gen_head_ranges(op):
+
+
+
+
 
 
 
@@ -208,4 +237,5 @@ if __name__ == "__main__":
     # test_deref_to_head_and_gen_relevant_idrecs()
     # test_deref_record_parent()
     # _test_validate_deref()
-    _test_validate_head_or_retract()
+    # _test_head_map()
+    # _test_validate_head_or_retract()

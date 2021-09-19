@@ -12,7 +12,9 @@ from cre.structref import define_structref
 from cre.memory import MemoryType
 from cre.vector import VectorType
 from cre.var import GenericVarType
-
+from cre.op import GenericOpType
+from cre.conditions import LiteralType, build_distributed_dnf
+from cre.vector import VectorType, new_vector
 
 RETRACT = u1(0xFF)# u1(0)
 DECLARE = u1(0)
@@ -21,14 +23,49 @@ deref_record_field_dict = {
     # Pointers to the Dict(i8,u1)s inside deref_depends
     "parent_ptrs" : i8[::1], 
     "arg_ind" : i8,
+    "base_f_id" : u8,
     "was_successful" : u1,
 }
 
 DerefRecord, DerefRecordType = define_structref("DerefRecord", deref_record_field_dict)
 
 
+
+node_memory_field_dict = {
+    # If it is a root then we should
+    # check the facts of the mem linked to the graph 
+    "is_root" : types.boolean,
+
+    #
+    "change_set" : DictType(u8,u1), 
+    # Maps f_ids -> sets of f_ids
+    "matches" : DictType(u8, DictType(u8,u1)), 
+
+}
+
+NodeMemory, NodeMemoryType = define_structref("NodeMemory", node_memory_field_dict)
+
+@njit(cache=True)
+def new_node_mem():
+    st = new(NodeMemoryType)
+    st.change_set = Dict.empty(u8,u1)
+    st.matches = Dict.empty(u8,dict_u8_u1_type)
+    st.is_root = False
+    return st
+
+@njit(cache=True)
+def new_root_node_mem():
+    st = new(NodeMemoryType)
+    st.change_set = Dict.empty(u8,u1)
+    st.is_root = True
+    return st
+
+
+
+
+
 dict_i8_u1_type = DictType(i8,u1)
-dict_u8_i8_type = DictType(u8,i8)
+dict_u8_i8_arr_type = DictType(u8,i8[::1])
 deref_dep_typ = DictType(u8,DictType(i8,u1))
 
 
@@ -39,36 +76,46 @@ outputs_typ = DictType(u8,DictType(u8,u1))
 base_rete_node_field_dict = {
     # Pointers to the Dict(i8,u1)s inside deref_depends
     "mem" : MemoryType, 
+    "lit" : LiteralType,
+    "op" : GenericOpType,
     "deref_depends" : deref_dep_typ, 
-    "arg_inds" : i8[::1],
+    "relevant_global_diffs" : VectorType,
+
+    "var_inds" : i8[::1],
     "t_ids" : u2[::1],
-    "vars" : ListType(GenericVarType),
+    # "vars" : ListType(GenericVarType),
     "inp_head_ptrs" : ListType(DictType(u8,i8[::1])),
-    "inputs" : types.Any,
-    "outputs" : ListType(DictType(u8,DictType(u8,u1))),
+    "inputs" : ListType(NodeMemoryType),
+    "outputs" : ListType(NodeMemoryType), #DictType(u8,DictType(u8,u1))
 }
 
 BaseReteNode, BaseReteNodeType = define_structref("BaseReteNode", base_rete_node_field_dict, define_constructor=False)
 
+
 i8_arr_typ = i8[::1]
 
 @njit(cache=True)
-def node_ctor(mem, _vars, t_ids, arg_inds):
+def node_ctor(mem, lit, t_ids, var_inds):
     st = new(BaseReteNodeType)
     st.mem = mem
     st.deref_depends = Dict.empty(u8,dict_i8_u1_type)
-    st.arg_inds = arg_inds
+    st.relevant_global_diffs = new_vector(4)
+    st.var_inds = var_inds
     st.t_ids = t_ids
-    st.vars = _vars
+    st.lit = lit
+    st.op = op = lit.op
+    # st.vars = _vars
 
-    inp_head_ptrs = List.empty_list(dict_u8_i8_type)
-    for i in range(len(_vars)):
+    inp_head_ptrs = List.empty_list(dict_u8_i8_arr_type)
+    for i in range(len(op.base_var_map)):
         inp_head_ptrs.append(Dict.empty(u8, i8_arr_typ))
     st.inp_head_ptrs = inp_head_ptrs
 
-    outputs = List.empty_list(outputs_typ)
-    for i in range(len(_vars)):
-        outputs.append(Dict.empty(u8,dict_u8_u1_type))
+    outputs = List.empty_list(NodeMemoryType)
+    for i in range(len(op.base_var_map)):
+        # outputs.append(Dict.empty(u8,dict_u8_u1_type))
+        outputs.append(new_node_mem())
+
     st.outputs = outputs
 
     return st
@@ -138,7 +185,7 @@ def make_deref_record_parent(deref_depends, idrec, r_ptr):
 
 # @njit(i8(BaseReteNodeType, u2, u8, deref_type[::1]),cache=True)
 @njit(cache=True)
-def validate_deref(self, base_t_id, f_id, deref_offsets):
+def validate_deref(self, arg_ind, base_t_id, f_id, deref_offsets):
     '''Try to get the head_ptr of 'f_id' in input 'k'. Inject a DerefRecord regardless of the result '''
     # t_id = self.t_ids[k]
     facts = _struct_from_pointer(VectorType, self.mem.mem_data.facts[base_t_id])
@@ -147,7 +194,7 @@ def validate_deref(self, base_t_id, f_id, deref_offsets):
     head_ptr, rel_idrecs  = deref_head_and_relevant_idrecs(base_ptr,deref_offsets)
     was_successful = (head_ptr != 0)
     parent_ptrs = np.empty(len(rel_idrecs), dtype=np.int64)
-    r = DerefRecord(parent_ptrs, self.arg_inds[k], was_successful)
+    r = DerefRecord(parent_ptrs, arg_ind, f_id, was_successful)
     r_ptr = _pointer_from_struct_incref(r)
     for i, idrec in enumerate(rel_idrecs):
         ptr = make_deref_record_parent(self.deref_depends, idrec, r_ptr)
@@ -156,60 +203,77 @@ def validate_deref(self, base_t_id, f_id, deref_offsets):
     return head_ptr
 
 # @njit(void(BaseReteNodeType, i8,u8,u1),locals={"f_id" : u8}, cache=True)
-@njit(locals={"f_id" : u8}, cache=True)
+@njit(locals={"f_id" : u8, "a_id" : u8}, cache=True)
 def validate_head_or_retract(self, arg_ind, f_id, a_id):
     '''Update the head_ptr dictionaries by following the deref
      chains of DECLARE/MODIFY changes, and make retractions
     for an explicit RETRACT or a failure in the deref chain.'''
     if(a_id != RETRACT):
         base_t_id = self.t_ids[arg_ind]
-        start, length = self.head_ranges[arg_ind]
-        head_ptrs = np.empty((length,),dtype=np.int64)
-        for i in range(length):
-            deref_offsets = self.head_vars[start+i].deref_offsets
-            head_ptrs[i] = validate_deref(self, base_t_id, f_id, deref_offsets)
+        r = self.op.head_ranges[arg_ind]
+        head_ptrs = np.empty((r.length,),dtype=np.int64)
+        for i in range(r.length):
+            head_var = _struct_from_pointer(GenericVarType,self.op.head_var_ptrs[r.start+i])
+            deref_offsets = head_var.deref_offsets
+            head_ptr = validate_deref(self, arg_ind, base_t_id, f_id, deref_offsets)
+            if(head_ptr == 0): break
+            head_ptrs[i] = head_ptr
         # print(head_ptr)
-        if(head_ptr != 0): 
-            self.inp_head_ptrs[k][f_id] = head_ptrs
-            return
+        # if(head_ptr != 0): 
+        self.inp_head_ptrs[arg_ind][f_id] = head_ptrs
+        return
         
     # At this point we are definitely RETRACT
-    to_clear = self.outputs[k][a_id]
+    to_clear = self.outputs[arg_ind][a_id]
     for x in to_clear:
-        other_out = self.outputs[1 if k else 0][x]
+        other_out = self.outputs[i8(1) if arg_ind else i8(0)][x]
         del other_out[a_id]
-    del self.outputs[k][a_id] 
-    del self.inp_head_ptrs[k][f_id]  
+    del self.outputs[arg_ind][a_id] 
+    del self.inp_head_ptrs[arg_ind][f_id]  
 
-
-def filter_beta(self):
-    arg_change_sets = List([Dict(i8,u1), Dict(i8,u1)])
-
-    ### 'relevant_global_diffs' is the set of self.mem.change_queue
+@njit(cache=True)
+def update_changes_deref_dependencies(self, arg_change_sets):
+     ### 'relevant_global_diffs' is the set of self.mem.change_queue
     # items relevant to intermediate derefs computed for this literal,
     # and modification of the head attribute. Shouldn't happen frequently ###
-    for idrec in self.relevant_global_diffs:
-        if(idrec in self.deref_depends and len(self.deref_depends) > 0):
+    for i in range(self.relevant_global_diffs.head):
+        idrec = self.relevant_global_diffs[i]
+        if(idrec in self.deref_depends):
             deref_records = self.deref_depends[idrec]
 
             # Invalidate old DerefRecords
-            for r in deref_records:
-                r.invalidate()
-                _, base_f_id, _ = decode_idrec(r.dep_idrecs[0])
+            for r_ptr in deref_records:
+                r = _struct_from_pointer(DerefRecordType,r_ptr)
+                invalidate_deref_rec(r)
 
                 # Any change in the deref chain counts as a MODIFY
-                arg_change_sets[r.arg_ind][base_f_id] = MODIFY
+                arg_change_sets[r.arg_ind][r.base_f_id] = u1(1) #MODIFY
 
-
-    ### Make sure the arg_change_sets are up to date
-    for i, inp in enumerate(self.inputs.change_set):
+@njit(cache=True)
+def update_changes_from_inputs(self, arg_change_sets):
+    for i, inp in enumerate(self.inputs):
         arg_change_sets_i = arg_change_sets[i]
         if(len(arg_change_sets_i) > 0):
-             for f_id in inp.change_set:
-                arg_change_sets_i.add(idrec)
+             for idrec in inp.change_set:
+                arg_change_sets_i[idrec] = u1(1)
         else:
             arg_change_sets[i] = inp.change_set
 
+dict_u8_u1_type = DictType(u8,u1)
+
+@njit(cache=True)
+def filter_beta(self):
+    arg_change_sets = List.empty_list(dict_u8_u1_type)
+    for i in range(len(self.var_inds)):
+         arg_change_sets.append(Dict.empty(u8,u1))
+
+    update_deref_dependencies(self, arg_change_sets)
+    update_changes_from_inputs(self, arg_change_sets)
+   
+
+
+    ### Make sure the arg_change_sets are up to date
+   
 
     # Update the head_ptr dictionaries by following the deref chains of DECLARE/MODIFY 
     # changes, and make retractions for an explicit RETRACT or a failure in the deref chain.
@@ -240,6 +304,218 @@ def check_pair(self, h_ptr0, h_ptr1, chg_typ):
     # if(not passes and chg_typ != DECLARE):
 
     # else:
+node_list_type = ListType(BaseReteNodeType)
+node_mem_list_type = ListType(NodeMemoryType)
+rete_graph_field_dict = {
+    "change_head" : i8,
+    "mem" : MemoryType,
+    "nodes_by_nargs" : ListType(ListType(BaseReteNodeType)),
+    "var_root_nodes" : DictType(i8,BaseReteNodeType),
+    "var_end_nodes" : DictType(i8,BaseReteNodeType),
+    "global_deref_idrec_map" : DictType(u8, node_list_type),
+    "global_base_t_id_map" : DictType(u2, NodeMemoryType)
+}
+
+@njit(cache=True)
+def rete_graph_ctor(mem,nodes_by_nargs, var_root_nodes, var_end_nodes,
+                    global_deref_idrec_map, global_base_t_id_map):
+    st = new(ReteGraphType)
+    st.change_head = 0
+    st.mem = mem
+    st.nodes_by_nargs = nodes_by_nargs
+    st.var_root_nodes = var_root_nodes
+    st.var_end_nodes = var_end_nodes
+    st.global_deref_idrec_map = global_deref_idrec_map
+    st.global_base_t_id_map = global_base_t_id_map
+    return st
+
+
+ReteGraph, ReteGraphType = define_structref("ReteGraph", rete_graph_field_dict, define_constructor=False)
+
+
+
+@njit(cache=True)
+def _global_map_insert(idrec, g_map, node):
+    if(idrec not in g_map):
+        g_map[idrec] = List.empty_list(BaseReteNodeType)
+    g_map[idrec].append(node)
+
+
+@njit(cache=True,locals={})
+def _make_rete_nodes(mem, c, index_map):
+    nodes_by_nargs = List()
+    global_deref_idrec_map = Dict.empty(u8, node_list_type)
+    # global_base_t_id_map = Dict.empty(u8, node_list_type)
+
+    fn_to_t_id = mem.context_data.fact_num_to_t_id
+
+    for distr_conjuct in c.distr_dnf:
+        for i, var_conjuct in enumerate(distr_conjuct):
+            for lit in var_conjuct:
+                nargs = len(lit.var_base_ptrs)
+                while(len(nodes_by_nargs) <= nargs-1):
+                    nodes_by_nargs.append(List.empty_list(BaseReteNodeType))
+
+                t_ids = np.empty((nargs,),dtype=np.uint16)
+                var_inds = np.empty((nargs,),dtype=np.int64)
+                for i,base_var_ptr in enumerate(lit.var_base_ptrs):
+                    var_inds[i] = index_map[base_var_ptr]
+                    base_var = _struct_from_pointer(GenericVarType, base_var_ptr)
+                    t_id = mem.context_data.fact_to_t_id.get(base_var.base_type_name,None)
+                    if(t_id is None): raise ValueError("Base Vars of Conditions() must inherit from Fact")
+                    t_ids[i] = t_id
+
+                # print("t_ids", t_ids)
+                node = node_ctor(mem, lit, t_ids, var_inds)
+                nodes_by_nargs[nargs-1].append(node)
+                # print("<< aft", lit.op.head_var_ptrs)
+                for i, head_var_ptr in enumerate(lit.op.head_var_ptrs):
+                    head_var = _struct_from_pointer(GenericVarType, head_var_ptr)
+                    ind = np.min(np.nonzero(lit.var_base_ptrs==head_var.base_ptr)[0])
+                    t_id = t_ids[ind]
+                    # print("START")
+                    for d_offset in head_var.deref_offsets:
+                        idrec1 = encode_idrec(u2(t_id),0,u1(d_offset.a_id))
+                        _global_map_insert(idrec1, global_deref_idrec_map, node)
+                        # print("-idrec1", decode_idrec(idrec1))
+                        fn = d_offset.fact_num
+                        if(fn >= 0 and fn < len(fn_to_t_id)):
+                            t_id = fn_to_t_id[d_offset.fact_num]
+                            idrec2 = encode_idrec(u2(t_id),0,0)
+                            _global_map_insert(idrec2, global_deref_idrec_map, node)
+                            # print("--idrec2", decode_idrec(idrec2))
+                        else:
+                            break
+                                
+
+    return nodes_by_nargs, global_deref_idrec_map
+
+optional_node_mem_type = types.optional(NodeMemoryType)
+# optional_node_type = types.optional(BaseReteNodeType)
+
+
+
+
+
+@njit(cache=True)
+def build_rete_graph(mem, c):
+    index_map = Dict.empty(i8, i8)
+    for i, v in enumerate(c.vars):
+        index_map[v.base_ptr] = i
+
+    if(not c.has_distr_dnf):
+        build_distributed_dnf(c,index_map)
+
+    nodes_by_nargs, global_deref_idrec_map = \
+         _make_rete_nodes(mem, c, index_map)
+
+    global_base_t_id_map = Dict.empty(u8, NodeMemoryType)
+    var_end_nodes = Dict.empty(i8,BaseReteNodeType)
+    var_root_nodes = Dict.empty(i8,BaseReteNodeType)
+
+    # Link nodes together. 'nodes_by_nargs' should already be ordered
+    # so that alphas are before 2-way, 3-way, etc. betas. 
+    for i, nodes in enumerate(nodes_by_nargs):
+        for node in nodes:
+            inputs = List.empty_list(NodeMemoryType)
+            for j, ind in enumerate(node.var_inds):
+                if(ind in var_end_nodes):
+                    # Extract the appropriate NodeMemory for this input
+                    e_node = var_end_nodes[ind]
+                    om = e_node.outputs[np.min(np.nonzero(e_node.var_inds==ind)[0])]
+                    inputs.append(om)
+                else:
+                    t_id = node.t_ids[j]
+                    if(t_id not in global_base_t_id_map):
+                        root = new_root_node_mem()
+                        global_base_t_id_map[t_id] = root
+                    root = global_base_t_id_map[t_id]
+
+
+                    inputs.append(root)
+                    var_root_nodes[ind] = node
+
+                    
+                    
+                        
+                    # global_base_t_id_map[t_id].append(root)
+                    # idrec = encode_idrec(, 0, 0)
+                    # _global_map_insert(, node, global_base_t_id_map)
+
+            # Make this node the new end node for the vars it takes as inputs
+            for ind in node.var_inds:
+                var_end_nodes[ind] = node
+            
+            node.inputs = inputs
+            # print("<<",len(inputs), len(node.var_inds))
+
+
+    return rete_graph_ctor(mem, nodes_by_nargs, var_root_nodes, var_end_nodes, global_deref_idrec_map, global_base_t_id_map)
+
+
+@njit(cache=True,locals={"t_id" : u2})
+def parse_mem_change_queue(r_graph):
+    
+    global_deref_idrec_map = r_graph.global_deref_idrec_map
+    global_base_t_id_map = r_graph.global_base_t_id_map
+
+    for idrec in global_deref_idrec_map:
+        print("<< global_deref_idrec_map", decode_idrec(idrec))
+    # print(global_deref_idrec_map)
+
+    change_queue = r_graph.mem.mem_data.change_queue
+    for i in range(r_graph.change_head, change_queue.head):
+        idrec = u8(change_queue[i])
+        t_id, f_id, a_id = decode_idrec(idrec)
+
+        # Add this idrec to change_set of root nodes
+        root_node_mem = global_base_t_id_map.get(t_id,None)
+        if(t_id in global_base_t_id_map):
+            global_base_t_id_map[t_id].change_set[idrec] = u1(1)
+
+        # Add this idrec to relevant deref idrecs
+        idrec_pattern = encode_idrec(t_id, 0, a_id)
+        nodes = global_deref_idrec_map.get(idrec_pattern,None)
+        if(nodes is not None):
+            for node in nodes:
+                node.relevant_global_diffs.add(idrec)
+
+       
+        # print(decode_idrec(idrec))
+
+    # print(r_graph.global_deref_idrec_map)
+    # print(r_graph.global_base_t_id_map)
+    r_graph.change_head = change_queue.head
+
+
+    for root_node in r_graph.var_root_nodes.values():
+        print("R")
+        for inp in root_node.inputs:
+            print(inp.change_set)
+        for idrec in root_node.relevant_global_diffs.data:
+            print(decode_idrec(u8(idrec)))
+            # print(_pointer_from_struct(inp.change_set))
+        # print(root_node.inputs[0].change_set)
+
+
+
+
+    # r_graph.mem.change_queue
+
+
+
+
+
+    
+
+
+
+
+
+
+
+
+
 
 if __name__ == "__main__":
     pass

@@ -13,7 +13,7 @@ from cre.context import cre_context
 from cre.structref import define_structref, define_structref_template, CastFriendlyStructref
 from cre.memory import MemoryType, Memory, facts_for_t_id, fact_at_f_id
 from cre.fact import define_fact, BaseFactType, cast_fact, DeferredFactRefType, Fact, _standardize_type
-from cre.utils import _struct_from_meminfo, _meminfo_from_struct, _cast_structref, cast_structref, decode_idrec, lower_getattr, _struct_from_pointer,  lower_setattr, lower_getattr, _pointer_from_struct, _decref_pointer, _incref_pointer, _incref_structref, pointer_from_struct
+from cre.utils import _struct_from_meminfo, _meminfo_from_struct, _cast_structref, cast_structref, decode_idrec, lower_getattr, _struct_from_pointer,  lower_setattr, lower_getattr, _pointer_from_struct, _decref_pointer, _incref_pointer, _incref_structref, pointer_from_struct, _pointer_from_struct_incref
 from cre.utils import assign_to_alias_in_parent_frame
 from cre.subscriber import base_subscriber_fields, BaseSubscriber, BaseSubscriberType, init_base_subscriber, link_downstream
 from cre.vector import VectorType
@@ -140,8 +140,9 @@ class Var(structref.StructRefProxy):
         else:
             struct_type = GenericVarType
         #CHECK THAT PTRS ARE SAME HERE
+        fact_num = getattr(head_type, "_fact_num", -1)
         head_type_name = str(head_type)
-        new = new_appended_var(struct_type, self, attr, a_id, offset, head_type_name, deref_type)
+        new = new_appended_var(struct_type, self, attr, a_id, offset, head_type_name, fact_num, deref_type)
         new._base_type = base_type
         new._head_type = head_type
         # new = var_ctor(struct_type, str(type_name), var_get_alias(self))
@@ -322,10 +323,17 @@ class Var(structref.StructRefProxy):
     def get_ptr(self):
         return get_var_ptr(self)
 
+    def get_ptr_incref(self):
+        return get_var_ptr_incref(self)
+
 @njit(cache=True)    
 def get_var_ptr(self):
     return _pointer_from_struct(self)
 
+
+@njit(cache=True)    
+def get_var_ptr_incref(self):
+    return _pointer_from_struct_incref(self)
 
 
 def var_cmp_alpha(left_var, op_str, right_var,negated):
@@ -497,11 +505,11 @@ class StructAttribute(AttributeTemplate):
 #### getattr and dereferencing ####
 
 @njit(cache=True)
-def new_appended_var(struct_type, base_var, attr, a_id, offset, head_type_name, typ='attr'):
+def new_appended_var(struct_type, base_var, attr, a_id, offset, head_type_name, fact_num=-1, typ='attr'):
     _incref_structref(base_var)
     st = new(struct_type)
     var_memcopy(base_var,st)
-    var_append_deref(st,attr, a_id, offset, head_type_name, typ)
+    var_append_deref(st,attr, a_id, offset, fact_num, head_type_name, typ)
     return st
 
 
@@ -528,7 +536,7 @@ def var_memcopy(self,st):
     
 
 @njit(cache=True)
-def var_append_deref(self, attr, a_id, offset, head_type_name, typ='attr'):
+def var_append_deref(self, attr, a_id, offset, fact_num, head_type_name, typ='attr'):
     lower_getattr(self,"deref_attrs").append(attr)
     old_deref_offsets = lower_getattr(self,"deref_offsets")
     L = len(old_deref_offsets)
@@ -541,6 +549,7 @@ def var_append_deref(self, attr, a_id, offset, head_type_name, typ='attr'):
 
     new_deref_offsets[L].a_id = u1(a_id)
     new_deref_offsets[L].offset = i8(offset)
+    new_deref_offsets[L].fact_num = i8(fact_num)
 
     lower_setattr(self,'deref_offsets', new_deref_offsets)
     lower_setattr(self,'head_type_name', head_type_name)

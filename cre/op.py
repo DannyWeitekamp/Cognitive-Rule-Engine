@@ -327,7 +327,7 @@ class UntypedOp():
             op = new_op(self.name, members)
             return OpComp(op, *py_args).flatten()
         else:
-            var_ptrs = np.array([v.get_ptr() for v in py_args],dtype=np.int64)
+            var_ptrs = np.array([v.get_ptr_incref() for v in py_args],dtype=np.int64)
             # Retreive from Cache/Make typed version 
             if(sig not in self._specialize_cache):
                 op_cls = new_op(self.name, members,return_class=True)
@@ -403,6 +403,29 @@ def gen_placeholder_aliases(var_ptrs):
     return generated_aliases
 
 
+@njit(cache=True)
+def make_head_ranges(n_args,head_var_ptrs):
+    head_ranges = np.empty((n_args,),
+                            dtype=head_range_type)
+    start, length = 0,0
+    prev_base_ptr = 0
+    k = 0 
+    for ptr in head_var_ptrs:
+        head_var = _struct_from_pointer(GenericVarType, ptr)
+        base_ptr = head_var.base_ptr
+        if(prev_base_ptr == 0 or base_ptr == prev_base_ptr):
+            length += 1
+        else:
+            head_ranges[k].start = start 
+            head_ranges[k].length = length
+            k += 1
+            start += length; length = 1
+            
+        prev_base_ptr = base_ptr
+    head_ranges[k][0] = start 
+    head_ranges[k][1] = length
+    return head_ranges
+
 
 @njit(cache=True)
 def op_ctor(name, return_type_name, arg_type_names, head_var_ptrs, 
@@ -432,29 +455,7 @@ def op_ctor(name, return_type_name, arg_type_names, head_var_ptrs,
             st.inv_base_var_map[alias] = base_ptr
 
     st.head_var_ptrs = head_var_ptrs
-
-    # Make head ranges
-    head_ranges = np.empty((len(st.base_var_map),),
-                            dtype=head_range_type)
-    start, length = 0,0
-    prev_base_ptr = 0
-    k = 0 
-    for ptr in head_var_ptrs:
-        head_var = _struct_from_pointer(GenericVarType, ptr)
-        base_ptr = head_var.base_ptr
-        if(prev_base_ptr == 0 or base_ptr == prev_base_ptr):
-            length += 1
-        else:
-            head_ranges[k][0] = start 
-            head_ranges[k][1] = length
-            k += 1
-            start += length; length = 1
-            
-        prev_base_ptr = base_ptr
-    head_ranges[k][0] = start 
-    head_ranges[k][1] = length
-    st.head_ranges = head_ranges
-
+    st.head_ranges = make_head_ranges(len(st.base_var_map), head_var_ptrs)
 
     st.expr_template = expr_template
     st.shorthand_template = shorthand_template
@@ -1189,14 +1190,14 @@ class DerefInstr():
 
 #     def __eq__(self):
 
-@njit(cache=True)
-def var_from_ptr(ptr):
-    return _struct_from_pointer(GenericVarType,ptr)
+# @njit(cache=True)
+# def var_from_ptr(ptr):
+#     return _struct_from_pointer(GenericVarType,ptr)
 
-def extract_head_ptr(x):
-    if(isinstance(x,DerefInstr)):
-        return x.var.get_ptr()
-    return x
+# def extract_head_ptr(x):
+#     if(isinstance(x,DerefInstr)):
+#         return x.var.get_ptr_incref()
+#     return x
 
 
 # def gen_ranges(head_vars):
@@ -1300,7 +1301,7 @@ class OpComp():
         self.arg_types = arg_types
         # self.head_types = head_types
         # print([x[0].get_ptr() for x in head_vars.values()])
-        self.head_var_ptrs = np.array([x[0].get_ptr() for x in head_vars.values()],dtype=np.int64)
+        self.head_var_ptrs = np.array([x[0].get_ptr_incref() for x in head_vars.values()],dtype=np.int64)
         self.constants = constants
         self.signature = op.signature.return_type(*arg_types)
         

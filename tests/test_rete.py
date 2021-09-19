@@ -5,7 +5,7 @@ from numba.types import DictType, ListType
 from cre.memory import Memory
 from cre.fact import define_fact
 from cre.var import Var, GenericVarType
-from cre.utils import pointer_from_struct, decode_idrec, encode_idrec, _struct_from_pointer
+from cre.utils import pointer_from_struct, decode_idrec, encode_idrec, _struct_from_pointer, _pointer_from_struct
 from cre.rete import (deref_head_and_relevant_idrecs, RETRACT,
      DerefRecord, make_deref_record_parent, invalidate_deref_rec,
      validate_deref, validate_head_or_retract)
@@ -121,6 +121,7 @@ def test_deref_record_parent():
 
 
 def _test_validate_deref():
+    from cre.conditions import Literal
     from cre.rete import node_ctor
     from cre.var import GenericVarType
     (mem, BOOP, BOOPType), (a1,a2,a3,a4,a5) = setup_deref_tests()
@@ -130,38 +131,42 @@ def _test_validate_deref():
     deref_offsets = v.deref_offsets
     a_n, a_v = [x[1] for x in v.deref_offsets]
 
+    op = (v < 1)
+
     t_id, f_id, _ = decode_idrec(a1.idrec)
 
-    _vars = List.empty_list(GenericVarType)
-    _vars.append(v)
-
-
-    node = node_ctor(mem,_vars,np.array([t_id],dtype=np.uint16), np.arange(1,dtype=np.int64))
+    node = node_ctor(mem,Literal(op),np.array([t_id],dtype=np.uint16), np.arange(1,dtype=np.int64))
     print(node)
 
     _, f_id, _ = decode_idrec(a1.idrec)
-    head_ptr = validate_deref(node,f_id, deref_offsets)
+    head_ptr = validate_deref(node,t_id,f_id, deref_offsets)
+    assert head_ptr != 0 
     print(head_ptr)
 
     _, f_id, _ = decode_idrec(a2.idrec)
-    head_ptr = validate_deref(node,f_id, deref_offsets)
+    head_ptr = validate_deref(node,t_id,f_id, deref_offsets)
+    assert head_ptr != 0
     print(head_ptr)
 
     _, f_id, _ = decode_idrec(a3.idrec)
-    head_ptr = validate_deref(node,f_id, deref_offsets)
+    head_ptr = validate_deref(node,t_id,f_id, deref_offsets)
+    assert head_ptr != 0
     print(head_ptr)
 
     _, f_id, _ = decode_idrec(a4.idrec)
-    head_ptr = validate_deref(node,f_id, deref_offsets)
+    head_ptr = validate_deref(node,t_id,f_id, deref_offsets)
+    assert head_ptr != 0
     print(head_ptr)
 
     _, f_id, _ = decode_idrec(a5.idrec)
-    head_ptr = validate_deref(node,f_id, deref_offsets)
+    head_ptr = validate_deref(node,t_id,f_id, deref_offsets)
+    assert head_ptr == 0
     print(head_ptr)
 
 
 def _test_validate_head_or_retract():
-    from cre.rete import node_ctor
+    from cre.conditions import Literal
+    from cre.var import GenericVarType
     from cre.var import GenericVarType
     (mem, BOOP, BOOPType), (a1,a2,a3,a4,a5) = setup_deref_tests()
 
@@ -171,11 +176,9 @@ def _test_validate_head_or_retract():
 
     t_id, f_id, _ = decode_idrec(a1.idrec)
 
-    _vars = List.empty_list(GenericVarType)
-    _vars.append(v)
+    op = (v < 1)
 
-
-    node = node_ctor(mem,_vars,np.array([t_id],dtype=np.uint16), np.arange(1,dtype=np.int64))
+    node = node_ctor(mem,Literal(op),np.array([t_id],dtype=np.uint16), np.arange(1,dtype=np.int64))
     print(node)
 
     _, f_id, _ = decode_idrec(a1.idrec)
@@ -198,33 +201,128 @@ def _test_validate_head_or_retract():
     # head_ptr = validate_head_or_retract(node,0,f_id,0)
     # print(head_ptr)
 
-i8_arr = i8[::1]
-i8_list = ListType(i8)
-@njit(cache=True)
-def gen_head_inds(op):
-    var_order = List.empty_list(i8)
-    head_inds = List.empty_list(i8_list)
-    for i,base_ptr in enumerate(op.base_var_map):
-        var_order.append(base_ptr)
-        head_inds.append(List.empty_list(i8))
-    
-    for head_ptr in op.head_var_ptrs:
-        head_var = _struct_from_pointer(GenericVarType, head_ptr)
-        base_ind = var_order.index(head_var.base_ptr)
-        head_ind = np.min(np.nonzero((op.head_var_ptrs==head_ptr))[0])
-        head_inds[base_ind].append(head_ind)
+from cre.conditions import LiteralType
 
-    return head_inds
+distr_conj_type = ListType(ListType(LiteralType))
+literal_list_type = ListType(LiteralType)
+
+
+
+
+
+
+
+
+
+
 
 
 # @njit(cache=True)
-# def gen_head_ranges(op):
+# def print_stuff(c):
+
+def list_to_str(x):
+    ''' Helper function that makes a copy of a nested list but with 
+        all non list-like 'x' turned into str(x) '''
+    if(isinstance(x,(list,List))):
+        return [list_to_str(y) for y in x]
+    return str(x)
 
 
+def test_distr_dnf_and():
+    from cre.rete import node_ctor
+    from cre.var import GenericVarType
+    from cre.conditions import as_distr_dnf_list
+    with cre_context("test_distr_dnf_and"):
+        BOOP, BOOPType = define_fact("BOOP",{"nxt" : "BOOP", "val" : f8})
+    
+        a,b,c = Var(BOOP,"a"), Var(BOOP,"b"), Var(BOOP,"c")
+
+        ideal_conds = (
+            a & (a.val > 1) & (a.nxt.val < a.val) & 
+            b & (b.val > 1) & (b.val != 0) & (b.val != 0) & (a.val > b.val) & (b.val != a.val) & 
+            c & (c.val == b.nxt.val) & (c.val != 0)
+        )
+
+        mixup_conds = (
+            a & b & c &
+            (c.val == b.nxt.val) & (c.val != 0)  &
+            (a.val > 1) & (a.nxt.val < a.val) & (a.val > b.val) &
+            (b.val != a.val) & (b.val > 1) & (b.val != 0) & (b.val != 0)
+        )
+        mixup_conds.distr_dnf
+        ideal_conds.distr_dnf
+        assert str(mixup_conds.distr_dnf) == str(ideal_conds.distr_dnf)
+
+        py_list_distr_dnf = as_distr_dnf_list(mixup_conds.distr_dnf)
+        assert list_to_str(py_list_distr_dnf) == list_to_str(mixup_conds.distr_dnf)
 
 
+from cre.rete import dict_u8_u1_type, update_changes_deref_dependencies, update_changes_from_inputs
+@njit(cache=True)
+def filter_first(graph):
 
 
+    for i,self in graph.var_root_nodes.items():
+        arg_change_sets = List.empty_list(dict_u8_u1_type)
+        for i in range(len(self.var_inds)):
+             arg_change_sets.append(Dict.empty(u8,u1))
+
+        update_changes_deref_dependencies(self, arg_change_sets)
+        update_changes_from_inputs(self, arg_change_sets)
+
+        print("<<", i)
+        for idrec in arg_change_sets[0]:
+            print(decode_idrec(idrec))
+        # print(i, arg_change_sets)
+   
+
+
+def test_build_rete_graph():
+    from cre.rete import node_ctor, build_rete_graph, parse_mem_change_queue
+    from cre.var import GenericVarType
+    from cre.conditions import as_distr_dnf_list
+    with cre_context("test_distr_dnf_and"):
+        BOOP, BOOPType = define_fact("BOOP",{"nxt" : "BOOP", "val" : f8})
+    
+        a,b,c = Var(BOOP,"a"), Var(BOOP,"b"), Var(BOOP,"c")    
+
+        mixup_conds = (
+            a & b & c &
+            (c.val == b.nxt.val) & (c.val != 0)  &
+            (a.val > 1) & (a.nxt.val < a.val) & (a.val > b.val) &
+            (b.val != a.val) & (b.val > 1) & (b.val != 0) & (b.val != 0)
+        )
+
+        mem = Memory()
+
+        graph = build_rete_graph(mem, mixup_conds)
+        print([[str(x.op) for x in y] for y in graph.nodes_by_nargs])
+        print({i:str(x.op) for i,x in graph.var_end_nodes.items()})
+        print({i:str(x.op) for i,x in graph.var_root_nodes.items()})
+
+
+        
+
+        a5 = BOOP(nxt=None, val=5)
+        a4 = BOOP(nxt=a5, val=5)
+        a3 = BOOP(nxt=a4, val=5)
+        a2 = BOOP(nxt=a3, val=5)
+        a1 = BOOP(nxt=a2, val=5)
+        mem.declare(a1)
+        mem.declare(a2)
+        mem.declare(a3)
+        mem.declare(a4)
+        mem.declare(a5)
+
+        parse_mem_change_queue(graph)
+
+        filter_first(graph)
+        # update_deref_dependencies(self, arg_change_sets)
+        # update_changes_from_inputs(self, arg_change_sets)
+
+        # print(a,b,c)
+
+        # print(nodes_by_nargs, var_end_nodes)
 
 
 
@@ -234,8 +332,14 @@ def gen_head_inds(op):
 
 
 if __name__ == "__main__":
+
+    # _test_validate_deref()
+    # _test_validate_head_or_retract()
     # test_deref_to_head_and_gen_relevant_idrecs()
     # test_deref_record_parent()
     # _test_validate_deref()
     # _test_head_map()
     # _test_validate_head_or_retract()
+    # test_distr_dnf_and()
+    test_build_rete_graph()
+

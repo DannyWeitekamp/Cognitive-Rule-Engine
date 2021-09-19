@@ -15,7 +15,7 @@ from numba.core.datamodel import default_manager, models
 
 #### deref_type ####
 
-_deref_type = np.dtype([('type', np.uint8), ('a_id', np.uint8), ('offset', np.int64)])
+_deref_type = np.dtype([('type', np.uint8),  ('a_id', np.uint8), ('fact_num', np.int64), ('offset', np.int64)])
 deref_type = numba.from_dtype(_deref_type)
 
 OFFSET_TYPE_ATTR = 0

@@ -109,6 +109,9 @@ class Literal(structref.StructRefProxy):
     def __str__(self):
         return literal_str(self)
 
+    def __repr__(self):
+        return literal_str(self)
+
     @property
     def op(self):
         return literal_get_pred_node(self)
@@ -197,9 +200,13 @@ conjunct_type = literal_list_type
 dnf_type = ListType(conjunct_type)
 
 ## distr_dnf_type ##e
-literal_list_list_type = ListType(literal_list_type)
-distr_ab_conjunct_type = Tuple((literal_list_list_type, literal_list_list_type, i8[:,:]))
-distr_dnf_type = ListType(distr_ab_conjunct_type)
+# literal_list_list_type = ListType(literal_list_type)
+distr_conj_type = ListType(ListType(LiteralType))
+distr_dnf_type = ListType(ListType(ListType(LiteralType)))
+# distr_var_spec_conj_type = ListType(LiteralType)
+
+# distr_ab_conjunct_type = Tuple((literal_list_list_type, literal_list_list_type, i8[:,:]))
+# distr_dnf_type = ListType(distr_ab_conjunct_type)
 
 
 conditions_fields_dict = {
@@ -226,7 +233,7 @@ conditions_fields_dict = {
     'mem_ptr' : i8,
 
     ### Fields that are filled in after initialization ### 
-
+    "has_distr_dnf" : types.boolean,
     "distr_dnf" : distr_dnf_type
 
     # # The alpha parts of '.dnf' organized by which Var in 'vars' they use 
@@ -290,7 +297,20 @@ class Conditions(structref.StructRefProxy):
     @property
     def vars(self):
         return conds_get_vars(self)
-    
+
+    @property
+    def dnf(self):
+        return conds_get_dnf(self)
+
+    @property
+    def distr_dnf(self):
+        return conds_get_distr_dnf(self)
+
+    def as_dnf_list(self):
+        return as_dnf_list(self)
+
+    def as_distr_dnf_list(self):
+        return as_distr_dnf_list(self)
 
     def __str__(self):
         return conditions_str(self)
@@ -302,9 +322,92 @@ define_boxing(ConditionsTypeTemplate,Conditions)
 
 ConditionsType = ConditionsTypeTemplate(conditions_fields)
 
+### Helper Functions for expressing conditions as python lists of cre.Op instances ###
+
+@njit(cache=True)
+def _nxt_distr(distr_dnf, disj_i, var_i, lit_i):
+    while(True):
+        if(len(distr_dnf) <= disj_i):
+            raise StopIteration()
+        if(len(distr_dnf[disj_i]) <= var_i):
+            disj_i +=1; var_i=0; continue;
+        if(len(distr_dnf[disj_i][var_i]) <= lit_i):
+            var_i +=1; lit_i=0; continue;
+        break
+
+    return distr_dnf[disj_i][var_i][lit_i].op, disj_i, var_i, lit_i
+
+
+def as_distr_dnf_list(distr_dnf):
+    lst = []
+    disj_i, var_i, lit_i = 0,0,0
+    while(True):
+        try:
+            lit, disj_i, var_i, lit_i = \
+                _nxt_distr(distr_dnf, disj_i, var_i, lit_i)
+        except StopIteration:
+            return lst
+
+        tmp = lst
+        if(disj_i >= len(tmp)): tmp.append([])
+        tmp = tmp[disj_i]
+        if(var_i >= len(tmp)): tmp.append([])
+        tmp = tmp[var_i]
+        tmp.append(lit)
+        lit_i += 1
+    return lst
+
+
+@njit(cache=True)
+def nxt_dnf(distr_dnf, disj_i, lit_i):
+    while(True):
+        if(len(distr_dnf) <= disj_i):
+            raise StopIteration()
+        if(len(distr_dnf[disj_i]) <= lit_i):
+            disj_i +=1; lit_i=0; continue
+        break
+
+    return distr_dnf[disj_i][lit_i].op, disj_i, lit_i
+
+
+def as_dnf_list(dnf):
+    lst = []
+    disj_i, lit_i = 0,0,0
+    while(True):
+        try:
+            lit, disj_i, var_i, lit_i = \
+                _nxt_distr(distr_dnf, disj_i, var_i, lit_i)
+        except StopIteration:
+            return lst
+
+        tmp = lst
+        if(disj_i >= len(tmp)): tmp.append([])
+        tmp = tmp[disj_i]
+        if(var_i >= len(tmp)): tmp.append([])
+        tmp = tmp[var_i]
+        tmp.append(lit)
+        lit_i += 1
+    return lst
+
+
+
 @njit(cache=True)
 def conds_get_vars(self):
     return self.vars
+
+@njit(cache=True)
+def conds_get_dnf(self):
+    return self.dnf
+
+@njit(cache=True)
+def conds_has_distr_dnf(self):
+    return self.has_distr_dnf
+
+@njit(cache=False)
+def conds_get_distr_dnf(self):
+    if(not self.has_distr_dnf):
+        self.distr_dnf = build_distributed_dnf(self)
+    return self.distr_dnf
 
 
 @overload_method(ConditionsTypeTemplate,'get_matches')
@@ -330,6 +433,7 @@ def _conditions_ctor_single_var(_vars,dnf=None):
     st.base_var_map = build_base_var_map(st.vars)
     # print("A",st.base_var_map)
     st.dnf = dnf if(dnf) else new_dnf(1)
+    st.has_distr_dnf = False
     st.is_initialized = False
     return st
 
@@ -339,6 +443,7 @@ def _conditions_ctor_base_var_map(_vars,dnf=None):
     st.vars = build_var_list(_vars)
     st.base_var_map = _vars.copy() # is shallow copy
     st.dnf = dnf if(dnf) else new_dnf(len(_vars))
+    st.has_distr_dnf = False
     st.is_initialized = False
     return st
 
@@ -807,7 +912,7 @@ def get_linked_conditions_instance(conds, mem, copy=False):
         for term in beta_conjunct: link_literal_instance(term, mem)
     if(copy):
         new_conds = Conditions(conds.base_var_map, dnf)
-        if(conds.is_initialized): initialize_conditions(new_conds)
+        # if(conds.is_initialized): initialize_conditions(new_conds)
         conds = new_conds
 
     #Note... maybe it's simpler to just make mem an optional(memType)
@@ -820,39 +925,82 @@ def get_linked_conditions_instance(conds, mem, copy=False):
 #### Initialization ####
 
 
-
 @njit(cache=True)
-def initialize_conditions(conds):
-    distr_dnf = List.empty_list(distr_ab_conjunct_type)
-    n_vars = len(conds.vars)
-    for conjunct in conds.dnf:
-        alpha_conjuncts = List.empty_list(literal_list_type)
-        beta_conjuncts = List.empty_list(literal_list_type)
+def build_distributed_dnf(c,index_map=None):
+    distr_dnf = List.empty_list(distr_conj_type)
+
+    if(index_map is None):
+        index_map = Dict.empty(i8, i8)
+        for i, v in enumerate(c.vars):
+            index_map[v.base_ptr] = i
+
+    for conjunct in c.dnf:
+        var_spec_conj_list = List.empty_list(literal_list_type)
+        distr_dnf.append(var_spec_conj_list)
+        for i, v in enumerate(c.vars):
+            var_spec_conj_list.append(List.empty_list(LiteralType))
+
+    for i, conjunct in enumerate(c.dnf):
+        distr_conjuct = distr_dnf[i]
+        for j, lit in enumerate(conjunct):
+            max_ind = -1
+            for base_ptr in lit.op.base_var_map:
+                ind = index_map[base_ptr]
+                if(ind > max_ind): max_ind = ind
+
+            insertion_conj = distr_conjuct[max_ind]
+            was_inserted = False
+            
+            lit_n_vars = len(lit.op.base_var_map)
+
+            for k in range(len(insertion_conj)-1,-1,-1):
+                if(lit_n_vars >= len(insertion_conj[k].op.base_var_map)):
+                    was_inserted = True
+                    insertion_conj.insert(k+1, lit)
+                    break
+                else:
+                    continue
+                    
+            if(not was_inserted):
+                insertion_conj.insert(0,lit)
+    c.distr_dnf = distr_dnf
+    c.has_distr_dnf = True
+
+    return distr_dnf
+
+
+# @njit(cache=True)
+# def initialize_conditions(conds):
+#     distr_dnf = List.empty_list(distr_ab_conjunct_type)
+#     n_vars = len(conds.vars)
+#     for conjunct in conds.dnf:
+#         alpha_conjuncts = List.empty_list(literal_list_type)
+#         beta_conjuncts = List.empty_list(literal_list_type)
         
-        for _ in range(n_vars): alpha_conjuncts.append(List.empty_list(LiteralType))
+#         for _ in range(n_vars): alpha_conjuncts.append(List.empty_list(LiteralType))
         
-        for term in ac:
-            i = conds.base_var_map[term.var_base_ptrs[0]]
-            alpha_conjuncts[i].append(term)
+#         for term in ac:
+#             i = conds.base_var_map[term.var_base_ptrs[0]]
+#             alpha_conjuncts[i].append(term)
 
         
 
-        beta_inds = -np.ones((n_vars,n_vars),dtype=np.int64)
-        for term in bc:
-            i = conds.base_var_map[term.var_base_ptrs[0]]
-            j = conds.base_var_map[term.var_base_ptrs[1]]
-            if(beta_inds[i,j] == -1):
-                k = len(beta_conjuncts)
-                beta_inds[i,j] = k
-                beta_conjuncts.append(List.empty_list(LiteralType))
+#         beta_inds = -np.ones((n_vars,n_vars),dtype=np.int64)
+#         for term in bc:
+#             i = conds.base_var_map[term.var_base_ptrs[0]]
+#             j = conds.base_var_map[term.var_base_ptrs[1]]
+#             if(beta_inds[i,j] == -1):
+#                 k = len(beta_conjuncts)
+#                 beta_inds[i,j] = k
+#                 beta_conjuncts.append(List.empty_list(LiteralType))
                 
-            beta_conjuncts[beta_inds[i,j]].append(term)
-            # beta_conjuncts.append(term)
+#             beta_conjuncts[beta_inds[i,j]].append(term)
+#             # beta_conjuncts.append(term)
 
-            # beta_conjuncts[j].append(term)
+#             # beta_conjuncts[j].append(term)
 
-        distr_dnf.append((alpha_conjuncts, beta_conjuncts, beta_inds))
-    conds.distr_dnf = distr_dnf
+#         distr_dnf.append((alpha_conjuncts, beta_conjuncts, beta_inds))
+#     conds.distr_dnf = distr_dnf
 
 
 

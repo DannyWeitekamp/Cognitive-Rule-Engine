@@ -681,3 +681,18 @@ Internally we need to be able to loop over the arg level and know which f_ids ha
 what we need
 
 
+--- Sept 15th ---
+
+Need to determine what owns what... Do conditions link to a matcher instances or does the matcher instance control the conditions. It seems like the connection should go both ways. When c.get_matches(mem) is called then the matcher instance should be attached to c, and it should be accessible by c.matcher. One concern is that if the matcher can be of one of mutliple types then we may have a problem. For now maybe it makes sense to make RETE the only type of matcher.
+
+
+--- Sept 17th ----
+Had an idea to have a NodeMemoryEntry object that gets pooled and can clean itself up... so the output matches would look like u8 -> vector<*NodeMemoryEntry> The problem is that if a match gets invalidated we still need to delete it from the set which would require looping through... so it's probably not worth it.
+
+I do still kind of like this idea of having entries in there that are just invalid,
+I suppose since it is a u8->u1 anyway we could just make the u1 = 1 for valid and 0 for invalid. The advantage being that if something is retracted then declared again or backtracking occurs the output.matches would still have the same order which means a matches iterator wouldn't become invalid on a backtrack.
+
+
+--- Sept 18th ----
+Okay, so what needs to happen? 
+[] setup the mem.facts->head_ptrs connection.  

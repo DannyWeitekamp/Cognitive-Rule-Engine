@@ -69,7 +69,7 @@ mem_data_fields = [
     ("subscribers" , ListType(BaseSubscriberType)), #<- Might not need 
 
     ("change_queue" , VectorType), 
-    ("grow_queue" , VectorType), 
+    # ("grow_queue" , VectorType), 
 
     ("NULL_FACT", BaseFactType)
 ]
@@ -121,7 +121,7 @@ def init_mem_data(context_data):
     mem_data.subscribers = List.empty_list(BaseSubscriberType) #FUTURE: Replace w/ resolved type
 
     mem_data.change_queue = new_vector(BASE_CHANGE_QUEUE_SIZE)
-    mem_data.grow_queue = new_vector(BASE_CHANGE_QUEUE_SIZE)
+    # mem_data.grow_queue = new_vector(BASE_CHANGE_QUEUE_SIZE)
     
     # mem_data.unnamed_counter = np.zeros(1,dtype=np.int64)
     mem_data.NULL_FACT = BaseFact()
@@ -385,10 +385,10 @@ def add_subscriber(mem, subscriber):
 
 ##### subscriber signalling ####
 
-@njit(cache=True)
-def signal_subscribers_grow(mem, idrec):
-    for sub in mem.mem_data.subscribers:
-        sub.grow_queue.add(idrec)
+# @njit(cache=True)
+# def signal_subscribers_grow(mem, idrec):
+#     for sub in mem.mem_data.subscribers:
+#         sub.grow_queue.add(idrec)
 
 @njit(cache=True)
 def signal_subscribers_change(mem, idrec):
@@ -414,12 +414,13 @@ def declare_fact(mem,fact):
 
     if(f_id < len(facts)): # .2ms / 10000
         facts.data[f_id] = fact_ptr
-        mem.mem_data.change_queue.add(idrec)
+        
         # signal_subscribers_change(mem, idrec)
     else:
         facts.add(fact_ptr)
-        mem.mem_data.grow_queue.add(idrec)
+        # mem.mem_data.grow_queue.add(idrec)
         # signal_subscribers_grow(mem, idrec)
+    mem.mem_data.change_queue.add(idrec)
     
     return idrec
 

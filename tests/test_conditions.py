@@ -130,28 +130,28 @@ def var_get_ptr(var):
 def cond_get_vars(cond):
     return cond.vars
 
-def test_initialize():
-    with cre_context("test_initialize"):
-        # BOOP, BOOPType = define_fact("BOOP",{"A": "string", "B" : "number"})
+# def test_initialize():
+#     with cre_context("test_initialize"):
+#         # BOOP, BOOPType = define_fact("BOOP",{"A": "string", "B" : "number"})
 
-        l1, l2 = Var(BOOPType,"l1"), Var(BOOPType,"l2")
-        r1, r2 = Var(BOOPType,"r1"), Var(BOOPType,"r2")
+#         l1, l2 = Var(BOOPType,"l1"), Var(BOOPType,"l2")
+#         r1, r2 = Var(BOOPType,"r1"), Var(BOOPType,"r2")
 
-        c = (l1.B < 1) & (l1.B > 7) & (l2.B < r1.B) & (r2.B < l1.B)# |\
-             # (l2.B < 1) & (l2.B > 7) & (l2.B < r1.B) & (r1.B < r2.B) |\
-             # (l2.B < 1) & (l2.B > 7) & (l2.B < r1.B) & (l1.B < l2.B)
+#         c = (l1.B < 1) & (l1.B > 7) & (l2.B < r1.B) & (r2.B < l1.B)# |\
+#              # (l2.B < 1) & (l2.B > 7) & (l2.B < r1.B) & (r1.B < r2.B) |\
+#              # (l2.B < 1) & (l2.B > 7) & (l2.B < r1.B) & (l1.B < l2.B)
 
-        assert [x.alias for x in cond_get_vars(c)] == ['l1','l2','r1','r2']
+#         assert [x.alias for x in cond_get_vars(c)] == ['l1','l2','r1','r2']
 
-        initialize_conditions(c)
-        print("DONE")
-        alpha_sizes, beta_sizes = get_init_cond_sizes(c)
+#         initialize_conditions(c)
+#         print("DONE")
+#         alpha_sizes, beta_sizes = get_init_cond_sizes(c)
 
         
-        print(alpha_sizes)
-        print(beta_sizes)
-        assert [list(x) for x in alpha_sizes] == [[2, 0, 0, 0], [0, 2, 0, 0], [0, 2, 0, 0]]
-        assert [list(x) for x in beta_sizes] == [[1, 1], [1, 1], [1, 1]]
+#         print(alpha_sizes)
+#         print(beta_sizes)
+#         assert [list(x) for x in alpha_sizes] == [[2, 0, 0, 0], [0, 2, 0, 0], [0, 2, 0, 0]]
+#         assert [list(x) for x in beta_sizes] == [[1, 1], [1, 1], [1, 1]]
 
 
 @njit(cache=True)
@@ -236,7 +236,7 @@ def test_list_operations():
 if(__name__ == "__main__"):
     # test_list_operations()
     # test_link()
-    test_initialize()
+    # test_initialize()
     for i in range(10):
         t0 = time_ns()
         test_build_conditions()

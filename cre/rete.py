@@ -37,7 +37,7 @@ node_memory_field_dict = {
     "is_root" : types.boolean,
 
     #
-    "change_set" : DictType(u8,i8), 
+    "change_set" : DictType(u8,u1), 
     # Maps f_ids -> sets of f_ids
     "matches" : DictType(u8, DictType(u8,u1)), 
 
@@ -48,7 +48,7 @@ NodeMemory, NodeMemoryType = define_structref("NodeMemory", node_memory_field_di
 @njit(cache=True)
 def new_node_mem():
     st = new(NodeMemoryType)
-    st.change_set = Dict.empty(u8,i8)
+    st.change_set = Dict.empty(u8,u1)
     st.matches = Dict.empty(u8,dict_u8_u1_type)
     st.is_root = False
     return st
@@ -56,7 +56,7 @@ def new_node_mem():
 @njit(cache=True)
 def new_root_node_mem():
     st = new(NodeMemoryType)
-    st.change_set = Dict.empty(u8,i8)
+    st.change_set = Dict.empty(u8,u1)
     st.is_root = True
     return st
 
@@ -84,10 +84,7 @@ base_rete_node_field_dict = {
     "var_inds" : i8[::1],
     "t_ids" : u2[::1],
     # "vars" : ListType(GenericVarType),
-    "retracted_head_inds" : ListType(VectorType),
-    "head_ptrs_lens" : i8[::1]
-    "head_ptrs" : ListType(i8[:,::1])
-    # "head_ptrs" : ListType(DictType(u8,i8[::1])),
+    "head_ptrs" : ListType(DictType(u8,i8[::1])),
     "inputs" : ListType(NodeMemoryType),
     "outputs" : ListType(NodeMemoryType), #DictType(u8,DictType(u8,u1))
 }
@@ -96,7 +93,6 @@ BaseReteNode, BaseReteNodeType = define_structref("BaseReteNode", base_rete_node
 
 
 i8_arr_typ = i8[::1]
-2d_i8_arr_typ = i8[:,::1]
 
 @njit(cache=True)
 def node_ctor(mem, lit, t_ids, var_inds):
@@ -108,21 +104,12 @@ def node_ctor(mem, lit, t_ids, var_inds):
     st.t_ids = t_ids
     st.lit = lit
     st.op = op = lit.op
-
     # st.vars = _vars
-    head_ranges = st.op.head_ranges
-    #TODO
-    retracted_head_inds = new_vector(2)
-    head_ptrs_lens = np.zeros((len(op.base_var_map),),dtype=np.int64)
-    head_ptrs = List.empty_list(2d_i8_arr_typ)
+
+    head_ptrs = List.empty_list(dict_u8_i8_arr_type)
     for i in range(len(op.base_var_map)):
-        head_ptrs.append(np.zeros((2,head_ranges[i].length), dtype=np.int64))
-
-
-    #     head_ptrs.append(Dict.empty(u8, i8_arr_typ))
-    st.retracted_head_inds = retracted_head_inds
-    st.head_ptrs_lens = head_ptrs_lens
-    st.head_ptrs =  head_ptrs
+        head_ptrs.append(Dict.empty(u8, i8_arr_typ))
+    st.head_ptrs = head_ptrs
 
     outputs = List.empty_list(NodeMemoryType)
     for i in range(len(op.base_var_map)):
@@ -215,24 +202,6 @@ def validate_deref(self, arg_ind, base_t_id, f_id, deref_offsets):
 
     return head_ptr
 
-@njit(cache=True)
-def nxt_head_ind(arg_ind, self):
-    if(len(self.retracted_head_inds[arg_ind]) > 0):
-        ind = self.retracted_head_inds.pop()
-    else:
-        buff = self.head_ptrs[arg_ind]
-        L = ind = self.head_ptrs_lens[arg_ind]
-        L += 1
-        buff_len = len(buff)
-        if(L > buff_len):
-            tmp = np.zeros((L*2),dtype=np.int64)
-            tmp[:buff_len] = buff
-            self.head_ptrs[arg_ind] = tmp
-        self.head_ptrs_lens[arg_ind] = L
-    return ind
-
-
-
 # @njit(void(BaseReteNodeType, i8,u8,u1),locals={"f_id" : u8}, cache=True)
 @njit(locals={"f_id" : u8, "a_id" : u8}, cache=True)
 def validate_head_or_retract(self, arg_ind, f_id, a_id):
@@ -252,8 +221,6 @@ def validate_head_or_retract(self, arg_ind, f_id, a_id):
             if(head_ptr == 0): break
             head_ptrs[i] = head_ptr
 
-        
-        
         self.head_ptrs[arg_ind][f_id] = head_ptrs
         return
         

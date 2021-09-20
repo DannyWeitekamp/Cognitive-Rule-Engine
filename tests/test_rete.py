@@ -5,7 +5,7 @@ from numba.types import DictType, ListType
 from cre.memory import Memory
 from cre.fact import define_fact
 from cre.var import Var, GenericVarType
-from cre.utils import pointer_from_struct, decode_idrec, encode_idrec, _struct_from_pointer, _pointer_from_struct
+from cre.utils import pointer_from_struct, decode_idrec, encode_idrec, _struct_from_pointer, _pointer_from_struct, _load_pointer
 from cre.rete import (deref_head_and_relevant_idrecs, RETRACT,
      DerefRecord, make_deref_record_parent, invalidate_deref_rec,
      validate_deref, validate_head_or_retract)
@@ -167,7 +167,7 @@ def _test_validate_deref():
 def _test_validate_head_or_retract():
     from cre.conditions import Literal
     from cre.var import GenericVarType
-    from cre.var import GenericVarType
+    from cre.rete import node_ctor
     (mem, BOOP, BOOPType), (a1,a2,a3,a4,a5) = setup_deref_tests()
 
 
@@ -257,24 +257,39 @@ def test_distr_dnf_and():
         assert list_to_str(py_list_distr_dnf) == list_to_str(mixup_conds.distr_dnf)
 
 
-from cre.rete import dict_u8_u1_type, update_changes_deref_dependencies, update_changes_from_inputs
+from cre.rete import (dict_u8_u1_type, update_changes_deref_dependencies,
+     update_changes_from_inputs, validate_head_or_retract, update_node)
 @njit(cache=True)
 def filter_first(graph):
-
-
     for i,self in graph.var_root_nodes.items():
-        arg_change_sets = List.empty_list(dict_u8_u1_type)
-        for i in range(len(self.var_inds)):
-             arg_change_sets.append(Dict.empty(u8,u1))
+        update_node(self)
+    #     arg_change_sets = List.empty_list(dict_u8_u1_type)
+    #     for i in range(len(self.var_inds)):
+    #          arg_change_sets.append(Dict.empty(u8,u1))
 
-        update_changes_deref_dependencies(self, arg_change_sets)
-        update_changes_from_inputs(self, arg_change_sets)
+    #     update_changes_deref_dependencies(self, arg_change_sets)
+    #     update_changes_from_inputs(self, arg_change_sets)
 
-        print("<<", i)
-        for idrec in arg_change_sets[0]:
-            print(decode_idrec(idrec))
-        # print(i, arg_change_sets)
-   
+    #     print("<<", i)
+    #     for idrec in arg_change_sets[0]:
+    #         print(decode_idrec(idrec))
+    #     # print(i, arg_change_sets)
+
+
+    #      ### Make sure the arg_change_sets are up to date
+
+    # for i,change_set in enumerate(arg_change_sets):
+    #     for idrec in change_set:
+    #         _, f_id, a_id = decode_idrec(idrec)
+    #         validate_head_or_retract(self, i, f_id, a_id)
+
+    # # head_ptrs = np.empty((len(self.inp_head_ptrs),),dtype=np.float64)
+
+    # print()
+
+    # print(self.inp_head_ptrs)
+    # for i, ptrs in self.inp_head_ptrs[0].items():
+    #     print("VAL",_load_pointer(f8,ptrs[0]))
 
 
 def test_build_rete_graph():
@@ -300,14 +315,11 @@ def test_build_rete_graph():
         print({i:str(x.op) for i,x in graph.var_end_nodes.items()})
         print({i:str(x.op) for i,x in graph.var_root_nodes.items()})
 
-
-        
-
         a5 = BOOP(nxt=None, val=5)
-        a4 = BOOP(nxt=a5, val=5)
-        a3 = BOOP(nxt=a4, val=5)
-        a2 = BOOP(nxt=a3, val=5)
-        a1 = BOOP(nxt=a2, val=5)
+        a4 = BOOP(nxt=a5, val=4)
+        a3 = BOOP(nxt=a4, val=3)
+        a2 = BOOP(nxt=a3, val=2)
+        a1 = BOOP(nxt=a2, val=1)
         mem.declare(a1)
         mem.declare(a2)
         mem.declare(a3)

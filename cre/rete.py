@@ -23,7 +23,7 @@ deref_record_field_dict = {
     # Pointers to the Dict(i8,u1)s inside deref_depends
     "parent_ptrs" : i8[::1], 
     "arg_ind" : i8,
-    "base_f_id" : u8,
+    "base_idrec" : u8,
     "was_successful" : u1,
 }
 
@@ -37,7 +37,7 @@ node_memory_field_dict = {
     "is_root" : types.boolean,
 
     #
-    "change_set" : DictType(u8,u1), 
+    "change_set" : DictType(u8,i8), 
     # Maps f_ids -> sets of f_ids
     "matches" : DictType(u8, DictType(u8,u1)), 
 
@@ -48,7 +48,7 @@ NodeMemory, NodeMemoryType = define_structref("NodeMemory", node_memory_field_di
 @njit(cache=True)
 def new_node_mem():
     st = new(NodeMemoryType)
-    st.change_set = Dict.empty(u8,u1)
+    st.change_set = Dict.empty(u8,i8)
     st.matches = Dict.empty(u8,dict_u8_u1_type)
     st.is_root = False
     return st
@@ -56,7 +56,7 @@ def new_node_mem():
 @njit(cache=True)
 def new_root_node_mem():
     st = new(NodeMemoryType)
-    st.change_set = Dict.empty(u8,u1)
+    st.change_set = Dict.empty(u8,i8)
     st.is_root = True
     return st
 
@@ -84,7 +84,10 @@ base_rete_node_field_dict = {
     "var_inds" : i8[::1],
     "t_ids" : u2[::1],
     # "vars" : ListType(GenericVarType),
-    "inp_head_ptrs" : ListType(DictType(u8,i8[::1])),
+    "retracted_head_inds" : ListType(VectorType),
+    "head_ptrs_lens" : i8[::1]
+    "head_ptrs" : ListType(i8[:,::1])
+    # "head_ptrs" : ListType(DictType(u8,i8[::1])),
     "inputs" : ListType(NodeMemoryType),
     "outputs" : ListType(NodeMemoryType), #DictType(u8,DictType(u8,u1))
 }
@@ -93,6 +96,7 @@ BaseReteNode, BaseReteNodeType = define_structref("BaseReteNode", base_rete_node
 
 
 i8_arr_typ = i8[::1]
+2d_i8_arr_typ = i8[:,::1]
 
 @njit(cache=True)
 def node_ctor(mem, lit, t_ids, var_inds):
@@ -104,12 +108,21 @@ def node_ctor(mem, lit, t_ids, var_inds):
     st.t_ids = t_ids
     st.lit = lit
     st.op = op = lit.op
-    # st.vars = _vars
 
-    inp_head_ptrs = List.empty_list(dict_u8_i8_arr_type)
+    # st.vars = _vars
+    head_ranges = st.op.head_ranges
+    #TODO
+    retracted_head_inds = new_vector(2)
+    head_ptrs_lens = np.zeros((len(op.base_var_map),),dtype=np.int64)
+    head_ptrs = List.empty_list(2d_i8_arr_typ)
     for i in range(len(op.base_var_map)):
-        inp_head_ptrs.append(Dict.empty(u8, i8_arr_typ))
-    st.inp_head_ptrs = inp_head_ptrs
+        head_ptrs.append(np.zeros((2,head_ranges[i].length), dtype=np.int64))
+
+
+    #     head_ptrs.append(Dict.empty(u8, i8_arr_typ))
+    st.retracted_head_inds = retracted_head_inds
+    st.head_ptrs_lens = head_ptrs_lens
+    st.head_ptrs =  head_ptrs
 
     outputs = List.empty_list(NodeMemoryType)
     for i in range(len(op.base_var_map)):
@@ -194,13 +207,31 @@ def validate_deref(self, arg_ind, base_t_id, f_id, deref_offsets):
     head_ptr, rel_idrecs  = deref_head_and_relevant_idrecs(base_ptr,deref_offsets)
     was_successful = (head_ptr != 0)
     parent_ptrs = np.empty(len(rel_idrecs), dtype=np.int64)
-    r = DerefRecord(parent_ptrs, arg_ind, f_id, was_successful)
+    r = DerefRecord(parent_ptrs, arg_ind, encode_idrec(base_t_id,f_id,0), was_successful)
     r_ptr = _pointer_from_struct_incref(r)
     for i, idrec in enumerate(rel_idrecs):
         ptr = make_deref_record_parent(self.deref_depends, idrec, r_ptr)
         parent_ptrs[i] = ptr
 
     return head_ptr
+
+@njit(cache=True)
+def nxt_head_ind(arg_ind, self):
+    if(len(self.retracted_head_inds[arg_ind]) > 0):
+        ind = self.retracted_head_inds.pop()
+    else:
+        buff = self.head_ptrs[arg_ind]
+        L = ind = self.head_ptrs_lens[arg_ind]
+        L += 1
+        buff_len = len(buff)
+        if(L > buff_len):
+            tmp = np.zeros((L*2),dtype=np.int64)
+            tmp[:buff_len] = buff
+            self.head_ptrs[arg_ind] = tmp
+        self.head_ptrs_lens[arg_ind] = L
+    return ind
+
+
 
 # @njit(void(BaseReteNodeType, i8,u8,u1),locals={"f_id" : u8}, cache=True)
 @njit(locals={"f_id" : u8, "a_id" : u8}, cache=True)
@@ -212,24 +243,31 @@ def validate_head_or_retract(self, arg_ind, f_id, a_id):
         base_t_id = self.t_ids[arg_ind]
         r = self.op.head_ranges[arg_ind]
         head_ptrs = np.empty((r.length,),dtype=np.int64)
+
+        # For each head_var try to deref all the way to the head_ptr and put it in head_ptrs
         for i in range(r.length):
             head_var = _struct_from_pointer(GenericVarType,self.op.head_var_ptrs[r.start+i])
             deref_offsets = head_var.deref_offsets
             head_ptr = validate_deref(self, arg_ind, base_t_id, f_id, deref_offsets)
             if(head_ptr == 0): break
             head_ptrs[i] = head_ptr
-        # print(head_ptr)
-        # if(head_ptr != 0): 
-        self.inp_head_ptrs[arg_ind][f_id] = head_ptrs
+
+        
+        
+        self.head_ptrs[arg_ind][f_id] = head_ptrs
         return
         
     # At this point we are definitely RETRACT
-    to_clear = self.outputs[arg_ind][a_id]
+    to_clear = self.outputs[arg_ind].matches
     for x in to_clear:
-        other_out = self.outputs[i8(1) if arg_ind else i8(0)][x]
-        del other_out[a_id]
-    del self.outputs[arg_ind][a_id] 
-    del self.inp_head_ptrs[arg_ind][f_id]  
+        for i in range(len(self.outputs)):
+            if(i == arg_ind): continue
+            other_out_matches = self.outputs[i].matches
+            del other_out_matches[x]
+
+    this_out_matches = self.outputs[arg_ind].matches
+    del this_out_matches[a_id] 
+    del self.head_ptrs[arg_ind][f_id]  
 
 @njit(cache=True)
 def update_changes_deref_dependencies(self, arg_change_sets):
@@ -247,7 +285,8 @@ def update_changes_deref_dependencies(self, arg_change_sets):
                 invalidate_deref_rec(r)
 
                 # Any change in the deref chain counts as a MODIFY
-                arg_change_sets[r.arg_ind][r.base_f_id] = u1(1) #MODIFY
+                # TODO: This is for sure wrong
+                arg_change_sets[r.arg_ind][r.base_idrec] = u1(1) #MODIFY
 
 @njit(cache=True)
 def update_changes_from_inputs(self, arg_change_sets):
@@ -258,6 +297,76 @@ def update_changes_from_inputs(self, arg_change_sets):
                 arg_change_sets_i[idrec] = u1(1)
         else:
             arg_change_sets[i] = inp.change_set
+
+@njit(cache=True)
+def update_head_ptrs(self, arg_change_sets):
+    for i,change_set in enumerate(arg_change_sets):
+        for idrec in change_set:
+            _, f_id, a_id = decode_idrec(idrec)
+            validate_head_or_retract(self, i, f_id, a_id)
+
+
+def foo(lengths):
+    n = len(lengths)
+    iters = np.zeros(n,dtype=np.int64)
+    # lens = np.zeros(n,dtype=np.int64)
+    i = end = n-1
+    while(i >= 0):
+        iters[i] += 1
+        if(iters[i] >= lengths[i]): 
+            i -= 1
+            iters[i] = 0
+        elif(i != end):
+            i += 1
+        print(iters)
+            
+
+
+
+
+
+@njit(cache=True)
+def update_node(self):
+    
+    arg_change_sets = List.empty_list(dict_u8_u1_type)
+    for j in range(len(self.var_inds)):
+         arg_change_sets.append(Dict.empty(u8,u1))
+
+    update_changes_deref_dependencies(self, arg_change_sets)
+    update_changes_from_inputs(self, arg_change_sets)
+    update_head_ptrs(self, arg_change_sets)
+
+    head_ranges = self.op.head_ranges
+    match_inp_ptrs = np.zeros((len(self.op.head_var_ptrs),),dtype=np.int64)
+    n_vars = len(head_ranges)
+
+    print("<<", match_inp_ptrs)
+    for i, change_set in enumerate(arg_change_sets):
+        head_ptrs_i = self.head_ptrs[i]
+        i_strt, i_len = head_ranges[i][0], head_ranges[i][1]
+
+        j = 1 if i == 0 else 0
+        for idrec in change_set:
+            _, f_id, a_id0 = decode_idrec(idrec)
+            match_inp_ptrs[i_strt:i_strt+i_len] = head_ptrs_i[f_id]
+
+            print(match_inp_ptrs)
+
+            for j in range(n_vars):
+                if(i == j): continue
+
+
+
+            
+
+
+
+    # for f_id0, a_id0 in arg_change_sets[0].items():
+    #     h_ptr0 = self.head_ptrs[0][f_id0]
+    #     if(a_id0 != RETRACT):
+    #         for h_ptr1 in self.head_ptrs[1]:
+    #             check_pair(h_ptr0, h_ptr1, a_id0)
+    
 
 dict_u8_u1_type = DictType(u8,u1)
 
@@ -277,11 +386,16 @@ def filter_beta(self):
 
     # Update the head_ptr dictionaries by following the deref chains of DECLARE/MODIFY 
     # changes, and make retractions for an explicit RETRACT or a failure in the deref chain.
-    for f_id0, a_id0 in arg_change_sets[0].items():
-        validate_head_or_retract(self, f_id0, a_id0)
+    for i,change_set in enumerate(arg_change_sets):
+        for idrec in change_set:
+            _, f_id, a_id = decode_idrec(idrec)
+            validate_head_or_retract(self, i, f_id, a_id)
+    # for idrec0 in arg_change_sets[0].items():
+    #     _,f_id0, a_id0 = 
+    #     validate_head_or_retract(self, f_id0, a_id0)
 
-    for f_id1, a_id1 in arg_change_sets[1].items():
-        validate_head_or_retract(self, f_id1, a_id1)
+    # for f_id1, a_id1 in arg_change_sets[1].items():
+    #     validate_head_or_retract(self, f_id1, a_id1)
 
     ### Check all pairs at this point we should only be dealing with DECLARE/MODIFY changes
     for f_id0, a_id0 in arg_change_sets[0].items():

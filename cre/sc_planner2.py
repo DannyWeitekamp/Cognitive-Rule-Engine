@@ -600,7 +600,7 @@ class ExplanationTreeIter():
     def __next__(self):
         op_comp = next(self.gen)
         vals = []
-        for var_ptr, val_typ in zip(op_comp.vars, op_comp.signature.args):
+        for var_ptr, val_typ in zip(op_comp.base_vars, op_comp.signature.args):
             vals.append(read_inv_val_map(self.expl_tree, var_ptr, val_typ))
         
         return op_comp, vals

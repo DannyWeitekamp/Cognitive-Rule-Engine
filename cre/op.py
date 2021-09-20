@@ -2,7 +2,7 @@ import operator
 import numpy as np
 import numba
 from numba.core.dispatcher import Dispatcher
-from numba import types, njit, i8, u8, i4, u1, i8, literally, generated_jit
+from numba import types, njit, i8, u8, i4, u1, i8, literally, generated_jit, boolean
 from numba.typed import List, Dict
 from numba.types import ListType, DictType, unicode_type, void, Tuple
 from numba.experimental import structref
@@ -137,9 +137,9 @@ match_head = match
 
 {",".join([f'h{i}_type' for i in range(len(arg_types))])} = call_sig.args
 
-@njit(boolean({",".join(["i8"]*len(arg_types))}) ,cache=True)
-def match_head_ptrs({arg_names}):
-{indent(nl.join([f'i{i} = _load_pointer(h{i}_type,a{i})' for i in range(len(arg_types))]),prefix='    ')}
+@njit(boolean(i8[::1],) ,cache=True)
+def match_head_ptrs(ptrs):
+{indent(nl.join([f'i{i} = _load_pointer(h{i}_type,ptrs[{i}])' for i in range(len(arg_types))]),prefix='    ')}
     return match_head({",".join([f'i{i}' for i in range(len(arg_types))])})
 
 
@@ -181,6 +181,7 @@ op_fields_dict = {
     "call_addr" : i8,
     "call_multi_addr" : i8,
     "check_addr" : i8,
+    "match_head_ptrs_addr" : i8,
     
     # "arg_types" : types.Any,
     # "out_type" : types.Any,
@@ -430,7 +431,7 @@ def make_head_ranges(n_args,head_var_ptrs):
 @njit(cache=True)
 def op_ctor(name, return_type_name, arg_type_names, head_var_ptrs, 
             expr_template="MOOSE", shorthand_template="ROOF",
-            call_addr=0, call_multi_addr=0, check_addr=0):
+            call_addr=0, call_multi_addr=0, check_addr=0, match_head_ptrs_addr=0):
     '''The constructor for an Op instance that can be passed to the numba runtime'''
     st = new(GenericOpType)
     st.name = name
@@ -463,6 +464,7 @@ def op_ctor(name, return_type_name, arg_type_names, head_var_ptrs,
     st.call_addr = call_addr
     st.call_multi_addr = call_multi_addr
     st.check_addr = check_addr
+    st.match_head_ptrs_addr = match_head_ptrs_addr
 
     return st
 
@@ -511,7 +513,9 @@ def new_op(name, members, var_ptrs=None, return_class=False):
         source = gen_op_source(cls, call_needs_jitting, check_needs_jitting)
         source_to_cache(name,long_hash,source)
 
-    to_import = ['call','call_addr'] if call_needs_jitting else []
+    # to_import = ['call','call_addr'] if call_needs_jitting else []
+    to_import = ['match_head_ptrs']
+    if(call_needs_jitting): to_import += ['call','call_addr']
     if(check_needs_jitting): to_import += ['check', 'check_addr']
     l = import_from_cached(name, long_hash, to_import)
     for key, value in l.items():
@@ -530,6 +534,9 @@ def new_op(name, members, var_ptrs=None, return_class=False):
     if(not check_needs_jitting and has_check):
         # cls.check_sig = u1(*cls.signature.args)
         cls.check_addr = _get_wrapper_address(cls.check,cls.check_sig)
+
+    # print(cls.match_head_ptrs.overloads.keys())
+    cls.match_head_ptrs_addr = _get_wrapper_address(cls.match_head_ptrs,boolean(i8[::1],))
 
     # Standardize shorthand definitions
     if(hasattr(cls,'shorthand') and 
@@ -792,6 +799,7 @@ class Op(structref.StructRefProxy,metaclass=OpMeta):
             str(cls._shorthand_template),
             call_addr=cls.call_addr,
             check_addr=cls.__dict__.get('check_addr',0),
+            match_head_ptrs_addr=cls.match_head_ptrs_addr,
             )
         
         op_inst.__class__ = cls

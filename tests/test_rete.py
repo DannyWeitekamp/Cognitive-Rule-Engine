@@ -259,10 +259,17 @@ def test_distr_dnf_and():
 
 from cre.rete import (dict_u8_u1_type, update_changes_deref_dependencies,
      update_changes_from_inputs, validate_head_or_retract, update_node)
-@njit(cache=True)
+# @njit(cache=True)
 def filter_first(graph):
-    for i,self in graph.var_root_nodes.items():
-        update_node(self)
+    print("HEY")
+    # for i,self in graph.var_root_nodes.items():
+    #     print("HEY",i)
+    #     update_node(self)
+
+    for lst in graph.nodes_by_nargs:
+        for node in lst:
+            update_node(node)        
+
     #     arg_change_sets = List.empty_list(dict_u8_u1_type)
     #     for i in range(len(self.var_inds)):
     #          arg_change_sets.append(Dict.empty(u8,u1))

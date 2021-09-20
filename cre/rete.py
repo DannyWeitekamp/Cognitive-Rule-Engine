@@ -204,37 +204,42 @@ def validate_deref(self, arg_ind, base_t_id, f_id, deref_offsets):
 
 # @njit(void(BaseReteNodeType, i8,u8,u1),locals={"f_id" : u8}, cache=True)
 @njit(locals={"f_id" : u8, "a_id" : u8}, cache=True)
-def validate_head_or_retract(self, arg_ind, f_id, a_id):
+def validate_head_or_retract(self, arg_ind, idrec, change_set):
     '''Update the head_ptr dictionaries by following the deref
      chains of DECLARE/MODIFY changes, and make retractions
     for an explicit RETRACT or a failure in the deref chain.'''
+    _, f_id, a_id = decode_idrec(idrec)
     if(a_id != RETRACT):
         base_t_id = self.t_ids[arg_ind]
         r = self.op.head_ranges[arg_ind]
-        head_ptrs = np.empty((r.length,),dtype=np.int64)
-
+        head_ptrs = np.zeros((r.length,),dtype=np.int64)
+        okay = True
         # For each head_var try to deref all the way to the head_ptr and put it in head_ptrs
         for i in range(r.length):
             head_var = _struct_from_pointer(GenericVarType,self.op.head_var_ptrs[r.start+i])
             deref_offsets = head_var.deref_offsets
             head_ptr = validate_deref(self, arg_ind, base_t_id, f_id, deref_offsets)
-            if(head_ptr == 0): break
+            if(head_ptr == 0): 
+                okay=False;
+                del change_set[idrec];
+                break; 
             head_ptrs[i] = head_ptr
 
-        self.head_ptrs[arg_ind][f_id] = head_ptrs
-        return
-        
-    # At this point we are definitely RETRACT
-    to_clear = self.outputs[arg_ind].matches
-    for x in to_clear:
-        for i in range(len(self.outputs)):
-            if(i == arg_ind): continue
-            other_out_matches = self.outputs[i].matches
-            del other_out_matches[x]
+        if(okay):
+            self.head_ptrs[arg_ind][f_id] = head_ptrs
+            return
+            
+    # # At this point we are definitely RETRACT
+    # to_clear = self.outputs[arg_ind].matches
+    # for x in to_clear:
+    #     for i in range(len(self.outputs)):
+    #         if(i == arg_ind): continue
+    #         other_out_matches = self.outputs[i].matches
+    #         del other_out_matches[x]
 
-    this_out_matches = self.outputs[arg_ind].matches
-    del this_out_matches[a_id] 
-    del self.head_ptrs[arg_ind][f_id]  
+    # this_out_matches = self.outputs[arg_ind].matches
+    # del this_out_matches[a_id] 
+    # del self.head_ptrs[arg_ind][f_id]  
 
 @njit(cache=True)
 def update_changes_deref_dependencies(self, arg_change_sets):
@@ -269,8 +274,8 @@ def update_changes_from_inputs(self, arg_change_sets):
 def update_head_ptrs(self, arg_change_sets):
     for i,change_set in enumerate(arg_change_sets):
         for idrec in change_set:
-            _, f_id, a_id = decode_idrec(idrec)
-            validate_head_or_retract(self, i, f_id, a_id)
+            # _, f_id, a_id = decode_idrec(idrec)
+            validate_head_or_retract(self, i, idrec, change_set)
 
 
 def foo(lengths):
@@ -287,10 +292,8 @@ def foo(lengths):
             i += 1
         print(iters)
             
-
-
-
-
+from cre.utils import _func_from_address
+match_heads_f_type = types.FunctionType(u1(i8[::1],))
 
 @njit(cache=True)
 def update_node(self):
@@ -303,24 +306,44 @@ def update_node(self):
     update_changes_from_inputs(self, arg_change_sets)
     update_head_ptrs(self, arg_change_sets)
 
+    match_head_ptrs = _func_from_address(match_heads_f_type, self.op.match_head_ptrs_addr)
+
     head_ranges = self.op.head_ranges
     match_inp_ptrs = np.zeros((len(self.op.head_var_ptrs),),dtype=np.int64)
     n_vars = len(head_ranges)
 
-    print("<<", match_inp_ptrs)
+    print("<<", match_inp_ptrs, arg_change_sets)
     for i, change_set in enumerate(arg_change_sets):
         head_ptrs_i = self.head_ptrs[i]
         i_strt, i_len = head_ranges[i][0], head_ranges[i][1]
 
         j = 1 if i == 0 else 0
-        for idrec in change_set:
-            _, f_id, a_id0 = decode_idrec(idrec)
-            match_inp_ptrs[i_strt:i_strt+i_len] = head_ptrs_i[f_id]
+        j_strt, j_len = head_ranges[j][0], head_ranges[j][1]        
+        print(">>",head_ptrs_i)
+        for idrec_i in change_set:
+            _, f_id_i, a_id_i = decode_idrec(idrec_i)
 
-            print(match_inp_ptrs)
+            print("A",head_ptrs_i[f_id_i], j_strt,j_strt+j_len, a_id_i)
+            match_inp_ptrs[i_strt:i_strt+i_len] = head_ptrs_i[f_id_i]
 
-            for j in range(n_vars):
-                if(i == j): continue
+            # print(match_inp_ptrs)
+            
+            if(n_vars > 1):
+                print(">>",self.head_ptrs[j])
+                for f_id_j, h_ptrs_j in self.head_ptrs[j].items():
+                    print("B",h_ptrs_j, j_strt,j_strt+j_len)
+                    match_inp_ptrs[j_strt:j_strt+j_len] = h_ptrs_j
+
+                    is_match = match_head_ptrs(match_inp_ptrs)
+
+                    print('beta', match_inp_ptrs, is_match)
+            else:
+                is_match = match_head_ptrs(match_inp_ptrs)
+                print('alpha', match_inp_ptrs, is_match)
+
+    for i, out in enumerate(self.outputs):
+        out.change_set = arg_change_sets[i]
+
 
 
 

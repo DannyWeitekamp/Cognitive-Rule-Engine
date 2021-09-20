@@ -312,6 +312,8 @@ def update_node(self):
     match_inp_ptrs = np.zeros((len(self.op.head_var_ptrs),),dtype=np.int64)
     n_vars = len(head_ranges)
 
+    print("---" str(self.op), "---")
+
     print("<<", match_inp_ptrs, arg_change_sets)
     for i, change_set in enumerate(arg_change_sets):
         head_ptrs_i = self.head_ptrs[i]

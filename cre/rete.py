@@ -705,7 +705,8 @@ match_iterator_node_field_dict = {
 
     # "is_exhausted": boolean,
     "curr_ind": i8,
-    "f_ids" : i8[::1],
+    "f_ids" : u8[::1],
+    "other_f_ids" : u8[::1],
 }
 
 
@@ -714,7 +715,8 @@ MatchIterNode, MatchIterNodeType = define_structref("MatchIterNode", match_itera
 
 
 match_iterator_field_dict = {
-    "iter_nodes" : ListType(MatchIterNodeType)
+    "iter_nodes" : ListType(MatchIterNodeType),
+    # "curr_match" : u8[::1],
 }
 
 MatchIter, MatchIterType = define_structref("MatchIter", match_iterator_field_dict)
@@ -791,6 +793,80 @@ def copy_match_iter(m_iter):
     return MatchIter(m_iter_nodes)
 
     # return MatchIter(rev_m_iter_nodes)
+
+@njit(cache=True)
+def update_other_f_ids(m_node):
+    print("START UPDATE OTHER")
+    if(len(m_node.node.var_inds) > 1):
+        print("A")
+        matches = m_node.associated_output.matches
+        f_id = m_node.f_ids[m_node.curr_ind]
+        print("B")
+        other_f_ids_d = _dict_from_ptr(dict_i8_u1_type, matches[f_id]) 
+        # print("C", other_f_ids_d)
+        print("C", )
+        # print("C", len(other_f_ids_d))
+        other_f_ids = np.empty((len(other_f_ids_d),), dtype=np.uint64)
+        print("F")
+        cnt = 0
+        for j, (o_f_id,v) in enumerate(other_f_ids_d.items()):
+            if(v == 0): continue
+            other_f_ids[j] = o_f_id; cnt += 1;
+        m_node.other_f_ids = other_f_ids[:cnt]
+        print("Z")
+    print("END UPDATE OTHER")
+
+
+
+@njit(cache=True)
+def restitch_match_iter(m_iter, start_from=-1):
+    if(start_from == -1): start_from = len(m_iter.iter_nodes)-1
+    for i in range(start_from,-1,-1):
+        print("I", i)
+        m_node = m_iter.iter_nodes[i]
+        if(m_node.curr_ind == -1):
+            if(m_node.depends_on_var_ind == -1):
+                print("A")
+                matches = m_node.associated_output.matches
+                f_ids = np.empty((len(matches)),dtype=np.uint64)
+                cnt = 0
+                print("B", matches, len(m_node.node.var_inds))
+                # print(matches)
+                for j, (f_id, v) in enumerate(matches.items()):
+                    if(v == 0): continue
+                    f_ids[j] = f_id; cnt += 1;
+                m_node.f_ids = f_ids[:cnt]
+                print("C", cnt)
+                # print(m_node.f_ids)
+                
+                
+            else:
+                dep_node = m_iter.iter_nodes[m_node.depends_on_var_ind]
+                m_node.f_ids = dep_node.other_f_ids
+                # m_node.curr_ind = 0
+            m_node.curr_ind = 0
+            update_other_f_ids(m_node)
+            # m_node.curr_ind = 0
+
+@njit(cache=True)
+def match_iter_next(m_iter):
+    f_ids = np.empty(len(m_iter.iter_nodes),dtype=np.uint64)
+    most_downstream_overflow = -1
+    for i, m_node in enumerate(m_iter.iter_nodes):
+        # print("RESTICH")
+        # print(m_node.curr_ind)
+        f_ids[m_node.var_ind] = m_node.f_ids[m_node.curr_ind]
+        if(i == 0 or most_downstream_overflow == i-1): m_node.curr_ind += 1
+        if(m_node.curr_ind >= len(m_node.f_ids)):
+            if(i == len(m_iter.iter_nodes)-1):
+                raise StopIteration()
+            m_node.curr_ind = -1
+            most_downstream_overflow = i
+
+    if(most_downstream_overflow != -1):
+        restitch_match_iter(m_iter, most_downstream_overflow)
+
+    return f_ids
 
 
 

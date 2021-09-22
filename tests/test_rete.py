@@ -324,7 +324,8 @@ def iter_matches(self):
 
 def test_build_rete_graph():
     from cre.rete import (node_ctor, build_rete_graph, parse_mem_change_queue,
-                            make_match_iter,repr_match_iter_dependencies, copy_match_iter)
+                            make_match_iter,repr_match_iter_dependencies, copy_match_iter,
+                            restitch_match_iter, match_iter_next)
     from cre.var import GenericVarType
     from cre.conditions import as_distr_dnf_list
     with cre_context("test_distr_dnf_and"):
@@ -332,10 +333,15 @@ def test_build_rete_graph():
     
         a,b,c = Var(BOOP,"a"), Var(BOOP,"b"), Var(BOOP,"c")    
 
+        # mixup_conds = (
+        #     a & b & c & (c.val != 0)  &
+        #     (a.val > 1) & (a.nxt.val > a.val) & (a.val > b.val) &
+        #     (b.val != a.val) & (b.val > 1) & (b.val != 0) & (b.val != 0)
+        # )
+
         mixup_conds = (
-            a & b & c & (c.val != 0)  &
-            (a.val > 1) & (a.nxt.val > a.val) & (a.val > b.val) &
-            (b.val != a.val) & (b.val > 1) & (b.val != 0) & (b.val != 0)
+            a & b & c & (a.val > 2) #& (b.val != 0) & (b.val < a.val) &
+            # (c.val == a.val)
         )
 
         mem = Memory()
@@ -345,16 +351,16 @@ def test_build_rete_graph():
         print({i:str(x.op) for i,x in graph.var_end_nodes.items()})
         print({i:str(x.op) for i,x in graph.var_root_nodes.items()})
 
-        a5 = BOOP(nxt=None, val=5)
-        a4 = BOOP(nxt=a5, val=4)
+        a4 = BOOP(nxt=None, val=4)
         a3 = BOOP(nxt=a4, val=3)
         a2 = BOOP(nxt=a3, val=2)
         a1 = BOOP(nxt=a2, val=1)
+        a0 = BOOP(nxt=a1, val=0)
+        mem.declare(a0)
         mem.declare(a1)
         mem.declare(a2)
         mem.declare(a3)
         mem.declare(a4)
-        mem.declare(a5)
 
         parse_mem_change_queue(graph)
 
@@ -365,6 +371,17 @@ def test_build_rete_graph():
         print(repr_match_iter_dependencies(m_iter))
         m_iter_copy = copy_match_iter(m_iter)
         print(repr_match_iter_dependencies(m_iter_copy))
+
+        print(restitch_match_iter(m_iter_copy))
+
+        while(True):
+            try:
+                print(match_iter_next(m_iter_copy))        
+            except StopIteration:
+                print("STOP ITER")
+                break
+
+        
 
         # iter_matches(graph)
         # update_deref_dependencies(self, arg_change_sets)

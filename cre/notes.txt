@@ -696,3 +696,98 @@ I suppose since it is a u8->u1 anyway we could just make the u1 = 1 for valid an
 --- Sept 18th ----
 Okay, so what needs to happen? 
 [] setup the mem.facts->head_ptrs connection.  
+
+
+--- Sept 21st ----
+Thinking about inside the NodeOutput object there is .matches again
+Realizing that the format of this depends a great deal on n_args, is there a way to do w/o having more than one nested dict?
+
+There could be just one dict of (arg_ind, f_id)... but then it's useless for looping. Maybe this should actually be an AKD... of the match's f_ids
+
+Could be two dictionaries, or a dictionary and a linked list or vector? The one dicitonary of (arg_ind, f_id)->NodeMemoryEntry is just there for cleanup, and the vector(s) are there for looping. Then they on retract the entries can just be invalidated instead of fully removed.
+
+Needs to be able to:
+	1) Clean up on the basis of retractions
+	2) Clean up on the basis of failed matches
+	3) Get a list of matches associated with each arg_ind and f_id
+
+Dict(AKD[i8]->u1)
+
+
+Alternatively match_inds[arg_ind][f_id] -> Dict(match_inds->u1)
+matches[match_ind] = match
+
+1+3 work... we can loop through matches via their match_inds
+2 is harder
+
+Dictionaries of Dictionaries may be the cleanest thing after_all,
+although keeping a proper refcount might be challenging.
+
+
+
+--- Sept 22 ---
+
+It seems a bug is preventing me from keeping around iter(Dict()) instances so we are going to need to just make copies of everything such that they can be indexed directly:
+
+For alpha end nodes an array will suffice
+for beta end nodes the same array, but also another array that points to arrays
+
+So a node iter might be like:
+	graph : ReteGraphType,
+	node: ReteNodeType,
+
+	output : ReteNodeOutputType,
+	downstream_ptr : i8,
+	if(downstream_ptr)
+
+	curr_ind : i8,
+
+	var_inds: i8[::1],
+
+
+Probably only need to copy as we go. Should do some preprocessing to get a structure that is relatively automatic.
+
+Constraint, lets just have one MatchIterNode for each var. We need to loop backwards from the last end_node back to the first. Each MatchIterNode either depends on a downstream node or not. 
+
+First construct IterNodes from downstream up... then on next() go from upstream down and iter each node. If a node can't increment then request an increment and update.
+
+
+MatchIterator:
+
+
+def init(var_end_nodes):
+	iternodes = []
+
+	# Init MatchIteratorNodes
+	for i in range(n_vars-1,-1,-1):
+		node = var_end_nodes[i]
+
+		st = new(MatchIteratorNodeType)
+		st.graph = self.graph
+		st.node = node
+		st.output = ...
+		st.curr_ind = 0
+
+	# Link MatchIteratorNodes
+	for i in range(n_vars-1,-1,-1):
+		node = 
+
+
+
+
+def increment(self):
+	node = self.iternodes[-1]
+
+	self.curr_ind += 1
+	if(self.curr_ind >= len(var_inds)):
+		
+		
+
+
+
+
+
+
+
+
+

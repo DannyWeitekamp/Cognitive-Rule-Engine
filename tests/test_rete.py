@@ -298,9 +298,33 @@ def filter_first(graph):
     # for i, ptrs in self.inp_head_ptrs[0].items():
     #     print("VAL",_load_pointer(f8,ptrs[0]))
 
+@njit(cache=True)
+def iter_matches(self):
+    print("START ITR")
+
+    prev_var_ind = -1
+    for i, node in self.var_end_nodes.items():
+        ind_i = np.min(np.nonzero(node.var_inds == i)[0])
+        output_i = node.outputs[ind_i]
+
+        if(prev_var_ind != -1):
+            print("<<", prev_var_ind, node.var_inds)
+            prev_inds = np.nonzero(node.var_inds == prev_var_ind)[0]
+            if(len(prev_inds) > 0):
+                prev_ind = np.min(prev_inds)
+                output_prev = node.outputs[prev_ind]
+                print(output_i.matches, output_prev.matches)
+                continue
+        # else:
+        print(output_i.matches)
+        prev_var_ind = i
+        # print(i, node.var_inds, j)
+        # print(i, "---", node.op, "---")
+        # print([x.matches for x in node.outputs])
 
 def test_build_rete_graph():
-    from cre.rete import node_ctor, build_rete_graph, parse_mem_change_queue
+    from cre.rete import (node_ctor, build_rete_graph, parse_mem_change_queue,
+                            make_match_iter,repr_match_iter_dependencies, copy_match_iter)
     from cre.var import GenericVarType
     from cre.conditions import as_distr_dnf_list
     with cre_context("test_distr_dnf_and"):
@@ -309,9 +333,8 @@ def test_build_rete_graph():
         a,b,c = Var(BOOP,"a"), Var(BOOP,"b"), Var(BOOP,"c")    
 
         mixup_conds = (
-            a & b & c &
-            (c.val == b.nxt.val) & (c.val != 0)  &
-            (a.val > 1) & (a.nxt.val < a.val) & (a.val > b.val) &
+            a & b & c & (c.val != 0)  &
+            (a.val > 1) & (a.nxt.val > a.val) & (a.val > b.val) &
             (b.val != a.val) & (b.val > 1) & (b.val != 0) & (b.val != 0)
         )
 
@@ -336,6 +359,14 @@ def test_build_rete_graph():
         parse_mem_change_queue(graph)
 
         filter_first(graph)
+
+
+        m_iter = make_match_iter(graph)
+        print(repr_match_iter_dependencies(m_iter))
+        m_iter_copy = copy_match_iter(m_iter)
+        print(repr_match_iter_dependencies(m_iter_copy))
+
+        # iter_matches(graph)
         # update_deref_dependencies(self, arg_change_sets)
         # update_changes_from_inputs(self, arg_change_sets)
 

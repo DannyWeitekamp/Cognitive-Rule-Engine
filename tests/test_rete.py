@@ -340,7 +340,7 @@ def test_build_rete_graph():
         # )
 
         mixup_conds = (
-            a & b & c & (a.val > 2) #& (b.val != 0) & (b.val < a.val) &
+            a & b & c & (a.val > 2) & (b.val != 0) & (b.val < a.val) #&
             # (c.val == a.val)
         )
 
@@ -365,6 +365,7 @@ def test_build_rete_graph():
         parse_mem_change_queue(graph)
 
         filter_first(graph)
+        print("*************")
 
 
         m_iter = make_match_iter(graph)

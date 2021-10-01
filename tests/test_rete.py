@@ -380,7 +380,7 @@ def test_build_rete_graph():
 
         while(True):
             try:
-                print(match_iter_next(m_iter))        
+                print([decode_idrec(x) for x in match_iter_next(m_iter)])        
                 # print(match_iter_next(m_iter_copy))        
             except StopIteration:
                 print("STOP ITER")
@@ -388,7 +388,7 @@ def test_build_rete_graph():
 
         m_iter = mixup_conds.get_matches(mem)
         for x in m_iter:
-            print(x)
+            print([decode_idrec(y) for y in x])
 
 
 

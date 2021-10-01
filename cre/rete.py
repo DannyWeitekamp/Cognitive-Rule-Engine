@@ -405,12 +405,12 @@ def update_node(self):
     
     # print(arg_change_sets)
    
-    #Note: They way these loops currently work there is some
     for i, change_set in enumerate(arg_change_sets):
         head_ptrs_i = self.head_ptrs[i]
         i_strt, i_len = head_ranges[i][0], head_ranges[i][1]
 
         if(n_vars > 1):
+            # BETA CASE 
             j = 1 if i == 0 else 0
             j_strt, j_len = head_ranges[j][0], head_ranges[j][1]        
             for idrec_i in change_set:
@@ -431,12 +431,13 @@ def update_node(self):
                     is_match = match_head_ptrs(match_inp_ptrs) ^ self.lit.negated
                     was_match = False
                     if(is_match):
-                        print("INSER", match_f_ids, self.lit.negated)
+                        # print("INSER", match_f_ids, self.lit.negated)
                         was_match = insert_beta_match(self, match_f_ids)
                     else:
                         was_match = invalidate_beta_match(self, match_f_ids)
                     # print(f_id_i, f_id_j, is_match, was_match)
         else:
+            # ALPHA CASE 
             for idrec_i in change_set:
                 _, f_id_i, a_id_i = decode_idrec(idrec_i)
                 match_inp_ptrs[i_strt:i_strt+i_len] = head_ptrs_i[f_id_i]
@@ -525,12 +526,13 @@ rete_graph_field_dict = {
     "var_end_nodes" : DictType(i8,BaseReteNodeType),
     "global_deref_idrec_map" : DictType(u8, node_list_type),
     "global_base_t_id_map" : DictType(u2, NodeMemoryType),
+    "var_t_ids" : u2[::1], #NOTE: Something wrong with this... consider just not keeping
     "match_iter_prototype_ptr" : i8, #NOTE: Should really use deferred type
 }
 
 @njit(cache=True)
 def rete_graph_ctor(mem,nodes_by_nargs, var_root_nodes, var_end_nodes,
-                    global_deref_idrec_map, global_base_t_id_map):
+                    global_deref_idrec_map, global_base_t_id_map, var_t_ids):
     st = new(ReteGraphType)
     st.change_head = 0
     st.mem = mem
@@ -539,7 +541,9 @@ def rete_graph_ctor(mem,nodes_by_nargs, var_root_nodes, var_end_nodes,
     st.var_end_nodes = var_end_nodes
     st.global_deref_idrec_map = global_deref_idrec_map
     st.global_base_t_id_map = global_base_t_id_map
+    st.var_t_ids = var_t_ids 
     st.match_iter_prototype_ptr = 0
+    
     return st
 
 
@@ -613,8 +617,17 @@ optional_node_mem_type = types.optional(NodeMemoryType)
 @njit(cache=True)
 def build_rete_graph(mem, c):
     index_map = Dict.empty(i8, i8)
+    var_t_ids = np.zeros((len(c.vars),), dtype=np.uint16)
+
     for i, v in enumerate(c.vars):
         index_map[v.base_ptr] = i
+
+        base_var = _struct_from_pointer(GenericVarType, v.base_ptr)
+        if(base_var.base_type_name in mem.context_data.fact_to_t_id):
+            var_t_ids[i] = u2(mem.context_data.fact_to_t_id[base_var.base_type_name])
+        # if(_t_id is not None):
+        #     t_id = u2(i8(_t_id))
+        #     var_t_ids[i] = t_id
 
     if(not c.has_distr_dnf):
         build_distributed_dnf(c,index_map)
@@ -625,6 +638,7 @@ def build_rete_graph(mem, c):
     global_base_t_id_map = Dict.empty(u2, NodeMemoryType)
     var_end_nodes = Dict.empty(i8,BaseReteNodeType)
     var_root_nodes = Dict.empty(i8,BaseReteNodeType)
+
 
     # Link nodes together. 'nodes_by_nargs' should already be ordered
     # so that alphas are before 2-way, 3-way, etc. betas. 
@@ -663,7 +677,9 @@ def build_rete_graph(mem, c):
             # print("<<",len(inputs), len(node.var_inds))
 
 
-    return rete_graph_ctor(mem, nodes_by_nargs, var_root_nodes, var_end_nodes, global_deref_idrec_map, global_base_t_id_map)
+    return rete_graph_ctor(mem, nodes_by_nargs, var_root_nodes,
+             var_end_nodes, global_deref_idrec_map, global_base_t_id_map,
+             var_t_ids)
 
 
 @njit(cache=True,locals={"t_id" : u2, "f_id":u8, "a_id":u1})
@@ -755,7 +771,7 @@ class MatchIterator(structref.StructRefProxy):
         return self
 
 match_iterator_field_dict = {
-
+    "graph" : ReteGraphType,
     "iter_nodes" : ListType(MatchIterNodeType),
     "is_empty" : types.boolean,
     # "curr_match" : u8[::1],
@@ -794,11 +810,12 @@ def copy_match_iter(m_iter):
             new_m_node.f_ids = m_node.f_ids
         m_iter_nodes.append(new_m_node)
 
-    m_iter = new(MatchIteratorType)
-    m_iter.iter_nodes = m_iter_nodes 
-    m_iter.is_empty = m_iter.is_empty
+    new_m_iter = new(MatchIteratorType)
+    new_m_iter.graph = m_iter.graph 
+    new_m_iter.iter_nodes = m_iter_nodes 
+    new_m_iter.is_empty = m_iter.is_empty
 
-    return m_iter
+    return new_m_iter
 
 @njit(cache=True)
 def new_match_iter(graph):
@@ -838,6 +855,7 @@ def new_match_iter(graph):
             rev_m_iter_nodes.append(m_iter_nodes[i])
 
         m_iter = new(MatchIteratorType)
+        m_iter.graph = graph 
         m_iter.iter_nodes = rev_m_iter_nodes 
         m_iter.is_empty = False
         graph.match_iter_prototype_ptr = _pointer_from_struct_incref(m_iter)
@@ -928,7 +946,7 @@ def restitch_match_iter(m_iter, start_from=-1):
             # m_node.curr_ind = 0
 
 @njit(cache=True)
-def match_iter_next(m_iter):
+def match_iter_next_f_ids(m_iter):
     n_vars = len(m_iter.iter_nodes)
     if(m_iter.is_empty or n_vars == 0): raise StopIteration()
 
@@ -960,6 +978,22 @@ def match_iter_next(m_iter):
         restitch_match_iter(m_iter, most_downstream_overflow)
 
     return f_ids
+
+
+@njit(cache=True)
+def match_iter_next_ptrs(m_iter):
+    mem, graph = m_iter.graph.mem, m_iter.graph
+    f_ids = match_iter_next_f_ids(m_iter)
+    ptrs = np.empty(len(f_ids),dtype=np.int64)
+    for i, f_id in enumerate(f_ids):
+        facts = _struct_from_pointer(VectorType, mem.mem_data.facts[graph.var_t_ids[i]])
+        ptrs[i] = facts.data[f_id]
+    return ptrs
+
+@njit(cache=True)
+def match_iter_next(m_iter):
+    return match_iter_next_ptrs(m_iter)
+
 
 @njit(cache=True)
 def update_graph(graph):

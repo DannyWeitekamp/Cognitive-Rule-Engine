@@ -329,8 +329,9 @@ if(__name__ == "__main__"):
     # test_matching_unconditioned()
     # test_ref_matching()
     # test_multiple_deref()
-    test_list()
+    # test_list()
     # test_multiple_types()
     # import pytest.__main__.benchmark
     # matching_1_t_4_lit_setup()
     # test_NOT()
+    test_b_matching_1_t_4_lit()

@@ -321,10 +321,10 @@ def iter_matches(self):
         # print(i, node.var_inds, j)
         # print(i, "---", node.op, "---")
         # print([x.matches for x in node.outputs])
-
+from cre.rete import update_graph
 def test_build_rete_graph():
     from cre.rete import (node_ctor, build_rete_graph, parse_mem_change_queue,
-                            make_match_iter,repr_match_iter_dependencies, copy_match_iter,
+                            new_match_iter,repr_match_iter_dependencies, copy_match_iter,
                             restitch_match_iter, match_iter_next)
     from cre.var import GenericVarType
     from cre.conditions import as_distr_dnf_list
@@ -340,16 +340,16 @@ def test_build_rete_graph():
         # )
 
         mixup_conds = (
-            a & b & c & (a.val > 2) & (b.val != 0) & (b.val < a.val) #&
+            a & b & c & (a.val > 2) & (b.val != 0) & (b.nxt.val < a.val) #&
             # (c.val == a.val)
         )
 
         mem = Memory()
 
-        graph = build_rete_graph(mem, mixup_conds)
-        print([[str(x.op) for x in y] for y in graph.nodes_by_nargs])
-        print({i:str(x.op) for i,x in graph.var_end_nodes.items()})
-        print({i:str(x.op) for i,x in graph.var_root_nodes.items()})
+        # graph = build_rete_graph(mem, mixup_conds)
+        # print([[str(x.op) for x in y] for y in graph.nodes_by_nargs])
+        # print({i:str(x.op) for i,x in graph.var_end_nodes.items()})
+        # print({i:str(x.op) for i,x in graph.var_root_nodes.items()})
 
         a4 = BOOP(nxt=None, val=4)
         a3 = BOOP(nxt=a4, val=3)
@@ -362,13 +362,71 @@ def test_build_rete_graph():
         mem.declare(a3)
         mem.declare(a4)
 
-        parse_mem_change_queue(graph)
+        m_iter = mixup_conds.get_matches(mem)
 
-        filter_first(graph)
+        # update_graph(graph)
+        # parse_mem_change_queue(graph)
+
+        # # filter_first(graph)
+        # # print("*************")
+
+
+        # m_iter = new_match_iter(graph)
+        # print(repr_match_iter_dependencies(m_iter))
+        # m_iter_copy = copy_match_iter(m_iter)
+        # print(repr_match_iter_dependencies(m_iter_copy))
+
+        # print(restitch_match_iter(m_iter_copy))
+
+        while(True):
+            try:
+                print(match_iter_next(m_iter))        
+                # print(match_iter_next(m_iter_copy))        
+            except StopIteration:
+                print("STOP ITER")
+                break
+
+        m_iter = mixup_conds.get_matches(mem)
+        for x in m_iter:
+            print(x)
+
+
+
+from cre.rete import update_graph
+def test_blaa():
+    with cre_context("test_blaa"):
+        BOOP, BOOPType = define_fact("BOOP",{"nxt" : "BOOP", "val" : f8})
+    
+        a,b,c = Var(BOOP,"a"), Var(BOOP,"b"), Var(BOOP,"c")    
+
+        conds = (
+            a & b & c & (a.val > 2) & (b.val != 0) & (b.nxt.val < a.val) #&
+        )
+
+        mem = Memory()
+
+        # graph = build_rete_graph(mem, mixup_conds)
+        # parse_mem_change_queue(graph)
+        update_graph(graph)
+        
+        a4 = BOOP(nxt=None, val=4)
+        a3 = BOOP(nxt=a4, val=3)
+        a2 = BOOP(nxt=a3, val=2)
+        a1 = BOOP(nxt=a2, val=1)
+        a0 = BOOP(nxt=a1, val=0)
+        mem.declare(a0)
+        mem.declare(a1)
+        mem.declare(a2)
+        mem.declare(a3)
+        mem.declare(a4)
+
+        
+
+        
         print("*************")
 
 
-        m_iter = make_match_iter(graph)
+        m_iter = new_match_iter(graph)
         print(repr_match_iter_dependencies(m_iter))
         m_iter_copy = copy_match_iter(m_iter)
         print(repr_match_iter_dependencies(m_iter_copy))
@@ -382,19 +440,33 @@ def test_build_rete_graph():
                 print("STOP ITER")
                 break
 
+
+        # assert type(conds.get_matches(mem))==???ITERATOR
+
+        # for match in conds.get_matches():
+
+
+
         
 
-        # iter_matches(graph)
-        # update_deref_dependencies(self, arg_change_sets)
-        # update_changes_from_inputs(self, arg_change_sets)
 
-        # print(a,b,c)
+# Tests to write: 
+'''
+1) 2,3,5,10 variables
+2) Different kinds of variables
+3) Alphas only 
+4) Beta only 
+5) Alphas and betas
+6) Complex beta chains
+7) Retractions
+8) Modifications 
+9) Modifications of a relevant deref attr
+10) Retractions of a relevant deref intermediate
+11) Ensure iterator consistency after a backtrack (i.e. a retract then declare)
+12) Benchmarks
 
-        # print(nodes_by_nargs, var_end_nodes)
 
-
-
-
+'''
 
 
 

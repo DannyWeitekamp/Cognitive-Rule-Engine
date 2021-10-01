@@ -226,7 +226,7 @@ conditions_fields_dict = {
     'base_var_map': DictType(i8,i8),
 
     # Wether or not the conditions object has been initialized
-    'is_initialized' : u1,
+    # 'is_initialized' : u1,
 
     # A pointer to the Memory the Conditions object is linked to.
     #   If the Memory is not linked defaults to 0.
@@ -234,7 +234,10 @@ conditions_fields_dict = {
 
     ### Fields that are filled in after initialization ### 
     "has_distr_dnf" : types.boolean,
-    "distr_dnf" : distr_dnf_type
+    "distr_dnf" : distr_dnf_type,
+
+
+    "matcher_inst_ptr" : i8,
 
     # # The alpha parts of '.dnf' organized by which Var in 'vars' they use 
     # 'alpha_dnfs': ListType(dnf_type),
@@ -274,10 +277,18 @@ class Conditions(structref.StructRefProxy):
         return get_ptr_matches(self,mem)
 
     def get_matches(self, mem=None):
-        from cre.matching import _get_matches
-        context = cre_context()
-        fact_types = tuple([context.type_registry[x.base_type_name] for x in self.vars if not x.is_not])
-        return _get_matches(self, fact_types, mem=mem)
+        from cre.rete import get_matches
+        # return get_matches(self, self.var_base_types, mem=mem)
+        return get_matches(mem, self)
+
+    @property
+    def var_base_types(self):
+        if(not hasattr(self,"_var_base_types")):
+            context = cre_context()
+            self._var_base_types = tuple([context.type_registry[x.base_type_name] for x in self.vars if not x.is_not])
+        return self._var_base_types
+
+
 
     def link(self,mem):
         get_linked_conditions_instance(self,mem,copy=False)
@@ -434,7 +445,8 @@ def _conditions_ctor_single_var(_vars,dnf=None):
     # print("A",st.base_var_map)
     st.dnf = dnf if(dnf) else new_dnf(1)
     st.has_distr_dnf = False
-    st.is_initialized = False
+    # st.is_initialized = False
+    st.matcher_inst_ptr = 0
     return st
 
 @njit(cache=True)
@@ -444,7 +456,8 @@ def _conditions_ctor_base_var_map(_vars,dnf=None):
     st.base_var_map = _vars.copy() # is shallow copy
     st.dnf = dnf if(dnf) else new_dnf(len(_vars))
     st.has_distr_dnf = False
-    st.is_initialized = False
+    # st.is_initialized = False
+    st.matcher_inst_ptr = 0
     return st
 
 @njit(cache=True)
@@ -457,7 +470,9 @@ def _conditions_ctor_var_list(_vars,dnf=None):
     st.base_var_map = build_base_var_map(st.vars)
     # print("C",st.base_var_map)
     st.dnf = dnf if(dnf) else new_dnf(len(_vars))
-    st.is_initialized = False
+    st.has_distr_dnf = False
+    # st.is_initialized = False
+    st.matcher_inst_ptr = 0
     return st
 
 @generated_jit(cache=True)

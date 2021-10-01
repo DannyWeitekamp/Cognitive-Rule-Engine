@@ -970,7 +970,7 @@ def update_graph(graph):
 
 
 @njit(cache=True)
-def get_matches(mem, conds):
+def get_match_iter(mem, conds):
     if(conds.matcher_inst_ptr == 0):
         rete_graph = build_rete_graph(mem, conds)
         conds.matcher_inst_ptr = _pointer_from_struct_incref(rete_graph)

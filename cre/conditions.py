@@ -277,9 +277,9 @@ class Conditions(structref.StructRefProxy):
         return get_ptr_matches(self,mem)
 
     def get_matches(self, mem=None):
-        from cre.rete import get_matches
+        from cre.rete import get_match_iter
         # return get_matches(self, self.var_base_types, mem=mem)
-        return get_matches(mem, self)
+        return get_match_iter(mem, self)
 
     @property
     def var_base_types(self):

@@ -991,13 +991,14 @@ def match_iter_next_ptrs(m_iter):
     idrecs = match_iter_next_idrecs(m_iter)
     ptrs = np.empty(len(idrecs),dtype=np.int64)
     for i, idrec in enumerate(idrecs):
-        facts = _struct_from_pointer(VectorType, mem.mem_data.facts[graph.var_t_ids[i]])
-        ptrs[i] = facts.data[idrec]
+        t_id, f_id, _  = decode_idrec(idrec)
+        facts = _struct_from_pointer(VectorType, mem.mem_data.facts[t_id])
+        ptrs[i] = facts.data[f_id]
     return ptrs
 
 @njit(cache=True)
 def match_iter_next(m_iter):
-    return match_iter_next_idrecs(m_iter)
+    return match_iter_next_ptrs(m_iter)
 
 
 @njit(cache=True)

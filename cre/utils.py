@@ -12,6 +12,37 @@ import numpy as np
 import numba
 from numba.typed.typedobjectutils import _container_get_data
 from numba.core.datamodel import default_manager, models
+from numba.core.typeconv import Conversion
+from numba.np.arrayobj import _getitem_array_single_int, make_array
+
+
+class CastFriendlyMixin():
+    def can_convert_to(self, typingctx, other):
+        """
+        Convert this Record to the *other*.
+        This method only implements width subtyping for records.
+        """
+        from numba.core.errors import NumbaExperimentalFeatureWarning
+        # print(other.__dict__)
+        if isinstance(other, self.__class__):
+            if len(other._fields) > len(self._fields):
+                return
+            for other_fd, self_fd in zip(other._fields,
+                                         self._fields):
+                if not other_fd == self_fd and other_fd[1] != types.Any and self_fd[1] != types.Any:
+                    return
+            # warnings.warn(f"{self} has been considered a subtype of {other} "
+            #               f" This is an experimental feature.",
+            #               category=NumbaExperimentalFeatureWarning)
+            return Conversion.safe
+
+    def can_convert_from(self, typingctx, other):
+        return other.can_convert_to(typingctx, other)
+
+    def unify(self, typingctx, other):
+        if(self.can_convert_to(typingctx, other)):
+            return other
+
 
 #### deref_type ####
 
@@ -609,3 +640,51 @@ def iter_typed_list(lst):
     else:
          return iter(lst)
             
+##### Make Tuple of StructRefs from array of ptrs ####
+
+@intrinsic
+def _struct_tuple_from_pointer_arr(typingctx, struct_types, ptr_arr):
+    ''' Takes a tuple of fact types and a ptr_array i.e. an i8[::1] and outputs 
+        the facts pointed to, casted to the appropriate types '''
+    # print(">>",struct_types)
+    _struct_types = struct_types
+    if(isinstance(struct_types, types.TypeRef )): _struct_types = struct_types.instance_type
+
+    if(isinstance(_struct_types, types.UniTuple)):
+        typs = tuple([_struct_types.dtype.instance_type] * _struct_types.count)
+        out_type =  types.UniTuple(_struct_types.dtype.instance_type,_struct_types.count)
+    else:
+        # print(struct_types.__dict__)
+        typs = tuple([x.instance_type for x in _struct_types.types])
+        out_type =  types.Tuple(typs)
+    # print(typs)
+    # print(out_type)
+    
+    sig = out_type(struct_types,i8[::1])
+    def codegen(context, builder, sig, args):
+        _,ptrs = args
+
+        vals = []
+        ary = make_array(i8[::1])(context, builder, value=ptrs)
+        for i, inst_type in enumerate(typs):
+            i_val = context.get_constant(types.intp, i)
+
+            # Same as _struct_from_pointer
+            raw_ptr = _getitem_array_single_int(context,builder,i8,i8[::1],ary,i_val)
+            meminfo = builder.inttoptr(raw_ptr, cgutils.voidptr_t)
+
+            context.nrt.incref(builder, types.MemInfoPointer(types.voidptr), meminfo)
+
+            st = cgutils.create_struct_proxy(inst_type)(context, builder)
+            st.meminfo = meminfo
+
+            
+
+            vals.append(st._getvalue())
+
+
+        ret = context.make_tuple(builder,out_type,vals)
+        return ret#impl_ret_borrowed(context, builder, sig.return_type, ret)
+        # return 
+
+    return sig,codegen

@@ -8,14 +8,15 @@ from cre.utils import (_dict_from_ptr, _pointer_from_struct,
          _pointer_from_struct_incref, _struct_from_pointer, decode_idrec,
         encode_idrec, deref_type, OFFSET_TYPE_ATTR, OFFSET_TYPE_LIST,
          _pointer_to_data_pointer, _list_base_from_ptr, _load_pointer,
-         _decref_structref, _decref_pointer)
+         _decref_structref, _decref_pointer, cast_structref, _struct_tuple_from_pointer_arr)
 from cre.structref import define_structref
 from cre.memory import MemoryType
 from cre.vector import VectorType
 from cre.var import GenericVarType
 from cre.op import GenericOpType
-from cre.conditions import LiteralType, build_distributed_dnf
+from cre.conditions import LiteralType, build_distributed_dnf, ConditionsType
 from cre.vector import VectorType, new_vector
+from cre.fact import BaseFactType
 
 RETRACT = u1(0xFF)# u1(0)
 DECLARE = u1(0)
@@ -58,6 +59,7 @@ def new_node_mem():
 def new_root_node_mem():
     st = new(NodeMemoryType)
     st.change_set = Dict.empty(u8,u1)
+    st.matches = Dict.empty(u8,i8)
     st.is_root = True
     return st
 
@@ -77,8 +79,9 @@ outputs_typ = DictType(u8,DictType(u8,u1))
 base_rete_node_field_dict = {
     # Pointers to the Dict(i8,u1)s inside deref_depends
     "mem" : MemoryType, 
-    "lit" : LiteralType,
-    "op" : GenericOpType,
+    "has_op" : types.boolean,
+    "lit" : types.optional(LiteralType),
+    "op" : types.optional(GenericOpType),
     "deref_depends" : deref_dep_typ, 
     "relevant_global_diffs" : VectorType,
 
@@ -96,24 +99,27 @@ BaseReteNode, BaseReteNodeType = define_structref("BaseReteNode", base_rete_node
 i8_arr_typ = i8[::1]
 
 @njit(cache=True)
-def node_ctor(mem, lit, t_ids, var_inds):
+def node_ctor(mem, t_ids, var_inds,lit=None):
     st = new(BaseReteNodeType)
     st.mem = mem
     st.deref_depends = Dict.empty(u8,dict_i8_u1_type)
     st.relevant_global_diffs = new_vector(4)
     st.var_inds = var_inds
     st.t_ids = t_ids
+
+    # if(lit is not None):
     st.lit = lit
-    st.op = op = lit.op
+    st.op = op = lit.op if(lit is not None) else None
+    n_vars = len(op.base_var_map) if(lit is not None) else 1
     # st.vars = _vars
 
     head_ptrs = List.empty_list(dict_u8_i8_arr_type)
-    for i in range(len(op.base_var_map)):
+    for i in range(n_vars):
         head_ptrs.append(Dict.empty(u8, i8_arr_typ))
     st.head_ptrs = head_ptrs
 
     outputs = List.empty_list(NodeMemoryType)
-    for i in range(len(op.base_var_map)):
+    for i in range(n_vars):
         # outputs.append(Dict.empty(u8,dict_u8_u1_type))
         outputs.append(new_node_mem())
 
@@ -282,19 +288,19 @@ def update_head_ptrs(self, arg_change_sets):
             validate_head_or_retract(self, i, idrec, change_set)
 
 
-def foo(lengths):
-    n = len(lengths)
-    iters = np.zeros(n,dtype=np.int64)
-    # lens = np.zeros(n,dtype=np.int64)
-    i = end = n-1
-    while(i >= 0):
-        iters[i] += 1
-        if(iters[i] >= lengths[i]): 
-            i -= 1
-            iters[i] = 0
-        elif(i != end):
-            i += 1
-        print(iters)
+# def foo(lengths):
+#     n = len(lengths)
+#     iters = np.zeros(n,dtype=np.int64)
+#     # lens = np.zeros(n,dtype=np.int64)
+#     i = end = n-1
+#     while(i >= 0):
+#         iters[i] += 1
+#         if(iters[i] >= lengths[i]): 
+#             i -= 1
+#             iters[i] = 0
+#         elif(i != end):
+#             i += 1
+#         print(iters)
             
 from cre.utils import _func_from_address
 match_heads_f_type = types.FunctionType(u1(i8[::1],))
@@ -384,14 +390,29 @@ def invalidate_beta_match(self, match_idrecs):
 
 @njit(cache=True)
 def update_node(self):
+
+    if(self.op is None):
+        print("---", None, "---")
+        # If the node is an identity node then just connect input to output
+
+        # for x in matches
+        self.outputs = self.inputs
+        print("<<", [x.matches for x in self.outputs])
+        return
     
     arg_change_sets = List.empty_list(dict_u8_u1_type)
     for j in range(len(self.var_inds)):
          arg_change_sets.append(Dict.empty(u8,u1))
+    
+        # self.change_set = self.inputs.outputs
 
     update_changes_deref_dependencies(self, arg_change_sets)
     update_changes_from_inputs(self, arg_change_sets)
     update_head_ptrs(self, arg_change_sets)
+
+    
+        
+
 
     match_head_ptrs = _func_from_address(match_heads_f_type, self.op.match_head_ptrs_addr)
 
@@ -527,34 +548,40 @@ node_mem_list_type = ListType(NodeMemoryType)
 rete_graph_field_dict = {
     "change_head" : i8,
     "mem" : MemoryType,
+    "conds" : ConditionsType,
     "nodes_by_nargs" : ListType(ListType(BaseReteNodeType)),
     "var_root_nodes" : DictType(i8,BaseReteNodeType),
     "var_end_nodes" : DictType(i8,BaseReteNodeType),
     "global_deref_idrec_map" : DictType(u8, node_list_type),
-    "global_base_t_id_map" : DictType(u2, NodeMemoryType),
+    "global_t_id_root_memory_map" : DictType(u2, NodeMemoryType),
     # "var_t_ids" : u2[::1], #NOTE: Something wrong with this... consider just not keeping
     "match_iter_prototype_ptr" : i8, #NOTE: Should really use deferred type
 }
 
 @njit(cache=True)
-def rete_graph_ctor(mem,nodes_by_nargs, var_root_nodes, var_end_nodes,
-                    global_deref_idrec_map, global_base_t_id_map):
+def rete_graph_ctor(mem, conds, nodes_by_nargs, var_root_nodes, var_end_nodes,
+                    global_deref_idrec_map, global_t_id_root_memory_map):
     st = new(ReteGraphType)
     st.change_head = 0
     st.mem = mem
+    st.conds = conds
     st.nodes_by_nargs = nodes_by_nargs
     st.var_root_nodes = var_root_nodes
     st.var_end_nodes = var_end_nodes
     st.global_deref_idrec_map = global_deref_idrec_map
-    st.global_base_t_id_map = global_base_t_id_map
+    st.global_t_id_root_memory_map = global_t_id_root_memory_map
     # st.var_t_ids = var_t_ids 
     st.match_iter_prototype_ptr = 0
     
     return st
 
 
+
 ReteGraph, ReteGraphType = define_structref("ReteGraph", rete_graph_field_dict, define_constructor=False)
 
+@njit(ConditionsType(ReteGraphType,), cache=True)
+def rete_graph_get_conds(self):
+    return self.conds
 
 
 @njit(cache=True)
@@ -564,16 +591,34 @@ def _global_map_insert(idrec, g_map, node):
     g_map[idrec].append(node)
 
 
+@njit(cache=True)
+def _get_var_t_id(mem, var):
+    t_id = mem.context_data.fact_to_t_id.get(var.base_type_name,None)
+    if(t_id is None): raise ValueError("Base Vars of Conditions() must inherit from Fact")
+    return t_id
+
 @njit(cache=True,locals={})
 def _make_rete_nodes(mem, c, index_map):
     nodes_by_nargs = List()
     global_deref_idrec_map = Dict.empty(u8, node_list_type)
-    # global_base_t_id_map = Dict.empty(u8, node_list_type)
+    # global_t_id_root_memory_map = Dict.empty(u8, node_list_type)
 
-    fn_to_t_id = mem.context_data.fact_num_to_t_id
+    fnum_to_t_id = mem.context_data.fact_num_to_t_id
+    # fname_to_t_id = mem.context_data.fact_to_t_id
 
     for distr_conjuct in c.distr_dnf:
-        for i, var_conjuct in enumerate(distr_conjuct):
+        for j, var_conjuct in enumerate(distr_conjuct):
+
+            if(len(var_conjuct)==0):
+                # No constraints on var j so make an identity node (i.e. lit,op=None) 
+                t_ids = np.empty((1,),dtype=np.uint16)
+                var_inds = np.empty((1,),dtype=np.int64)
+                base_var = c.vars[j]
+                t_ids[0] = _get_var_t_id(mem, base_var)
+                var_inds[0] = index_map[base_var.base_ptr]
+                nodes_by_nargs[0].append(node_ctor(mem, t_ids, var_inds,lit=None))
+                continue
+
             for lit in var_conjuct:
                 nargs = len(lit.var_base_ptrs)
                 while(len(nodes_by_nargs) <= nargs-1):
@@ -581,15 +626,14 @@ def _make_rete_nodes(mem, c, index_map):
 
                 t_ids = np.empty((nargs,),dtype=np.uint16)
                 var_inds = np.empty((nargs,),dtype=np.int64)
-                for i,base_var_ptr in enumerate(lit.var_base_ptrs):
+                for i, base_var_ptr in enumerate(lit.var_base_ptrs):
                     var_inds[i] = index_map[base_var_ptr]
                     base_var = _struct_from_pointer(GenericVarType, base_var_ptr)
-                    t_id = mem.context_data.fact_to_t_id.get(base_var.base_type_name,None)
-                    if(t_id is None): raise ValueError("Base Vars of Conditions() must inherit from Fact")
+                    t_id = _get_var_t_id(mem, base_var)
                     t_ids[i] = t_id
 
                 # print("t_ids", t_ids)
-                node = node_ctor(mem, lit, t_ids, var_inds)
+                node = node_ctor(mem, t_ids, var_inds, lit)
                 nodes_by_nargs[nargs-1].append(node)
                 # print("<< aft", lit.op.head_var_ptrs)
                 for i, head_var_ptr in enumerate(lit.op.head_var_ptrs):
@@ -602,8 +646,8 @@ def _make_rete_nodes(mem, c, index_map):
                         _global_map_insert(idrec1, global_deref_idrec_map, node)
                         # print("-idrec1", decode_idrec(idrec1))
                         fn = d_offset.fact_num
-                        if(fn >= 0 and fn < len(fn_to_t_id)):
-                            t_id = fn_to_t_id[d_offset.fact_num]
+                        if(fn >= 0 and fn < len(fnum_to_t_id)):
+                            t_id = fnum_to_t_id[d_offset.fact_num]
                             idrec2 = encode_idrec(u2(t_id),0,0)
                             _global_map_insert(idrec2, global_deref_idrec_map, node)
                             # print("--idrec2", decode_idrec(idrec2))
@@ -641,7 +685,7 @@ def build_rete_graph(mem, c):
     nodes_by_nargs, global_deref_idrec_map = \
          _make_rete_nodes(mem, c, index_map)
 
-    global_base_t_id_map = Dict.empty(u2, NodeMemoryType)
+    global_t_id_root_memory_map = Dict.empty(u2, NodeMemoryType)
     var_end_nodes = Dict.empty(i8,BaseReteNodeType)
     var_root_nodes = Dict.empty(i8,BaseReteNodeType)
 
@@ -652,6 +696,7 @@ def build_rete_graph(mem, c):
         for node in nodes:
             inputs = List.empty_list(NodeMemoryType)
             for j, ind in enumerate(node.var_inds):
+                # print("ind", ind)
                 if(ind in var_end_nodes):
                     # Extract the appropriate NodeMemory for this input
                     e_node = var_end_nodes[ind]
@@ -659,10 +704,10 @@ def build_rete_graph(mem, c):
                     inputs.append(om)
                 else:
                     t_id = node.t_ids[j]
-                    if(t_id not in global_base_t_id_map):
+                    if(t_id not in global_t_id_root_memory_map):
                         root = new_root_node_mem()
-                        global_base_t_id_map[t_id] = root
-                    root = global_base_t_id_map[t_id]
+                        global_t_id_root_memory_map[t_id] = root
+                    root = global_t_id_root_memory_map[t_id]
 
 
                     inputs.append(root)
@@ -671,27 +716,29 @@ def build_rete_graph(mem, c):
                     
                     
                         
-                    # global_base_t_id_map[t_id].append(root)
+                    # global_t_id_root_memory_map[t_id].append(root)
                     # idrec = encode_idrec(, 0, 0)
-                    # _global_map_insert(, node, global_base_t_id_map)
+                    # _global_map_insert(, node, global_t_id_root_memory_map)
 
             # Make this node the new end node for the vars it takes as inputs
             for ind in node.var_inds:
                 var_end_nodes[ind] = node
             
             node.inputs = inputs
-            # print("<<",len(inputs), len(node.var_inds))
+            print("<<",len(inputs), node.var_inds)
+
+    print(var_end_nodes)
 
 
-    return rete_graph_ctor(mem, nodes_by_nargs, var_root_nodes,
-             var_end_nodes, global_deref_idrec_map, global_base_t_id_map)
+    return rete_graph_ctor(mem, c, nodes_by_nargs, var_root_nodes,
+             var_end_nodes, global_deref_idrec_map, global_t_id_root_memory_map)
 
 
 @njit(cache=True,locals={"t_id" : u2, "f_id":u8, "a_id":u1})
 def parse_mem_change_queue(r_graph):
     
     global_deref_idrec_map = r_graph.global_deref_idrec_map
-    global_base_t_id_map = r_graph.global_base_t_id_map
+    global_t_id_root_memory_map = r_graph.global_t_id_root_memory_map
 
     # for idrec in global_deref_idrec_map:
     #     print("<< global_deref_idrec_map", decode_idrec(idrec))
@@ -699,20 +746,26 @@ def parse_mem_change_queue(r_graph):
 
     change_queue = r_graph.mem.mem_data.change_queue
     # print("**:", change_queue.data[:change_queue.head])
-    # print("**:", global_base_t_id_map)
+    # print("**:", global_t_id_root_memory_map)
     for i in range(r_graph.change_head, change_queue.head):
         idrec = u8(change_queue[i])
         t_id, f_id, a_id = decode_idrec(idrec)
         # print(t_id, f_id, a_id)
 
         # Add this idrec to change_set of root nodes
-        # root_node_mem = global_base_t_id_map.get(t_id,None)
-        if(t_id in global_base_t_id_map):
+        # root_node_mem = global_t_id_root_memory_map.get(t_id,None)
+        if(t_id in global_t_id_root_memory_map):
             # print("T_ID", t_id)
+            root_mem = global_t_id_root_memory_map[t_id]
+            root_mem.change_set[idrec] = u1(1)
+            fact_idrec = encode_idrec(t_id,f_id,0)
+            if(a_id == DECLARE):
+                root_mem.matches[fact_idrec] = 1
+            elif(a_id == RETRACT):
+                root_mem.matches[fact_idrec] = 0
 
-            global_base_t_id_map[t_id].change_set[encode_idrec(t_id,f_id,a_id)] = u1(1)
         # else:
-            # print("~T_ID", t_id, List(global_base_t_id_map.keys()))
+            # print("~T_ID", t_id, List(global_t_id_root_memory_map.keys()))
 
         # Add this idrec to relevant deref idrecs
         # idrec_pattern = encode_idrec(t_id, 0, a_id)
@@ -728,7 +781,7 @@ def parse_mem_change_queue(r_graph):
         # print(decode_idrec(idrec))
 
     # print(r_graph.global_deref_idrec_map)
-    # print(r_graph.global_base_t_id_map)
+    # print(r_graph.global_t_id_root_memory_map)
     r_graph.change_head = change_queue.head
 
     # print(r_graph.var_root_nodes)
@@ -753,7 +806,6 @@ match_iterator_node_field_dict = {
     "associated_output" : NodeMemoryType,
     "depends_on_var_ind" : i8,
     "var_ind" : i8,
-
     # "is_exhausted": boolean,
     "curr_ind": i8,
     "idrecs" : u8[::1],
@@ -766,38 +818,63 @@ MatchIterNode, MatchIterNodeType = define_structref("MatchIterNode", match_itera
 
 
 
-class MatchIterator(structref.StructRefProxy):
-    ''' '''
-    def __new__(cls, context=None):
-        raise ValueError("MatchIterator should not be instantiated directly. Use Conditions.get_matches().")
-    def __next__(self):
-        return match_iter_next(self)
-    def __iter__(self):
-        return self
+
 
 match_iterator_field_dict = {
     "graph" : ReteGraphType,
     "iter_nodes" : ListType(MatchIterNodeType),
     "is_empty" : types.boolean,
+    "output_types" : types.Any
     # "curr_match" : u8[::1],
 }
 match_iterator_fields = [(k,v) for k,v, in match_iterator_field_dict.items()]
 
+class MatchIterator(structref.StructRefProxy):
+    ''' '''
+    # def __init__(self):
+    #     super().__init__()
+
+    def __new__(cls, mem, conds):
+        # Make a generic MatchIterator (reuses graph if conds already has one)
+        generic_m_iter = get_match_iter(mem, conds)
+        # generic_m_iter = new_match_iter(graph)
+        # if(conds is None): conds = rete_graph_get_conds(graph)
+
+        # Specialize the match iter to output conds.var_base_types 
+        output_types = types.TypeRef(types.Tuple([types.TypeRef(x) for x in conds.var_base_types]))
+        spec_m_iter_type = MatchIteratorType([(k,v) for k,v in {**match_iterator_field_dict   ,"output_types": output_types}.items()])
+        self = cast_structref(spec_m_iter_type, generic_m_iter)
+        self.output_types = output_types#tuple([types.TypeRef(x) for x in conds.var_base_types])
+        return self
+        
+    def __next__(self):
+        # ptrs = match_iter_next_ptrs(self)
+        # print(ptrs)
+        # return fact_ptrs_as_tuple(self.output_types, ptrs)
+        return match_iter_next(self)
+
+        # return match_iter_next(self)
+    def __iter__(self):
+        return self
+
 
 @structref.register
-class MatchIteratorTypeTemplate(types.StructRef):
+class MatchIteratorType(types.StructRef):
     def __str__(self):
         return "cre.MatchIterator"
     def preprocess_fields(self, fields):
         return tuple((name, types.unliteral(typ)) for name, typ in fields)
 
 
-define_boxing(MatchIteratorTypeTemplate, MatchIterator)
-MatchIteratorType = MatchIteratorTypeTemplate(match_iterator_fields)
+define_boxing(MatchIteratorType, MatchIterator)
+MatchIteratorGenericType = MatchIteratorType(match_iterator_fields)
 
 
 
 # MatchIter, MatchIteratorType = define_structref("MatchIter", match_iterator_field_dict)
+
+# @njit(cache=True)
+# def copy_iter_nodes()
 
 
 @njit(cache=True)
@@ -815,7 +892,7 @@ def copy_match_iter(m_iter):
             new_m_node.idrecs = m_node.idrecs
         m_iter_nodes.append(new_m_node)
 
-    new_m_iter = new(MatchIteratorType)
+    new_m_iter = new(MatchIteratorGenericType)
     new_m_iter.graph = m_iter.graph 
     new_m_iter.iter_nodes = m_iter_nodes 
     new_m_iter.is_empty = m_iter.is_empty
@@ -824,7 +901,6 @@ def copy_match_iter(m_iter):
 
 @njit(cache=True)
 def new_match_iter(graph):
-    print("HERE")
     if(graph.match_iter_prototype_ptr == 0):
         m_iter_nodes = List.empty_list(MatchIterNodeType)
         handled_vars = Dict.empty(i8,MatchIterNodeType)
@@ -859,13 +935,13 @@ def new_match_iter(graph):
         for i in range(len(m_iter_nodes)-1,-1,-1):
             rev_m_iter_nodes.append(m_iter_nodes[i])
 
-        m_iter = new(MatchIteratorType)
+        m_iter = new(MatchIteratorGenericType)
         m_iter.graph = graph 
         m_iter.iter_nodes = rev_m_iter_nodes 
         m_iter.is_empty = False
         graph.match_iter_prototype_ptr = _pointer_from_struct_incref(m_iter)
     
-    prototype = _struct_from_pointer(MatchIteratorType, graph.match_iter_prototype_ptr)
+    prototype = _struct_from_pointer(MatchIteratorGenericType, graph.match_iter_prototype_ptr)
     m_iter = copy_match_iter(prototype)
     
     return m_iter
@@ -984,11 +1060,11 @@ def match_iter_next_idrecs(m_iter):
 
     return idrecs
 
-
 @njit(cache=True)
 def match_iter_next_ptrs(m_iter):
     mem, graph = m_iter.graph.mem, m_iter.graph
     idrecs = match_iter_next_idrecs(m_iter)
+    print(idrecs)
     ptrs = np.empty(len(idrecs),dtype=np.int64)
     for i, idrec in enumerate(idrecs):
         t_id, f_id, _  = decode_idrec(idrec)
@@ -998,8 +1074,51 @@ def match_iter_next_ptrs(m_iter):
 
 @njit(cache=True)
 def match_iter_next(m_iter):
-    return match_iter_next_ptrs(m_iter)
+    ptrs = match_iter_next_ptrs(m_iter)
+    # print(ptrs)
+    tup = _struct_tuple_from_pointer_arr(m_iter.output_types, ptrs)
+    return tup
 
+
+@njit(cache=True)
+def fact_ptrs_as_tuple(typs, ptr_arr):
+    # print("BEFORE")
+    tup = _struct_tuple_from_pointer_arr(typs, ptr_arr)
+    # print("AFTER",tup)
+    return tup
+
+# @generated_jit(cache=True,nopython=True)
+# def _get_matches(conds, struct_types, mem=None):
+#     print(type(struct_types))
+#     print(struct_types)
+#     if(isinstance(struct_types, UniTuple)):
+#         typs = tuple([struct_types.dtype.instance_type] * struct_types.count)
+#         out_type =  UniTuple(struct_types.dtype.instance_type,struct_types.count)
+#     else:
+#         raise NotImplemented("Need to write intrinsic for multi-type ")
+
+    # print(typs)
+# @njit(cache=True, locals={"ptr_set" : i8[::1]})
+# def match_iter_next(m_iter, struct_types):
+#     ptrs = match_iter_next_ptrs(m_iter)
+#     return _struct_tuple_from_pointer_arr(struct_types, ptr_set)
+
+
+# @njit(cache=True)
+# def match_iter_next(m_iter, types):
+#     mem, graph = m_iter.graph.mem, m_iter.graph
+#     idrecs = match_iter_next_idrecs(m_iter)
+#     ptrs = np.empty(len(idrecs),dtype=np.int64)
+#     for i, idrec in enumerate(idrecs):
+#         t_id, f_id, _  = decode_idrec(idrec)
+#         facts = _struct_from_pointer(VectorType, mem.mem_data.facts[t_id])
+#         ptrs[i] = facts.data[f_id]
+#     return ptrs
+
+
+# @njit(cache=True)
+# def match_iter_next(m_iter):
+#     return match_iter_next_ptrs(m_iter)
 
 @njit(cache=True)
 def update_graph(graph):

@@ -277,9 +277,11 @@ class Conditions(structref.StructRefProxy):
         return get_ptr_matches(self,mem)
 
     def get_matches(self, mem=None):
-        from cre.rete import get_match_iter
+        from cre.rete import MatchIterator
         # return get_matches(self, self.var_base_types, mem=mem)
-        return get_match_iter(mem, self)
+
+
+        return MatchIterator(mem, self)#get_match_iter(mem, self)
 
     @property
     def var_base_types(self):
@@ -942,6 +944,7 @@ def get_linked_conditions_instance(conds, mem, copy=False):
 
 @njit(cache=True)
 def build_distributed_dnf(c,index_map=None):
+    print("c.vars", c.vars)
     distr_dnf = List.empty_list(distr_conj_type)
 
     if(index_map is None):
@@ -981,6 +984,7 @@ def build_distributed_dnf(c,index_map=None):
     c.distr_dnf = distr_dnf
     c.has_distr_dnf = True
 
+    print(distr_dnf)
     return distr_dnf
 
 

@@ -325,7 +325,7 @@ from cre.rete import update_graph
 def test_build_rete_graph():
     from cre.rete import (node_ctor, build_rete_graph, parse_mem_change_queue,
                             new_match_iter,repr_match_iter_dependencies, copy_match_iter,
-                            restitch_match_iter, match_iter_next)
+                            restitch_match_iter)
     from cre.var import GenericVarType
     from cre.conditions import as_distr_dnf_list
     with cre_context("test_distr_dnf_and"):
@@ -378,17 +378,20 @@ def test_build_rete_graph():
 
         # print(restitch_match_iter(m_iter_copy))
 
-        while(True):
-            try:
-                print([decode_idrec(x) for x in match_iter_next(m_iter)])        
-                # print(match_iter_next(m_iter_copy))        
-            except StopIteration:
-                print("STOP ITER")
-                break
+        # while(True):
+        #     try:
+        #         # print([decode_idrec(x) for x in match_iter_next(m_iter)])        
+        #         print(match_iter_next(m_iter))        
+        #     except StopIteration:
+        #         print("STOP ITER")
+        #         break
 
         m_iter = mixup_conds.get_matches(mem)
         for x in m_iter:
-            print([decode_idrec(y) for y in x])
+            # print([decode_idrec(y) for y in x])
+            print(x)
+
+        print(mem)
 
 
 
@@ -433,12 +436,12 @@ def test_blaa():
 
         print(restitch_match_iter(m_iter_copy))
 
-        while(True):
-            try:
-                print(match_iter_next(m_iter_copy))        
-            except StopIteration:
-                print("STOP ITER")
-                break
+        # while(True):
+        #     try:
+        #         print(match_iter_next(m_iter_copy))        
+        #     except StopIteration:
+        #         print("STOP ITER")
+        #         break
 
 
         # assert type(conds.get_matches(mem))==???ITERATOR

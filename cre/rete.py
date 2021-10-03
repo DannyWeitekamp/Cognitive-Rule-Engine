@@ -1064,7 +1064,7 @@ def match_iter_next_idrecs(m_iter):
 def match_iter_next_ptrs(m_iter):
     mem, graph = m_iter.graph.mem, m_iter.graph
     idrecs = match_iter_next_idrecs(m_iter)
-    print(idrecs)
+    # print(idrecs)
     ptrs = np.empty(len(idrecs),dtype=np.int64)
     for i, idrec in enumerate(idrecs):
         t_id, f_id, _  = decode_idrec(idrec)

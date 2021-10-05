@@ -5,9 +5,9 @@ from numba.types import ListType, DictType, unicode_type, void, Tuple
 from numba.experimental.structref import new, define_boxing
 import numba.experimental.structref as structref
 from cre.utils import (_dict_from_ptr, _pointer_from_struct,
-         _pointer_from_struct_incref, _struct_from_pointer, decode_idrec,
-        encode_idrec, deref_type, OFFSET_TYPE_ATTR, OFFSET_TYPE_LIST,
-         _pointer_to_data_pointer, _list_base_from_ptr, _load_pointer,
+         _pointer_from_struct_incref, _struct_from_pointer, decode_idrec, CastFriendlyMixin,
+        encode_idrec, deref_type, OFFSET_TYPE_ATTR, OFFSET_TYPE_LIST, _obj_cast_codegen,
+         _pointer_to_data_pointer, _list_base_from_ptr, _load_pointer, PrintElapse,
          _decref_structref, _decref_pointer, cast_structref, _struct_tuple_from_pointer_arr)
 from cre.structref import define_structref
 from cre.memory import MemoryType
@@ -16,7 +16,10 @@ from cre.var import GenericVarType
 from cre.op import GenericOpType
 from cre.conditions import LiteralType, build_distributed_dnf, ConditionsType
 from cre.vector import VectorType, new_vector
-from cre.fact import BaseFactType
+from cre.fact import BaseFactType 
+
+from numba.core.imputils import (lower_cast)
+
 
 RETRACT = u1(0xFF)# u1(0)
 DECLARE = u1(0)
@@ -274,6 +277,7 @@ def update_changes_from_inputs(self, arg_change_sets):
         arg_change_sets_i = arg_change_sets[i]
         for idrec in inp.change_set:
             arg_change_sets_i[idrec] = u1(1)
+            # print("::", i, idrec)
 
         # if(len(arg_change_sets_i) > 0):
              
@@ -392,12 +396,14 @@ def invalidate_beta_match(self, match_idrecs):
 def update_node(self):
 
     if(self.op is None):
-        print("---", None, "---")
+        # print("---", None, "---")
         # If the node is an identity node then just connect input to output
 
         # for x in matches
-        self.outputs = self.inputs
-        print("<<", [x.matches for x in self.outputs])
+        # self.outputs = self.inputs
+        # print(self.outputs[0].matches)
+        # for x in self.outputs:
+        #     print("<<", x.matches, x.change_set)
         return
     
     arg_change_sets = List.empty_list(dict_u8_u1_type)
@@ -421,7 +427,9 @@ def update_node(self):
     match_idrecs = np.zeros((len(self.var_inds),),dtype=np.uint64)
     n_vars = len(head_ranges)
 
-    print("---", self.op, "---")
+    # print("---", self.op, "---")
+    # print(self.inputs[0].change_set)
+    # print(self.inputs[0].change_set)
 
     for i, out in enumerate(self.outputs):
         out.change_set = Dict.empty(u8,u1)
@@ -443,7 +451,7 @@ def update_node(self):
                 match_inp_ptrs[i_strt:i_strt+i_len] = head_ptrs_i[idrec_i]
                 match_idrecs[i] = idrec_i
             
-            
+                
                 for idrec_j, h_ptrs_j in self.head_ptrs[j].items():
                     # print(encode_idrec(self.t_ids[j],f_id_j,0), arg_change_sets[j])
                     if(j > i and idrec_j in arg_change_sets[j]):
@@ -460,7 +468,7 @@ def update_node(self):
                         was_match = insert_beta_match(self, match_idrecs)
                     else:
                         was_match = invalidate_beta_match(self, match_idrecs)
-                    # print(f_id_i, f_id_j, is_match, was_match)
+                    # print(f_id_i, decode_idrec(idrec_j)[1], is_match, was_match)
         else:
             # ALPHA CASE 
             for idrec_i in change_set:
@@ -476,7 +484,7 @@ def update_node(self):
                 else:
                     invalidate_alpha_match(self,idrec_i)
 
-    print("<<", [x.matches for x in self.outputs])
+    # print("<<", [x.matches for x in self.outputs])
 
 
 
@@ -597,32 +605,44 @@ def _get_var_t_id(mem, var):
     if(t_id is None): raise ValueError("Base Vars of Conditions() must inherit from Fact")
     return t_id
 
+@njit(cache=True)
+def _ensure_long_enough(nodes_by_nargs, nargs):
+    while(len(nodes_by_nargs) <= nargs-1):
+        nodes_by_nargs.append(List.empty_list(BaseReteNodeType))
+
+ReteNode_List_type = ListType(BaseReteNodeType)
+
 @njit(cache=True,locals={})
 def _make_rete_nodes(mem, c, index_map):
-    nodes_by_nargs = List()
+    nodes_by_nargs = List.empty_list(ReteNode_List_type)
+    nodes_by_nargs.append(List.empty_list(BaseReteNodeType))
     global_deref_idrec_map = Dict.empty(u8, node_list_type)
     # global_t_id_root_memory_map = Dict.empty(u8, node_list_type)
 
     fnum_to_t_id = mem.context_data.fact_num_to_t_id
     # fname_to_t_id = mem.context_data.fact_to_t_id
 
+    # Make an identity node (i.e. lit,op=None) so there are always alphas
+    for j in range(len(c.vars)):
+        t_ids = np.empty((1,),dtype=np.uint16)
+        var_inds = np.empty((1,),dtype=np.int64)
+        base_var = c.vars[j]
+        t_ids[0] = _get_var_t_id(mem, base_var)
+        var_inds[0] = index_map[base_var.base_ptr]
+        # _ensure_long_enough(nodes_by_nargs, 1)
+        nodes_by_nargs[0].append(node_ctor(mem, t_ids, var_inds,lit=None))
+
+
     for distr_conjuct in c.distr_dnf:
         for j, var_conjuct in enumerate(distr_conjuct):
 
-            if(len(var_conjuct)==0):
-                # No constraints on var j so make an identity node (i.e. lit,op=None) 
-                t_ids = np.empty((1,),dtype=np.uint16)
-                var_inds = np.empty((1,),dtype=np.int64)
-                base_var = c.vars[j]
-                t_ids[0] = _get_var_t_id(mem, base_var)
-                var_inds[0] = index_map[base_var.base_ptr]
-                nodes_by_nargs[0].append(node_ctor(mem, t_ids, var_inds,lit=None))
-                continue
+            # if(len(var_conjuct)==0):
+                
+                # continue
 
             for lit in var_conjuct:
                 nargs = len(lit.var_base_ptrs)
-                while(len(nodes_by_nargs) <= nargs-1):
-                    nodes_by_nargs.append(List.empty_list(BaseReteNodeType))
+                _ensure_long_enough(nodes_by_nargs, nargs)
 
                 t_ids = np.empty((nargs,),dtype=np.uint16)
                 var_inds = np.empty((nargs,),dtype=np.int64)
@@ -632,7 +652,7 @@ def _make_rete_nodes(mem, c, index_map):
                     t_id = _get_var_t_id(mem, base_var)
                     t_ids[i] = t_id
 
-                # print("t_ids", t_ids)
+                print("t_ids", t_ids)
                 node = node_ctor(mem, t_ids, var_inds, lit)
                 nodes_by_nargs[nargs-1].append(node)
                 # print("<< aft", lit.op.head_var_ptrs)
@@ -666,6 +686,7 @@ optional_node_mem_type = types.optional(NodeMemoryType)
 
 @njit(cache=True)
 def build_rete_graph(mem, c):
+    # print("A")
     index_map = Dict.empty(i8, i8)
     # var_t_ids = np.zeros((len(c.vars),), dtype=np.uint16)
 
@@ -678,10 +699,10 @@ def build_rete_graph(mem, c):
         # if(_t_id is not None):
         #     t_id = u2(i8(_t_id))
         #     var_t_ids[i] = t_id
-
+    # print("B")
     if(not c.has_distr_dnf):
         build_distributed_dnf(c,index_map)
-
+    # print("C")
     nodes_by_nargs, global_deref_idrec_map = \
          _make_rete_nodes(mem, c, index_map)
 
@@ -689,7 +710,7 @@ def build_rete_graph(mem, c):
     var_end_nodes = Dict.empty(i8,BaseReteNodeType)
     var_root_nodes = Dict.empty(i8,BaseReteNodeType)
 
-
+    # print("D")
     # Link nodes together. 'nodes_by_nargs' should already be ordered
     # so that alphas are before 2-way, 3-way, etc. betas. 
     for i, nodes in enumerate(nodes_by_nargs):
@@ -713,6 +734,12 @@ def build_rete_graph(mem, c):
                     inputs.append(root)
                     var_root_nodes[ind] = node
 
+            node.inputs = inputs
+
+            # Short circut the input to the output for identity nodes
+            if(node.lit is None):
+                node.outputs = node.inputs
+
                     
                     
                         
@@ -724,10 +751,10 @@ def build_rete_graph(mem, c):
             for ind in node.var_inds:
                 var_end_nodes[ind] = node
             
-            node.inputs = inputs
-            print("<<",len(inputs), node.var_inds)
+            
+            # print("<<",len(inputs), node.var_inds)
 
-    print(var_end_nodes)
+    # print(var_end_nodes)
 
 
     return rete_graph_ctor(mem, c, nodes_by_nargs, var_root_nodes,
@@ -836,6 +863,7 @@ class MatchIterator(structref.StructRefProxy):
 
     def __new__(cls, mem, conds):
         # Make a generic MatchIterator (reuses graph if conds already has one)
+        # with PrintElapse("get_match_iter"):
         generic_m_iter = get_match_iter(mem, conds)
         # generic_m_iter = new_match_iter(graph)
         # if(conds is None): conds = rete_graph_get_conds(graph)
@@ -843,6 +871,7 @@ class MatchIterator(structref.StructRefProxy):
         # Specialize the match iter to output conds.var_base_types 
         output_types = types.TypeRef(types.Tuple([types.TypeRef(x) for x in conds.var_base_types]))
         spec_m_iter_type = MatchIteratorType([(k,v) for k,v in {**match_iterator_field_dict   ,"output_types": output_types}.items()])
+        # with PrintElapse("cast_structref"):
         self = cast_structref(spec_m_iter_type, generic_m_iter)
         self.output_types = output_types#tuple([types.TypeRef(x) for x in conds.var_base_types])
         return self
@@ -851,6 +880,7 @@ class MatchIterator(structref.StructRefProxy):
         # ptrs = match_iter_next_ptrs(self)
         # print(ptrs)
         # return fact_ptrs_as_tuple(self.output_types, ptrs)
+        # with PrintElapse("match_iter_next"):
         return match_iter_next(self)
 
         # return match_iter_next(self)
@@ -859,7 +889,7 @@ class MatchIterator(structref.StructRefProxy):
 
 
 @structref.register
-class MatchIteratorType(types.StructRef):
+class MatchIteratorType(CastFriendlyMixin, types.StructRef):
     def __str__(self):
         return "cre.MatchIterator"
     def preprocess_fields(self, fields):
@@ -867,7 +897,13 @@ class MatchIteratorType(types.StructRef):
 
 
 define_boxing(MatchIteratorType, MatchIterator)
-MatchIteratorGenericType = MatchIteratorType(match_iterator_fields)
+GenericMatchIteratorType = MatchIteratorType(match_iterator_fields)
+
+# Allow any specialization of MatchIteratorType to be downcast to GenericMatchIteratorType
+@lower_cast(MatchIteratorType, GenericMatchIteratorType)
+def downcast(context, builder, fromty, toty, val):
+    return _obj_cast_codegen(context, builder, val, fromty, toty)
+
 
 
 
@@ -877,7 +913,7 @@ MatchIteratorGenericType = MatchIteratorType(match_iterator_fields)
 # def copy_iter_nodes()
 
 
-@njit(cache=True)
+@njit(GenericMatchIteratorType(GenericMatchIteratorType),cache=True)
 def copy_match_iter(m_iter):
     m_iter_nodes = List.empty_list(MatchIterNodeType)
     for i,m_node in enumerate(m_iter.iter_nodes):
@@ -892,14 +928,14 @@ def copy_match_iter(m_iter):
             new_m_node.idrecs = m_node.idrecs
         m_iter_nodes.append(new_m_node)
 
-    new_m_iter = new(MatchIteratorGenericType)
+    new_m_iter = new(GenericMatchIteratorType)
     new_m_iter.graph = m_iter.graph 
     new_m_iter.iter_nodes = m_iter_nodes 
     new_m_iter.is_empty = m_iter.is_empty
 
     return new_m_iter
 
-@njit(cache=True)
+@njit(GenericMatchIteratorType(ReteGraphType), cache=True)
 def new_match_iter(graph):
     if(graph.match_iter_prototype_ptr == 0):
         m_iter_nodes = List.empty_list(MatchIterNodeType)
@@ -935,19 +971,19 @@ def new_match_iter(graph):
         for i in range(len(m_iter_nodes)-1,-1,-1):
             rev_m_iter_nodes.append(m_iter_nodes[i])
 
-        m_iter = new(MatchIteratorGenericType)
+        m_iter = new(GenericMatchIteratorType)
         m_iter.graph = graph 
         m_iter.iter_nodes = rev_m_iter_nodes 
         m_iter.is_empty = False
         graph.match_iter_prototype_ptr = _pointer_from_struct_incref(m_iter)
     
-    prototype = _struct_from_pointer(MatchIteratorGenericType, graph.match_iter_prototype_ptr)
+    prototype = _struct_from_pointer(GenericMatchIteratorType, graph.match_iter_prototype_ptr)
     m_iter = copy_match_iter(prototype)
     
     return m_iter
 
 
-@njit(cache=True)
+@njit(unicode_type(GenericMatchIteratorType),cache=True)
 def repr_match_iter_dependencies(m_iter):
     rep = ""
     for i, m_node in enumerate(m_iter.iter_nodes):
@@ -966,11 +1002,11 @@ def repr_match_iter_dependencies(m_iter):
 
     # return MatchIter(rev_m_iter_nodes)
 
-@njit(cache=True)
+@njit(types.void(MatchIterNodeType),cache=True)
 def update_other_idrecs(m_node):
     # print("START UPDATE OTHER")
     if(len(m_node.node.var_inds) > 1):
-        # print("A")
+        # print("A", m_node.idrecs, m_node.curr_ind)
         matches = m_node.associated_output.matches
         f_id = m_node.idrecs[m_node.curr_ind]
         # print("B", matches, m_node.f_ids, m_node.curr_ind)
@@ -991,8 +1027,8 @@ def update_other_idrecs(m_node):
 
 
 
-@njit(cache=True)
-def restitch_match_iter(m_iter, start_from=-1):
+@njit(types.void(GenericMatchIteratorType,i8), cache=True)
+def restitch_match_iter(m_iter, start_from):
     if(start_from == -1): start_from = len(m_iter.iter_nodes)-1
     for i in range(start_from,-1,-1):
         # print("I", i)
@@ -1019,14 +1055,14 @@ def restitch_match_iter(m_iter, start_from=-1):
                 # m_node.curr_ind = 0
             m_node.curr_ind = 0
         if(i > 0):
-            # print("SS")
+            print("SS")
             update_other_idrecs(m_node)
             # print("S UPDATE OTHER", i, m_node.other_f_ids)
         # else:
         #     print("CURRIND", m_node.curr_ind)
             # m_node.curr_ind = 0
 
-@njit(cache=True)
+@njit(u8[::1](GenericMatchIteratorType),cache=True)
 def match_iter_next_idrecs(m_iter):
     n_vars = len(m_iter.iter_nodes)
     if(m_iter.is_empty or n_vars == 0): raise StopIteration()
@@ -1060,7 +1096,7 @@ def match_iter_next_idrecs(m_iter):
 
     return idrecs
 
-@njit(cache=True)
+@njit(i8[::1](GenericMatchIteratorType), cache=True)
 def match_iter_next_ptrs(m_iter):
     mem, graph = m_iter.graph.mem, m_iter.graph
     idrecs = match_iter_next_idrecs(m_iter)
@@ -1128,18 +1164,21 @@ def update_graph(graph):
             update_node(node)        
 
 
-@njit(cache=True)
+@njit(GenericMatchIteratorType(MemoryType, ConditionsType), cache=True)
 def get_match_iter(mem, conds):
+    # print("START")
     if(conds.matcher_inst_ptr == 0):
         rete_graph = build_rete_graph(mem, conds)
         conds.matcher_inst_ptr = _pointer_from_struct_incref(rete_graph)
+    # print("BUILT")
     rete_graph = _struct_from_pointer(ReteGraphType, conds.matcher_inst_ptr)
     update_graph(rete_graph)
+    # print("UPDATED")
     m_iter = new_match_iter(rete_graph)
     # for i, m_node in enumerate(m_iter.iter_nodes):
     #     print("<<", m_node.curr_ind)
     # print("INITIAL RESTICH")
-    restitch_match_iter(m_iter)
+    restitch_match_iter(m_iter, -1)
     # print("RESTRICT ED")
     return m_iter
 

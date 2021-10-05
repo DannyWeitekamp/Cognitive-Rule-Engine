@@ -4,7 +4,7 @@ from numba.typed import List
 from cre.conditions import *
 from cre.memory import Memory
 from cre.context import cre_context
-from cre.matching import get_ptr_matches,_get_matches
+# from cre.matching import get_ptr_matches,_get_matches
 from cre.utils import _struct_from_pointer, _pointer_from_struct
 
 # with cre_context("test_matching"):
@@ -40,57 +40,57 @@ def mem_w_n_boops(n):
     return mem
 
 
-def test_matching():
-    with cre_context("test_matching_unconditioned"):
-        BOOP, BOOPType = define_fact("BOOP",{"name": "string", "B" : "number"})
-        # with cre_context("test_link"):
-        # BOOP, BOOPType = define_fact("BOOP",{"A": "string", "B" : "number"})
-        mem = mem_w_n_boops(5)
+# def test_matching():
+#     with cre_context("test_matching_unconditioned"):
+#         BOOP, BOOPType = define_fact("BOOP",{"name": "string", "B" : "number"})
+#         # with cre_context("test_link"):
+#         # BOOP, BOOPType = define_fact("BOOP",{"A": "string", "B" : "number"})
+#         mem = mem_w_n_boops(5)
 
 
-        l1, l2 = Var(BOOPType,"l1"), Var(BOOPType,"l2")
-        r1, r2 = Var(BOOPType,"r1"), Var(BOOPType,"r2")
+#         l1, l2 = Var(BOOPType,"l1"), Var(BOOPType,"l2")
+#         r1, r2 = Var(BOOPType,"r1"), Var(BOOPType,"r2")
 
-        c = (l1.B > 0) & (l1.B != 3) & (l1.B < 4) & (l2.B != 3) | \
-            (l1.B == 3) 
+#         c = (l1.B > 0) & (l1.B != 3) & (l1.B < 4) & (l2.B != 3) | \
+#             (l1.B == 3) 
 
-        print(c)
+#         print(c)
 
-        cl = get_linked_conditions_instance(c, mem)
+#         cl = get_linked_conditions_instance(c, mem)
 
-        Bs = boop_Bs_from_ptrs(get_ptr_matches(cl))
-        print("Bs", Bs)
+#         Bs = boop_Bs_from_ptrs(get_ptr_matches(cl))
+#         print("Bs", Bs)
 
-        print("----------")
+#         print("----------")
 
-        c = (l1.B <= 1) & (l1.B < l2.B) & (l2.B <= r1.B)
+#         c = (l1.B <= 1) & (l1.B < l2.B) & (l2.B <= r1.B)
 
-        cl = get_linked_conditions_instance(c, mem)
+#         cl = get_linked_conditions_instance(c, mem)
 
-        Bs = boop_Bs_from_ptrs(get_ptr_matches(cl))
-        print("Bs", Bs)
-
-
-def test_matching_unconditioned():
-    with cre_context("test_matching_unconditioned"):
-        BOOP, BOOPType = define_fact("BOOP",{"name": "string", "B" : "number"})
-        mem = mem_w_n_boops(5)
+#         Bs = boop_Bs_from_ptrs(get_ptr_matches(cl))
+#         print("Bs", Bs)
 
 
-        l1, l2 = Var(BOOPType,"l1"), Var(BOOPType,"l2")
-        c = l1 & l2
-
-        cl = get_linked_conditions_instance(c, mem)
-        Bs = boop_Bs_from_ptrs(get_ptr_matches(cl))
-        print("Bs", Bs)
+# def test_matching_unconditioned():
+#     with cre_context("test_matching_unconditioned"):
+#         BOOP, BOOPType = define_fact("BOOP",{"name": "string", "B" : "number"})
+#         mem = mem_w_n_boops(5)
 
 
-        l1, l2 = Var(BOOPType,"l1"), Var(BOOPType,"l2")
-        c = l1 & (l2.B < 3)
+#         l1, l2 = Var(BOOPType,"l1"), Var(BOOPType,"l2")
+#         c = l1 & l2
 
-        cl = get_linked_conditions_instance(c, mem)
-        Bs = boop_Bs_from_ptrs(get_ptr_matches(cl))
-        print("Bs", Bs)
+#         cl = get_linked_conditions_instance(c, mem)
+#         Bs = boop_Bs_from_ptrs(get_ptr_matches(cl))
+#         print("Bs", Bs)
+
+
+#         l1, l2 = Var(BOOPType,"l1"), Var(BOOPType,"l2")
+#         c = l1 & (l2.B < 3)
+
+#         cl = get_linked_conditions_instance(c, mem)
+#         Bs = boop_Bs_from_ptrs(get_ptr_matches(cl))
+#         print("Bs", Bs)
 
 def test_ref_matching():
     with cre_context("test_ref_matching"):
@@ -249,11 +249,11 @@ def test_multiple_types():
         mem.declare(TList("A", List(["x","a"])))
         mem.declare(TList("B", List(["x","b"])))
 
-        c = (t.name == b.name)
-        assert match_names(c,mem) == [["A","A"], ["B","B"]]
+        c = t & b & (t.name == b.name)
+        assert match_names(c, mem) == [["A","A"], ["B","B"]]
 
-        c = (b.name == t.name)
-        assert match_names(c,mem) == [["A","A"], ["B","B"]]
+        c = t & b & (b.name == t.name)
+        assert match_names(c, mem) == [["A","A"], ["B","B"]]
 
 
 
@@ -277,25 +277,25 @@ def apply_it(mem,l1,l2,r1):
     print(l1,l2,r1)
     mem.declare(BOOP("??",1000+r1.B))
 
-@njit(cache=True)
-def apply_all_matches(c, f, mem):
-    cl = get_linked_conditions_instance(c, mem)
-    ptr_matches = get_ptr_matches(cl)
-    for match in ptr_matches:
-        arg0 = _struct_from_pointer(BOOPType,match[0]) 
-        arg1 = _struct_from_pointer(BOOPType,match[1]) 
-        arg2 = _struct_from_pointer(BOOPType,match[2]) 
-        f(mem,arg0,arg1,arg2)
+# @njit(cache=True)
+# def apply_all_matches(c, f, mem):
+#     cl = get_linked_conditions_instance(c, mem)
+#     ptr_matches = get_ptr_matches(cl)
+#     for match in ptr_matches:
+#         arg0 = _struct_from_pointer(BOOPType,match[0]) 
+#         arg1 = _struct_from_pointer(BOOPType,match[1]) 
+#         arg2 = _struct_from_pointer(BOOPType,match[2]) 
+#         f(mem,arg0,arg1,arg2)
 
 
-def test_applying():
-    with cre_context("test_matching_benchmarks"):
-        mem = mem_w_n_boops(5)
-        l1, l2 = Var(BOOPType,"l1"), Var(BOOPType,"l2")
-        r1, r2 = Var(BOOPType,"r1"), Var(BOOPType,"r2")
-        c = (l1.B <= 1) & (l1.B < l2.B) & (l2.B <= r1.B)
-        apply_all_matches(c,apply_it,mem)
-        apply_all_matches(c,apply_it,mem)
+# def test_applying():
+#     with cre_context("test_matching_benchmarks"):
+#         mem = mem_w_n_boops(5)
+#         l1, l2 = Var(BOOPType,"l1"), Var(BOOPType,"l2")
+#         r1, r2 = Var(BOOPType,"r1"), Var(BOOPType,"r2")
+#         c = (l1.B <= 1) & (l1.B < l2.B) & (l2.B <= r1.B)
+#         apply_all_matches(c,apply_it,mem)
+#         apply_all_matches(c,apply_it,mem)
 
 
 
@@ -324,14 +324,15 @@ def test_b_matching_1_t_4_lit(benchmark):
 
 
 if(__name__ == "__main__"):
+    pass
     # test_applying()
     # test_matching()
     # test_matching_unconditioned()
     # test_ref_matching()
     # test_multiple_deref()
     # test_list()
-    # test_multiple_types()
+    test_multiple_types()
     # import pytest.__main__.benchmark
     # matching_1_t_4_lit_setup()
     # test_NOT()
-    test_b_matching_1_t_4_lit()
+    # test_b_matching_1_t_4_lit()

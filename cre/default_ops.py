@@ -1,4 +1,5 @@
 from cre.op import Op
+from cre.ptrop import PtrOp
 
 
 @Op(shorthand = '({0} == {1})', commutes=True)
@@ -21,7 +22,6 @@ def GreaterThan(a, b):
 @Op(shorthand = '({0} >= {1})')
 def GreaterThanEq(a, b):
     return a >= b
-
 
 @Op(shorthand = '({0} + {1})', commutes=True)
 def Add(a, b):
@@ -51,6 +51,12 @@ def Power(a, b):
     return a ** b
 
 
+@PtrOp(nargs=2, shorthand = '({0} == {1})')
+def ObjEquals(ptrs):
+    return ptrs[0] == ptrs[1]
 
+@PtrOp(nargs=1, shorthand = '({0} == None)')
+def ObjIsNone(ptrs):
+    return ptrs[0] == 0
 
 

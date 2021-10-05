@@ -467,6 +467,23 @@ def test_op_arith_overloads ():
     op = (x + z) ** 1
     assert str(op) == "((x + z) ** 1)"
 
+def test_ptr_ops():
+    from cre.default_ops import ObjIsNone, ObjEquals
+    with cre_context("test_ptr_ops"):
+        BOOP, BOOPType = define_fact("BOOP",{"nxt" : "BOOP", "val" : f8})
+
+        a,b,c = Var(BOOP,"a"), Var(BOOP,"b"), Var(BOOP,"c")    
+
+        l1 = ObjIsNone(a.nxt)
+        l2 = ObjEquals(a.nxt, b.nxt)
+
+        assert l1.match_head_ptrs(np.zeros(1,dtype=np.int64)) == True
+        assert l2.match_head_ptrs(np.zeros(2,dtype=np.int64)) == True
+        assert l2.match_head_ptrs(np.arange(2,dtype=np.int64)) == False
+
+
+
+
 
 def test_boxing():
     x, y = Var(f8,'x'), Var(f8,'y')
@@ -540,7 +557,8 @@ if __name__ == "__main__":
 
     #     test_commutes()
     # test_fact_args()
-    test_head_ptrs_ranges()
+    # test_head_ptrs_ranges()
     # not_jit_compilable()
+    test_ptr_ops()
             
 

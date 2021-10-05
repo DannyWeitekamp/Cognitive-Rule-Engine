@@ -13,6 +13,18 @@ from cre.context import cre_context
 from cre.default_ops import Add
 
 
+import time
+
+class PrintElapse():
+    def __init__(self, name):
+        self.name = name
+    def __enter__(self):
+        self.t0 = time.time_ns()/float(1e6)
+    def __exit__(self,*args):
+        self.t1 = time.time_ns()/float(1e6)
+        print(f'{self.name}: {self.t1-self.t0:.2f} ms')
+
+
 def setup_deref_tests(ctx=None):
     with cre_context(ctx):
         BOOP, BOOPType = define_fact("BOOP",{"nxt" : "BOOP", "val" : f8})
@@ -325,7 +337,7 @@ from cre.rete import update_graph
 def test_build_rete_graph():
     from cre.rete import (node_ctor, build_rete_graph, parse_mem_change_queue,
                             new_match_iter,repr_match_iter_dependencies, copy_match_iter,
-                            restitch_match_iter)
+                            restitch_match_iter, get_match_iter)
     from cre.var import GenericVarType
     from cre.conditions import as_distr_dnf_list
     with cre_context("test_distr_dnf_and"):
@@ -340,7 +352,7 @@ def test_build_rete_graph():
         # )
 
         mixup_conds = (
-            a & b & c & (a.val > 2) & (b.val != 0) & (b.nxt.val < a.val) #&
+            a & b & (b.nxt.val < a.val)  #&
             # (c.val == a.val)
         )
 
@@ -361,7 +373,16 @@ def test_build_rete_graph():
         mem.declare(a2)
         mem.declare(a3)
         mem.declare(a4)
+        # print("------------------------------------------------")
+        # get_match_iter(mem,mixup_conds)
+        # print("------------------------------------------------")
+        # from cre.rete import MatchIterator
+        # with PrintElapse("get_matches"):
+            # print("------------------------------------------------")
+        m_iter = mixup_conds.get_matches(mem)
+            # print("------------------------------------------------")
 
+        # with PrintElapse("get_matches"):
         m_iter = mixup_conds.get_matches(mem)
 
         # update_graph(graph)
@@ -383,15 +404,18 @@ def test_build_rete_graph():
         #         # print([decode_idrec(x) for x in match_iter_next(m_iter)])        
         #         print(match_iter_next(m_iter))        
         #     except StopIteration:
-        #         print("STOP ITER")
+        #         # print("STOP ITER")
         #         break
 
-        m_iter = mixup_conds.get_matches(mem)
+        # m_iter = mixup_conds.get_matches(mem)
+        # while()
         for x in m_iter:
-            # print([decode_idrec(y) for y in x])
-            print(x)
 
-        print(mem)
+            print([int(y.val) for y in x])
+            # print([decode_idrec(y) for y in x])
+            # print(x)
+
+        # print(mem)
 
 
 
@@ -403,7 +427,7 @@ def test_blaa():
         a,b,c = Var(BOOP,"a"), Var(BOOP,"b"), Var(BOOP,"c")    
 
         conds = (
-            a & b & c & (a.val > 2) & (b.val != 0) & (b.nxt.val < a.val) #&
+            a & b & (b.nxt.val < a.val) #c & (a.val > 2) & (b.val != 0) & (b.nxt.val < a.val) #&
         )
 
         mem = Memory()

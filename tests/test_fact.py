@@ -160,6 +160,31 @@ def test_cast_fact():
         _b1 = base_up_cast.py_func(_bs)    
         assert type(b1) == type(_b1)    
 
+def test_fact_eq():
+    with cre_context("test_fact_eq") as context:
+        spec1 = {"A" : "string", "B" : "number"}
+        BOOP1, BOOP1Type = define_fact("BOOP1", spec1)
+
+        b1 = BOOP1("A",7)
+        b2 = BOOP1("A",7)
+
+        @njit
+        def do_eq(a,b):
+            return a == b
+
+        assert do_eq(b1,b2) == False
+        assert do_eq(b1,b1) == True
+        assert do_eq(b2,b2) == True
+        assert do_eq.py_func(b1,b2) == False
+        assert do_eq.py_func(b1,b1) == True
+        assert do_eq.py_func(b2,b2) == True
+
+        assert do_eq(b1,None) == False
+        assert do_eq.py_func(b1,None) == False
+        
+
+
+
 
 
 
@@ -306,7 +331,8 @@ if __name__ == "__main__":
     # test_define_fact()
     # test_inheritence()
     # test_cast_fact()
-    test_protected_mutability()
+    # test_protected_mutability()
+    test_fact_eq()
 
     # _test_reference_type()
 

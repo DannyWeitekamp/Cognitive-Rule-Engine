@@ -24,7 +24,7 @@ class CastFriendlyMixin():
         """
         from numba.core.errors import NumbaExperimentalFeatureWarning
         # print(other.__dict__)
-        if isinstance(other, self.__class__):
+        if issubclass(type(self), type(other)):
             if len(other._fields) > len(self._fields):
                 return
             for other_fd, self_fd in zip(other._fields,

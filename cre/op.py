@@ -34,7 +34,7 @@ from operator import itemgetter
 from copy import copy
 from os import getenv
 from cre.utils import deref_type, OFFSET_TYPE_ATTR, OFFSET_TYPE_LIST, listtype_sizeof_item
-import inspect, dill, pickle
+import inspect, cloudpickle, pickle
 from textwrap import dedent, indent
 # from itertools import combinations
 from collections.abc import Iterable
@@ -82,12 +82,12 @@ from numba.experimental.function_type import _get_wrapper_address
 from numba.core.errors import NumbaError, NumbaPerformanceWarning
 from cre.utils import _func_from_address, _load_pointer
 from cre.op import op_fields_dict, OpTypeTemplate, warn_cant_compile
-import dill
+import cloudpickle
 nopython_call = {cls.nopython_call} 
 nopython_check = {cls.nopython_check} 
 
-call_sig = dill.loads({dill.dumps(cls.call_sig)})
-call_pyfunc = dill.loads({cls.call_bytes})
+call_sig = cloudpickle.loads({cloudpickle.dumps(cls.call_sig)})
+call_pyfunc = cloudpickle.loads({cls.call_bytes})
 
 try:
     call = njit(call_sig,cache=True)(call_pyfunc)
@@ -108,8 +108,8 @@ call_addr = _get_wrapper_address(call, call_sig)
 '''
     if(hasattr(cls,'check')):
         source += f'''
-check_sig = dill.loads({dill.dumps(cls.check_sig)})
-check_pyfunc = dill.loads({cls.check_bytes})
+check_sig = cloudpickle.loads({cloudpickle.dumps(cls.check_sig)})
+check_pyfunc = cloudpickle.loads({cls.check_bytes})
 
 try:
     check = njit(check_sig,cache=True)(check_pyfunc)
@@ -182,6 +182,7 @@ op_fields_dict = {
     "call_multi_addr" : i8,
     "check_addr" : i8,
     "match_head_ptrs_addr" : i8,
+    "is_ptr_op" : types.boolean,
     
     # "arg_types" : types.Any,
     # "out_type" : types.Any,
@@ -431,7 +432,7 @@ def make_head_ranges(n_args,head_var_ptrs):
 @njit(cache=True)
 def op_ctor(name, return_type_name, arg_type_names, head_var_ptrs, 
             expr_template="MOOSE", shorthand_template="ROOF",
-            call_addr=0, call_multi_addr=0, check_addr=0, match_head_ptrs_addr=0):
+            call_addr=0, call_multi_addr=0, check_addr=0, match_head_ptrs_addr=0, is_ptr_op=False):
     '''The constructor for an Op instance that can be passed to the numba runtime'''
     st = new(GenericOpType)
     st.name = name
@@ -465,6 +466,7 @@ def op_ctor(name, return_type_name, arg_type_names, head_var_ptrs,
     st.call_multi_addr = call_multi_addr
     st.check_addr = check_addr
     st.match_head_ptrs_addr = match_head_ptrs_addr
+    st.is_ptr_op = is_ptr_op
 
     return st
 
@@ -488,6 +490,7 @@ def new_op(name, members, var_ptrs=None, return_class=False):
     
     # 'cls' is the class of the user defined Op (i.e. Add(a,b)).
     cls = type.__new__(OpMeta,name,(Op,),members) 
+    cls.__module__ = members["call"].__module__
     # cls.__call__ = call_op
     cls._handle_commutes()
     cls._handle_nopython()
@@ -499,6 +502,7 @@ def new_op(name, members, var_ptrs=None, return_class=False):
         cls.process_method("check", u1(*cls.signature.args))
 
     cls._handle_defaults()  
+    # cls._handle_default_templates()
     
     # If either call or check needs to be jitted then generate source code
     #  to do the jitting and put it in the cache. Or retrieve if already
@@ -575,7 +579,9 @@ class OpMeta(type):
     def __new__(meta_cls, *args):
         name, members = args[0], args[2]
         if(name == "Op"):
-            return super().__new__(meta_cls,*args)
+            ret = super().__new__(meta_cls,*args)
+            print(ret)
+            return ret
         # print("<<<<", [str(x.__name__) for x in args[1]])
         # members = 
         return new_op(name, members)
@@ -644,6 +650,7 @@ class OpMeta(type):
                     assert typ1==typ2, \
             f"cre.Op {cls.__name__!r} has invalid 'commutes' member {cls.commutes}. Signature arguments {k} and {commuting_set[j]} have different types {typ1} and {typ2}."
         cls.right_commutes = right_commutes
+        
 
     def _handle_defaults(cls):
         # By default use the variable names that the user defined in the call() fn.
@@ -657,6 +664,8 @@ class OpMeta(type):
             cls._expr_template = f"{cls.__name__}({','.join([f'{{{i}}}' for i in range(len(cls.arg_type_names))])})"  
         
         cls._shorthand_template = cls.shorthand if(hasattr(cls,'shorthand')) else cls._expr_template
+
+        
         
 
 
@@ -671,13 +680,17 @@ class OpMeta(type):
             setattr(cls, name+"_pyfunc", py_func)
             setattr(cls, name+"_sig", sig)
             
-            # Speed up by caching dill.dumps(py_func) inside py_func object
-            if(hasattr(py_func,'_cre_dill_bytes')):
-                setattr(cls, name+'_bytes', py_func._cre_dill_bytes)
+            # Speed up by caching cloudpickle.dumps(py_func) inside py_func object
+            if(hasattr(py_func,'_cre_cloudpickle_bytes')):
+                setattr(cls, name+'_bytes', py_func._cre_cloudpickle_bytes)
             else:
-                dill_bytes = dill.dumps(py_func)
-                setattr(cls, name+'_bytes', dill_bytes)
-                py_func._cre_dill_bytes = dill_bytes
+                # print("<<", py_func)
+                # print("<<", py_func.__dict__)
+                # print(py_func.__loader__)
+                cloudpickle_bytes = cloudpickle.dumps(py_func)
+                # print(cloudpickle_bytes)
+                setattr(cls, name+'_bytes', cloudpickle_bytes)
+                py_func._cre_cloudpickle_bytes = cloudpickle_bytes
 
 
     @property
@@ -1633,11 +1646,11 @@ from numba.extending import intrinsic
 from numba.core import cgutils
 from cre.op import Op
 from cre.utils import _load_pointer
-import dill
+import cloudpickle
 {op_imports}
 
-call_sig = dill.loads({dill.dumps(call_sig)})
-head_types = dill.loads({dill.dumps(head_types)})
+call_sig = cloudpickle.loads({cloudpickle.dumps(call_sig)})
+head_types = cloudpickle.loads({cloudpickle.dumps(head_types)})
 
 {"".join([f'h{i}_type,' for i in range(len(head_types))])} = head_types
 
@@ -1681,7 +1694,5 @@ class __GenerateOp__(Op):
         flattened_inst = self.flatten()
         # print("FALT")
         return flattened_inst(*args)
-
-
 
 

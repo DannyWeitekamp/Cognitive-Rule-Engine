@@ -23,22 +23,21 @@ from numba.types import ListType
 from cre.core import TYPE_ALIASES, JITSTRUCTS, py_type_map, numba_type_map, numpy_type_map
 from cre.gensource import assert_gen_source
 from cre.caching import unique_hash, source_to_cache, import_from_cached, source_in_cache, get_cache_path
-from cre.structref import gen_structref_code, define_structref, CastFriendlyStructref
+from cre.structref import gen_structref_code, define_structref
 from cre.context import cre_context
 from cre.utils import (_struct_from_pointer, _cast_structref, struct_get_attr_offset, _obj_cast_codegen,
-                       _pointer_from_struct_codegen, _pointer_from_struct)
+                       _pointer_from_struct_codegen, _pointer_from_struct, CastFriendlyMixin)
 from numba.core.typeconv import Conversion
+import operator
 
 import numpy as np
 
 GLOBAL_FACT_COUNT = -1
 SPECIAL_ATTRIBUTES = ["inherit_from"]
 
-class Fact(CastFriendlyStructref):
+class Fact(CastFriendlyMixin, types.StructRef):
     def __init__(self, fields):
         super().__init__(fields)
-
-    
 
     def __str__(self):
         return self._fact_name if hasattr(self, '_fact_name') else "Fact"
@@ -46,6 +45,8 @@ class Fact(CastFriendlyStructref):
     def get_attr_offset(self,attr):
         fd = self.field_dict
         return self._attr_offsets[list(fd.keys()).index(attr)]
+
+    
 
     # def __getstate__(self):
     #     state = self.__dict__.copy()
@@ -64,10 +65,10 @@ class Fact(CastFriendlyStructref):
     #     print(state)
     #     return state
 
-
-
 class FactModel(models.StructRefModel):
     pass
+
+
 
 
 
@@ -81,8 +82,8 @@ class DeferredFactRefType():
     def __init__(self,typ):
         self._fact_name = typ._fact_name if isinstance(typ, types.StructRef) else typ 
         super(DeferredFactRefType,self).__init__()
-    def __equal__(self,other):
-        return isinstance(other,DefferedRefType) \
+    def __eq__(self,other):
+        return isinstance(other,DeferredFactRefType) \
                and self._fact_name == other._fact_name
     def __str__(self):
         return f"DeferredFactRefType[{self._fact_name}]"
@@ -235,6 +236,11 @@ class FactProxy:
         Subclasses should NOT override.
         """
         return self._fact_type
+
+    def __eq__(self, other):
+        if(isinstance(other, FactProxy)):
+            return fact_eq(self,other)
+        return False
 
     # def __setattr__(self,attr,val):
     #     from cre.fact_intrinsics import fact_lower_setattr
@@ -593,11 +599,18 @@ def fact_to_ptr(fact):
 @njit(cache=True)
 def fact_to_ptr_incref(fact):
     return _pointer_from_struct_incref(fact)
+
+def _fact_eq(a,b):
+    if(isinstance(a,Fact) and isinstance(b,Fact)):
+        def impl(a,b):
+            return _pointer_from_struct(a) ==_pointer_from_struct(b)
+        return impl
+
+fact_eq = generated_jit(cache=True)(_fact_eq)
+overload(operator.eq)(_fact_eq)
+
+
 ###### Fact Casting #######
-
-
-
-
 @generated_jit
 def cast_fact(typ, val):
     '''Casts a fact to a new type of fact if possible'''

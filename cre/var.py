@@ -240,11 +240,21 @@ class Var(structref.StructRefProxy):
         from cre.default_ops import GreaterThanEq
         return GreaterThanEq(self, other)
     def __eq__(self, other): 
-        from cre.default_ops import Equals
+        from cre.default_ops import Equals, ObjEquals, ObjIsNone
+        if(other is None):
+            return ObjIsNone(self)
+        if(isinstance(other,Var) and isinstance(other.head_type,Fact)):
+            return ObjEquals(self,other)
+
         return Equals(self, other)
     def __ne__(self, other): 
-        from cre.default_ops import Equals
-        return ~Equals(self, other)
+        return ~(self == other)
+        # from cre.default_ops import Equals, ObjEquals, ObjIsNone
+        # if(other is None):
+        #     return ~ObjIsNone(other)
+        # if(isinstance(other,Var) and isinstance(other.head_type,Fact)):
+        #     return ~ObjEquals(self,other)
+        # return ~Equals(self, other)
 
     def __add__(self, other):
         from cre.default_ops import Add

@@ -287,7 +287,8 @@ class Conditions(structref.StructRefProxy):
     def var_base_types(self):
         if(not hasattr(self,"_var_base_types")):
             context = cre_context()
-            self._var_base_types = tuple([context.type_registry[x.base_type_name] for x in self.vars if not x.is_not])
+            delimited_type_names = conds_get_delimited_type_names(self,";",True).split(";")
+            self._var_base_types = tuple([context.type_registry[x] for x in delimited_type_names])
         return self._var_base_types
 
 
@@ -334,6 +335,15 @@ class Conditions(structref.StructRefProxy):
 define_boxing(ConditionsTypeTemplate,Conditions)
 
 ConditionsType = ConditionsTypeTemplate(conditions_fields)
+
+@njit(unicode_type(ConditionsType,unicode_type,types.boolean), cache=True)
+def conds_get_delimited_type_names(self,delim,ignore_ext_nots):
+    s,l = "", len(self.vars)
+    for i, v in enumerate(self.vars):
+        if(ignore_ext_nots and v.is_not): continue
+        s += v.base_type_name
+        s += delim
+    return s[:-len(delim)]
 
 ### Helper Functions for expressing conditions as python lists of cre.Op instances ###
 
@@ -499,7 +509,7 @@ def conditions_ctor(_vars, dnf=None):
 @njit(cache=True)
 def _get_sig_str(conds):
     s = "("
-    print("HERE")
+    # print("HERE")
     for i, var in enumerate(conds.vars):
         if(var.is_not): continue
         if(len(s) > 1): s += ","
@@ -944,7 +954,7 @@ def get_linked_conditions_instance(conds, mem, copy=False):
 
 @njit(cache=True)
 def build_distributed_dnf(c,index_map=None):
-    print("c.vars", c.vars)
+    # print("c.vars", c.vars)
     distr_dnf = List.empty_list(distr_conj_type)
 
     if(index_map is None):
@@ -984,7 +994,7 @@ def build_distributed_dnf(c,index_map=None):
     c.distr_dnf = distr_dnf
     c.has_distr_dnf = True
 
-    print(distr_dnf)
+    # print(distr_dnf)
     return distr_dnf
 
 

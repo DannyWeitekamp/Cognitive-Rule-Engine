@@ -608,9 +608,16 @@ class OpMeta(type):
 
         return wrapper
 
-    def __repr__(cls):
+    def _get_simple_sig_str(cls):
         sig = getattr(cls,'signature',None)
-        return f"cre.OpMeta(name={cls.__name__!r}, signature=[{sig}])"
+        if(sig is None): return "None"
+        return f'{str(sig.return_type)}({",".join([str(x) for x in sig.args])})'
+
+    def __str__(cls):
+        return f"cre.{cls.__name__}(signature={cls._get_simple_sig_str()})"
+
+    def __repr__(cls):
+        return f"cre.OpMeta(name={cls.__name__!r}, signature={cls._get_simple_sig_str()})"
         
 
     def _handle_nopython(cls):
@@ -1122,7 +1129,7 @@ def op_repr(self):
     s = self.expr_template
     arg_names = op_get_arg_names(self)
     for i,arg_name in enumerate(arg_names):
-        s =  s.replace(f'{{{i}}}',f'{arg_name}:{self.arg_type_names[i]}')
+        s =  s.replace(f'{{{i}}}',f'[{arg_name}:{self.arg_type_names[i]}]')
 
     #Add spaces after commas
     s = s.replace(", ", ",")

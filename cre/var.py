@@ -463,19 +463,34 @@ def overload_repr_var(self):
     
 
 @njit(cache=True)
+def str_var_derefs(self):
+    s = ""
+    for i in range(len(self.deref_offsets)):
+        attr = self.deref_attrs[i]
+        deref = self.deref_offsets[i]
+        if(deref.type == OFFSET_TYPE_ATTR):
+            s += "." + attr
+        else:
+            s += "[" + attr + "]"
+    return s
+
+
+
+@njit(cache=True)
 def str_var(self):
     s = self.alias
     if (len(s) > 0):
-        for i in range(len(self.deref_offsets)):
-            attr = self.deref_attrs[i]
-            deref = self.deref_offsets[i]
-            if(deref.type == OFFSET_TYPE_ATTR):
-                s += "." + attr
-            else:
-                s += "[" + attr + "]"
-        return s
+        return s + str_var_derefs(self)
     else:
         return repr(self)
+
+@njit(cache=True)
+def str_var_ptr(ptr):
+    return str_var(_struct_from_pointer(GenericVarType,ptr))
+
+@njit(cache=True)
+def str_var_ptr_derefs(ptr):
+    return str_var_derefs(_struct_from_pointer(GenericVarType,ptr))
 
 
 @overload(str)

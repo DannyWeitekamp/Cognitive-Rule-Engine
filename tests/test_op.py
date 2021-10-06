@@ -164,8 +164,8 @@ def test_source_gen():
 
     assert str(DoublePlusOne) == "((x*2)+1)"
     assert str(TimesDoublePlusOne) == "(((x*2)+1)*y)"
-    assert repr(DoublePlusOne) == "Add(Multiply(x:float64, 2), 1)"
-    assert repr(TimesDoublePlusOne) == "Multiply(Add(Multiply(x:float64, 2), 1), y:float64)"
+    assert repr(DoublePlusOne) == "Add(Multiply([x:float64], 2), 1)"
+    assert repr(TimesDoublePlusOne) == "Multiply(Add(Multiply([x:float64], 2), 1), [y:float64])"
 
 
 
@@ -481,8 +481,8 @@ def test_ptr_ops():
         assert l2.match_head_ptrs(np.zeros(2,dtype=np.int64)) == True
         assert l2.match_head_ptrs(np.arange(2,dtype=np.int64)) == False
 
-
-
+        assert str(l2) == '(a.nxt == b.nxt)'
+        assert repr(l2) == 'ObjEquals([a:BOOP].nxt, [b:BOOP].nxt)'
 
 
 def test_boxing():

@@ -617,7 +617,7 @@ class OpMeta(type):
         return f"cre.{cls.__name__}(signature={cls._get_simple_sig_str()})"
 
     def __repr__(cls):
-        return f"cre.OpMeta(name={cls.__name__!r}, signature={cls._get_simple_sig_str()})"
+        return f"cre.op.OpMeta(name={cls.__name__!r}, signature={cls._get_simple_sig_str()})"
         
 
     def _handle_nopython(cls):

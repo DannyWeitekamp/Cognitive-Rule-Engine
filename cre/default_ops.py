@@ -1,5 +1,7 @@
+from numba import i8
 from cre.op import Op
 from cre.ptrop import PtrOp
+from cre.utils import _load_pointer
 
 
 @Op(shorthand = '({0} == {1})', commutes=True)
@@ -53,10 +55,14 @@ def Power(a, b):
 
 @PtrOp(nargs=2, shorthand = '({0} == {1})')
 def ObjEquals(ptrs):
-    return ptrs[0] == ptrs[1]
+    '''From two head_ptrs see if the underlying pointers to objects are the same'''
+    objptr0 = _load_pointer(i8,ptrs[0])
+    objptr1 = _load_pointer(i8,ptrs[1])
+    return objptr0 == objptr1
 
 @PtrOp(nargs=1, shorthand = '({0} == None)')
 def ObjIsNone(ptrs):
-    return ptrs[0] == 0
+    '''From a head_ptr see if the underlying object pointer is the NULL pointer'''
+    return _load_pointer(i8,ptrs[0]) == 0
 
 

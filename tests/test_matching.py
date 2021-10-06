@@ -13,10 +13,16 @@ from cre.utils import _struct_from_pointer, _pointer_from_struct
 def match_names(c,mem=None):
     out = []
     for m in c.get_matches(mem):
-        print(m)
+        # print(m)
         out.append([x.name for x in m])
         # print("X")
     return out
+
+def set_is_same(a,b):
+    setA = set([tuple(x) for x in a])
+    setB = set([tuple(x) for x in b])
+    return setA == setB
+
 
 @njit(cache=True)
 def boop_Bs_from_ptrs(ptr_matches):
@@ -117,7 +123,7 @@ def test_ref_matching():
         # Bs = boop_Bs_from_ptrs(get_ptr_matches(cl))
 
         # print(Bs)
-        c = x1.nxt == 0
+        c = x1.nxt == None
         # assert str(c) == '(x1.nxt == None)'
         print(c)
 
@@ -136,6 +142,8 @@ def test_ref_matching():
         # cl = get_linked_conditions_instance(c, mem)
         # print(get_ptr_matches(cl))
 
+
+
 def test_multiple_deref():
     with cre_context("test_multiple_deref"):
         TestLL, TestLLType = define_fact("TestLL",{"name": "string", "B" :'number', "nxt" : "TestLL"})
@@ -152,6 +160,8 @@ def test_multiple_deref():
         b2 = TestLL("B2", B=1, nxt=a)
         c2 = TestLL("C2", B=2, nxt=b2)
 
+        print([(i,pointer_from_struct(x)) for i,x in enumerate([a,b1,c1,b2,c2])])
+
         mem.declare(a)
         mem.declare(b1)
         mem.declare(c1)
@@ -162,22 +172,23 @@ def test_multiple_deref():
         v2 = Var(TestLL,'v2')
 
         # One Deep check same fact instance
-        c = (v1.nxt != 0) & (v1.nxt == v2.nxt) & (v1 != v2)
-        assert match_names(c, mem) == [['B1', 'B2'], ['B2', 'B1']]
+        c = (v1.nxt != None) & (v1.nxt == v2.nxt) & (v1 != v2)
+        names = match_names(c, mem) 
+        assert set_is_same(names, [['B1', 'B2'], ['B2', 'B1']])
 
         # One Deep check same B value
-        c = (v1.nxt != 0) & (v1.nxt.B == v2.nxt.B) & (v1 != v2)
+        c = (v1.nxt != None) & (v1.nxt.B == v2.nxt.B) & (v1 != v2)
         names = match_names(c, mem) 
-        print(names)
-        assert names == [['B1', 'B2'], ['C1', 'C2'], ['B2', 'B1'], ['C2', 'C1']]
+        assert set_is_same(names, [['B1', 'B2'], ['C1', 'C2'], ['B2', 'B1'], ['C2', 'C1']])
 
         # Two Deep w/ Permutions
-        c = (v1.nxt.nxt != 0) & (v1.nxt.nxt == v2.nxt.nxt) & (v1 != v2)
-        assert match_names(c, mem) == [['C1', 'C2'], ['C2', 'C1']]
+        c = (v1.nxt.nxt != None) & (v1.nxt.nxt == v2.nxt.nxt) & (v1 != v2)
+        names = match_names(c, mem)
+        assert set_is_same(names, [['C1', 'C2'], ['C2', 'C1']])
 
         # Two Deep w/o Permutions. 
         # NOTE: v1 < v2 compares ptrs, can't guarentee order 
-        c = (v1.nxt.nxt != 0) & (v1.nxt.nxt == v2.nxt.nxt) & (v1 < v2)
+        c = (v1.nxt.nxt != None) & (v1.nxt.nxt == v2.nxt.nxt) & (v1 < v2)
         names = match_names(c, mem)
         assert names == [['C1', 'C2']] or names == [['C2', 'C1']]
 
@@ -186,10 +197,9 @@ def test_multiple_deref():
 
         # Three Deep (use None) -- helps check that dereference errors 
         #  are treated internally as errors instead evaluating to 0.
-        c = (v1.nxt.nxt.nxt != 0) & (v1.nxt.nxt.nxt == v2.nxt.nxt.nxt) & (v1 != v2)
+        c = (v1.nxt.nxt.nxt != None) & (v1.nxt.nxt.nxt == v2.nxt.nxt.nxt) & (v1 != v2)
         names = match_names(c, mem) 
-        print(names)
-        assert names == [['D1', 'D2'], ['D2', 'D1']]
+        assert set_is_same(names, [['D1', 'D2'], ['D2', 'D1']])
 
 
 
@@ -226,10 +236,13 @@ def test_list():
         mem.declare(TList("B", List(["x","b"])))
 
         c = (v1 != v2) & (v1.items[0] == v2.items[0])
-        assert match_names(c, mem) == [['A','B'],['B','A']]
+        names = match_names(c, mem)
+        assert set_is_same(names, [['A','B'],['B','A']])
 
         c = (v1 != v2) & (v1.items[1] != v2.items[1])
-        assert match_names(c, mem) == [['A','B'],['B','A']]
+
+        names = match_names(c, mem)
+        assert set_is_same(names,  [['A','B'],['B','A']])
 
         #TODO: Self-Beta-like conditions
         # c = v1.items[0] != v1.items[1]
@@ -330,9 +343,11 @@ if(__name__ == "__main__"):
     # test_matching_unconditioned()
     # test_ref_matching()
     # test_multiple_deref()
-    # test_list()
-    test_multiple_types()
+    test_list()
+    # test_multiple_types()
+    # test_ref_matching()
     # import pytest.__main__.benchmark
     # matching_1_t_4_lit_setup()
     # test_NOT()
     # test_b_matching_1_t_4_lit()
+    # test_multiple_types()

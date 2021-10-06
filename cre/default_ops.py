@@ -1,7 +1,8 @@
 from numba import i8
 from cre.op import Op
+from cre.fact import BaseFactType
 from cre.ptrop import PtrOp
-from cre.utils import _load_pointer
+from cre.utils import _load_pointer, _struct_from_pointer, decode_idrec
 
 
 @Op(shorthand = '({0} == {1})', commutes=True)
@@ -48,17 +49,36 @@ def Divide(a, b):
 def FloorDivide(a, b):
     return a // b
 
-@Op(shorthand = '({0} ** {1})', check=denom_not_zero)
+@Op(shorthand = '({0} ** {1})')
 def Power(a, b):
     return a ** b
+
+@Op(shorthand = '({0} < {1})')
+def FactIdrecsLessThan(a, b):
+    return a.idrec < b.idrec
 
 
 @PtrOp(nargs=2, shorthand = '({0} == {1})')
 def ObjEquals(ptrs):
     '''From two head_ptrs see if the underlying pointers to objects are the same'''
+    # objptr0 = _struct_from_pointer(BaseFactType,_load_pointer(i8,ptrs[0]))
+    # objptr1 = _struct_from_pointer(BaseFactType,_load_pointer(i8,ptrs[1]))
     objptr0 = _load_pointer(i8,ptrs[0])
     objptr1 = _load_pointer(i8,ptrs[1])
+    # print("OJBS", decode_idrec(_struct_from_pointer(BaseFactType,objptr0).idrec)[1] if objptr0 else -1,
+    #  decode_idrec(_struct_from_pointer(BaseFactType,objptr1).idrec)[1] if objptr1 else -1, objptr0 == objptr1)
     return objptr0 == objptr1
+
+# PtrOp(nargs=2, shorthand = '({0} == {1})')
+# def FactIdrecsLessThan(ptrs):
+#     '''From two head_ptrs see if the left pointers to objects are the same'''
+#     # objptr0 = _struct_from_pointer(BaseFactType,_load_pointer(i8,ptrs[0]))
+#     # objptr1 = _struct_from_pointer(BaseFactType,_load_pointer(i8,ptrs[1]))
+#     objptr0 = _load_pointer(i8,ptrs[0])
+#     objptr1 = _load_pointer(i8,ptrs[1])
+#     # print("OJBS", decode_idrec(_struct_from_pointer(BaseFactType,objptr0).idrec)[1] if objptr0 else -1,
+#     #  decode_idrec(_struct_from_pointer(BaseFactType,objptr1).idrec)[1] if objptr1 else -1, objptr0 == objptr1)
+#     return objptr0 < objptr1
 
 @PtrOp(nargs=1, shorthand = '({0} == None)')
 def ObjIsNone(ptrs):

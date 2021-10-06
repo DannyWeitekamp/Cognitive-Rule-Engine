@@ -45,6 +45,7 @@ node_memory_field_dict = {
     "change_set" : DictType(u8,u1), 
     # Maps f_ids -> sets of f_ids
     "matches" : DictType(u8, i8), 
+    "parent_node_ptr" : i8,
 
 }
 
@@ -56,6 +57,7 @@ def new_node_mem():
     st.change_set = Dict.empty(u8,u1)
     st.matches = Dict.empty(u8,i8)
     st.is_root = False
+    st.parent_node_ptr = 0
     return st
 
 @njit(cache=True)
@@ -64,6 +66,7 @@ def new_root_node_mem():
     st.change_set = Dict.empty(u8,u1)
     st.matches = Dict.empty(u8,i8)
     st.is_root = True
+    st.parent_node_ptr = 0
     return st
 
 
@@ -94,6 +97,7 @@ base_rete_node_field_dict = {
     "head_ptrs" : ListType(DictType(u8,i8[::1])),
     "inputs" : ListType(NodeMemoryType),
     "outputs" : ListType(NodeMemoryType), #DictType(u8,DictType(u8,u1))
+
 }
 
 BaseReteNode, BaseReteNodeType = define_structref("BaseReteNode", base_rete_node_field_dict, define_constructor=False)
@@ -122,9 +126,13 @@ def node_ctor(mem, t_ids, var_inds,lit=None):
     st.head_ptrs = head_ptrs
 
     outputs = List.empty_list(NodeMemoryType)
+
+    self_ptr = _pointer_from_struct(st)
     for i in range(n_vars):
         # outputs.append(Dict.empty(u8,dict_u8_u1_type))
-        outputs.append(new_node_mem())
+        node_mem = new_node_mem()
+        node_mem.parent_node_ptr = self_ptr
+        outputs.append(node_mem)
 
     st.outputs = outputs
 
@@ -223,34 +231,37 @@ def resolve_head_ptr(self, arg_ind, base_t_id, f_id, deref_offsets):
 
 # @njit(void(BaseReteNodeType, i8,u8,u1),locals={"f_id" : u8}, cache=True)
 @njit(locals={"f_id" : u8, "a_id" : u8}, cache=True)
-def validate_head_or_retract(self, arg_ind, idrec, change_set):
+def validate_head_or_retract(self, arg_ind, idrec):
     '''Update the head_ptr dictionaries by following the deref
      chains of DECLARE/MODIFY changes, and make retractions
     for an explicit RETRACT or a failure in the deref chain.'''
     t_id, f_id, a_id = decode_idrec(idrec)
+    is_valid = True
     if(a_id != RETRACT):
-        base_t_id = self.t_ids[arg_ind]
+        # base_t_id = self.t_ids[arg_ind]
         r = self.op.head_ranges[arg_ind]
         # print("r.length", r.length)
         head_ptrs = np.zeros((r.length,),dtype=np.int64)
-        okay = True
+        # okay = True
         # For each head_var try to deref all the way to the head_ptr and put it in head_ptrs
         for i in range(r.length):
             head_var = _struct_from_pointer(GenericVarType,self.op.head_var_ptrs[r.start+i])
             deref_offsets = head_var.deref_offsets
             # print("--start resolve_head_ptr",)
-            head_ptr = resolve_head_ptr(self, arg_ind, base_t_id, f_id, deref_offsets)
-            # print("resolve_head_ptr", f_id, head_ptr)
+            head_ptr = resolve_head_ptr(self, arg_ind, t_id, f_id, deref_offsets)
+            print("resolve_head_ptr", f_id, head_ptr)
             if(head_ptr == 0): 
-                okay=False;
-                del change_set[idrec];
+                is_valid=False;
+                # del change_set[idrec];
                 break; 
             head_ptrs[i] = head_ptr
 
-        if(okay):
+        if(is_valid):
             new_idrec = encode_idrec(t_id, f_id, 0)
             self.head_ptrs[arg_ind][new_idrec] = head_ptrs
-            return
+    else:
+        is_valid = False
+    return is_valid
             
     # # At this point we are definitely RETRACT
     # to_clear = self.outputs[arg_ind].matches
@@ -288,7 +299,8 @@ def update_changes_from_inputs(self, arg_change_sets):
     for i, inp in enumerate(self.inputs):
         arg_change_sets_i = arg_change_sets[i]
         for idrec in inp.change_set:
-            arg_change_sets_i[idrec] = u1(1)
+            if(validate_head_or_retract(self, i, idrec)):
+                arg_change_sets_i[idrec] = u1(1)
             # print("::", i, idrec)
 
         # if(len(arg_change_sets_i) > 0):
@@ -296,12 +308,15 @@ def update_changes_from_inputs(self, arg_change_sets):
         # else:
         #     arg_change_sets[i] = inp.change_set
 
-@njit(cache=True)
-def update_head_ptrs(self, arg_change_sets):
-    for i,change_set in enumerate(arg_change_sets):
-        for idrec in change_set:
-            # _, f_id, a_id = decode_idrec(idrec)
-            validate_head_or_retract(self, i, idrec, change_set)
+# @njit(cache=True)
+# def update_head_ptrs(self, arg_change_sets):
+#     for i,change_set in enumerate(arg_change_sets):
+#         # print(change_set)
+#         for idrec in change_set:
+#             # _, f_id, a_id = decode_idrec(idrec)
+#             # print("<<",idrec)
+#             validate_head_or_retract(self, i, idrec, change_set)
+
 
 
 # def foo(lengths):
@@ -403,6 +418,53 @@ def invalidate_beta_match(self, match_idrecs):
 #         if(decref): _decref_pointer(ptr0)
 #         outputs[0].matches[f_id0] = 0
 
+@njit(cache=True)
+def beta_matches_to_str(matches):
+    # for x in self.outputs
+    s = ""
+    for match0, others_ptr in matches.items():
+        others_str = ""
+        t_id0, f_id0, a0 = decode_idrec(match0)
+        others = _ld_dict(others_ptr)
+        for match1, ok in others.items():
+            t_id1, f_id1, _ = decode_idrec(match1)
+            if(ok): others_str += f"({t_id1},{f_id1}),"
+            
+        s +=f"({t_id0},{f_id0}) : [{others_str[:-1] if len(others_str) > 0 else ''}]\n"
+
+    return s
+
+
+@njit(cache=True)
+def alpha_matches_to_str(matches):
+    # for x in self.outputs
+    s = "["
+    for match0, others_ptr in matches.items():
+        # others_str = ""
+        t_id0, f_id0, a0 = decode_idrec(match0)
+        # others = _ld_dict(others_ptr)
+        # for match1, ok in others.items():
+        #     t_id1, f_id1, _ = decode_idrec(match1)
+        #     if(ok): others_str += f"({t_id1},{f_id1}),"
+            
+        s +=f"({t_id0},{f_id0}),"
+
+    return s[:-1] + "]"
+    # print("<<", [x.matches ])
+
+
+
+@njit(cache=True)
+def _handle_beta_match(self, match_head_ptrs_func, match_inp_ptrs, match_idrecs):    
+    # print("Beta",match_inp_ptrs)
+    is_match = match_head_ptrs_func(match_inp_ptrs) ^ self.lit.negated
+    was_match = False
+    if(is_match):
+        # print("INSER", match_f_ids, self.lit.negated)
+        was_match = insert_beta_match(self, match_idrecs)
+    else:
+        was_match = invalidate_beta_match(self, match_idrecs)
+    # print(f_id_i, decode_idrec(idrec_j)[1], is_match, was_match)
 
 @njit(cache=True)
 def update_node(self):
@@ -422,20 +484,20 @@ def update_node(self):
     print("A")
     update_changes_from_inputs(self, arg_change_sets)
     print("B")
-    update_head_ptrs(self, arg_change_sets)
+    # update_head_ptrs(self, arg_change_sets)
 
     
     print("!UPDATE_NODE", self.op)        
 
 
-    match_head_ptrs = _func_from_address(match_heads_f_type, self.op.match_head_ptrs_addr)
+    match_head_ptrs_func = _func_from_address(match_heads_f_type, self.op.match_head_ptrs_addr)
 
     head_ranges = self.op.head_ranges
     match_inp_ptrs = np.zeros((len(self.op.head_var_ptrs),),dtype=np.int64)
     match_idrecs = np.zeros((len(self.var_inds),),dtype=np.uint64)
     n_vars = len(head_ranges)
 
-    print("---", self.op, "---")
+    print("---", "~" if self.lit.negated else "", self.op, "---")
     # print(self.inputs[0].change_set)
     # print(self.inputs[0].change_set)
 
@@ -449,34 +511,47 @@ def update_node(self):
         i_strt, i_len = head_ranges[i][0], head_ranges[i][1]
 
         if(n_vars > 1):
+            p1, p2= self.inputs[i].parent_node_ptr, self.inputs[j].parent_node_ptr
+
+            inputs_same_parent = p1 != 0 and p1 == p2
             # BETA CASE 
             j = 1 if i == 0 else 0
             j_strt, j_len = head_ranges[j][0], head_ranges[j][1]        
+            head_ptrs_j = self.head_ptrs[j]
+
+            print("ij", i, j)
+
+
             for idrec_i in change_set:
                 t_id_i, f_id_i, a_id_i = decode_idrec(idrec_i)
                 idrec_i = encode_idrec(t_id_i, f_id_i, 0)
-
+                print("H", idrec_i, head_ptrs_i)
                 match_inp_ptrs[i_strt:i_strt+i_len] = head_ptrs_i[idrec_i]
                 match_idrecs[i] = idrec_i
-            
+                print("D")
                 
-                for idrec_j, h_ptrs_j in self.head_ptrs[j].items():
-                    # print(encode_idrec(self.t_ids[j],f_id_j,0), arg_change_sets[j])
-                    if(j > i and idrec_j in arg_change_sets[j]):
-                        continue
-                    match_inp_ptrs[j_strt:j_strt+j_len] = h_ptrs_j
-                    match_idrecs[j] = idrec_j
-
-
-                    # print("Beta",match_inp_ptrs)
-                    is_match = match_head_ptrs(match_inp_ptrs) ^ self.lit.negated
-                    was_match = False
-                    if(is_match):
-                        # print("INSER", match_f_ids, self.lit.negated)
-                        was_match = insert_beta_match(self, match_idrecs)
-                    else:
-                        was_match = invalidate_beta_match(self, match_idrecs)
-                    # print(f_id_i, decode_idrec(idrec_j)[1], is_match, was_match)
+                # prev_matches_j = self.inputs[i].matches[idrec_i]
+       
+                if(inputs_same_parent):
+                    print("SAME PARENT")
+                    print("SAME PARENT", self.inputs[i].matches[idrec_i])
+                    for idrec_j in _ld_dict(self.inputs[i].matches[idrec_i]):
+                        if(j > i and idrec_j in arg_change_sets[j]): continue
+                        h_ptrs_j = head_ptrs_j[idrec_j]
+                        match_inp_ptrs[j_strt:j_strt+j_len] = h_ptrs_j
+                        match_idrecs[j] = idrec_j
+                        _handle_beta_match(self, match_head_ptrs_func, match_inp_ptrs, match_idrecs)
+                else:
+                    print("DIFF PARENT")
+                    for idrec_j in head_ptrs_j:
+                        if(j > i and idrec_j in arg_change_sets[j]): continue
+                        print("TRY")
+                        h_ptrs_j = head_ptrs_j[idrec_j]
+                        print("OK")
+                        match_inp_ptrs[j_strt:j_strt+j_len] = h_ptrs_j
+                        match_idrecs[j] = idrec_j
+                        _handle_beta_match(self, match_head_ptrs_func, match_inp_ptrs, match_idrecs)
+            
         else:
             # ALPHA CASE 
             for idrec_i in change_set:
@@ -485,15 +560,19 @@ def update_node(self):
 
                 match_inp_ptrs[i_strt:i_strt+i_len] = head_ptrs_i[idrec_i]
 
-                print("alpha",match_inp_ptrs)
-                is_match = match_head_ptrs(match_inp_ptrs) ^ self.lit.negated
+                # print("alpha",match_inp_ptrs)
+                is_match = match_head_ptrs_func(match_inp_ptrs) ^ self.lit.negated
                 
                 if(is_match):
                     insert_alpha_match(self,idrec_i)
                 else:
                     invalidate_alpha_match(self,idrec_i)
+            # print(alpha_matches_to_str(self.outputs[0].matches))
 
-    # print("<<", [x.matches for x in self.outputs])
+    if(n_vars > 1):
+        print(beta_matches_to_str(self.outputs[0].matches))
+    else:
+        print(alpha_matches_to_str(self.outputs[0].matches))   
 
 
 
@@ -1041,7 +1120,7 @@ def update_other_idrecs(m_node):
 def restitch_match_iter(m_iter, start_from):
     if(start_from == -1): start_from = len(m_iter.iter_nodes)-1
     for i in range(start_from,-1,-1):
-        # print("I", i)
+        print("I", i)
         m_node = m_iter.iter_nodes[i]
         if(m_node.curr_ind == -1):
             if(m_node.depends_on_var_ind == -1):
@@ -1055,6 +1134,12 @@ def restitch_match_iter(m_iter, start_from):
                     if(v == 0): continue
                     idrecs[j] = f_id; cnt += 1;
                 m_node.idrecs = idrecs[:cnt]
+
+                print("N_IDRECS",m_node.idrecs)
+                # if(i == start_from and len(m_node.idrecs) == 0):
+                #     print("EMPTY")
+
+
                 # print("C", cnt)
                 # print(m_node.f_ids)
                 
@@ -1065,9 +1150,9 @@ def restitch_match_iter(m_iter, start_from):
                 # m_node.curr_ind = 0
             m_node.curr_ind = 0
         if(i > 0):
-            print("SS")
+            # print("SS")
             update_other_idrecs(m_node)
-            # print("S UPDATE OTHER", i, m_node.other_f_ids)
+            print("S UPDATE OTHER", i, m_node.other_idrecs)
         # else:
         #     print("CURRIND", m_node.curr_ind)
             # m_node.curr_ind = 0

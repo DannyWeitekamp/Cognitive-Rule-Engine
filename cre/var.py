@@ -228,23 +228,32 @@ class Var(structref.StructRefProxy):
     
 
     def __lt__(self, other): 
-        from cre.default_ops import LessThan
-        return LessThan(self, other)
+        from cre.default_ops import LessThan, FactIdrecsLessThan
+        if(isinstance(other,Var) and isinstance(other.head_type,Fact)):
+            return FactIdrecsLessThan(self,other)
+        else:
+            return LessThan(self, other)
     def __le__(self, other): 
         from cre.default_ops import LessThanEq
         return LessThanEq(self, other)
+            
     def __gt__(self, other): 
-        from cre.default_ops import GreaterThan
-        return GreaterThan(self, other)
+        from cre.default_ops import GreaterThan, FactIdrecsLessThan
+        if(isinstance(other,Var) and isinstance(other.head_type,Fact)):
+            return FactIdrecsLessThan(other,self)
+        else:
+            return GreaterThan(self, other)
+
     def __ge__(self, other):
         from cre.default_ops import GreaterThanEq
         return GreaterThanEq(self, other)
     def __eq__(self, other): 
         from cre.default_ops import Equals, ObjEquals, ObjIsNone
+        from cre.conditions import op_to_cond
         if(other is None):
-            return ObjIsNone(self)
+            return op_to_cond(ObjIsNone(self))
         if(isinstance(other,Var) and isinstance(other.head_type,Fact)):
-            return ObjEquals(self,other)
+            return op_to_cond(ObjEquals(self,other))
 
         return Equals(self, other)
     def __ne__(self, other): 
@@ -451,9 +460,7 @@ def overload_Var(typ,alias=None):
 def repr_var(self):
     alias_part = ", '" + self.alias + "'" if len(self.alias) > 0 else ""
     s = "Var(" + self.base_type_name + "Type" + alias_part + ")"
-    for attr in self.deref_attrs:
-        s += "." + attr
-    return s
+    return s + str_var_derefs(self)
 
 
 @overload(repr)

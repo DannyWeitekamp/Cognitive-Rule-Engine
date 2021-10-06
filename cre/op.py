@@ -314,14 +314,19 @@ class UntypedOp():
         if(all_const):
             return call(*py_args)
 
-
-        cres = call.overloads.get(tuple(arg_types))
+        arg_types = tuple(arg_types)
+        # print(tuple(arg_types),tuple(arg_types) in call.overloads)
+        # print("-- overloads",call.overloads.keys())
+        cres = call.overloads.get(arg_types,None)
         if(cres is not None):
             sig = cres.signature
         else:
             # Note: get_call_template is an internal method of numba.Dispatcher 
             (template,*rest) = call.get_call_template(arg_types,{})
-            sig = template.cases[0]
+            # print("<<", "cases", template.cases)
+            # print(rest)
+            # print([x for x in template.cases if x.args==arg_types])
+            sig = [x for x in template.cases if x.args==arg_types][0] #Note: this can be finicky might need to find the best one
         # self.members['signature'] = sig
         members = {**self.members, 'signature': sig}
 
@@ -332,8 +337,10 @@ class UntypedOp():
             var_ptrs = np.array([v.get_ptr_incref() for v in py_args],dtype=np.int64)
             # Retreive from Cache/Make typed version 
             if(sig not in self._specialize_cache):
+                # print("MISS", sig)
                 op_cls = new_op(self.name, members,return_class=True)
                 self._specialize_cache[sig] = op_cls
+            
             op_cls = self._specialize_cache[sig]
             return op_cls.make_singleton_inst(head_var_ptrs=var_ptrs)
 
@@ -347,7 +354,9 @@ def resolve_return_type(x):
         return x.op.signature.return_type
     elif(isinstance(x, UntypedOp)):
         raise ValueError(f"Cannot resolve return type of UntypedOp {x}")
-    elif(isinstance(x, (float,int))):
+    elif(isinstance(x, (int))):
+        return types.int64
+    elif(isinstance(x, (float))):
         return types.float64
     elif(isinstance(x, (str))):
         return types.unicode_type
@@ -1170,6 +1179,17 @@ def set_shorthand_template(self, expr):
 
 op_define_boxing(OpTypeTemplate,Op)   
 
+def str_deref_attrs(deref_attrs):
+    s = ""
+    for attr in deref_attrs:
+        if(attr.isdigit()):
+            s += f"[{attr}]"
+        else:
+            s += f".{attr}"
+    return s
+
+
+
 def g_nm(x,names):
     '''Helper function that helps with putting instances of Var
         as dictionary keys by replacing them with their NRT pointers.
@@ -1187,7 +1207,7 @@ class DerefInstr():
 
     @property
     def template(self):
-        return f'{{}}.{".".join(list(iter_typed_list(self.deref_attrs)))}'
+        return f'{{}}{str_deref_attrs(iter_typed_list(self.deref_attrs))}'
 
     def _get_hashable(self):
         if(not hasattr(self,"_hashable")):
@@ -1256,7 +1276,7 @@ class OpComp():
             return x.gen_expr('python',arg_names=arg_names)
         elif(isinstance(x,DerefInstr)):
             deref_attrs = list(iter_typed_list(x.deref_attrs))
-            return f'{{{self.base_vars[x.var.base_ptr][1]}}}.{".".join(deref_attrs)}'
+            return f'{{{self.base_vars[x.var.base_ptr][1]}}}{str_deref_attrs(deref_attrs)}'
         else:
             return repr(x) 
 
@@ -1507,7 +1527,7 @@ class OpComp():
         body = const_defs
         for i,instr in enumerate(self.instructions):
             if(isinstance(instr, DerefInstr)):
-                deref_str = f'{g_nm(instr.var,names)}.{".".join(instr.deref_attrs)}'
+                deref_str = f'{g_nm(instr.var,names)}{str_deref_attrs(instr.deref_attrs)}'
                 body += f"{ind}{gen_assign(lang, f'i{i}', deref_str)}\n"
             else:
                 inp_seq = ", ".join([g_nm(x,names) for x in instr.args])
@@ -1526,7 +1546,7 @@ class OpComp():
         for i,instr in enumerate(self.instructions):
             # print(type(instr))
             if(isinstance(instr, DerefInstr)):
-                deref_str = f'{g_nm(instr.var,names)}.{".".join(instr.deref_attrs)}'
+                deref_str = f'{g_nm(instr.var,names)}{str_deref_attrs(instr.deref_attrs)}'
                 body += f"{ind}{gen_assign(lang, f'i{i}', deref_str)}\n"
                 # inps.append(g_nm(instr,names))
             # else:
@@ -1571,7 +1591,7 @@ class OpComp():
             if(isinstance(instr, DerefInstr)):
                 if(args_are_heads):
                     continue
-                deref_str = f'{g_nm(instr.var,names)}.{".".join(instr.deref_attrs)}'
+                deref_str = f'{g_nm(instr.var,names)}{str_deref_attrs(instr.deref_attrs)}'
                 body += f"{ind}{gen_assign(lang, f'i{i}', deref_str)}\n"
             else:
                 # print([(g_nm(x,names), x) for x in instr.args])
@@ -1601,7 +1621,7 @@ class OpComp():
             # print(self.used_ops)
             # j,_ = self.used_ops[instr]
             if(isinstance(instr, DerefInstr)):
-                deref_str = f'{g_nm(instr.var,names)}.{".".join(instr.deref_attrs)}'
+                deref_str = f'{g_nm(instr.var,names)}{str_deref_attrs(instr.deref_attrs)}'
                 body += f"{ind}{gen_assign(lang, f'i{i}', deref_str)}\n"
             else:
                 inp_seq = ", ".join([g_nm(x,names) for x in instr.args])

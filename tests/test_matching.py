@@ -318,7 +318,7 @@ def apply_it(mem,l1,l2,r1):
 def matching_1_t_4_lit_setup():
     with cre_context("test_matching_benchmarks") as ctxt:
         BOOP, BOOPType = define_fact("BOOP",{"name": "string", "B" : "number"})
-        mem = mem_w_n_boops(100,BOOP)
+        mem = mem_w_n_boops(1000,BOOP)
 
         l1, l2 = Var(BOOPType,"l1"), Var(BOOPType,"l2")
         r1, r2 = Var(BOOPType,"r1"), Var(BOOPType,"r2")

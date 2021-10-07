@@ -33,7 +33,7 @@ from cre.op import GenericOpType
 from operator import itemgetter
 from copy import copy
 from os import getenv
-from cre.utils import deref_type, OFFSET_TYPE_ATTR, OFFSET_TYPE_LIST, listtype_sizeof_item
+from cre.utils import deref_type, listtype_sizeof_item
 import inspect, dill, pickle
 from textwrap import dedent, indent
 

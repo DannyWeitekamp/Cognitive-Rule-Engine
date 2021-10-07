@@ -49,8 +49,8 @@ class CastFriendlyMixin():
 _deref_type = np.dtype([('type', np.uint8),  ('a_id', np.uint8), ('fact_num', np.int64), ('offset', np.int64)])
 deref_type = numba.from_dtype(_deref_type)
 
-OFFSET_TYPE_ATTR = 0
-OFFSET_TYPE_LIST = 1 
+DEREF_TYPE_ATTR = 0
+DEREF_TYPE_LIST = 1 
 
 #### idrec encoding ####
 

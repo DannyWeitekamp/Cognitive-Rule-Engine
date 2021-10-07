@@ -26,7 +26,7 @@ from numba.core.datamodel import default_manager, models
 from operator import itemgetter
 from copy import copy
 from os import getenv
-from cre.utils import deref_type, OFFSET_TYPE_ATTR, OFFSET_TYPE_LIST, listtype_sizeof_item
+from cre.utils import deref_type, DEREF_TYPE_ATTR, DEREF_TYPE_LIST, listtype_sizeof_item
 # import inspect
 
 
@@ -205,7 +205,7 @@ class Var(structref.StructRefProxy):
         else: 
             base = f'{prefix}({self.base_type_name})'
 
-        deref_strs = [f"[{a}]" if o[0]==OFFSET_TYPE_LIST else "." + a 
+        deref_strs = [f"[{a}]" if o[0]==DEREF_TYPE_LIST else "." + a 
                 for o, a in zip(self.deref_offsets, self.deref_attrs)]
         s = base + "".join(deref_strs)
         # print(self.is_not)
@@ -475,7 +475,7 @@ def str_var_derefs(self):
     for i in range(len(self.deref_offsets)):
         attr = self.deref_attrs[i]
         deref = self.deref_offsets[i]
-        if(deref.type == OFFSET_TYPE_ATTR):
+        if(deref.type == DEREF_TYPE_ATTR):
             s += "." + attr
         else:
             s += "[" + attr + "]"
@@ -575,9 +575,9 @@ def var_append_deref(self, attr, a_id, offset, fact_num, head_type_name, typ='at
     new_deref_offsets = np.empty(L+1,dtype=deref_type)
     new_deref_offsets[:L] = old_deref_offsets
     if(typ == 'attr'):
-        new_deref_offsets[L].type = u1(OFFSET_TYPE_ATTR)
+        new_deref_offsets[L].type = u1(DEREF_TYPE_ATTR)
     elif(typ == 'list'):
-        new_deref_offsets[L].type = u1(OFFSET_TYPE_LIST)
+        new_deref_offsets[L].type = u1(DEREF_TYPE_LIST)
 
     new_deref_offsets[L].a_id = u1(a_id)
     new_deref_offsets[L].offset = i8(offset)

@@ -38,7 +38,7 @@ def get_ptr(fact):
     return _pointer_from_struct(fact)
 
 
-def mem_w_n_boops(n):
+def mem_w_n_boops(n,BOOP):
     mem = Memory()
     for i in range(n):
         boop = BOOP(str(i), i)
@@ -207,7 +207,7 @@ def test_NOT():
     with cre_context("test_NOT"):
         BOOP, BOOPType = define_fact("BOOP",{"name": "string", "B" : "number"})
 
-        mem = mem_w_n_boops(3)
+        mem = mem_w_n_boops(3,BOOP)
 
         x1,x2,x3 = Var(BOOP,'x1'), Var(BOOP,'x2'), Var(BOOP,'x3')
         c = (x1.B > 1) & (x2.B < 1) & NOT(x3.B > 9000) 
@@ -244,9 +244,12 @@ def test_list():
         names = match_names(c, mem)
         assert set_is_same(names,  [['A','B'],['B','A']])
 
+        mem.declare(TList("C", List(["x","c"])))
+        mem.declare(TList("D", List(["x","x"])))
         #TODO: Self-Beta-like conditions
-        # c = v1.items[0] != v1.items[1]
-        # match_names(c, mem)
+        c = v1.items[0] != v1.items[1]
+        names = match_names(c, mem)
+        assert set_is_same(names, [["A"],["B"],["C"]])
 
 def test_multiple_types():
     with cre_context("test_multiple_types"):
@@ -313,37 +316,56 @@ def apply_it(mem,l1,l2,r1):
 
 
 def matching_1_t_4_lit_setup():
-    with cre_context("test_matching_benchmarks"):
-        mem = mem_w_n_boops(100)
+    with cre_context("test_matching_benchmarks") as ctxt:
+        BOOP, BOOPType = define_fact("BOOP",{"name": "string", "B" : "number"})
+        mem = mem_w_n_boops(100,BOOP)
 
         l1, l2 = Var(BOOPType,"l1"), Var(BOOPType,"l2")
         r1, r2 = Var(BOOPType,"r1"), Var(BOOPType,"r2")
 
         c = (l1.B > 0) & (l1.B != 3) & (l1.B < 4) & (l2.B != 3) 
 
-        cl = get_linked_conditions_instance(c, mem)
+        c.get_matches(mem)
 
+        # cl = get_linked_conditions_instance(c, mem)
+# 
         # Bs = boop_Bs_from_ptrs(get_ptr_matches(cl))
-        return (cl,), {}
+        return (c,mem), {}
 
+from cre.rete import get_match_iter, update_graph, ReteGraphType, parse_mem_change_queue, update_node
 @njit(cache=True)
-def check_twice(cl):
-    get_ptr_matches(cl)
-    # get_ptr_matches(cl)
+def check_twice(c,mem):
+    graph = _struct_from_pointer(ReteGraphType, c.matcher_inst_ptr)
+    parse_mem_change_queue(graph)
+
+    for lst in graph.nodes_by_nargs:
+        for node in lst:
+            update_node(node)        
+    # get_match_iter(mem,c)
+
+    # with ctxt:
+    #     for x in c.get_matches(mem):
+    #         pass
+        
+        # c.get_matches(mem)
+        
 
 
 def test_b_matching_1_t_4_lit(benchmark):
-    benchmark.pedantic(check_twice,setup=matching_1_t_4_lit_setup, warmup_rounds=1)
+    benchmark.pedantic(check_twice,setup=matching_1_t_4_lit_setup, warmup_rounds=1, rounds=100)
 
 
 if(__name__ == "__main__"):
     pass
+
+    check_twice(*matching_1_t_4_lit_setup()[0])
     # test_applying()
     # test_matching()
     # test_matching_unconditioned()
     # test_ref_matching()
     # test_multiple_deref()
-    test_list()
+    # test_list()
+    # test_list()
     # test_multiple_types()
     # test_ref_matching()
     # import pytest.__main__.benchmark

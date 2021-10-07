@@ -31,7 +31,7 @@ from cre.utils import _struct_from_meminfo, _meminfo_from_struct, _cast_structre
  _load_pointer, _pointer_to_data_pointer, _list_base_from_ptr
 from cre.subscriber import base_subscriber_fields, BaseSubscriber, BaseSubscriberType, init_base_subscriber, link_downstream
 from cre.vector import VectorType, new_vector
-from cre.utils import deref_type, OFFSET_TYPE_ATTR, OFFSET_TYPE_LIST
+from cre.utils import deref_type, DEREF_TYPE_ATTR, DEREF_TYPE_LIST
 from copy import copy
 from operator import itemgetter
 
@@ -286,7 +286,7 @@ def _deref_attrs(val_type, inst_ptr, attr_offsets):
 
     for deref in attr_offsets[:-1]:
         if(inst_ptr == 0): raise Exception()
-        if(deref.type == u1(OFFSET_TYPE_ATTR)):
+        if(deref.type == u1(DEREF_TYPE_ATTR)):
             data_ptr = _pointer_to_data_pointer(inst_ptr)
         else:
             data_ptr = _list_base_from_ptr(inst_ptr)
@@ -294,7 +294,7 @@ def _deref_attrs(val_type, inst_ptr, attr_offsets):
         
     if(inst_ptr == 0): raise Exception()
     deref = attr_offsets[-1]
-    if(deref.type == u1(OFFSET_TYPE_ATTR)):
+    if(deref.type == u1(DEREF_TYPE_ATTR)):
         data_ptr = _pointer_to_data_pointer(inst_ptr)
     else:
         data_ptr = i8(_list_base_from_ptr(inst_ptr))
@@ -505,7 +505,7 @@ def resolve_deref(typ,attr_chain):
             attr_chain_str = ".".join(attr_chain)
             raise AttributeError(f"Invalid dereference {typ}.{attr_chain_str}. {out_type} has no attribute '{attr}'.")
         fd = out_type.field_dict
-        offsets[i][0] = OFFSET_TYPE_ATTR
+        offsets[i][0] = DEREF_TYPE_ATTR
         offsets[i][1] = out_type._attr_offsets[list(fd.keys()).index(attr)]  #struct_get_attr_offset(out_type,attr) #For some reason ~4.6ms
         out_type = fd[attr]
     print(offsets)

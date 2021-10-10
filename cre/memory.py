@@ -182,13 +182,15 @@ def remove_consistency_map(mem_data, index):
 class Memory(structref.StructRefProxy):
     ''' '''
     def __new__(cls, context=None):
-        context_data = CREContext.get_context(context).context_data
+        context = CREContext.get_context(context)
+        context_data = context.context_data
         mem_data = init_mem_data(context_data)
         self = mem_ctor(context_data,mem_data)
         # self = structref.StructRefProxy.__new__(cls, context_data, mem_data)
         # _BaseContextful.__init__(self,context) #Maybe want this afterall
         self.mem_data = mem_data
         self.context_data = context_data
+        self.context = context
         return self
     
     def add_subscriber(self,subscriber):

@@ -313,6 +313,10 @@ class Var(structref.StructRefProxy):
         from cre.default_ops import Power
         return Power(other, self)
 
+    def __mod__(self, other):
+        from cre.default_ops import Modulus
+        return Modulus(other, self)
+
     def __and__(self, other):
         from cre.conditions import conditions_and, op_to_cond
         from cre.op import Op

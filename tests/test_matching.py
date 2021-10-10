@@ -6,6 +6,8 @@ from cre.memory import Memory
 from cre.context import cre_context
 # from cre.matching import get_ptr_matches,_get_matches
 from cre.utils import _struct_from_pointer, _pointer_from_struct
+from numba.core.runtime.nrt import rtsys
+import gc
 
 # with cre_context("test_matching"):
     
@@ -313,34 +315,45 @@ def apply_it(mem,l1,l2,r1):
 #         apply_all_matches(c,apply_it,mem)
 #         apply_all_matches(c,apply_it,mem)
 
+with cre_context("test_matching_benchmarks") as ctxt:
+    BOOP, BOOPType = define_fact("BOOP",{"name": "string", "B" : "number"})
 
-
-def matching_1_t_4_lit_setup():
+def matching_alphas_setup():
     with cre_context("test_matching_benchmarks") as ctxt:
-        BOOP, BOOPType = define_fact("BOOP",{"name": "string", "B" : "number"})
-        mem = mem_w_n_boops(1000,BOOP)
+        mem = mem_w_n_boops(100,BOOP)
 
         l1, l2 = Var(BOOPType,"l1"), Var(BOOPType,"l2")
         r1, r2 = Var(BOOPType,"r1"), Var(BOOPType,"r2")
 
         c = (l1.B > 0) & (l1.B != 3) & (l1.B < 4) & (l2.B != 3) 
 
-        c.get_matches(mem)
-
-        # cl = get_linked_conditions_instance(c, mem)
-# 
-        # Bs = boop_Bs_from_ptrs(get_ptr_matches(cl))
         return (c,mem), {}
 
-from cre.rete import get_match_iter, update_graph, ReteGraphType, parse_mem_change_queue, update_node
-@njit(cache=True)
-def check_twice(c,mem):
-    graph = _struct_from_pointer(ReteGraphType, c.matcher_inst_ptr)
-    parse_mem_change_queue(graph)
+def matching_betas_setup():
+    with cre_context("test_matching_benchmarks") as ctxt:
+        mem = mem_w_n_boops(100,BOOP)
 
-    for lst in graph.nodes_by_nargs:
-        for node in lst:
-            update_node(node)        
+        l1, l2 = Var(BOOPType,"l1"), Var(BOOPType,"l2")
+        r1, r2 = Var(BOOPType,"r1"), Var(BOOPType,"r2")
+
+        c = l1 & l2 & (l1.B > l2.B) #& ((l1.B % 2) == (l2.B + 1) % 2)
+
+        return (c,mem), {}
+
+from cre.rete import get_match_iter, update_graph, ReteGraphType, parse_mem_change_queue, update_node, build_rete_graph, new_match_iter, restitch_match_iter
+def apply_get_matches(c,mem):
+    # rete_graph = build_rete_graph(mem, c)
+    # update_graph(rete_graph)
+    # m_iter = new_match_iter(rete_graph)
+    # restitch_match_iter(m_iter, -1)
+    with cre_context("test_matching_benchmarks") as ctxt:
+        c.get_matches(mem)
+    # graph = _struct_from_pointer(ReteGraphType, c.matcher_inst_ptr)
+    # parse_mem_change_queue(graph)
+
+    # for lst in graph.nodes_by_nargs:
+    #     for node in lst:
+    #         update_node(node)        
     # get_match_iter(mem,c)
 
     # with ctxt:
@@ -348,17 +361,48 @@ def check_twice(c,mem):
     #         pass
         
         # c.get_matches(mem)
-        
+
+@njit(cache=True)
+def do_update_graph(c,mem):
+    rete_graph = build_rete_graph(mem, c)
+    update_graph(rete_graph)
 
 
-def test_b_matching_1_t_4_lit(benchmark):
-    benchmark.pedantic(check_twice,setup=matching_1_t_4_lit_setup, warmup_rounds=1, rounds=100)
+def test_b_matching_alphas_lit(benchmark):
+    # with cre_context("test_matching_benchmarks") as ctxt:
+    benchmark.pedantic(apply_get_matches,setup=matching_alphas_setup, warmup_rounds=1, rounds=100)
+    alloc_stats = rtsys.get_allocation_stats()
+    gc.collect()
+    assert(alloc_stats.free==alloc_stats.alloc), f'{alloc_stats}'
 
+def test_b_matching_betas_lit(benchmark):
+    # with cre_context("test_matching_benchmarks") as ctxt:
+    # alloc_stats1 = rtsys.get_allocation_stats()
+    benchmark.pedantic(do_update_graph,setup=matching_betas_setup, warmup_rounds=1, rounds=100)
+    alloc_stats = rtsys.get_allocation_stats()
+    gc.collect()
+    assert(alloc_stats.free==alloc_stats.alloc), f'{alloc_stats}'
+
+
+# def diff_increases()
 
 if(__name__ == "__main__"):
     pass
+    dat = matching_alphas_setup()[0]
 
-    check_twice(*matching_1_t_4_lit_setup()[0])
+   
+    gc.collect(); alloc_stats0 = rtsys.get_allocation_stats()
+    apply_get_matches(*dat)
+
+    # dat = None
+    
+    gc.collect(); alloc_stats1 = rtsys.get_allocation_stats()
+    print(alloc_stats0.alloc-alloc_stats0.free, alloc_stats1.alloc-alloc_stats1.free)
+
+    apply_get_matches(*dat)
+    
+    gc.collect(); alloc_stats2 = rtsys.get_allocation_stats()
+    print(alloc_stats1.alloc-alloc_stats1.free, alloc_stats2.alloc-alloc_stats2.free)
     # test_applying()
     # test_matching()
     # test_matching_unconditioned()

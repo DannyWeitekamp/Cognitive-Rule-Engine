@@ -7,9 +7,10 @@ import numba.experimental.structref as structref
 from cre.utils import (_dict_from_ptr, _pointer_from_struct, _get_array_data_ptr,
          _pointer_from_struct_incref, _struct_from_pointer, decode_idrec, CastFriendlyMixin,
         encode_idrec, deref_type, DEREF_TYPE_ATTR, DEREF_TYPE_LIST, _obj_cast_codegen,
-         _pointer_to_data_pointer, _list_base_from_ptr, _load_pointer, PrintElapse,
-         _decref_structref, _decref_pointer, cast_structref, _struct_tuple_from_pointer_arr)
+         _pointer_to_data_pointer, _list_base_from_ptr, _load_pointer, PrintElapse, meminfo_type,
+         _decref_structref, _decref_pointer, cast_structref, _struct_tuple_from_pointer_arr, _meminfo_from_struct)
 from cre.structref import define_structref
+from cre.caching import gen_import_str, unique_hash,import_from_cached, source_to_cache, source_in_cache, cache_safe_exec, get_cache_path
 from cre.memory import MemoryType
 from cre.vector import VectorType
 from cre.var import GenericVarType
@@ -17,6 +18,7 @@ from cre.op import GenericOpType
 from cre.conditions import LiteralType, build_distributed_dnf, ConditionsType
 from cre.vector import VectorType, new_vector
 from cre.fact import BaseFactType 
+import cloudpickle
 
 from numba.core.imputils import (lower_cast)
 
@@ -25,7 +27,7 @@ RETRACT = u1(0xFF)# u1(0)
 DECLARE = u1(0)
 
 deref_record_field_dict = {
-    # Pointers to the Dict(i8,u1)s inside deref_depends
+    # Weak Pointers to the Dict(i8,u1)s inside deref_depends
     "parent_ptrs" : i8[::1], 
     "arg_ind" : i8,
     "base_idrec" : u8,
@@ -45,6 +47,8 @@ node_memory_field_dict = {
     "change_set" : DictType(u8,u1), 
     # Maps f_ids -> sets of f_ids
     "matches" : DictType(u8, i8), 
+
+    # Weak pointer to the node that owns this memory
     "parent_node_ptr" : i8,
 
 }
@@ -544,7 +548,6 @@ def update_node(self):
 
         if(n_vars > 1):
             p1, p2= self.inputs[i].parent_node_ptr, self.inputs[j].parent_node_ptr
-
             inputs_same_parent = p1 != 0 and p1 == p2
             # BETA CASE 
             j = 1 if i == 0 else 0
@@ -683,8 +686,12 @@ rete_graph_field_dict = {
     "global_deref_idrec_map" : DictType(u8, node_list_type),
     "global_t_id_root_memory_map" : DictType(u2, NodeMemoryType),
     # "var_t_ids" : u2[::1], #NOTE: Something wrong with this... consider just not keeping
+    "match_iter_prototype_meminfo" : meminfo_type, #NOTE: Should really use deferred type
     "match_iter_prototype_ptr" : i8, #NOTE: Should really use deferred type
 }
+
+
+ReteGraph, ReteGraphType = define_structref("ReteGraph", rete_graph_field_dict, define_constructor=False)
 
 @njit(cache=True)
 def rete_graph_ctor(mem, conds, nodes_by_nargs, var_root_nodes, var_end_nodes,
@@ -704,8 +711,12 @@ def rete_graph_ctor(mem, conds, nodes_by_nargs, var_root_nodes, var_end_nodes,
     return st
 
 
+# @njit(void(ReteGraphType))
+# def rete_graph_dtor(self):
+#     if(self.match_iter_prototype_ptr != 0):
+#         # NOTE we don't need to clean up anything else if we do the array thing
+#         _decref_pointer(self.match_iter_prototype_ptr)
 
-ReteGraph, ReteGraphType = define_structref("ReteGraph", rete_graph_field_dict, define_constructor=False)
 
 @njit(ConditionsType(ReteGraphType,), cache=True)
 def rete_graph_get_conds(self):
@@ -977,23 +988,54 @@ match_iterator_field_dict = {
 }
 match_iterator_fields = [(k,v) for k,v, in match_iterator_field_dict.items()]
 
+
+def gen_match_iter_source(output_types):
+    return f'''import cloudpickle
+from numba import njit
+from cre.rete import GenericMatchIteratorType, MatchIteratorType, match_iterator_field_dict
+from cre.utils import _cast_structref
+output_types = cloudpickle.loads({cloudpickle.dumps(output_types)})
+m_iter_type = MatchIteratorType([(k,v) for k,v in {{**match_iterator_field_dict ,"output_types": output_types}}.items()])
+
+@njit(m_iter_type(GenericMatchIteratorType),cache=True)
+def specialize_m_iter(self):
+    return _cast_structref(m_iter_type,self)
+    '''
+
+
+
+
 class MatchIterator(structref.StructRefProxy):
     ''' '''
     # def __init__(self):
     #     super().__init__()
-
+    m_iter_type_cache = {}
     def __new__(cls, mem, conds):
         # Make a generic MatchIterator (reuses graph if conds already has one)
         # with PrintElapse("get_match_iter"):
+        # with mem.context as ctx:
         generic_m_iter = get_match_iter(mem, conds)
-        # generic_m_iter = new_match_iter(graph)
-        # if(conds is None): conds = rete_graph_get_conds(graph)
 
-        # Specialize the match iter to output conds.var_base_types 
-        output_types = types.TypeRef(types.Tuple([types.TypeRef(x) for x in conds.var_base_types]))
-        spec_m_iter_type = MatchIteratorType([(k,v) for k,v in {**match_iterator_field_dict   ,"output_types": output_types}.items()])
-        # with PrintElapse("cast_structref"):
-        self = cast_structref(spec_m_iter_type, generic_m_iter)
+        #Cache 'output_types' and 'specialized_m_iter_type'
+        var_base_types = conds.var_base_types
+
+
+        if(var_base_types not in cls.m_iter_type_cache):
+            hash_code = unique_hash([var_base_types])
+            if(not source_in_cache('MatchIterator', hash_code)):
+                output_types = types.TypeRef(types.Tuple([types.TypeRef(x) for x in conds.var_base_types]))
+                source = gen_match_iter_source(output_types)
+                source_to_cache('MatchIterator', hash_code, source)
+            l = import_from_cached('MatchIterator', hash_code, ['specialize_m_iter', 'output_types'])
+            # op_cls = self._generate_op_cls = l['MatchIterator']
+
+            # specialized_m_iter_type = MatchIteratorType([(k,v) for k,v in {**match_iterator_field_dict ,"output_types": output_types}.items()])
+            output_types, specialize_m_iter = cls.m_iter_type_cache[var_base_types] = l['output_types'], l['specialize_m_iter']
+        else:
+            output_types, specialize_m_iter  = cls.m_iter_type_cache[var_base_types]
+        
+        # Specialize the match iter so that it outputs conds.var_base_types 
+        self = specialize_m_iter(generic_m_iter)
         self.output_types = output_types#tuple([types.TypeRef(x) for x in conds.var_base_types])
         return self
         
@@ -1096,7 +1138,8 @@ def new_match_iter(graph):
         m_iter.graph = graph 
         m_iter.iter_nodes = rev_m_iter_nodes 
         m_iter.is_empty = False
-        graph.match_iter_prototype_ptr = _pointer_from_struct_incref(m_iter)
+        graph.match_iter_prototype_meminfo = _meminfo_from_struct(m_iter)
+        graph.match_iter_prototype_ptr = _pointer_from_struct(m_iter)
     
     prototype = _struct_from_pointer(GenericMatchIteratorType, graph.match_iter_prototype_ptr)
     m_iter = copy_match_iter(prototype)
@@ -1296,7 +1339,8 @@ def get_match_iter(mem, conds):
     # print("START")
     if(conds.matcher_inst_ptr == 0):
         rete_graph = build_rete_graph(mem, conds)
-        conds.matcher_inst_ptr = _pointer_from_struct_incref(rete_graph)
+        conds.matcher_inst_meminfo = _meminfo_from_struct(rete_graph)
+        conds.matcher_inst_ptr = _pointer_from_struct(rete_graph)
     # print("BUILT")
     rete_graph = _struct_from_pointer(ReteGraphType, conds.matcher_inst_ptr)
     update_graph(rete_graph)

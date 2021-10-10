@@ -987,6 +987,10 @@ class Op(structref.StructRefProxy,metaclass=OpMeta):
         from cre.default_ops import Power
         return Power(other, self)
 
+    def __mod__(self, other):
+        from cre.default_ops import Modulus
+        return Modulus(other, self)
+
     def __and__(self,other):
         from cre.conditions import op_to_cond, conditions_and
         self = op_to_cond(self)
@@ -1374,7 +1378,7 @@ class OpComp():
             l = import_from_cached('__GenerateOp__', long_hash, ['__GenerateOp__'])
             op_cls = self._generate_op_cls = l['__GenerateOp__']
             # print("<<",type(op_cls))
-            print(get_cache_path('__GenerateOp__',long_hash))
+            # print(get_cache_path('__GenerateOp__',long_hash))
 
             # var_ptrs = np.empty(len(self.base_vars),dtype=np.int64)
             # for i,v_p in enumerate(self.base_vars):

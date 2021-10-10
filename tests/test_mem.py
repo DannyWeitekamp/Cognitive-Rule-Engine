@@ -280,9 +280,10 @@ def test_b_retract10000(benchmark):
 
 
 if __name__ == "__main__":
-    test_modify()
+    test_declare_overloading()
+    # test_modify()
     # test_encode_decode()
-    test_declare_retract()
-    test_retract_keyerror()
+    # test_declare_retract()
+    # test_retract_keyerror()
     # test_subscriber()
-    test_all_facts_of_type()
+    # test_all_facts_of_type()

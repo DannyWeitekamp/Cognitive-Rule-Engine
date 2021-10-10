@@ -26,9 +26,10 @@ from cre.caching import unique_hash, source_to_cache, import_from_cached, source
 from cre.structref import gen_structref_code, define_structref
 from cre.context import cre_context
 from cre.utils import (_struct_from_pointer, _cast_structref, struct_get_attr_offset, _obj_cast_codegen,
-                       _pointer_from_struct_codegen, _pointer_from_struct, CastFriendlyMixin)
+                       _pointer_from_struct_codegen, _pointer_from_struct, CastFriendlyMixin, _obj_cast_codegen)
 from numba.core.typeconv import Conversion
 import operator
+from numba.core.imputils import (lower_cast)
 
 import numpy as np
 
@@ -591,6 +592,11 @@ base_fact_fields = [
 
 BaseFact, BaseFactType = _fact_from_fields("BaseFact", [])
 base_list_type = ListType(BaseFactType)
+
+@lower_cast(Fact, BaseFactType)
+def downcast(context, builder, fromty, toty, val):
+    return _obj_cast_codegen(context, builder, val, fromty, toty)
+
 
 @njit(cache=True)
 def fact_to_ptr(fact):

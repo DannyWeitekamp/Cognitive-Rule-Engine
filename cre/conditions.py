@@ -13,7 +13,7 @@ from cre.structref import define_structref, define_structref_template
 from cre.memory import MemoryType, Memory, facts_for_t_id, fact_at_f_id
 from cre.fact import define_fact, BaseFactType, cast_fact
 from cre.utils import _struct_from_meminfo, _meminfo_from_struct, _cast_structref, cast_structref, decode_idrec, lower_getattr, _struct_from_pointer,  lower_setattr, lower_getattr, _pointer_from_struct, _pointer_from_struct_incref, _decref_pointer
-from cre.utils import assign_to_alias_in_parent_frame
+from cre.utils import assign_to_alias_in_parent_frame, meminfo_type
 from cre.subscriber import base_subscriber_fields, BaseSubscriber, BaseSubscriberType, init_base_subscriber, link_downstream
 from cre.vector import VectorType
 from cre.op import GenericOpType, op_str, op_repr, Op
@@ -237,7 +237,9 @@ conditions_fields_dict = {
     "distr_dnf" : distr_dnf_type,
 
 
-    "matcher_inst_ptr" : i8,
+    # Keep around a pointer and a meminfo for the matcher_inst
+    "matcher_inst_ptr" : i8, # Keep this so we can check for zero
+    "matcher_inst_meminfo" : meminfo_type, # Keep this so it is decreffed
 
     # # The alpha parts of '.dnf' organized by which Var in 'vars' they use 
     # 'alpha_dnfs': ListType(dnf_type),
@@ -282,6 +284,11 @@ class Conditions(structref.StructRefProxy):
 
 
         return MatchIterator(mem, self)#get_match_iter(mem, self)
+
+    # def __del__(self):
+    #     print("CONDITIONS DTOR",self)
+    #     conds_dtor(self)
+        # if()
 
     @property
     def var_base_types(self):
@@ -344,6 +351,12 @@ def conds_get_delimited_type_names(self,delim,ignore_ext_nots):
         s += v.base_type_name
         s += delim
     return s[:-len(delim)]
+
+# @njit(void(ConditionsType),cache=True)
+# def conds_dtor(self):
+#     if(self.matcher_inst_ptr): 
+#         _decref_pointer(self.matcher_inst_ptr)
+
 
 ### Helper Functions for expressing conditions as python lists of cre.Op instances ###
 

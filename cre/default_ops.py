@@ -53,6 +53,10 @@ def FloorDivide(a, b):
 def Power(a, b):
     return a ** b
 
+@Op(shorthand = '({0} % {1})')
+def Modulus(a, b):
+    return a % b
+
 @Op(shorthand = '({0} < {1})')
 def FactIdrecsLessThan(a, b):
     return a.idrec < b.idrec

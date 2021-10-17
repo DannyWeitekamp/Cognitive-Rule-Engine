@@ -366,6 +366,7 @@ def apply_get_matches(c,mem):
 def do_update_graph(c,mem):
     rete_graph = build_rete_graph(mem, c)
     update_graph(rete_graph)
+    m_iter = new_match_iter(rete_graph)
 
 
 def test_b_matching_alphas_lit(benchmark):
@@ -388,21 +389,25 @@ def test_b_matching_betas_lit(benchmark):
 
 if(__name__ == "__main__"):
     pass
-    dat = matching_alphas_setup()[0]
+    # dat = matching_alphas_setup()[0]
+    dat = matching_betas_setup()[0]
 
    
-    gc.collect(); alloc_stats0 = rtsys.get_allocation_stats()
-    apply_get_matches(*dat)
+    # gc.collect(); alloc_stats0 = rtsys.get_allocation_stats()
+    do_update_graph(*dat)
 
-    # dat = None
+    # # dat = None
     
-    gc.collect(); alloc_stats1 = rtsys.get_allocation_stats()
-    print(alloc_stats0.alloc-alloc_stats0.free, alloc_stats1.alloc-alloc_stats1.free)
+    # gc.collect(); alloc_stats1 = rtsys.get_allocation_stats()
+    # print(alloc_stats0.alloc-alloc_stats0.free, alloc_stats1.alloc-alloc_stats1.free)
 
-    apply_get_matches(*dat)
+    # do_update_graph(*dat)
     
-    gc.collect(); alloc_stats2 = rtsys.get_allocation_stats()
-    print(alloc_stats1.alloc-alloc_stats1.free, alloc_stats2.alloc-alloc_stats2.free)
+    # gc.collect(); alloc_stats2 = rtsys.get_allocation_stats()
+    # print(alloc_stats1.alloc-alloc_stats1.free, alloc_stats2.alloc-alloc_stats2.free)
+
+
+    # test_multiple_deref()
     # test_applying()
     # test_matching()
     # test_matching_unconditioned()

@@ -782,6 +782,46 @@ def increment(self):
 	if(self.curr_ind >= len(var_inds)):
 		
 		
+--- Oct 12 ---
+
+Organizing betas as a dict of dicts is a bit slow. In particular I suspect that initializing O(n) dicts is causing lag. It would probably suffice to just return to the way things were before where the truth value of betas is handled by a 2d array. This probably isn't the best data structure if I end up supporting 3-way or greater Ops, but I doubt that that is such a killer feature that it will become worth pursuing. 
+
+Instead we can just keep idrec -> ind dictionaries, in the output... so the data structure is the same. Then on a retraction we can just del the idrec and assign -1 to the row/column. We probably also need to keep a vector of free indicies for each arg which would get push to on a retraction. On an insertion we need to expand the size of the array by whatever... 
+
+There is a slight tension between the need to quickly index a truth value and the need to iterate over only the true ones. 
+
+We need to be able to insert, retract, and iterate quickly. Insertion and retraction are quick for a truth table, but iteration is slower. 
+
+Instantiating one big array neglibible compared to instantiating lost of little ones. 
+
+Instantiating one dict that then gets big as also relatively faster. 
+
+We need in any case a way to efficiently retrieve just those indicies that correspond to true items 
+
+
+--- Oct 13 ---
+
+So far using the truth table is considerably faster than dictionaries
+Now it seems reasonable to cull out a few more uses of dictionaries. 
+Here are all the dictionaries:
+	idrec_to_ind : definitely needs to stay, this ensures that we can map arbirary idrecs into a fixed address space
+
+	output.matches : might be able to do without... retraction could be achieved by zeroing the index found with idrec_to_ind
+
+	output.change_set : probably can be replaced, in principle if this was just an array of idrecs then we could just slice it directly from the mem's change_queue
+
+	arg_change_set : we could probably achieve the same thing by just keeping around a record array with an entry like .is_changed  
+
+Okay so we can have something like "input_states" which is a list of record arrays with "idrec", "is_changed", "true_was_nonzero", "true_count" -> input_state_type. From this we can make  new arrays, maybe that share same buffers: "changed_idrecs", "unchanged_idrecs", "changed_inds" "unchanged_inds". We can use these to loop through pairs efficiently without overlap. The output.matches can be edited by looping through the changed_inputs. 
+
+It is unclear if it is more efficient to leave holes in output.matches or to rebuild it each time. If holes are left then it seems we need vectors to keep track of the holes, like with the change queue, and probably a buffer in any case. The output.matches probably needs to be only the idrecs to be consistent with the alpha case and there should be an additional output.inds that can be used by the iterator. In the case of same parent and during iteration we would call get_other which would get the idrecs with nonzero elements along a row or column.
+If "true_was_nonzero" and now "true_count" == 0, then retract 
+
+
+
+
+
+
 
 
 

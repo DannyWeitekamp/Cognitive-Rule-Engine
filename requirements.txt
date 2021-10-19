@@ -1,4 +1,5 @@
-ipython
 numba
+ipython
 numpy
 dill
+cloudpickle

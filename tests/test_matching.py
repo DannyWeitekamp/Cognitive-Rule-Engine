@@ -162,7 +162,7 @@ def test_multiple_deref():
         b2 = TestLL("B2", B=1, nxt=a)
         c2 = TestLL("C2", B=2, nxt=b2)
 
-        print([(i,pointer_from_struct(x)) for i,x in enumerate([a,b1,c1,b2,c2])])
+        # print([(i,pointer_from_struct(x)) for i,x in enumerate([a,b1,c1,b2,c2])])
 
         mem.declare(a)
         mem.declare(b1)
@@ -176,6 +176,7 @@ def test_multiple_deref():
         # One Deep check same fact instance
         c = (v1.nxt != None) & (v1.nxt == v2.nxt) & (v1 != v2)
         names = match_names(c, mem) 
+        print(names)
         assert set_is_same(names, [['B1', 'B2'], ['B2', 'B1']])
 
         # One Deep check same B value
@@ -364,8 +365,11 @@ def apply_get_matches(c,mem):
 
 @njit(cache=True)
 def do_update_graph(c,mem):
+    # print("BUILD")
     rete_graph = build_rete_graph(mem, c)
+    # print("UDPATE")
     update_graph(rete_graph)
+    # print("new iter")
     m_iter = new_match_iter(rete_graph)
 
 
@@ -390,11 +394,11 @@ def test_b_matching_betas_lit(benchmark):
 if(__name__ == "__main__"):
     pass
     # dat = matching_alphas_setup()[0]
-    dat = matching_betas_setup()[0]
+    # dat = matching_betas_setup()[0]
 
    
     # gc.collect(); alloc_stats0 = rtsys.get_allocation_stats()
-    do_update_graph(*dat)
+    # do_update_graph(*dat)
 
     # # dat = None
     
@@ -407,7 +411,7 @@ if(__name__ == "__main__"):
     # print(alloc_stats1.alloc-alloc_stats1.free, alloc_stats2.alloc-alloc_stats2.free)
 
 
-    # test_multiple_deref()
+    test_multiple_deref()
     # test_applying()
     # test_matching()
     # test_matching_unconditioned()

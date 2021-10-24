@@ -1358,12 +1358,13 @@ def build_rete_graph(mem, c):
             node.inputs_same_parent = (len(inputs) == 2 and 
                 inputs[0].parent_node_ptr == inputs[1].parent_node_ptr)
 
-            # In 'inputs_same_parent' cases make nodes share idrec_to_inds and widths 
+            # In 'inputs_same_parent' cases make nodes share idrec_to_inds, widths, change_pairs
             if(node.inputs_same_parent):
                 assert node.upstream_node_ptr != 0
                 upstream_node = _struct_from_pointer(BaseReteNodeType, node.upstream_node_ptr)
                 node.idrecs_to_inds = upstream_node.idrecs_to_inds
                 node.widths = upstream_node.widths
+                node.change_pairs = upstream_node.change_pairs
 
             # Short circut the input to the output for identity nodes
             if(node.lit is None):

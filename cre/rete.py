@@ -90,7 +90,7 @@ def new_root_node_mem():
 
 
 _input_state_type = np.dtype([
-    # ('idrec', np.int64),
+    ('idrec', np.int64),
     ('true_count', np.int64),
     ('head_was_valid', np.uint8), 
     ('is_changed', np.uint8),
@@ -115,6 +115,9 @@ deref_dep_typ = DictType(u8,DictType(i8,u1))
 dict_u8_u1_type = DictType(u8,u1)
 outputs_typ = DictType(u8,DictType(u8,u1))
 
+_idrec_ind_pair = np.dtype([('idrec', np.uint64),  ('ind', np.int64)])
+idrec_ind_pair_type = numba.from_dtype(_idrec_ind_pair)
+
 base_rete_node_field_dict = {
     # Pointers to the Dict(i8,u1)s inside deref_depends
     "mem" : MemoryType, 
@@ -133,7 +136,6 @@ base_rete_node_field_dict = {
     "widths" : i8[::1],
     "head_ptr_buffers" : ListType(i8[:,::1]),
     "input_state_buffers" : ListType(input_state_type[::1]),
-    "input_idrec_buffers": ListType(u8[::1]),
     
 
 
@@ -161,6 +163,9 @@ base_rete_node_field_dict = {
     # A weak pointer to the node upstream to this one
     "upstream_node_ptr" : i8,
 
+    # A temporary record array of with inds and idrecs of changes
+    "change_pairs" : ListType(idrec_ind_pair_type[::1])
+
 }
 
 BaseReteNode, BaseReteNodeType = define_structref("BaseReteNode", base_rete_node_field_dict, define_constructor=False)
@@ -170,6 +175,7 @@ u8_arr_typ = u8[::1]
 i8_arr_typ = i8[::1]
 i8_x2_arr_typ = i8[:,::1]
 input_state_arr_type = input_state_type[::1]
+idrec_ind_pair_arr_type = idrec_ind_pair_type[::1]
 
 @njit(cache=True)
 def node_ctor(mem, t_ids, var_inds,lit=None):
@@ -184,7 +190,6 @@ def node_ctor(mem, t_ids, var_inds,lit=None):
     # if(lit is not None):
     st.head_ptr_buffers = List.empty_list(i8_x2_arr_typ)
     st.input_state_buffers = List.empty_list(input_state_arr_type)
-    st.input_idrec_buffers = List.empty_list(u8_arr_typ)
 
     # st.idrecs_change_buffers = List.empty_list(u8_arr_typ)
     # st.changed_idrecs = List.empty_list(u8_arr_typ)
@@ -204,7 +209,6 @@ def node_ctor(mem, t_ids, var_inds,lit=None):
             l = op.head_ranges[i].length
             st.head_ptr_buffers.append(np.empty((8,l),dtype=np.int64))
             st.input_state_buffers.append(np.zeros(8, dtype=input_state_type))
-            st.input_idrec_buffers.append(np.zeros(8, dtype=np.uint64))
 
             # idrec_change_buff = np.empty(8, dtype=np.uint64)
             ind_change_buff = np.empty(8, dtype=np.int64)
@@ -247,6 +251,7 @@ def node_ctor(mem, t_ids, var_inds,lit=None):
     st.truth_table = np.zeros((8,8), dtype=np.uint8)
     st.idrecs_to_inds = List.empty_list(u8_i8_dict_type) 
     st.retracted_inds = List.empty_list(VectorType) 
+    st.change_pairs = List.empty_list(idrec_ind_pair_arr_type) 
     st.widths = np.zeros(2,dtype=np.int64)
     #  "idrecs_to_inds" : ListType(DictType(u8,i8)),
     # "retracted_inds" : ListType(VectorType),
@@ -255,6 +260,7 @@ def node_ctor(mem, t_ids, var_inds,lit=None):
     for i in range(n_vars):
         st.idrecs_to_inds.append(Dict.empty(u8,i8))
         st.retracted_inds.append(new_vector(8))
+        st.change_pairs.append(np.empty(0,dtype=idrec_ind_pair_type))
 
     # Just make False by default, can end up being True after linking
     st.inputs_same_parent = False
@@ -462,8 +468,7 @@ def update_changes_deref_dependencies(self, arg_change_sets):
 
 
 
-_idrec_ind_pair = np.dtype([('idrec', np.uint64),  ('ind', np.int64)])
-idrec_ind_pair_type = numba.from_dtype(_idrec_ind_pair)
+
 
 
 # @njit(cache=True)
@@ -482,7 +487,6 @@ def update_changes_from_inputs(self):
         retracted_inds_i = self.retracted_inds[i]
         head_ptr_buffers_i = self.head_ptr_buffers[i]
         input_state_buffers_i = self.input_state_buffers[i]
-        input_idrec_buffers_i = self.input_idrec_buffers[i]
         # idrecs_change_buffers_i = self.idrecs_change_buffers[i]
 
         # idrecs_match_buffers_i = self.idrecs_match_buffers[i]
@@ -492,9 +496,9 @@ def update_changes_from_inputs(self):
 
         # print("--", len(inp.change_set))
         # Designate inds for each idrec and expand widths (14 us) 
-        idrec_ind_pairs = np.empty(len(inp.change_set),dtype=idrec_ind_pair_type)
-        for k, idrec in enumerate(inp.change_set):
-            if(not self.inputs_same_parent):
+        if(not self.inputs_same_parent):
+            change_pairs = self.change_pairs[i] = np.empty(len(inp.change_set),dtype=idrec_ind_pair_type)
+            for k, idrec in enumerate(inp.change_set):
                 # If the inputs have the same parent then the node should just share
                 #  the same idrecs_to_inds and widths
                 ind = idrecs_to_inds_i.get(idrec,-1)
@@ -505,12 +509,12 @@ def update_changes_from_inputs(self):
                         ind = w_i
                         w_i += 1
                     idrecs_to_inds_i[idrec] = ind
-            else:
-                ind = idrecs_to_inds_i.get(idrec,-1)
-                assert ind != -1
+                # else:
+                #     ind = idrecs_to_inds_i.get(idrec,-1)
+                #     assert ind != -1
 
-            idrec_ind_pairs[k].idrec = idrec
-            idrec_ind_pairs[k].ind = ind
+                change_pairs[k].idrec = idrec
+                change_pairs[k].ind = ind
 
         self.widths[i] = w_i
         # print("<<",idrecs_to_inds_i)
@@ -527,12 +531,6 @@ def update_changes_from_inputs(self):
             new_input_state_buff = np.zeros((curr_len+expand,),dtype=input_state_type)
             new_input_state_buff[:curr_len] = input_state_buffers_i
             input_state_buffers_i = self.input_state_buffers[i] = new_input_state_buff
-
-            if(not self.inputs_same_parent):
-                new_input_idrec_buff = np.zeros((curr_len+expand,),dtype=np.uint64)
-                new_input_idrec_buff[:curr_len] = input_idrec_buffers_i
-                input_idrec_buffers_i = self.input_idrec_buffers[i] = new_input_idrec_buff
-
 
             # new_idrec_chng_buff = np.empty((curr_len+expand,),dtype=np.uint64)
             # new_idrec_chng_buff[:curr_len] = idrecs_change_buffers_i
@@ -552,7 +550,7 @@ def update_changes_from_inputs(self):
         
         # # Try to deref, mark any changes (10 us)
         # print(idrec_ind_pairs)
-        for pair in idrec_ind_pairs:
+        for pair in self.change_pairs[i]:
             idrec, ind = pair.idrec, pair.ind
 
             head_ptrs = head_ptr_buffers_i[ind]
@@ -561,10 +559,7 @@ def update_changes_from_inputs(self):
             is_valid = validate_head_or_retract(self, i, idrec, head_ptrs, head_range_i)
             is_changed = is_valid ^ input_state.head_was_valid
 
-            if(not self.inputs_same_parent):
-                input_idrec_buffers_i[ind] = idrec
-
-            # input_state.idrec = idrec
+            input_state.idrec = idrec
             input_state.is_changed = is_changed
             input_state.head_was_valid = is_valid
 
@@ -815,8 +810,8 @@ def _handle_beta_match(self, tt, negated, inp_state_i, inp_state_j, match_head_p
     inp_state_i.true_count += count_diff
     inp_state_j.true_count += count_diff
 
-    # decode_idrec(inp_state_j.idrec)[0]
-    print("Beta",is_match, match_inp_ptrs, match_inds)
+    decode_idrec(inp_state_j.idrec)[0]
+    print("Beta",is_match, match_inp_ptrs, match_inds, decode_idrec(inp_state_i.idrec)[1], decode_idrec(inp_state_j.idrec)[1])
 
     #     tt[0, 0] |= u1(1)
         # print("INSER", match_f_ids, self.lit.negated)
@@ -917,18 +912,16 @@ def update_node(self):
             # inputs_same_parent = p1 != 0 and p1 == p2
             # BETA CASE 
             j_strt, j_len = head_ranges[j][0], head_ranges[j][1]        
-            # idrecs_to_inds_j = self.idrecs_to_inds[j]
+            idrecs_to_inds_j = self.idrecs_to_inds[j]
             head_ptrs_j = self.head_ptr_buffers[j]
             input_state_buffers_i = self.input_state_buffers[i]
             input_state_buffers_j = self.input_state_buffers[j]
-            input_idrec_buffers_i = self.input_idrec_buffers[i]
-            input_idrec_buffers_j = self.input_idrec_buffers[j]
 
             # print("Z")
 
             for ind_i in changed_inds_i:
                 inp_state_i  = input_state_buffers_i[ind_i]
-                idrec_i = input_idrec_buffers_i[ind_i]#inp_state_i.idrec
+                idrec_i = inp_state_i.idrec
                 t_id_i, f_id_i, a_id_i = decode_idrec(idrec_i)
                 idrec_i = encode_idrec(t_id_i, f_id_i, 0)
                 # print("H", idrec_i, head_ptrs_i)
@@ -965,7 +958,7 @@ def update_node(self):
                     # Update the whole row/column
                     for ind_j in range(self.widths[j]):
                         inp_state_j = input_state_buffers_j[ind_j]
-                        match_inds[j], match_idrecs[j] = ind_j, input_idrec_buffers_j[ind_j]
+                        match_inds[j], match_idrecs[j] = ind_j, inp_state_j.idrec
                         match_inp_ptrs[j_strt:j_strt+j_len] = head_ptrs_j[ind_j]
                         _handle_beta_match(self, tt, negated, inp_state_i, inp_state_j,
                             match_head_ptrs_func, match_inp_ptrs, match_inds, match_idrecs)
@@ -973,7 +966,7 @@ def update_node(self):
                     # Check just the unchanged parts, so to avoid repeat checks 
                     for ind_j in self.unchanged_inds[j]:
                         inp_state_j = input_state_buffers_j[ind_j]
-                        match_inds[j], match_idrecs[j] = ind_j, input_idrec_buffers_j[ind_j]
+                        match_inds[j], match_idrecs[j] = ind_j, inp_state_j.idrec
                         match_inp_ptrs[j_strt:j_strt+j_len] = head_ptrs_j[ind_j]
                         _handle_beta_match(self, tt, negated, inp_state_i, inp_state_j,
                             match_head_ptrs_func, match_inp_ptrs, match_inds, match_idrecs)
@@ -983,11 +976,10 @@ def update_node(self):
         else:
             # print("ALPHA CASE", changed_inds_i, len(input_state_buffers_i))
             input_state_buffers_i = self.input_state_buffers[i]
-            input_idrec_buffers_i = self.input_idrec_buffers[i]
             # ALPHA CASE 
             for ind_i in changed_inds_i:
                 inp_state_i=  input_state_buffers_i[ind_i]
-                idrec_i = input_idrec_buffers_i[ind_i]
+                idrec_i = inp_state_i.idrec
                 t_id_i, f_id_i, a_id_i = decode_idrec(idrec_i)
                 idrec_i = encode_idrec(t_id_i, f_id_i, 0)
 
@@ -1026,7 +1018,6 @@ def update_node(self):
         change_ind = 0
         match_ind = 0
         input_state_buffers_i = self.input_state_buffers[i]
-        input_idrec_buffers_i = self.input_idrec_buffers[i]
         # idrecs_change_buffers_i = self.idrecs_change_buffers[i]
 
         # match_idrecs_buffer_i = out_i.match_idrecs_buffer
@@ -1038,7 +1029,7 @@ def update_node(self):
         
         for k in range(self.widths[i]):
             input_state = input_state_buffers_i[k]
-            idrec_i = input_idrec_buffers_i[k]
+            idrec_i = input_state.idrec
             t_id_i, f_id_i, a_id_i = decode_idrec(idrec_i)
 
             true_is_nonzero = (input_state.true_count != 0)
@@ -1367,13 +1358,12 @@ def build_rete_graph(mem, c):
             node.inputs_same_parent = (len(inputs) == 2 and 
                 inputs[0].parent_node_ptr == inputs[1].parent_node_ptr)
 
-            # In 'inputs_same_parent' cases make nodes share idrec_to_inds, widths, and input_idrec_buffers
+            # In 'inputs_same_parent' cases make nodes share idrec_to_inds and widths 
             if(node.inputs_same_parent):
                 assert node.upstream_node_ptr != 0
                 upstream_node = _struct_from_pointer(BaseReteNodeType, node.upstream_node_ptr)
                 node.idrecs_to_inds = upstream_node.idrecs_to_inds
                 node.widths = upstream_node.widths
-                node.input_idrec_buffers = upstream_node.input_idrec_buffers
 
             # Short circut the input to the output for identity nodes
             if(node.lit is None):
@@ -1769,7 +1759,7 @@ def update_other_idrecs(m_node):
         
         # matches_inds = m_node.outputs[arg_ind]
 
-        # f_decode_idrecid = m_node.idrecs[m_node.curr_ind]
+        # f_id = m_node.idrecs[m_node.curr_ind]
         # print("B", matches, m_node.f_ids, m_node.curr_ind)
 
         # other_idrecs_d = _dict_from_ptr(dict_i8_u1_type, matches[f_id]) 
@@ -1782,17 +1772,16 @@ def update_other_idrecs(m_node):
         this_internal_ind = associated_output.match_inds[m_node.curr_ind]
 
         truth_table = node.truth_table
-        input_idrecs = node.input_idrec_buffers[arg_ind]
-        # input_states = node.input_state_buffers[arg_ind]
+        input_states = node.input_state_buffers[arg_ind]
         
         other_idrecs = np.empty((len(associated_output.match_inds)), dtype=np.uint64)
         k = 0
         if(arg_ind == 0):
             for i, t in enumerate(truth_table[this_internal_ind, :]):
-                if(t): other_idrecs[k] = input_idrecs[i]; k += 1
+                if(t): other_idrecs[k] = input_states[i].idrec; k += 1
         else:        
             for i, t in enumerate(truth_table[:, this_internal_ind]):
-                if(t): other_idrecs[k] = input_idrecs[i]; k += 1
+                if(t): other_idrecs[k] = input_states[i].idrec; k += 1
 
         m_node.other_idrecs = other_idrecs[:k]
         # this_input_state = m_node.node.truth_table[arg_ind][]

@@ -15,15 +15,15 @@ from cre.context import cre_context
 from cre.structref import define_structref, define_structref_template
 from cre.memory import MemoryType, Memory, facts_for_t_id, fact_at_f_id
 # from cre.fact import define_fact, BaseFactType, cast_fact, DeferredFactRefType, Fact
-from cre.utils import (_struct_from_meminfo, _meminfo_from_struct, _cast_structref, cast_structref, decode_idrec, lower_getattr, _struct_from_pointer,  lower_setattr, lower_getattr,
-                       _pointer_from_struct, _decref_pointer, _incref_pointer, _incref_structref, _pointer_from_struct_incref)
+from cre.utils import (_struct_from_meminfo, _meminfo_from_struct, _cast_structref, cast_structref, decode_idrec, lower_getattr, _struct_from_ptr,  lower_setattr, lower_getattr,
+                       _raw_ptr_from_struct, _decref_ptr, _incref_ptr, _incref_structref, _ptr_from_struct_incref)
 from cre.utils import assign_to_alias_in_parent_frame, as_typed_list, iter_typed_list
 from cre.subscriber import base_subscriber_fields, BaseSubscriber, BaseSubscriberType, init_base_subscriber, link_downstream
 from cre.vector import VectorType
 from cre.fact import Fact, gen_fact_import_str, get_offsets_from_member_types
 from cre.var import Var
-from cre.predicate_node import BasePredicateNode,BasePredicateNodeType, get_alpha_predicate_node_definition, \
- get_beta_predicate_node_definition, deref_attrs, define_alpha_predicate_node, define_beta_predicate_node, AlphaPredicateNode, BetaPredicateNode
+# from cre.predicate_node import BasePredicateNode,BasePredicateNodeType, get_alpha_predicate_node_definition, \
+#  get_beta_predicate_node_definition, deref_attrs, define_alpha_predicate_node, define_beta_predicate_node, AlphaPredicateNode, BetaPredicateNode
 from cre.make_source import make_source, gen_def_func, gen_assign, resolve_template, gen_def_class
 from numba.core import imputils, cgutils
 from numba.core.datamodel import default_manager, models, register_default
@@ -80,7 +80,7 @@ def gen_op_source(cls, call_needs_jitting, check_needs_jitting):
 f'''from numba import njit, void, i8, boolean, objmode
 from numba.experimental.function_type import _get_wrapper_address
 from numba.core.errors import NumbaError, NumbaPerformanceWarning
-from cre.utils import _func_from_address, _load_pointer
+from cre.utils import _func_from_address, _load_ptr
 from cre.op import op_fields_dict, OpTypeTemplate, warn_cant_compile
 import cloudpickle
 nopython_call = {cls.nopython_call} 
@@ -135,11 +135,11 @@ def match({arg_names}):
 
 match_head = match
 
-{",".join([f'h{i}_type' for i in range(len(arg_types))])} = call_sig.args
+{"".join([f'h{i}_type, ' for i in range(len(arg_types))])} = call_sig.args
 
 @njit(boolean(i8[::1],) ,cache=True)
 def match_head_ptrs(ptrs):
-{indent(nl.join([f'i{i} = _load_pointer(h{i}_type,ptrs[{i}])' for i in range(len(arg_types))]),prefix='    ')}
+{indent(nl.join([f'i{i} = _load_ptr(h{i}_type,ptrs[{i}])' for i in range(len(arg_types))]),prefix='    ')}
     return match_head({",".join([f'i{i}' for i in range(len(arg_types))])})
 
 
@@ -367,7 +367,7 @@ def resolve_return_type(x):
 
 @njit(cache=True)
 def var_to_ptr(x):
-    return _pointer_from_struct_incref(x)
+    return _ptr_from_struct_incref(x)
 
 def new_var_ptrs_from_types(types, names):
     '''Generate vars with 'types' and 'names'
@@ -385,10 +385,10 @@ def gen_placeholder_aliases(var_ptrs):
     
     n_auto_gen = 0
     for var_ptr in var_ptrs:
-        head_var = _struct_from_pointer(GenericVarType, var_ptr)
+        head_var = _struct_from_ptr(GenericVarType, var_ptr)
         base_ptr = head_var.base_ptr
         if(base_ptr not in _vars):
-            base_var = _struct_from_pointer(GenericVarType, base_ptr)
+            base_var = _struct_from_ptr(GenericVarType, base_ptr)
             _vars[base_ptr] = base_var
             
     for var in _vars.values():
@@ -422,8 +422,8 @@ def make_head_ranges(n_args,head_var_ptrs):
     prev_base_ptr = 0
     k = 0 
     for ptr in head_var_ptrs:
-        head_var = _struct_from_pointer(GenericVarType, ptr)
-        base_ptr = head_var.base_ptr
+        head_var = _struct_from_ptr(GenericVarType, ptr)
+        base_ptr = i8(head_var.base_ptr)
         if(prev_base_ptr == 0 or base_ptr == prev_base_ptr):
             length += 1
         else:
@@ -454,10 +454,10 @@ def op_ctor(name, return_type_name, arg_type_names, head_var_ptrs,
     generated_aliases = gen_placeholder_aliases(head_var_ptrs)
     j = 0
     for head_ptr in head_var_ptrs:
-        head_var = _struct_from_pointer(GenericVarType, head_ptr)
+        head_var = _struct_from_ptr(GenericVarType, head_ptr)
         base_ptr = head_var.base_ptr
         if(base_ptr not in st.base_var_map):
-            base_var = _struct_from_pointer(GenericVarType, base_ptr)
+            base_var = _struct_from_ptr(GenericVarType, base_ptr)
             alias = base_var.alias
             if(alias == ""):
                 alias = generated_aliases[j]; j+=1;
@@ -1076,7 +1076,7 @@ class Op(structref.StructRefProxy,metaclass=OpMeta):
 def extract_arg_names(op):
     out = List.empty_list(unicode_type)
     for v_ptr in op.base_var_map:
-        v =_struct_from_pointer(GenericVarType, v_ptr)
+        v =_struct_from_ptr(GenericVarType, v_ptr)
         out.append(v.alias)
     return out
 
@@ -1114,7 +1114,7 @@ def get_head_ranges(self):
 @njit(cache=True)
 def get_var(self,i):
     v_ptr = List(self.base_var_map.keys())[i]
-    return _struct_from_pointer(GenericVarType,v_ptr)
+    return _struct_from_ptr(GenericVarType,v_ptr)
 
 
 @njit(cache=True)
@@ -1155,7 +1155,7 @@ def get_arg_seq(self,type_annotations=False):
     for i,alias in enumerate(self.inv_base_var_map):
         s += alias
         if(type_annotations): 
-            v = _struct_from_pointer(GenericVarType, self.inv_base_var_map[alias])
+            v = _struct_from_ptr(GenericVarType, self.inv_base_var_map[alias])
             s += ":" + v.base_type_name
 
         if(i < len(self.inv_base_var_map)-1): 
@@ -1244,7 +1244,7 @@ class DerefInstr():
 
 # @njit(cache=True)
 # def var_from_ptr(ptr):
-#     return _struct_from_pointer(GenericVarType,ptr)
+#     return _struct_from_ptr(GenericVarType,ptr)
 
 # def extract_head_ptr(x):
 #     if(isinstance(x,DerefInstr)):
@@ -1576,7 +1576,7 @@ class OpComp():
         body = ""
         for i in range(n_heads):
             # print(i, head_type_names)
-            load_str = f'_load_pointer({head_type_names[i]},ptrs[{i}])'
+            load_str = f'_load_ptr({head_type_names[i]},ptrs[{i}])'
             body += f"{ind}{gen_assign(lang,f'i{i}',load_str)}\n"
         inps = ",".join([f'i{i}' for i in range(len(arg_names))])
         tail = f"{ind}return {wrapped_fname}({inps})\n"
@@ -1676,7 +1676,7 @@ from numba.types import unicode_type
 from numba.extending import intrinsic
 from numba.core import cgutils
 from cre.op import Op
-from cre.utils import _load_pointer
+from cre.utils import _load_ptr
 import cloudpickle
 {op_imports}
 

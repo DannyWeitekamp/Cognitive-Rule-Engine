@@ -1,10 +1,11 @@
+import numba
 from numba import types, njit, u1,u2,u4,u8, i8,i2, literally
 from numba.core.imputils import impl_ret_borrowed
 from numba.types import Tuple, void, ListType
 from numba.typed import List
 from numba.experimental.structref import _Utils, imputils
-from numba.extending import intrinsic
-from numba.core import cgutils
+from numba.extending import intrinsic, overload_method, overload
+from numba.core import cgutils, utils as numba_utils
 from llvmlite.ir import types as ll_types
 from llvmlite import ir
 import inspect
@@ -14,6 +15,72 @@ from numba.typed.typedobjectutils import _container_get_data
 from numba.core.datamodel import default_manager, models
 from numba.core.typeconv import Conversion
 from numba.np.arrayobj import _getitem_array_single_int, make_array
+from numba.core.datamodel.models import IntegerModel, register_default
+from numba.core.imputils import (lower_cast)
+import operator
+
+#### Ptr Type #####
+
+class Ptr(types.Integer):
+    pass
+
+# Pointer Type, typically equivalent to i8 but will decref when dtor of parent struct is called
+ptr_t = Ptr("ptr_t", numba_utils.MACHINE_BITS)
+
+#Weak Pointer Type
+wptr_t = i8
+
+@register_default(Ptr)
+class PtrModel(IntegerModel):
+    _ptr_type = ir.IntType(8).as_pointer()
+
+    def get_nrt_meminfo(self, builder, value):
+        """
+        Returns the MemInfo object or None if it is not tracked.
+        It is only defined for types.meminfo_pointer
+        """
+        return builder.inttoptr(value, cgutils.voidptr_t)
+
+    def has_nrt_meminfo(self):
+        return True
+
+@lower_cast(Ptr, types.Integer)
+def downcast(context, builder, fromty, toty, val):
+    return val
+
+# class PtrCompare(AbstractTemplate):
+#     def generic(self, args, kws):
+#         [lhs, rhs] = args
+#         if isinstance(lhs, types.Integer) and isinstance(rhs, types.Integer):
+
+from numba.core.imputils import (builtin_registry, lower_builtin, lower_getattr,
+                                    lower_getattr_generic, lower_cast,
+                                    lower_constant, impl_ret_borrowed,
+                                    impl_ret_untracked)
+
+from numba.cpython.numbers import lower_builtin, int_eq_impl, int_ne_impl
+
+
+@overload(operator.eq)
+def _ptr_eq(a,b):
+    if(isinstance(a,types.Integer) and isinstance(b,types.Integer)):
+        def impl(a,b):
+            return i8(a) == i8(b)
+        return impl
+
+
+# overload(operator.eq)(_fact_eq)
+# print("<<", list(builtin_registry.functions))
+# lower_builtin(operator.eq, Ptr, types.Integer)(int_eq_impl)
+# lower_builtin(operator.eq, types.Integer, Ptr)(int_eq_impl)
+# lower_builtin(operator.ne, Ptr, types.Integer)(int_ne_impl)
+
+
+
+
+
+
+#### CastFriendlyMixin ####
 
 
 class CastFriendlyMixin():
@@ -194,7 +261,7 @@ def cast_structref(typ,inst):
 
 
 @intrinsic
-def _struct_from_pointer(typingctx, struct_type, raw_ptr):
+def _struct_from_ptr(typingctx, struct_type, raw_ptr):
     inst_type = struct_type.instance_type
 
     def codegen(context, builder, sig, args):
@@ -260,7 +327,9 @@ _dict_from_ptr = _list_from_ptr
 
 
 
-def _pointer_from_struct_codegen(context, builder, val, td,incref=True):
+
+
+def _ptr_from_struct_codegen(context, builder, val, td, incref=True):
     ctor = cgutils.create_struct_proxy(td)
     dstruct = ctor(context, builder, value=val)
     meminfo = dstruct.meminfo
@@ -272,39 +341,48 @@ def _pointer_from_struct_codegen(context, builder, val, td,incref=True):
 
 
 @intrinsic
-def _pointer_from_struct(typingctx, val_ty):
+def _raw_ptr_from_struct(typingctx, val_ty):
     if(isinstance(val_ty, types.Optional)):
         val_ty = val_ty.type
-    def codegen(context, builder, sig, args):
-        [td] = sig.args
-        [d] = args
 
-        return _pointer_from_struct_codegen(context, builder, d, td, False)
+    def codegen(context, builder, sig, args):
+        return _ptr_from_struct_codegen(context, builder, args[0], sig.args[0], False)
 
         # return res
         
-    sig = i8(val_ty,)
+    sig = i8(val_ty)
     return sig, codegen
 
-@njit
-def pointer_from_struct(self):
-    return _pointer_from_struct(self) 
-
 @intrinsic
-def _pointer_from_struct_incref(typingctx, val_ty):
+def _raw_ptr_from_struct_incref(typingctx, val_ty):
     if(isinstance(val_ty, types.Optional)):
         val_ty = val_ty.type
-    def codegen(context, builder, sig, args):
-        [td] = sig.args
-        [d] = args
 
-        return _pointer_from_struct_codegen(context, builder, d, td, True)
+    def codegen(context, builder, sig, args):
+        return _ptr_from_struct_codegen(context, builder, args[0], sig.args[0], True)
         
-    sig = i8(val_ty,)
+    sig = i8(val_ty)
+    return sig, codegen
+
+
+# @njit
+# def pointer_from_struct(self):
+#     return _raw_ptr_from_struct(self) 
+
+
+@intrinsic
+def _ptr_from_struct_incref(typingctx, val_ty):
+    if(isinstance(val_ty, types.Optional)):
+        val_ty = val_ty.type
+
+    def codegen(context, builder, sig, args):
+        return _ptr_from_struct_codegen(context, builder, args[0], sig.args[0], True)
+        
+    sig = ptr_t(val_ty)
     return sig, codegen
 
 @intrinsic
-def _pointer_to_data_pointer(typingctx, raw_ptr):
+def _ptr_to_data_ptr(typingctx, raw_ptr):
     def codegen(context, builder, sig, args):
         raw_ptr,  = args
         raw_ptr_ty,  = sig.args
@@ -352,7 +430,7 @@ def _decref_structref(typingctx,inst_type):
 
 
 @intrinsic
-def _decref_pointer(typingctx, raw_ptr):
+def _decref_ptr(typingctx, raw_ptr):
     def codegen(context, builder, sig, args):
         raw_ptr, = args
         meminfo = builder.inttoptr(raw_ptr, cgutils.voidptr_t)
@@ -363,7 +441,7 @@ def _decref_pointer(typingctx, raw_ptr):
     return sig, codegen
 
 @intrinsic
-def _incref_pointer(typingctx, raw_ptr):
+def _incref_ptr(typingctx, raw_ptr):
     def codegen(context, builder, sig, args):
         raw_ptr, = args
         meminfo = builder.inttoptr(raw_ptr, cgutils.voidptr_t)
@@ -414,7 +492,7 @@ def struct_get_attr_offset(inst,attr):
     return _struct_get_attr_offset(inst,literally(attr))
 
 @intrinsic
-def _struct_get_data_pointer(typingctx, inst_type):
+def _struct_get_data_ptr(typingctx, inst_type):
     '''get the base address of the struct pointed to by structref 'inst' '''
     def codegen(context, builder, sig, args):
         val_ty, = sig.args
@@ -429,7 +507,7 @@ def _struct_get_data_pointer(typingctx, inst_type):
     return sig, codegen
 
 @intrinsic
-def _load_pointer(typingctx, typ, ptr):
+def _load_ptr(typingctx, typ, ptr):
     '''Get the value pointed to by 'ptr' assuming it has type 'typ' 
     '''
     inst_type = typ.instance_type
@@ -669,7 +747,7 @@ def _struct_tuple_from_pointer_arr(typingctx, struct_types, ptr_arr):
         for i, inst_type in enumerate(typs):
             i_val = context.get_constant(types.intp, i)
 
-            # Same as _struct_from_pointer
+            # Same as _struct_from_ptr
             raw_ptr = _getitem_array_single_int(context,builder,i8,i8[::1],ary,i_val)
             meminfo = builder.inttoptr(raw_ptr, cgutils.voidptr_t)
 

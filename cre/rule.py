@@ -26,7 +26,7 @@ from cre.gensource import assert_gen_source
 from cre.caching import unique_hash, source_to_cache, import_from_cached, source_in_cache, get_cache_path, cache_safe_exec
 from cre.structref import gen_structref_code, define_structref, define_structref_template
 from cre.context import cre_context
-from cre.utils import _cast_structref, _struct_from_pointer, _func_from_address
+from cre.utils import _cast_structref, _struct_from_ptr, _func_from_address
 from cre.var import Var
 from cre.fact import define_fact, gen_fact_import_str
 from cre.conditions import get_linked_conditions_instance

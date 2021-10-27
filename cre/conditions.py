@@ -12,7 +12,7 @@ from cre.context import cre_context
 from cre.structref import define_structref, define_structref_template
 from cre.memory import MemoryType, Memory, facts_for_t_id, fact_at_f_id
 from cre.fact import define_fact, BaseFactType, cast_fact
-from cre.utils import _struct_from_meminfo, _meminfo_from_struct, _cast_structref, cast_structref, decode_idrec, lower_getattr, _struct_from_pointer,  lower_setattr, lower_getattr, _pointer_from_struct, _pointer_from_struct_incref, _decref_pointer
+from cre.utils import _struct_from_meminfo, _meminfo_from_struct, _cast_structref, cast_structref, decode_idrec, lower_getattr, _struct_from_ptr,  lower_setattr, lower_getattr, _raw_ptr_from_struct, _ptr_from_struct_incref, _decref_ptr
 from cre.utils import assign_to_alias_in_parent_frame, meminfo_type
 from cre.subscriber import base_subscriber_fields, BaseSubscriber, BaseSubscriberType, init_base_subscriber, link_downstream
 from cre.vector import VectorType
@@ -176,7 +176,7 @@ def literal_to_cond(lit):
     _vars = List.empty_list(GenericVarType)
 
     for ptr in lit.var_base_ptrs:
-        _vars.append(_struct_from_pointer(GenericVarType, ptr))
+        _vars.append(_struct_from_ptr(GenericVarType, ptr))
     # if(right_var is not None):
     #     _vars.append(right_var)
     # pt.negated = negated
@@ -355,7 +355,7 @@ def conds_get_delimited_type_names(self,delim,ignore_ext_nots):
 # @njit(void(ConditionsType),cache=True)
 # def conds_dtor(self):
 #     if(self.matcher_inst_ptr): 
-#         _decref_pointer(self.matcher_inst_ptr)
+#         _decref_ptr(self.matcher_inst_ptr)
 
 
 ### Helper Functions for expressing conditions as python lists of cre.Op instances ###
@@ -465,7 +465,7 @@ def new_dnf(n):
 def _conditions_ctor_single_var(_vars,dnf=None):
     st = new(ConditionsType)
     st.vars = List.empty_list(GenericVarType)
-    st.vars.append(_struct_from_pointer(GenericVarType,_vars.base_ptr)) 
+    st.vars.append(_struct_from_ptr(GenericVarType,_vars.base_ptr)) 
     st.base_var_map = build_base_var_map(st.vars)
     # print("A",st.base_var_map)
     st.dnf = dnf if(dnf) else new_dnf(1)
@@ -490,7 +490,7 @@ def _conditions_ctor_var_list(_vars,dnf=None):
     st = new(ConditionsType)
     st.vars = List.empty_list(GenericVarType)
     for x in _vars:
-        st.vars.append(_struct_from_pointer(GenericVarType,x.base_ptr))
+        st.vars.append(_struct_from_ptr(GenericVarType,x.base_ptr))
     # st.vars = List([ for x in _vars])
     st.base_var_map = build_base_var_map(st.vars)
     # print("C",st.base_var_map)
@@ -627,7 +627,7 @@ def build_var_list(base_var_map):
     '''Makes a Var list from a base_var_map'''
     var_list = List.empty_list(GenericVarType)
     for ptr in base_var_map:
-        var_list.append(_struct_from_pointer(GenericVarType,ptr))
+        var_list.append(_struct_from_ptr(GenericVarType,ptr))
     return var_list
 
 
@@ -775,10 +775,10 @@ def _build_var_conjugate(v):
         conj = new(GenericVarType)
         var_memcopy(v,conj)
         conj.is_not = u1(0) if v.is_not else u1(1)
-        conj.conj_ptr = _pointer_from_struct_incref(v)
-        v.conj_ptr = _pointer_from_struct_incref(conj)
+        conj.conj_ptr = _ptr_from_struct_incref(v)
+        v.conj_ptr = _ptr_from_struct_incref(conj)
     else:
-        conj = _struct_from_pointer(GenericVarType, v.conj_ptr)
+        conj = _struct_from_ptr(GenericVarType, v.conj_ptr)
     return conj
 
 
@@ -791,14 +791,14 @@ def _var_NOT(c):
         st_typ = c
         def impl(c):
             if(c.conj_ptr == 0):
-                base = _struct_from_pointer(GenericVarType, c.base_ptr)
+                base = _struct_from_ptr(GenericVarType, c.base_ptr)
 
                 conj_base = _build_var_conjugate(base)
                 g_conj = _build_var_conjugate(_cast_structref(GenericVarType,c))
 
-                g_conj.base_ptr = _pointer_from_struct(conj_base)
+                g_conj.base_ptr = _raw_ptr_from_struct(conj_base)
 
-            st = _struct_from_pointer(st_typ, c.conj_ptr)
+            st = _struct_from_ptr(st_typ, c.conj_ptr)
             return st
         return impl
 
@@ -808,7 +808,7 @@ def _conditions_NOT(c):
     ptr_map = Dict.empty(i8,i8)
     for var in c.vars:
         new_var = _var_NOT(var)
-        ptr_map[_pointer_from_struct(var)]  = _pointer_from_struct(new_var)
+        ptr_map[_raw_ptr_from_struct(var)]  = _raw_ptr_from_struct(new_var)
         new_vars.append(new_var)
 
     dnf = dnf_copy(c.dnf,shallow=False)
@@ -929,7 +929,7 @@ def cond_not(c):
 def link_literal_instance(literal, mem):
     link_data = generate_link_data(literal.pred_node, mem)
     literal.link_data = link_data
-    literal.mem_ptr = _pointer_from_struct(mem)
+    literal.mem_ptr = _raw_ptr_from_struct(mem)
     return literal
 
 @njit(cache=True)
@@ -957,8 +957,8 @@ def get_linked_conditions_instance(conds, mem, copy=False):
 
     #Note... maybe it's simpler to just make mem an optional(memType)
     old_ptr = conds.mem_ptr
-    conds.mem_ptr = _pointer_from_struct_incref(mem)
-    if(old_ptr != 0): _decref_pointer(old_ptr)
+    conds.mem_ptr = _ptr_from_struct_incref(mem)
+    if(old_ptr != 0): _decref_ptr(old_ptr)
     return conds
 
 
@@ -1067,7 +1067,7 @@ def build_distributed_dnf(c,index_map=None):
 
 #         for term in conjunct:
 #             ptr = term.var_base_ptrs[0]
-#             # ptr = _pointer_from_struct(l_var)
+#             # ptr = _raw_ptr_from_struct(l_var)
 #             # print(">>>", ptr, conds.base_var_map)
 #             ind = conds.base_var_map[ptr]
 #             # print(ind, len(a_is_in_this_conj))

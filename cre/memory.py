@@ -33,7 +33,7 @@ from cre.structref import define_structref
 from cre.fact import BaseFact,BaseFactType, cast_fact
 from cre.fact_intrinsics import fact_lower_setattr
 from cre.utils import lower_setattr, _cast_structref, _meminfo_from_struct, decode_idrec, encode_idrec, \
- _pointer_from_struct, _pointer_from_struct_incref, _struct_from_pointer, _decref_pointer
+ _raw_ptr_from_struct, _ptr_from_struct_incref,  _struct_from_ptr, _decref_ptr, _raw_ptr_from_struct_incref
 from cre.vector import new_vector, VectorType
 from cre.caching import import_from_cached, source_in_cache, source_to_cache
 
@@ -85,11 +85,12 @@ def expand_mem_data_types(mem_data,n):
 
     for i in range(n):
         v = new_vector(BASE_F_ID_STACK_SIZE)    
-        v_ptr =_pointer_from_struct_incref(v)
+        v_ptr = _raw_ptr_from_struct_incref(v)
+
         mem_data.retracted_f_ids.add(v_ptr)
 
         v = new_vector(BASE_FACT_SET_SIZE)    
-        v_ptr =_pointer_from_struct_incref(v)
+        v_ptr = _raw_ptr_from_struct_incref(v)
         mem_data.facts.add(v_ptr)
         
         # mem_data.facts.append(List.empty_list(BaseFactType))
@@ -140,16 +141,16 @@ def mem_data_dtor(mem_data):
     #Decref all declared facts and their container vectors 
     for i in range(mem_data.facts.head):
         facts_ptr = mem_data.facts.data[i]
-        facts = _struct_from_pointer(VectorType, facts_ptr)
+        facts = _struct_from_ptr(VectorType, facts_ptr)
         for j in range(facts.head):
             fact_ptr = facts.data[j]
-            _decref_pointer(fact_ptr)
-        _decref_pointer(facts_ptr)
+            _decref_ptr(fact_ptr)
+        _decref_ptr(facts_ptr)
 
     #Decref the inner vectors of retracted_f_ids
     for i in range(mem_data.retracted_f_ids.head):
         ptr = mem_data.retracted_f_ids.data[i]
-        _decref_pointer(ptr)
+        _decref_ptr(ptr)
 
 
 
@@ -282,19 +283,19 @@ def facts_for_t_id(mem_data,t_id):
     if(t_id >= L):
         expand_mem_data_types(mem_data, (t_id+1)-L)
     # print("L",L,t_id,(t_id+1)-L,len(mem_data.facts))
-    return _struct_from_pointer(VectorType, mem_data.facts[t_id])
+    return _struct_from_ptr(VectorType, mem_data.facts[t_id])
 
 @njit(cache=True)
 def fact_at_f_id(typ, t_id_facts,f_id):
     ptr = t_id_facts.data[f_id]
     if(ptr != 0):
-        return _struct_from_pointer(typ, ptr)
+        return _struct_from_ptr(typ, ptr)
     else:
         return None
 
 @njit(cache=True)
 def retracted_f_ids_for_t_id(mem_data,t_id):
-    return _struct_from_pointer(VectorType, mem_data.retracted_f_ids[t_id])
+    return _struct_from_ptr(VectorType, mem_data.retracted_f_ids[t_id])
 
 #### Helper Functions ####
 
@@ -313,14 +314,14 @@ def make_f_id_empty(mem_data, t_id, f_id):
 
     # es_s[es_h] = f_id
     retracted_f_ids_for_t_id(mem_data,t_id).add(f_id)
-    #_struct_from_pointer(VectorType, mem_data.retracted_f_ids[t_id]).add(f_id)
+    #_struct_from_ptr(VectorType, mem_data.retracted_f_ids[t_id]).add(f_id)
     # mem_data.empty_f_id_heads[t_id] += 1
     fact_ptr = facts_for_t_id(mem_data,t_id)[f_id]
     if(fact_ptr != 0):
-        _decref_pointer(fact_ptr)
+        _decref_ptr(fact_ptr)
     
-    facts_for_t_id(mem_data,t_id)[f_id] = 0#_pointer_from_struct(mem_data.NULL_FACT)
-    # mem_data.facts[t_id][f_id] = _pointer_from_struct(mem_data.NULL_FACT)
+    facts_for_t_id(mem_data,t_id)[f_id] = 0#_raw_ptr_from_struct(mem_data.NULL_FACT)
+    # mem_data.facts[t_id][f_id] = _raw_ptr_from_struct(mem_data.NULL_FACT)
 
 
 @njit(cache=True)
@@ -403,7 +404,7 @@ def signal_subscribers_change(mem, idrec):
 @njit(cache=True)
 def declare_fact(mem,fact):
     #Incref so that the fact is not freed if this is the only reference
-    fact_ptr = _pointer_from_struct_incref(fact) #.4ms / 10000
+    fact_ptr = _raw_ptr_from_struct_incref(fact) #.4ms / 10000
 
     t_id = resolve_t_id(mem,fact)  #.1ms / 10000
     facts = facts_for_t_id(mem.mem_data,t_id) #negligible
@@ -491,7 +492,7 @@ def all_facts_of_type(mem,typ):
         fact_ptr = facts.data[i]
         if(fact_ptr != 0):#u8(-1)):
             # out.append(cast_fact(typ,b_fact))
-            out.append(_struct_from_pointer(typ,fact_ptr))
+            out.append(_struct_from_ptr(typ,fact_ptr))
     return out
 
 #### Memory Overloading #####

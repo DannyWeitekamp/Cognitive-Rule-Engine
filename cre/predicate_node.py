@@ -27,8 +27,8 @@ from cre.structref import define_structref, define_structref_template
 from cre.memory import MemoryType, Memory, facts_for_t_id, fact_at_f_id
 from cre.fact import define_fact, BaseFactType, cast_fact
 from cre.utils import _struct_from_meminfo, _meminfo_from_struct, _cast_structref, \
- decode_idrec, lower_getattr, _struct_from_pointer, struct_get_attr_offset, _struct_get_data_pointer, \
- _load_pointer, _pointer_to_data_pointer, _list_base_from_ptr
+ decode_idrec, lower_getattr, _struct_from_ptr, struct_get_attr_offset, _struct_get_data_pointer, \
+ _load_ptr, _pointer_to_data_pointer, _list_base_from_ptr
 from cre.subscriber import base_subscriber_fields, BaseSubscriber, BaseSubscriberType, init_base_subscriber, link_downstream
 from cre.vector import VectorType, new_vector
 from cre.utils import deref_type, DEREF_TYPE_ATTR, DEREF_TYPE_LIST
@@ -290,7 +290,7 @@ def _deref_attrs(val_type, inst_ptr, attr_offsets):
             data_ptr = _pointer_to_data_pointer(inst_ptr)
         else:
             data_ptr = _list_base_from_ptr(inst_ptr)
-        inst_ptr = _load_pointer(i8,data_ptr+deref.offset)
+        inst_ptr = _load_ptr(i8,data_ptr+deref.offset)
         
     if(inst_ptr == 0): raise Exception()
     deref = attr_offsets[-1]
@@ -298,7 +298,7 @@ def _deref_attrs(val_type, inst_ptr, attr_offsets):
         data_ptr = _pointer_to_data_pointer(inst_ptr)
     else:
         data_ptr = i8(_list_base_from_ptr(inst_ptr))
-    val = _load_pointer(val_type, data_ptr+deref.offset)
+    val = _load_ptr(val_type, data_ptr+deref.offset)
 
     return val
 
@@ -327,7 +327,7 @@ def deref_attrs(val_type, inst_ptr, attr_offsets):
 #     # print("attr_offsets", attr_offsets)
 #     if(len(attr_offsets) == 0): return inst_ptr
 #     data_ptr = _pointer_to_data_pointer(inst_ptr)
-#     val = _load_pointer(val_type, data_ptr+attr_offsets[0])
+#     val = _load_ptr(val_type, data_ptr+attr_offsets[0])
 #     return val
     
 
@@ -592,8 +592,8 @@ def beta_eval_truth(pred_node, left_facts, right_facts, i, j):
         # If either dereference chain failed then return error byte 0xFF
         # if(left_val is None or right_val == None): return 0xFF
         # print(left_val, right_val)
-        # left_inst = _struct_from_pointer(pred_node.left_type,left_ptr)
-        # right_inst = _struct_from_pointer(pred_node.right_type,right_ptr)
+        # left_inst = _struct_from_ptr(pred_node.left_type,left_ptr)
+        # right_inst = _struct_from_ptr(pred_node.right_type,right_ptr)
         # left_val = lower_getattr(left_inst, pred_node.left_attr)
         # right_val = lower_getattr(right_inst, pred_node.right_attr)
         return exec_op(pred_node.op_str, left_val, right_val)

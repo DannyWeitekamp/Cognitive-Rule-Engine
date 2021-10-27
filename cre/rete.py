@@ -5,11 +5,11 @@ from numba.typed import List, Dict
 from numba.types import ListType, DictType, unicode_type, void, Tuple
 from numba.experimental.structref import new, define_boxing
 import numba.experimental.structref as structref
-from cre.utils import (_dict_from_ptr, _pointer_from_struct, _get_array_data_ptr,
-         _pointer_from_struct_incref, _struct_from_pointer, decode_idrec, CastFriendlyMixin,
+from cre.utils import (wptr_t, ptr_t, _dict_from_ptr, _raw_ptr_from_struct, _get_array_data_ptr,
+         _ptr_from_struct_incref, _struct_from_ptr, decode_idrec, CastFriendlyMixin,
         encode_idrec, deref_type, DEREF_TYPE_ATTR, DEREF_TYPE_LIST, _obj_cast_codegen,
-         _pointer_to_data_pointer, _list_base_from_ptr, _load_pointer, PrintElapse, meminfo_type,
-         _decref_structref, _decref_pointer, cast_structref, _struct_tuple_from_pointer_arr, _meminfo_from_struct)
+         _ptr_to_data_ptr, _list_base_from_ptr, _load_ptr, PrintElapse, meminfo_type,
+         _decref_structref, _decref_ptr, cast_structref, _struct_tuple_from_pointer_arr, _meminfo_from_struct)
 from cre.structref import define_structref
 from cre.caching import gen_import_str, unique_hash,import_from_cached, source_to_cache, source_in_cache, cache_safe_exec, get_cache_path
 from cre.memory import MemoryType
@@ -108,12 +108,12 @@ input_state_type = numba.from_dtype(_input_state_type)
 
 dict_i8_u1_type = DictType(i8,u1)
 dict_u8_i8_arr_type = DictType(u8,i8[::1])
-deref_dep_typ = DictType(u8,DictType(i8,u1))
+deref_dep_typ = DictType(u8,DictType(ptr_t,u1))
 
 
 # outputs_item_typ = DictType(u8,DictType(u8,u1))
 dict_u8_u1_type = DictType(u8,u1)
-outputs_typ = DictType(u8,DictType(u8,u1))
+# outputs_typ = DictType(u8,DictType(u8,u1))
 
 _idrec_ind_pair = np.dtype([('idrec', np.uint64),  ('ind', np.int64)])
 idrec_ind_pair_type = numba.from_dtype(_idrec_ind_pair)
@@ -239,7 +239,7 @@ def node_ctor(mem, t_ids, var_inds,lit=None):
     outputs = List.empty_list(NodeMemoryType)
     
 
-    self_ptr = _pointer_from_struct(st)
+    self_ptr = _raw_ptr_from_struct(st)
     for i in range(n_vars):
         # outputs.append(Dict.empty(u8,dict_u8_u1_type))
         node_mem = new_node_mem()
@@ -284,25 +284,25 @@ def deref_head_and_relevant_idrecs(inst_ptr, deref_offsets):
         # print("ENTERED")
         if(inst_ptr == 0): break;
         if(deref.type == u1(DEREF_TYPE_ATTR)):
-            data_ptr = _pointer_to_data_pointer(inst_ptr)
+            data_ptr = _ptr_to_data_ptr(inst_ptr)
         else:
             data_ptr = _list_base_from_ptr(inst_ptr)
-        t_id, f_id, _ = decode_idrec(u8(_load_pointer(u8, data_ptr)))
+        t_id, f_id, _ = decode_idrec(u8(_load_ptr(u8, data_ptr)))
         # if(k >= 0):
         #     relevant_idrecs[k] = encode_idrec(t_id, f_id, RETRACT);
         # k += 1
         # relevant_idrecs[k] = encode_idrec(t_id, f_id, deref.a_id); k += 1
 
-        inst_ptr = _load_pointer(i8, data_ptr+deref.offset)
+        inst_ptr = _load_ptr(i8, data_ptr+deref.offset)
     
     # print(inst_ptr)
     if(inst_ptr != 0):
         deref = deref_offsets[-1]
         if(deref.type == u1(DEREF_TYPE_ATTR)):
-            data_ptr = _pointer_to_data_pointer(inst_ptr)
+            data_ptr = _ptr_to_data_ptr(inst_ptr)
         else:
             data_ptr = _list_base_from_ptr(inst_ptr)
-        t_id, f_id, _ = decode_idrec(u8(_load_pointer(u8, data_ptr)))
+        t_id, f_id, _ = decode_idrec(u8(_load_ptr(u8, data_ptr)))
         # relevant_idrecs[k] = encode_idrec(t_id, f_id, RETRACT); k += 1
         # relevant_idrecs[k] = encode_idrec(t_id, f_id, deref.a_id); k += 1
 
@@ -325,24 +325,24 @@ def deref_head_and_relevant_idrecs(inst_ptr, deref_offsets):
 
 @njit(cache=True)
 def invalidate_head_ptr_rec(rec):
-    r_ptr = _pointer_from_struct(rec)
+    r_ptr = _raw_ptr_from_struct(rec)
     for ptr in rec.parent_ptrs:
         parent = _dict_from_ptr(dict_i8_u1_type, ptr)
         del parent[r_ptr]
         _decref_structref(rec)
 
-@njit(i8(deref_dep_typ, u8, i8),cache=True)
+@njit(wptr_t(deref_dep_typ, u8, ptr_t),cache=True)
 def make_deref_record_parent(deref_depends, idrec, r_ptr):
     p = deref_depends.get(idrec,None)
     if(p is None): 
-        p = deref_depends[idrec] = Dict.empty(i8,u1)
+        p = deref_depends[idrec] = Dict.empty(ptr_t,u1)
     p[r_ptr] = u1(1)
-    return _pointer_from_struct(p)
+    return _raw_ptr_from_struct(p)
 
 @njit(i8(deref_type,i8),inline='always',cache=True)
 def deref_once(deref,inst_ptr):
     if(deref.type == u1(DEREF_TYPE_ATTR)):
-        return _pointer_to_data_pointer(inst_ptr)
+        return _ptr_to_data_ptr(inst_ptr)
     else:
         return _list_base_from_ptr(inst_ptr)
 
@@ -353,7 +353,7 @@ def resolve_head_ptr(self, arg_ind, base_t_id, f_id, deref_offsets):
     '''Try to get the head_ptr of 'f_id' in input 'arg_ind'. Inject a DerefRecord regardless of the result 
         Keep in mind that a head_ptr is the pointer to the address where the data is stored not the data itself.
     '''
-    facts = _struct_from_pointer(VectorType, self.mem.mem_data.facts[base_t_id])
+    facts = _struct_from_ptr(VectorType, self.mem.mem_data.facts[base_t_id])
     if(len(deref_offsets) > 0):
         inst_ptr = facts.data[f_id]
         if(len(deref_offsets) > 1):
@@ -362,15 +362,15 @@ def resolve_head_ptr(self, arg_ind, base_t_id, f_id, deref_offsets):
                 if(inst_ptr == 0): break;
                 deref = deref_offsets[k]
                 data_ptr = deref_once(deref,inst_ptr)
-                rel_idrecs[k] = _load_pointer(u8, data_ptr)
-                inst_ptr = _load_pointer(i8, data_ptr+deref.offset)
+                rel_idrecs[k] = _load_ptr(u8, data_ptr)
+                inst_ptr = _load_ptr(i8, data_ptr+deref.offset)
 
             # Inject a deref record so that we can track changes to intermediate facts
             parent_ptrs = rel_idrecs.astype(i8) 
             r = DerefRecord(parent_ptrs, arg_ind, encode_idrec(base_t_id,f_id,0), inst_ptr != 0) #7us
-            r_ptr = _pointer_from_struct_incref(r)
+            r_ptr = _ptr_from_struct_incref(r)
             for i, idrec in enumerate(rel_idrecs): #21 us
-                parent_ptrs[i] = make_deref_record_parent(self.deref_depends, idrec, r_ptr)            
+                parent_ptrs[i] = i8(make_deref_record_parent(self.deref_depends, idrec, r_ptr))            
 
         if(inst_ptr != 0):
             deref = deref_offsets[-1]
@@ -403,7 +403,7 @@ def validate_head_or_retract(self, arg_ind, idrec, head_ptrs, r):
         # For each head_var try to deref all the way to the head_ptr and put it in head_ptrs
         for i in range(r.length):
             # continue 
-            head_var = _struct_from_pointer(GenericVarType,self.op.head_var_ptrs[r.start+i])
+            head_var = _struct_from_ptr(GenericVarType,self.op.head_var_ptrs[r.start+i])
             deref_offsets = head_var.deref_offsets
             # continue
             # print("--start resolve_head_ptr",)
@@ -446,7 +446,7 @@ def update_changes_deref_dependencies(self, arg_change_sets):
 
             # Invalidate old DerefRecords
             for r_ptr in deref_records:
-                r = _struct_from_pointer(DerefRecordType,r_ptr)
+                r = _struct_from_ptr(DerefRecordType,r_ptr)
                 invalidate_head_ptr_rec(r)
 
                 # Any change in the deref chain counts as a MODIFY
@@ -493,7 +493,7 @@ def update_changes_from_inputs(self):
         inds_change_buffers_i = self.inds_change_buffers[i]
         # inds_match_buffers_i = self.inds_match_buffers_i[i]
         head_range_i = self.op.head_ranges[i]
-
+        # return
         # print("--", len(inp.change_set))
         # Designate inds for each idrec and expand widths (14 us) 
         if(not self.inputs_same_parent):
@@ -549,7 +549,7 @@ def update_changes_from_inputs(self):
         # print("B", idrec_ind_pairs)
         
         # # Try to deref, mark any changes (10 us)
-        # print(idrec_ind_pairs)
+        # print(self.change_pairs[i])
         for pair in self.change_pairs[i]:
             idrec, ind = pair.idrec, pair.ind
 
@@ -709,7 +709,7 @@ def insert_beta_match(self, match_inds, match_idrecs):
     # d0_ptr = outputs[0].matches.get(idrec0, 0)
     # if(d0_ptr == 0):
     #     d0 = Dict.empty(u8,i8)
-    #     d0_ptr = _pointer_from_struct_incref(d0)
+    #     d0_ptr = _ptr_from_struct_incref(d0)
     #     outputs[0].matches[idrec0] = d0_ptr
     #     was_match = False
     # else:
@@ -718,7 +718,7 @@ def insert_beta_match(self, match_inds, match_idrecs):
     # d1_ptr = outputs[1].matches.get(idrec1, 0)
     # if(d1_ptr == 0):
     #     d1 = Dict.empty(u8,i8)
-    #     d1_ptr = _pointer_from_struct_incref(d1)
+    #     d1_ptr = _ptr_from_struct_incref(d1)
     #     outputs[1].matches[idrec1] = d1_ptr
     #     was_match = False
     # else:
@@ -757,7 +757,7 @@ def invalidate_beta_match(self, match_idrecs):
 #     outputs = self.outputs
 #     ptr0 = outputs[0].matches.get(f_id0,0)
 #     if(ptr0 != 0):
-#         if(decref): _decref_pointer(ptr0)
+#         if(decref): _decref_ptr(ptr0)
 #         outputs[0].matches[f_id0] = 0
 
 @njit(cache=True)
@@ -797,12 +797,11 @@ def alpha_matches_to_str(matches):
 
 
 @njit(cache=True, inline='always')
-def _handle_beta_match(self, tt, negated, inp_state_i, inp_state_j, match_head_ptrs_func, match_inp_ptrs, match_inds, match_idrecs):    
+def _handle_beta_match(tt, negated, inp_state_i, inp_state_j, match_head_ptrs_func, match_inp_ptrs, match_inds, match_idrecs):    
     ind0, ind1 = match_inds[0], match_inds[1]
-    if(self.inputs_same_parent):
-        upstream_node = _struct_from_pointer(BaseReteNodeType, self.upstream_node_ptr)
-        if(not upstream_node.truth_table[ind0, ind1]): return
+    if(not inp_state_j.head_was_valid): return
     
+    # print("L", match_inds, match_inp_ptrs)
     was_match = tt[ind0, ind1]
     is_match = match_head_ptrs_func(match_inp_ptrs) ^ negated
     tt[ind0, ind1] = u1(is_match)
@@ -810,8 +809,7 @@ def _handle_beta_match(self, tt, negated, inp_state_i, inp_state_j, match_head_p
     inp_state_i.true_count += count_diff
     inp_state_j.true_count += count_diff
 
-    decode_idrec(inp_state_j.idrec)[0]
-    print("Beta",is_match, match_inp_ptrs, match_inds, decode_idrec(inp_state_i.idrec)[1], decode_idrec(inp_state_j.idrec)[1])
+    # print("Beta",is_match, match_inp_ptrs, match_inds, decode_idrec(inp_state_i.idrec)[1], decode_idrec(inp_state_j.idrec)[1])
 
     #     tt[0, 0] |= u1(1)
         # print("INSER", match_f_ids, self.lit.negated)
@@ -827,11 +825,11 @@ def _handle_beta_match(self, tt, negated, inp_state_i, inp_state_j, match_head_p
 
 @njit(cache=True)
 def update_node(self):
-
+    # return
     # print("START")
     # If the node is an identity node then skip since the input is hardwired to the output
     if(self.op is None): return
-    print("UPDATE_NODE", self.lit)    
+    # print("UPDATE_NODE", self.lit)    
         
     # NOTE: Before this could be 0 for declare , 1 for modify...
 # arg_change_sets = List.empty_list(u8_i8_dict_type)
@@ -845,7 +843,7 @@ def update_node(self):
     # print("A")
     # return
     update_changes_from_inputs(self)
-    print("B")
+    # print("B")
     # update_head_ptrs(self, arg_change_sets)
     # return 
     
@@ -873,7 +871,7 @@ def update_node(self):
     if(n_vars > 1):
         resize_truth_table(self)
 
-    print("C")
+    # print("C")
 
     # return
 
@@ -895,7 +893,7 @@ def update_node(self):
     # print("WHATT")
     # print(arg_change_sets)
     # garbage = 0
-
+    # return
     # (Beta 125 us)
     for i in range(n_vars):
         idrecs_to_inds_i = self.idrecs_to_inds[i]
@@ -921,6 +919,7 @@ def update_node(self):
 
             for ind_i in changed_inds_i:
                 inp_state_i  = input_state_buffers_i[ind_i]
+                # if(not inp_state_i.head_was_valid): continue
                 idrec_i = inp_state_i.idrec
                 t_id_i, f_id_i, a_id_i = decode_idrec(idrec_i)
                 idrec_i = encode_idrec(t_id_i, f_id_i, 0)
@@ -954,22 +953,47 @@ def update_node(self):
                 # else:
                     # print("DIFF PARENT", len(idrecs_to_inds_j))
                 # print(input_state_buffers_j)
-                if(j > i):
-                    # Update the whole row/column
-                    for ind_j in range(self.widths[j]):
-                        inp_state_j = input_state_buffers_j[ind_j]
-                        match_inds[j], match_idrecs[j] = ind_j, inp_state_j.idrec
-                        match_inp_ptrs[j_strt:j_strt+j_len] = head_ptrs_j[ind_j]
-                        _handle_beta_match(self, tt, negated, inp_state_i, inp_state_j,
-                            match_head_ptrs_func, match_inp_ptrs, match_inds, match_idrecs)
+
+                if(self.inputs_same_parent):
+                    upstream_node = _struct_from_ptr(BaseReteNodeType, self.upstream_node_ptr)
+                    u_tt = upstream_node.truth_table
+                    if(j > i):
+                        # Update the whole row/column
+                        for ind_j in range(self.widths[j]):
+                            inp_state_j = input_state_buffers_j[ind_j]
+                            match_inds[j], match_idrecs[j] = ind_j, inp_state_j.idrec
+                            match_inp_ptrs[j_strt:j_strt+j_len] = head_ptrs_j[ind_j]
+                            # print(head_ptrs_j, ind_j)
+                            if(not u_tt[match_inds[0],match_inds[1]]): continue
+                            _handle_beta_match(tt, negated, inp_state_i, inp_state_j,
+                                match_head_ptrs_func, match_inp_ptrs, match_inds, match_idrecs)
+                    else:
+                        # Check just the unchanged parts, so to avoid repeat checks 
+                        for ind_j in self.unchanged_inds[j]:
+                            inp_state_j = input_state_buffers_j[ind_j]
+                            match_inds[j], match_idrecs[j] = ind_j, inp_state_j.idrec
+                            match_inp_ptrs[j_strt:j_strt+j_len] = head_ptrs_j[ind_j]
+                            if(not u_tt[match_inds[0],match_inds[1]]): continue
+                            _handle_beta_match(tt, negated, inp_state_i, inp_state_j,
+                                match_head_ptrs_func, match_inp_ptrs, match_inds, match_idrecs)
                 else:
-                    # Check just the unchanged parts, so to avoid repeat checks 
-                    for ind_j in self.unchanged_inds[j]:
-                        inp_state_j = input_state_buffers_j[ind_j]
-                        match_inds[j], match_idrecs[j] = ind_j, inp_state_j.idrec
-                        match_inp_ptrs[j_strt:j_strt+j_len] = head_ptrs_j[ind_j]
-                        _handle_beta_match(self, tt, negated, inp_state_i, inp_state_j,
-                            match_head_ptrs_func, match_inp_ptrs, match_inds, match_idrecs)
+                    if(j > i):
+                        # Update the whole row/column
+                        for ind_j in range(self.widths[j]):
+                            inp_state_j = input_state_buffers_j[ind_j]
+                            match_inds[j], match_idrecs[j] = ind_j, inp_state_j.idrec
+                            match_inp_ptrs[j_strt:j_strt+j_len] = head_ptrs_j[ind_j]
+                            # print(head_ptrs_j, ind_j)
+                            _handle_beta_match(tt, negated, inp_state_i, inp_state_j,
+                                match_head_ptrs_func, match_inp_ptrs, match_inds, match_idrecs)
+                    else:
+                        # Check just the unchanged parts, so to avoid repeat checks 
+                        for ind_j in self.unchanged_inds[j]:
+                            inp_state_j = input_state_buffers_j[ind_j]
+                            match_inds[j], match_idrecs[j] = ind_j, inp_state_j.idrec
+                            match_inp_ptrs[j_strt:j_strt+j_len] = head_ptrs_j[ind_j]
+                            _handle_beta_match(tt, negated, inp_state_i, inp_state_j,
+                                match_head_ptrs_func, match_inp_ptrs, match_inds, match_idrecs)
                 # if(i < j):
                 #     for idrec_j,ind_j in arg_change_sets[j].items():
                 #         tt[ind_i,ind_j] &= u1(0x1)
@@ -979,6 +1003,7 @@ def update_node(self):
             # ALPHA CASE 
             for ind_i in changed_inds_i:
                 inp_state_i=  input_state_buffers_i[ind_i]
+                # if(not inp_state_i.head_was_valid): continue
                 idrec_i = inp_state_i.idrec
                 t_id_i, f_id_i, a_id_i = decode_idrec(idrec_i)
                 idrec_i = encode_idrec(t_id_i, f_id_i, 0)
@@ -1043,7 +1068,7 @@ def update_node(self):
                 # idrecs_match_buffers_i[match_ind] = idrec
 
                 # Expand match buffers if necessary
-                print("<<", match_ind, decode_idrec(idrec)[1], k)
+                # print("<<", match_ind, decode_idrec(idrec)[1], k)
                 node_memory_insert_match_buffers(out_i, match_ind, idrec, k)
                 match_ind += 1
 
@@ -1062,7 +1087,7 @@ def update_node(self):
                 
 
             # If true_was_nonzero flipped then insert into the change_set
-            print(i, input_state.true_count, input_state.true_was_nonzero)
+            # print(i, input_state.true_count, input_state.true_was_nonzero)
             if(input_state.true_was_nonzero != true_is_nonzero):
                 t_id_i, f_id_i, _ = decode_idrec(idrec_i)
                 a_id = DECLARE if true_is_nonzero else RETRACT
@@ -1093,8 +1118,8 @@ def update_node(self):
         out_i.change_set = out_i.change_buffer[:change_ind]
 
         # print("match_idrecs", out_i.match_idrecs)
-        print("match_inds", out_i.match_inds)
-        print("change_set", np.array([decode_idrec(x)[1] for x in out_i.change_set]))
+        # print("match_inds", out_i.match_inds)
+        # print("change_set", np.array([decode_idrec(x)[1] for x in out_i.change_set]))
             
 
 
@@ -1202,7 +1227,7 @@ def rete_graph_ctor(mem, conds, nodes_by_nargs, var_root_nodes, var_end_nodes,
 # def rete_graph_dtor(self):
 #     if(self.match_iter_prototype_ptr != 0):
 #         # NOTE we don't need to clean up anything else if we do the array thing
-#         _decref_pointer(self.match_iter_prototype_ptr)
+#         _decref_ptr(self.match_iter_prototype_ptr)
 
 
 @njit(ConditionsType(ReteGraphType,), cache=True)
@@ -1266,7 +1291,7 @@ def _make_rete_nodes(mem, c, index_map):
                 var_inds = np.empty((nargs,),dtype=np.int64)
                 for i, base_var_ptr in enumerate(lit.var_base_ptrs):
                     var_inds[i] = index_map[base_var_ptr]
-                    base_var = _struct_from_pointer(GenericVarType, base_var_ptr)
+                    base_var = _struct_from_ptr(GenericVarType, base_var_ptr)
                     t_id = _get_var_t_id(mem, base_var)
                     t_ids[i] = t_id
 
@@ -1275,8 +1300,8 @@ def _make_rete_nodes(mem, c, index_map):
                 nodes_by_nargs[nargs-1].append(node)
                 # print("<< aft", lit.op.head_var_ptrs)
                 for i, head_var_ptr in enumerate(lit.op.head_var_ptrs):
-                    head_var = _struct_from_pointer(GenericVarType, head_var_ptr)
-                    ind = np.min(np.nonzero(lit.var_base_ptrs==head_var.base_ptr)[0])
+                    head_var = _struct_from_ptr(GenericVarType, head_var_ptr)
+                    ind = np.min(np.nonzero(lit.var_base_ptrs==i8(head_var.base_ptr))[0])
                     t_id = t_ids[ind]
                     # print("START")
                     for d_offset in head_var.deref_offsets:
@@ -1311,7 +1336,7 @@ def build_rete_graph(mem, c):
     for i, v in enumerate(c.vars):
         index_map[v.base_ptr] = i
 
-        # base_var = _struct_from_pointer(GenericVarType, v.base_ptr)
+        # base_var = _struct_from_ptr(GenericVarType, v.base_ptr)
         # if(base_var.base_type_name in mem.context_data.fact_to_t_id):
         #     var_t_ids[i] = u2(mem.context_data.fact_to_t_id[base_var.base_type_name])
         # if(_t_id is not None):
@@ -1341,7 +1366,7 @@ def build_rete_graph(mem, c):
                     e_node = var_end_nodes[ind]
                     om = e_node.outputs[np.min(np.nonzero(e_node.var_inds==ind)[0])]
                     inputs.append(om)
-                    node.upstream_node_ptr = _pointer_from_struct(e_node)
+                    node.upstream_node_ptr = _raw_ptr_from_struct(e_node)
                 else:
                     t_id = node.t_ids[j]
                     if(t_id not in global_t_id_root_memory_map):
@@ -1355,13 +1380,16 @@ def build_rete_graph(mem, c):
 
             node.inputs = inputs
 
-            node.inputs_same_parent = (len(inputs) == 2 and 
-                inputs[0].parent_node_ptr == inputs[1].parent_node_ptr)
+            if(len(inputs) == 2):
+                p1,p2 = inputs[0].parent_node_ptr, inputs[1].parent_node_ptr
+                node.inputs_same_parent = (p1 != 0 and p1 == p2)
+            else:
+                node.inputs_same_parent = False
 
             # In 'inputs_same_parent' cases make nodes share idrec_to_inds, widths, change_pairs
             if(node.inputs_same_parent):
                 assert node.upstream_node_ptr != 0
-                upstream_node = _struct_from_pointer(BaseReteNodeType, node.upstream_node_ptr)
+                upstream_node = _struct_from_ptr(BaseReteNodeType, node.upstream_node_ptr)
                 node.idrecs_to_inds = upstream_node.idrecs_to_inds
                 node.widths = upstream_node.widths
                 node.change_pairs = upstream_node.change_pairs
@@ -1424,7 +1452,7 @@ def parse_mem_change_queue(r_graph):
     change_queue = mem_data.change_queue
 
     # for t_id, root_mem in global_t_id_root_memory_map.items():
-    #     facts = _struct_from_pointer(VectorType, mem.mem_data.facts[t_id])
+    #     facts = _struct_from_ptr(VectorType, mem.mem_data.facts[t_id])
     #     if(len(root_mem.match_idrecs_buffer) < len(facts.data)):
     #         new_match_idrecs_buffer = np.empty(len(facts.data),dtype=np.uint64)
     #         new_match_idrecs_buffer[]
@@ -1533,7 +1561,7 @@ def parse_mem_change_queue(r_graph):
     #         print(inp.change_set)
         # for idrec in root_node.relevant_global_diffs.data:
         #     print(decode_idrec(idrec))
-            # print(_pointer_from_struct(inp.change_set))
+            # print(_raw_ptr_from_struct(inp.change_set))
         # print(root_node.inputs[0].change_set)
 
 
@@ -1723,9 +1751,9 @@ def new_match_iter(graph):
         m_iter.iter_nodes = rev_m_iter_nodes 
         m_iter.is_empty = False
         graph.match_iter_prototype_meminfo = _meminfo_from_struct(m_iter)
-        graph.match_iter_prototype_ptr = _pointer_from_struct(m_iter)
+        graph.match_iter_prototype_ptr = _raw_ptr_from_struct(m_iter)
     
-    prototype = _struct_from_pointer(GenericMatchIteratorType, graph.match_iter_prototype_ptr)
+    prototype = _struct_from_ptr(GenericMatchIteratorType, graph.match_iter_prototype_ptr)
     m_iter = copy_match_iter(prototype)
     
     return m_iter
@@ -1737,7 +1765,7 @@ def repr_match_iter_dependencies(m_iter):
     for i, m_node in enumerate(m_iter.iter_nodes):
         s = f'({str(m_node.var_ind)}'
         if(m_node.depends_on_var_ind != -1):
-            # dep = _struct_from_pointer(MatchIterNodeType, )
+            # dep = _struct_from_ptr(MatchIterNodeType, )
             s += f",{str(m_node.depends_on_var_ind)})"
         else:
              s += f")"
@@ -1765,15 +1793,16 @@ def update_other_idrecs(m_node):
 
         # other_idrecs_d = _dict_from_ptr(dict_i8_u1_type, matches[f_id]) 
         # print("C", other_f_ids_d)
-        print("C", )
+        # print("C", )
         # print("C", len(other_f_ids_d))
         arg_ind = m_node.associated_arg_ind
+        other_ind = 0 if arg_ind == 1 else 1
         node = m_node.node
         associated_output = node.outputs[arg_ind]
         this_internal_ind = associated_output.match_inds[m_node.curr_ind]
 
         truth_table = node.truth_table
-        input_states = node.input_state_buffers[arg_ind]
+        input_states = node.input_state_buffers[other_ind]
         
         other_idrecs = np.empty((len(associated_output.match_inds)), dtype=np.uint64)
         k = 0
@@ -1788,7 +1817,7 @@ def update_other_idrecs(m_node):
         # this_input_state = m_node.node.truth_table[arg_ind][]
         # # this_ind = 
         # other_idrecs = np.empty((len(other_input_state),), dtype=np.uint64)
-        print("F")
+        # print("F")
         # cnt = 0
         # for j, (o_f_id,v) in enumerate(other_input_states):
         #     if(v == 0): continue
@@ -1882,22 +1911,22 @@ def match_iter_next_idrecs(m_iter):
 def match_iter_next_ptrs(m_iter):
     mem, graph = m_iter.graph.mem, m_iter.graph
     idrecs = match_iter_next_idrecs(m_iter)
-    print("^^", idrecs)
+    # print("^^", idrecs)
     ptrs = np.empty(len(idrecs),dtype=np.int64)
     for i, idrec in enumerate(idrecs):
         t_id, f_id, _  = decode_idrec(idrec)
-        facts = _struct_from_pointer(VectorType, mem.mem_data.facts[t_id])
+        facts = _struct_from_ptr(VectorType, mem.mem_data.facts[t_id])
         ptrs[i] = facts.data[f_id]
-    print("SLOOP")
+    # print("SLOOP")
     return ptrs
 
 @njit(cache=True)
 def match_iter_next(m_iter):
     ptrs = match_iter_next_ptrs(m_iter)
-    print("PTRS", ptrs)
+    # print("PTRS", ptrs)
     tup = _struct_tuple_from_pointer_arr(m_iter.output_types, ptrs)
-    print("tup")
-    print(tup)
+    # print("tup")
+    # print(tup)
     return tup
 
 
@@ -1932,7 +1961,7 @@ def fact_ptrs_as_tuple(typs, ptr_arr):
 #     ptrs = np.empty(len(idrecs),dtype=np.int64)
 #     for i, idrec in enumerate(idrecs):
 #         t_id, f_id, _  = decode_idrec(idrec)
-#         facts = _struct_from_pointer(VectorType, mem.mem_data.facts[t_id])
+#         facts = _struct_from_ptr(VectorType, mem.mem_data.facts[t_id])
 #         ptrs[i] = facts.data[f_id]
 #     return ptrs
 
@@ -1943,12 +1972,12 @@ def fact_ptrs_as_tuple(typs, ptr_arr):
 
 @njit(cache=True)
 def update_graph(graph):
-    print("START UP")
+    # print("START UP")
     parse_mem_change_queue(graph)
     for lst in graph.nodes_by_nargs:
         for node in lst:
             update_node(node)        
-    print("END UPDATE")
+    # print("END UPDATE")
 
 
 @njit(GenericMatchIteratorType(MemoryType, ConditionsType), cache=True)
@@ -1957,17 +1986,17 @@ def get_match_iter(mem, conds):
     if(conds.matcher_inst_ptr == 0):
         rete_graph = build_rete_graph(mem, conds)
         conds.matcher_inst_meminfo = _meminfo_from_struct(rete_graph)
-        conds.matcher_inst_ptr = _pointer_from_struct(rete_graph)
+        conds.matcher_inst_ptr = _raw_ptr_from_struct(rete_graph)
     # print("BUILT")
-    rete_graph = _struct_from_pointer(ReteGraphType, conds.matcher_inst_ptr)
+    rete_graph = _struct_from_ptr(ReteGraphType, conds.matcher_inst_ptr)
     update_graph(rete_graph)
-    print("UPDATED")
+    # print("UPDATED")
     m_iter = new_match_iter(rete_graph)
     # for i, m_node in enumerate(m_iter.iter_nodes):
     #     print("<<", m_node.curr_ind)
-    print("INITIAL RESTICH")
+    # print("INITIAL RESTICH")
     restitch_match_iter(m_iter, -1)
-    print("RESTRICT ED")
+    # print("RESTRICT ED")
     return m_iter
 
 

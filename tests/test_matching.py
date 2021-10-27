@@ -5,7 +5,7 @@ from cre.conditions import *
 from cre.memory import Memory
 from cre.context import cre_context
 # from cre.matching import get_ptr_matches,_get_matches
-from cre.utils import _struct_from_pointer, _pointer_from_struct
+from cre.utils import _struct_from_ptr
 from numba.core.runtime.nrt import rtsys
 import gc
 
@@ -31,13 +31,13 @@ def boop_Bs_from_ptrs(ptr_matches):
     out = np.empty(ptr_matches.shape,dtype=np.float64)
     for i, match in enumerate(ptr_matches):
         for j, ptr in enumerate(match):
-            boop = _struct_from_pointer(BOOPType, ptr)
-            out[i,j] = _struct_from_pointer(BOOPType, ptr).B
+            boop = _struct_from_ptr(BOOPType, ptr)
+            out[i,j] = _struct_from_ptr(BOOPType, ptr).B
     return out
 
 @njit(cache=True)
 def get_ptr(fact):
-    return _pointer_from_struct(fact)
+    return _raw_ptr_from_struct(fact)
 
 
 def mem_w_n_boops(n,BOOP):
@@ -176,7 +176,6 @@ def test_multiple_deref():
         # One Deep check same fact instance
         c = (v1.nxt != None) & (v1.nxt == v2.nxt) & (v1 != v2)
         names = match_names(c, mem) 
-        print(names)
         assert set_is_same(names, [['B1', 'B2'], ['B2', 'B1']])
 
         # One Deep check same B value
@@ -301,9 +300,9 @@ def apply_it(mem,l1,l2,r1):
 #     cl = get_linked_conditions_instance(c, mem)
 #     ptr_matches = get_ptr_matches(cl)
 #     for match in ptr_matches:
-#         arg0 = _struct_from_pointer(BOOPType,match[0]) 
-#         arg1 = _struct_from_pointer(BOOPType,match[1]) 
-#         arg2 = _struct_from_pointer(BOOPType,match[2]) 
+#         arg0 = _struct_from_ptr(BOOPType,match[0]) 
+#         arg1 = _struct_from_ptr(BOOPType,match[1]) 
+#         arg2 = _struct_from_ptr(BOOPType,match[2]) 
 #         f(mem,arg0,arg1,arg2)
 
 
@@ -321,18 +320,18 @@ with cre_context("test_matching_benchmarks") as ctxt:
 
 def matching_alphas_setup():
     with cre_context("test_matching_benchmarks") as ctxt:
-        mem = mem_w_n_boops(100,BOOP)
+        mem = mem_w_n_boops(500,BOOP)
 
         l1, l2 = Var(BOOPType,"l1"), Var(BOOPType,"l2")
         r1, r2 = Var(BOOPType,"r1"), Var(BOOPType,"r2")
 
-        c = (l1.B > 0) & (l1.B != 3) & (l1.B < 4) & (l2.B != 3) 
+        c = (l1.B > 0) & (l2.B != 3) 
 
         return (c,mem), {}
 
 def matching_betas_setup():
     with cre_context("test_matching_benchmarks") as ctxt:
-        mem = mem_w_n_boops(100,BOOP)
+        mem = mem_w_n_boops(500,BOOP)
 
         l1, l2 = Var(BOOPType,"l1"), Var(BOOPType,"l2")
         r1, r2 = Var(BOOPType,"r1"), Var(BOOPType,"r2")
@@ -349,7 +348,7 @@ def apply_get_matches(c,mem):
     # restitch_match_iter(m_iter, -1)
     with cre_context("test_matching_benchmarks") as ctxt:
         c.get_matches(mem)
-    # graph = _struct_from_pointer(ReteGraphType, c.matcher_inst_ptr)
+    # graph = _struct_from_ptr(ReteGraphType, c.matcher_inst_ptr)
     # parse_mem_change_queue(graph)
 
     # for lst in graph.nodes_by_nargs:
@@ -375,7 +374,7 @@ def do_update_graph(c,mem):
 
 def test_b_matching_alphas_lit(benchmark):
     # with cre_context("test_matching_benchmarks") as ctxt:
-    benchmark.pedantic(apply_get_matches,setup=matching_alphas_setup, warmup_rounds=1, rounds=100)
+    benchmark.pedantic(apply_get_matches,setup=matching_alphas_setup, warmup_rounds=1, rounds=20)
     alloc_stats = rtsys.get_allocation_stats()
     gc.collect()
     assert(alloc_stats.free==alloc_stats.alloc), f'{alloc_stats}'
@@ -383,7 +382,7 @@ def test_b_matching_alphas_lit(benchmark):
 def test_b_matching_betas_lit(benchmark):
     # with cre_context("test_matching_benchmarks") as ctxt:
     # alloc_stats1 = rtsys.get_allocation_stats()
-    benchmark.pedantic(do_update_graph,setup=matching_betas_setup, warmup_rounds=1, rounds=100)
+    benchmark.pedantic(do_update_graph,setup=matching_betas_setup, warmup_rounds=1, rounds=20)
     alloc_stats = rtsys.get_allocation_stats()
     gc.collect()
     assert(alloc_stats.free==alloc_stats.alloc), f'{alloc_stats}'
@@ -395,6 +394,14 @@ if(__name__ == "__main__"):
     pass
     # dat = matching_alphas_setup()[0]
     # dat = matching_betas_setup()[0]
+
+    with cre_context("test_matching_benchmarks") as ctxt:
+        # c.get_matches(mem)
+
+        mem = mem_w_n_boops(80, BOOP)
+        print(rtsys.get_allocation_stats())
+        mem = None
+        print(rtsys.get_allocation_stats())
 
    
     # gc.collect(); alloc_stats0 = rtsys.get_allocation_stats()
@@ -411,7 +418,7 @@ if(__name__ == "__main__"):
     # print(alloc_stats1.alloc-alloc_stats1.free, alloc_stats2.alloc-alloc_stats2.free)
 
 
-    test_multiple_deref()
+    # test_multiple_deref()
     # test_applying()
     # test_matching()
     # test_matching_unconditioned()

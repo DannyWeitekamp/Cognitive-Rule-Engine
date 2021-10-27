@@ -8,7 +8,7 @@ from numba.experimental import structref
 from numba.experimental.structref import new, define_boxing, define_attributes, _Utils
 from numba.extending import overload_method, intrinsic, overload_attribute, intrinsic, lower_getattr_generic, overload, infer_getattr, lower_setattr_generic
 from numba.core.typing.templates import AttributeTemplate
-from cre.utils import _struct_from_meminfo, _meminfo_from_struct, _cast_structref, cast_structref, decode_idrec, lower_getattr, _struct_from_pointer,  lower_setattr, lower_getattr, _pointer_from_struct
+from cre.utils import _struct_from_meminfo, _meminfo_from_struct, _cast_structref, cast_structref, decode_idrec, lower_getattr, _struct_from_ptr,  lower_setattr, lower_getattr, _ptr_from_struct
 from cre.caching import gen_import_str, unique_hash,import_from_cached, source_to_cache, source_in_cache
 from cre.conditions import Conditions, ConditionsType, initialize_conditions, get_linked_conditions_instance
 
@@ -52,7 +52,7 @@ def get_alpha_inds(facts_per_var, alpha_conjuncts, conds):
     # alpha_inds_list = List.empty_list(list_i8_arr)
     # for alpha_conjuncts, _, _ in conds.distr_dnf:
 
-    # mem = _struct_from_pointer(MemoryType,conds.mem_ptr)
+    # mem = _struct_from_ptr(MemoryType,conds.mem_ptr)
     # mem_data = mem.mem_data
     # # Using this dictionary might be a little slow, but it's low frequency
     # t_id_map = mem.context_data.fact_to_t_id
@@ -198,7 +198,7 @@ def fill_singles_at(partial_matches,i, candidate_inds, is_not):
 @njit(cache=True)
 def _get_fact_vectors(conds):
     n_vars = len(conds.vars)
-    mem = _struct_from_pointer(MemoryType,conds.mem_ptr)
+    mem = _struct_from_ptr(MemoryType,conds.mem_ptr)
     mem_data = mem.mem_data
 
     # Using this dictionary might be a little slow, but it's low frequency
@@ -297,7 +297,7 @@ def _struct_tuple_from_pointer_arr(typingctx, struct_types, ptr_arr):
         for i, inst_type in enumerate(typs):
             i_val = context.get_constant(types.intp, i)
 
-            # Same as _struct_from_pointer
+            # Same as _struct_from_ptr
             raw_ptr = _getitem_array_single_int(context,builder,i8,i8[::1],ary,i_val)
             meminfo = builder.inttoptr(raw_ptr, cgutils.voidptr_t)
 
@@ -340,7 +340,7 @@ def _get_matches(conds, struct_types, mem=None):
         # print("Z")
         out.append(facts)
         # for i,fact_type in enumerate(literal_unroll(fact_types)):
-        #     _struct_from_pointer(fact_type,ptr_set[i])
+        #     _struct_from_ptr(fact_type,ptr_set[i])
 
     return out
 

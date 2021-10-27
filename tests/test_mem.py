@@ -192,8 +192,8 @@ def test_grow_change_queues():
         idrec = mem.declare(TextField("A","B","C","D","E"))
 
         # assert mem.mem_data.subscribers[0].grow_queue.data[0] == idrec
-        gr_q = mem.mem_data.grow_queue
-        assert gr_q.data[gr_q.head-1] == idrec
+        # gr_q = mem.mem_data.grow_queue
+        # assert gr_q.data[gr_q.head-1] == idrec
 
         mem.retract(idrec)
 

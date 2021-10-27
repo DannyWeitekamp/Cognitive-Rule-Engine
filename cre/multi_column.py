@@ -6,11 +6,11 @@ from cre.rule import Rule, RuleEngine
 from cre.memory import Memory
 from cre.var import Var
 from cre.conditions import NOT
-from cre.utils import _pointer_from_struct
+from cre.utils import _ptr_from_struct
 
 @njit(cache=True)
 def ptr(x):
-    return _pointer_from_struct(x)
+    return _raw_ptr_from_struct(x)
 
 
 

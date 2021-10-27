@@ -14,8 +14,8 @@ from cre.context import cre_context
 from cre.structref import define_structref, define_structref_template
 from cre.memory import MemoryType, Memory, facts_for_t_id, fact_at_f_id
 # from cre.fact import define_fact, BaseFactType, cast_fact, DeferredFactRefType, Fact
-from cre.utils import (_struct_from_meminfo, _meminfo_from_struct, _cast_structref, cast_structref, decode_idrec, lower_getattr, _struct_from_pointer,  lower_setattr, lower_getattr,
-                       _pointer_from_struct, _decref_pointer, _incref_pointer, _incref_structref, _pointer_from_struct_incref,
+from cre.utils import (_struct_from_meminfo, _meminfo_from_struct, _cast_structref, cast_structref, decode_idrec, lower_getattr, _struct_from_ptr,  lower_setattr, lower_getattr,
+                       _raw_ptr_from_struct, _decref_ptr, _incref_ptr, _incref_structref, _ptr_from_struct_incref,
                        _dict_from_ptr, _list_from_ptr)
 from cre.utils import assign_to_alias_in_parent_frame
 from cre.subscriber import base_subscriber_fields, BaseSubscriber, BaseSubscriberType, init_base_subscriber, link_downstream
@@ -152,7 +152,7 @@ def how_search(self, goal, ops=None,
 def _query_goal(self, type_name, typ, goal):
     vtd_ptr_d = self.vals_to_depth_ptr_dict
     if(type_name in vtd_ptr_d):
-        vals_to_depth = _struct_from_pointer(typ,vtd_ptr_d)
+        vals_to_depth = _struct_from_ptr(typ,vtd_ptr_d)
         if(goal in vals_to_depth):
             return vals_to_depth[goal]
         else:
@@ -202,15 +202,15 @@ def join_records_of_type(self, depth, typ_name,
         flat_vals.append(val) 
     
     if(typ_name in self.vals_to_depth_ptr_dict):
-        _decref_pointer(self.vals_to_depth_ptr_dict[typ_name])
+        _decref_ptr(self.vals_to_depth_ptr_dict[typ_name])
     self.vals_to_depth_ptr_dict[typ_name] = \
-        _pointer_from_struct_incref(vals_to_depth)
+        _ptr_from_struct_incref(vals_to_depth)
 
     tup = (typ_name, depth)
     if(tup in self.flat_vals_ptr_dict):
-        _decref_pointer(self.flat_vals_ptr_dict[tup])
+        _decref_ptr(self.flat_vals_ptr_dict[tup])
     self.flat_vals_ptr_dict[tup] = \
-         _pointer_from_struct_incref(flat_vals)
+         _ptr_from_struct_incref(flat_vals)
 
 
 def join_records(self,depth,ops):
@@ -262,7 +262,7 @@ from numba.typed import Dict
 from numba.types import ListType
 import numpy as np
 import dill
-from cre.utils import _dict_from_ptr, _list_from_ptr, _pointer_from_struct_incref
+from cre.utils import _dict_from_ptr, _list_from_ptr, _ptr_from_struct_incref
 from cre.sc_planner import SC_Record
 ''' 
     imp_targets = ['call'] + (['check'] if has_check else [])
@@ -323,7 +323,7 @@ hist[{_is}] = v_uid
 #     vals_to_uid[v] = uid; uid+=1''',prefix=c_ind)
 
     src += indent(f'''
-vals_to_uid_ptr = _pointer_from_struct_incref(vals_to_uid)
+vals_to_uid_ptr = _ptr_from_struct_incref(vals_to_uid)
 return SC_Record(hist.flatten(),
                  np.array(hist_shape,dtype=np.uint64),
                  vals_to_uid_ptr
@@ -364,14 +364,14 @@ def apply_multi(op, planner, depth):
 #     tup0 = ('typ0',depth)
 #     if(tup0 in planner.flat_vals_ptr_dict):
 #         iter_ptr0 = planner.flat_vals_ptr_dict[tup0]
-#         iter0 = _struct_from_pointer(LiteralType0, iter_ptr0)
+#         iter0 = _struct_from_ptr(LiteralType0, iter_ptr0)
 #     else:
 #         return None
 
 #     tup1 = ('typ1',depth)
 #     if(tup1 in planner.flat_vals_ptr_dict):
 #         iter_ptr1 = planner.flat_vals_ptr_dict[tup1]
-#         iter1 = _struct_from_pointer(LiteralType1, iter_ptr1)
+#         iter1 = _struct_from_ptr(LiteralType1, iter_ptr1)
 #     else:
 #         return None
 

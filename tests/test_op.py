@@ -558,8 +558,8 @@ if __name__ == "__main__":
 
     #     test_commutes()
     # test_fact_args()
-    # test_head_ptrs_ranges()
+    test_head_ptrs_ranges()
     # not_jit_compilable()
-    test_ptr_ops()
+    # test_ptr_ops()
             
 

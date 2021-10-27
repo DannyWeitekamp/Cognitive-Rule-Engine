@@ -20,7 +20,7 @@ from numba.core.datamodel import default_manager, models
 from numba.experimental.structref import _Utils, imputils
 from numba.typed.typedobjectutils import _nonoptional
 
-from cre.utils import _pointer_from_struct, _struct_from_pointer, _cast_structref, _pointer_from_struct_codegen
+from cre.utils import _raw_ptr_from_struct, _struct_from_ptr, _cast_structref, _ptr_from_struct_codegen
 
 
 def define_boxing(struct_type, obj_class):
@@ -114,7 +114,7 @@ def safe_get_fact_ptr(fact):
     if(fact is None):
         return 0
     else:
-        return _pointer_from_struct(_nonoptional(fact))
+        return _raw_ptr_from_struct(_nonoptional(fact))
 
 @intrinsic
 def get_fact_attr_ptr(typingctx, inst_type, attr_type):
@@ -134,7 +134,7 @@ def get_fact_attr_ptr(typingctx, inst_type, attr_type):
         dataval = utils.get_data_struct(val)
         ret = getattr(dataval, attr)
 
-        ret = _pointer_from_struct_codegen(context,builder,ret, field_type, False)
+        ret = _ptr_from_struct_codegen(context, builder, ret, field_type, False)
 
         return ret
     return u8(inst_type,attr_type), codegen
@@ -164,12 +164,12 @@ def fact_setattr_codegen(context, builder, sig, args, attr, mutability_protected
         if(isinstance(val_type, types.Optional)):
             def cast_obj(x):
                 if(x is None):
-                    return _struct_from_pointer(field_type,0)
+                    return _struct_from_ptr(field_type,0)
                 return _cast_structref(field_type, _nonoptional(x))
         else:
             def cast_obj(x):
                 if(x is None):
-                    return _struct_from_pointer(field_type,0)
+                    return _struct_from_ptr(field_type,0)
                 return _cast_structref(field_type, x)
         # else:
         #     def cast_obj(x):
@@ -258,7 +258,7 @@ def define_attributes(struct_typeclass):
         if(isinstance(ret_type, (ListType,Fact))):
             # if(isinstance(ret_type, (Fact,))):
             def cast_obj(x):
-                if(_pointer_from_struct(x) != 0):
+                if(_raw_ptr_from_struct(x) != 0):
                     return _cast_structref(ret_type, x)
                 return None
             ret = context.compile_internal(builder, cast_obj, types.optional(ret_type)(field_type,), (ret,))
@@ -288,7 +288,7 @@ def define_attributes(struct_typeclass):
         #     if(isinstance(field_type, Fact)):
         #         def cast_obj(x):
         #             if(x is None):
-        #                 return _struct_from_pointer(BaseFactType,0)
+        #                 return _struct_from_ptr(BaseFactType,0)
         #             return _cast_structref(BaseFactType, _nonoptional(x))
         #     else:
         #         def cast_obj(x):

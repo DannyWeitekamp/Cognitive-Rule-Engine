@@ -13,12 +13,12 @@ from cre.context import cre_context
 from cre.structref import define_structref, define_structref_template, CastFriendlyStructref
 from cre.memory import MemoryType, Memory, facts_for_t_id, fact_at_f_id
 from cre.fact import define_fact, BaseFactType, cast_fact, DeferredFactRefType, Fact, _standardize_type
-from cre.utils import _struct_from_meminfo, _meminfo_from_struct, _cast_structref, cast_structref, decode_idrec, lower_getattr, _struct_from_pointer,  lower_setattr, lower_getattr, _pointer_from_struct, _decref_pointer, _incref_pointer, _incref_structref, pointer_from_struct, _pointer_from_struct_incref
+from cre.utils import ptr_t, _struct_from_meminfo, _meminfo_from_struct, _cast_structref, cast_structref, decode_idrec, lower_getattr, _struct_from_ptr,  lower_setattr, lower_getattr, _raw_ptr_from_struct, _decref_ptr, _incref_ptr, _incref_structref, _ptr_from_struct_incref
 from cre.utils import assign_to_alias_in_parent_frame
 from cre.subscriber import base_subscriber_fields, BaseSubscriber, BaseSubscriberType, init_base_subscriber, link_downstream
 from cre.vector import VectorType
-from cre.predicate_node import BasePredicateNode,BasePredicateNodeType, get_alpha_predicate_node_definition, \
- get_beta_predicate_node_definition, deref_attrs, define_alpha_predicate_node, define_beta_predicate_node, AlphaPredicateNode, BetaPredicateNode
+# from cre.predicate_node import BasePredicateNode,BasePredicateNodeType, get_alpha_predicate_node_definition, \
+ # get_beta_predicate_node_definition, deref_attrs, define_alpha_predicate_node, define_beta_predicate_node, AlphaPredicateNode, BetaPredicateNode
 from numba.core import imputils, cgutils
 from numba.core.datamodel import default_manager, models
 
@@ -37,11 +37,11 @@ var_fields_dict = {
     'is_not' : u1,
 
     # A pointer to the Var instance which is the NOT() of this Var
-    'conj_ptr' : i8,
+    'conj_ptr' : ptr_t,
 
     # The pointer of the Var instance before any attribute selection
     #   e.g. if '''v = Var(Type); v_b = v.B;''' then v_b.base_ptr = &v
-    'base_ptr' : i8,
+    'base_ptr' : ptr_t,
 
     # The name of the Var 
     'alias' : unicode_type,
@@ -351,12 +351,12 @@ class Var(structref.StructRefProxy):
 
 @njit(cache=True)    
 def get_var_ptr(self):
-    return _pointer_from_struct(self)
+    return _raw_ptr_from_struct(self)
 
 
 @njit(cache=True)    
 def get_var_ptr_incref(self):
-    return _pointer_from_struct_incref(self)
+    return _ptr_from_struct_incref(self)
 
 
 def var_cmp_alpha(left_var, op_str, right_var,negated):
@@ -440,10 +440,10 @@ def get_var_definition(base_type, head_type):
 def var_ctor(var_struct_type, base_type_name="", alias=""):
     st = new(var_struct_type)
     st.is_not = u1(0)
-    st.conj_ptr = 0
+    st.conj_ptr = ptr_t(0)
     st.base_type_name = base_type_name
     st.head_type_name = base_type_name
-    st.base_ptr = _pointer_from_struct(st)
+    st.base_ptr = _ptr_from_struct_incref(st)
     st.alias =  "" if(alias is  None) else alias
     st.deref_attrs = List.empty_list(unicode_type)
     st.deref_offsets = np.empty(0,dtype=deref_type)
@@ -497,11 +497,11 @@ def str_var(self):
 
 @njit(cache=True)
 def str_var_ptr(ptr):
-    return str_var(_struct_from_pointer(GenericVarType,ptr))
+    return str_var(_struct_from_ptr(GenericVarType,ptr))
 
 @njit(cache=True)
 def str_var_ptr_derefs(ptr):
-    return str_var_derefs(_struct_from_pointer(GenericVarType,ptr))
+    return str_var_derefs(_struct_from_ptr(GenericVarType,ptr))
 
 
 @overload(str)

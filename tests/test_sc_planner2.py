@@ -9,7 +9,7 @@ from cre.sc_planner2 import (gen_apply_multi_source,
                     rec_entry_from_ptr, SC_Record_EntryType, retrace_goals_back_one, expl_tree_ctor,
                     build_explanation_tree, ExplanationTreeType, SC_Record, SC_RecordType,
                     gen_op_comps_from_expl_tree, planner_declare_fact)
-from cre.utils import _pointer_from_struct_incref, _list_from_ptr, _dict_from_ptr, _struct_from_pointer, _get_array_data_ptr, _pointer_from_struct
+from cre.utils import _ptr_from_struct_incref, _list_from_ptr, _dict_from_ptr, _struct_from_ptr, _get_array_data_ptr
 from cre.var import Var
 from cre.context import cre_context
 from cre.fact import define_fact
@@ -67,16 +67,16 @@ def setup_float(planner=None,n=5):
     #         # print(x)
     #         l.append(x)
     #         v = Var(f8)
-    #         # print("VPTR", _pointer_from_struct(v))
+    #         # print("VPTR", _raw_ptr_from_struct(v))
     #         rec = SC_Record(v)
     #         rec_entry = np.empty((1,),dtype=np.int64)
-    #         rec_entry[0] = _pointer_from_struct_incref(rec)
+    #         rec_entry[0] = _ptr_from_struct_incref(rec)
 
     #         rec_entry_ptr = _get_array_data_ptr(rec_entry)
     #         val_map[x] = (0, rec_entry_ptr)
     #     # print("END")
-    #     planner.flat_vals_ptr_dict[('float64',0)] = _pointer_from_struct_incref(l)
-    #     planner.val_map_ptr_dict['float64'] = _pointer_from_struct_incref(val_map)
+    #     planner.flat_vals_ptr_dict[('float64',0)] = _ptr_from_struct_incref(l)
+    #     planner.val_map_ptr_dict['float64'] = _ptr_from_struct_incref(val_map)
     # # print("INJECT")
     # inject_float_data(planner,n)
     # print("END!")
@@ -100,12 +100,12 @@ def setup_str(planner=None,n=5):
     #         l.append(x)
     #         rec = SC_Record(Var(unicode_type))
     #         rec_entry = np.empty((1,),dtype=np.int64)
-    #         rec_entry[0] = _pointer_from_struct_incref(rec)
+    #         rec_entry[0] = _ptr_from_struct_incref(rec)
     #         rec_entry_ptr = _get_array_data_ptr(rec_entry)
     #         val_map[x] = (0, rec_entry_ptr)
 
-    #     planner.flat_vals_ptr_dict[('unicode_type',0)] = _pointer_from_struct_incref(l)
-    #     planner.val_map_ptr_dict['unicode_type'] = _pointer_from_struct_incref(val_map)
+    #     planner.flat_vals_ptr_dict[('unicode_type',0)] = _ptr_from_struct_incref(l)
+    #     planner.val_map_ptr_dict['unicode_type'] = _ptr_from_struct_incref(val_map)
 
     # inject_str_data(planner,n)
 
@@ -234,7 +234,7 @@ def tree_str(root,ind=0):
         #     # print(child_arg_ptrs)
             for ptr in child_arg_ptrs:
                 
-                ch_expl = _struct_from_pointer(ExplanationTreeType, ptr)
+                ch_expl = _struct_from_ptr(ExplanationTreeType, ptr)
                 # print(ch_expl)
                 tree_str(ch_expl, ind+1)
         #         # print("str",tree_str(ch_expl, ind+1))
@@ -248,6 +248,7 @@ def tree_str(root,ind=0):
 
 def test_build_explanation_tree():
     planner = setup_retrace()
+    print("BEF EX")
     root = build_explanation_tree(planner, f8, 36.0)
     print("BEF STR")
     for op_comp in root:
@@ -367,7 +368,7 @@ if __name__ == "__main__":
 # from numba.types import ListType
 # import numpy as np
 # import dill
-# from cre.utils import _struct_from_pointer, _pointer_from_struct_incref
+# from cre.utils import _struct_from_ptr, _ptr_from_struct_incref
 # from cre.condensed_chainer import CondensedRecord
 # from cre_cache.Add._5e24697b8e500d3d837dca80591bde623483d2322c5204e56fd36c79ddc2ed7d import call, check
 
@@ -407,7 +408,7 @@ if __name__ == "__main__":
 #             else:
 #                 hist[i0,i1] = uid
 #                 vals_to_uid[v] = uid; uid+=1
-#     vals_to_uid_ptr = _pointer_from_struct_incref(vals_to_uid)
+#     vals_to_uid_ptr = _ptr_from_struct_incref(vals_to_uid)
 #     return CondensedRecord(hist.flatten(), hist_shape, vals_to_uid_ptr)
     
 

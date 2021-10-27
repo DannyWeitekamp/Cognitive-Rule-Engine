@@ -331,8 +331,8 @@ if __name__ == "__main__":
     # test_define_fact()
     # test_inheritence()
     # test_cast_fact()
-    # test_protected_mutability()
-    test_fact_eq()
+    test_protected_mutability()
+    # test_fact_eq()
 
     # _test_reference_type()
 

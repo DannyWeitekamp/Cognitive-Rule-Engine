@@ -2,7 +2,7 @@ from cre.conditions import *
 from cre.memory import Memory
 from cre.context import cre_context
 from time import time_ns
-from cre.utils import  _pointer_from_struct
+from cre.utils import  _raw_ptr_from_struct
 
 BOOP, BOOPType = define_fact("BOOP",{"A": "string", "B" : "number"})
 
@@ -124,7 +124,7 @@ def get_init_cond_sizes(conds):
 
 @njit(cache=True)
 def var_get_ptr(var):
-    return _pointer_from_struct(var)
+    return _raw_ptr_from_struct(var)
 
 @njit(cache=True)
 def cond_get_vars(cond):
@@ -156,7 +156,7 @@ def cond_get_vars(cond):
 
 @njit(cache=True)
 def get_pointer(st):
-    return _pointer_from_struct(st)
+    return _raw_ptr_from_struct(st)
 
 def test_link():
     print("START TEST LINK")

@@ -525,7 +525,7 @@ DerefRecord = {
 dict_i8_u1_type = DictType(i8,u1)
 
 def invalidate_deref_rec(rec):
-	r_ptr = _pointer_from_struct(rec)
+	r_ptr = _raw_ptr_from_struct(rec)
 	for ptr in parent_ptrs:
 		parent = _dict_from_ptr(dict_i8_u1_type, ptr)
 		del parent[r_ptr]
@@ -537,7 +537,7 @@ def _make_deref_record_parent(idrec, r_ptr):
 	if(p0 is None):	
 		p0 = self.deref_depends[idrec] = Dict(i8,u1)
 	p[r_ptr] = 1
-	return _pointer_from_struct(p0)
+	return _raw_ptr_from_struct(p0)
 
 
 def validate_deref(k, f_id):
@@ -550,7 +550,7 @@ def validate_deref(k, f_id):
 
 	parent_ptrs = np.empty(len(deref_idrecs), dtype=np.int64)
 	r = DerefRecord(parent_ptrs, self.arg_inds[k], was_successful)
-	r_ptr = _pointer_from_struct_incref(r)
+	r_ptr = _ptr_from_struct_incref(r)
 	for i in range(len(deref_f_ids)):
 		idrec0 = encode_idrec(?t_id, ?f_id, ??MODIFY)
 		idrec1 = encode_idrec(?t_id, ?f_id, RETRACT)

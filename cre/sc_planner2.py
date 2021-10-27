@@ -15,17 +15,17 @@ from cre.structref import define_structref, define_structref_template
 from cre.memory import MemoryType, Memory, facts_for_t_id, fact_at_f_id
 from cre.var import GenericVarType
 # from cre.fact import define_fact, BaseFactType, cast_fact, DeferredFactRefType, Fact
-from cre.utils import (_struct_from_meminfo, _meminfo_from_struct, _cast_structref, cast_structref, decode_idrec, lower_getattr, _struct_from_pointer,  lower_setattr, lower_getattr,
-                       _pointer_from_struct, _decref_pointer, _incref_pointer, _incref_structref, _pointer_from_struct_incref,
-                       _dict_from_ptr, _list_from_ptr, _load_pointer, _arr_from_data_ptr, _get_array_data_ptr)
-from cre.utils import assign_to_alias_in_parent_frame
+from cre.utils import (ptr_t, _struct_from_meminfo, _meminfo_from_struct, _cast_structref, cast_structref, decode_idrec, lower_getattr, _struct_from_ptr,  lower_setattr, lower_getattr,
+                       _raw_ptr_from_struct, _decref_ptr, _incref_ptr, _incref_structref, _ptr_from_struct_incref,
+                       _dict_from_ptr, _list_from_ptr, _load_ptr, _arr_from_data_ptr, _get_array_data_ptr)
+from cre.utils import assign_to_alias_in_parent_frame, _raw_ptr_from_struct_incref
 from cre.subscriber import base_subscriber_fields, BaseSubscriber, BaseSubscriberType, init_base_subscriber, link_downstream
 from cre.vector import VectorType
 from cre.fact import Fact, gen_fact_import_str, get_offsets_from_member_types
 from cre.var import Var, VarTypeTemplate
 from cre.op import GenericOpType, OpTypeTemplate
-from cre.predicate_node import BasePredicateNode,BasePredicateNodeType, get_alpha_predicate_node_definition, \
- get_beta_predicate_node_definition, deref_attrs, define_alpha_predicate_node, define_beta_predicate_node, AlphaPredicateNode, BetaPredicateNode
+# from cre.predicate_node import BasePredicateNode,BasePredicateNodeType, get_alpha_predicate_node_definition, \
+#  get_beta_predicate_node_definition, deref_attrs, define_alpha_predicate_node, define_beta_predicate_node, AlphaPredicateNode, BetaPredicateNode
 from cre.make_source import make_source, gen_def_func, gen_assign, resolve_template, gen_def_class
 from numba.core import imputils, cgutils
 from numba.core.datamodel import default_manager, models
@@ -129,7 +129,7 @@ SC_Record_Entry, SC_Record_EntryType = \
 def rec_entry_from_ptr(d_ptr):
     ptrs = _arr_from_data_ptr(d_ptr, (2,),dtype=np.int64)
     rec_ptr, next_entry_ptr = ptrs[0], ptrs[1]
-    rec = _struct_from_pointer(SC_RecordType, rec_ptr)
+    rec = _struct_from_ptr(SC_RecordType, rec_ptr)
     args = _arr_from_data_ptr(d_ptr+16,(rec.nargs,),dtype=np.uint32)
 
     return SC_Record_Entry(rec,next_entry_ptr,args)
@@ -156,11 +156,11 @@ SetChainingPlanner_field_dict = {
     #  Tuple(type_str[str],depth[int]) -> ListType[Record])
     'backward_records' : ListType(DictType(unicode_type, ListType(SC_RecordType))),
     # Maps type_str[str] -> *(Dict: val[any] -> Tuple(depth[i8], *SC_Record_Entry) )
-    'val_map_ptr_dict' : DictType(unicode_type, i8),
+    'val_map_ptr_dict' : DictType(unicode_type, ptr_t),
     # Maps type_str[str] -> *(Dict: *Var -> val[any])
-    'inv_val_map_ptr_dict' : DictType(unicode_type, i8), 
+    'inv_val_map_ptr_dict' : DictType(unicode_type, ptr_t), 
     # Maps (type_str[str],depth[int]) -> *Iterator[any]
-    'flat_vals_ptr_dict' : DictType(Tuple((unicode_type,i8)), i8),
+    'flat_vals_ptr_dict' : DictType(Tuple((unicode_type,i8)), ptr_t),
 
 }
 SetChainingPlanner_fields = [(k,v) for k,v in SetChainingPlanner_field_dict.items()]
@@ -190,9 +190,9 @@ def sc_planner_ctor():
     st = new(SetChainingPlannerType)
     st.forward_records = List.empty_list(dict_str_to_record_list_type)
     st.backward_records = List.empty_list(dict_str_to_record_list_type)
-    st.val_map_ptr_dict = Dict.empty(unicode_type, i8)
-    st.inv_val_map_ptr_dict = Dict.empty(unicode_type, i8)
-    st.flat_vals_ptr_dict = Dict.empty(str_int_tuple, i8)
+    st.val_map_ptr_dict = Dict.empty(unicode_type, ptr_t)
+    st.inv_val_map_ptr_dict = Dict.empty(unicode_type, ptr_t)
+    st.flat_vals_ptr_dict = Dict.empty(str_int_tuple, ptr_t)
     return st
 
 
@@ -201,13 +201,13 @@ def ensure_ptr_dicts(planner,typ,typ_name,lt,vt,ivt):
     tup = (typ_name,0)
     if(tup not in planner.flat_vals_ptr_dict):
         flat_vals = List.empty_list(typ)
-        planner.flat_vals_ptr_dict[tup] = _pointer_from_struct_incref(flat_vals)
+        planner.flat_vals_ptr_dict[tup] = _ptr_from_struct_incref(flat_vals)
     if(typ_name not in planner.val_map_ptr_dict):
         val_map = Dict.empty(typ, i8_2x_tuple)    
-        planner.val_map_ptr_dict[typ_name] = _pointer_from_struct_incref(val_map)
+        planner.val_map_ptr_dict[typ_name] = _ptr_from_struct_incref(val_map)
     if(typ_name not in planner.inv_val_map_ptr_dict):
         inv_val_map = Dict.empty(i8, typ)    
-        planner.inv_val_map_ptr_dict[typ_name] = _pointer_from_struct_incref(inv_val_map)
+        planner.inv_val_map_ptr_dict[typ_name] = _ptr_from_struct_incref(inv_val_map)
 
     flat_vals = _list_from_ptr(lt, planner.flat_vals_ptr_dict[tup])    
     val_map = _dict_from_ptr(vt, planner.val_map_ptr_dict[typ_name])    
@@ -233,10 +233,10 @@ def planner_declare(planner, val):
             ensure_ptr_dicts(planner, val_typ,
                 val_typ_name, l_typ, vm_typ, ivm_typ)
         v = Var(val_typ)
-        var_ptr = _pointer_from_struct(v)
+        var_ptr = _raw_ptr_from_struct(v)
         rec = SC_Record(v)
         rec_entry = np.empty((1,),dtype=np.int64)
-        rec_entry[0] = _pointer_from_struct_incref(rec)
+        rec_entry[0] = _raw_ptr_from_struct_incref(rec)
         rec_entry_ptr = _get_array_data_ptr(rec_entry)
         flat_vals.append(val)
         val_map[val] = (0, rec_entry_ptr)
@@ -307,7 +307,7 @@ def how_search(self, goal, ops=None,
 def _query_goal(self, type_name, typ, goal):
     vtd_ptr_d = self.vals_to_depth_ptr_dict
     if(type_name in vtd_ptr_d):
-        vals_to_depth = _struct_from_pointer(typ,vtd_ptr_d)
+        vals_to_depth = _struct_from_ptr(typ,vtd_ptr_d)
         if(goal in vals_to_depth):
             return vals_to_depth[goal]
         else:
@@ -350,9 +350,9 @@ def join_records_of_type(self, depth, typ):
         #If (typ_name, depth) was already there then decref the
         # entry in flat_vals_ptr_dict so it gets freed
         # if(tup in self.flat_vals_ptr_dict):
-        #     _decref_pointer(self.flat_vals_ptr_dict[tup])
+        #     _decref_ptr(self.flat_vals_ptr_dict[tup])
         self.flat_vals_ptr_dict[tup] = \
-             _pointer_from_struct_incref(flat_vals)
+             _ptr_from_struct_incref(flat_vals)
     return impl
 
 
@@ -401,7 +401,7 @@ from numba.typed import Dict
 from numba.types import ListType, DictType, Tuple
 import numpy as np
 import dill
-from cre.utils import _dict_from_ptr, _list_from_ptr, _pointer_from_struct_incref, _get_array_data_ptr
+from cre.utils import _dict_from_ptr, _list_from_ptr, _raw_ptr_from_struct_incref, _get_array_data_ptr
 from cre.sc_planner2 import SC_Record, SC_Record_Entry, SC_Record_EntryType
 ''' 
     imp_targets = ['call'] + (['check'] if has_check else [])
@@ -445,7 +445,7 @@ data_len = {"*".join([f'l{i}' for i in a_cnt])}*ENTRY_WIDTH
 data = np.empty(data_len,dtype=np.uint32)
 d_ptr = _get_array_data_ptr(data)
 rec = SC_Record(op_inst, nxt_depth, N_ARGS, data, stride)
-rec_ptr = _pointer_from_struct_incref(rec)
+rec_ptr = _raw_ptr_from_struct_incref(rec)
 
 d_offset=0
 val_map_defaults = (-1,0)
@@ -498,7 +498,7 @@ def _assert_prepared(self, typ, typ_name, depth):
         )
     if(typ_name not in self.val_map_ptr_dict):
         val_map = Dict.empty(typ, i8_2x_tuple)
-        val_map_ptr = _pointer_from_struct_incref(val_map)
+        val_map_ptr = _ptr_from_struct_incref(val_map)
         self.val_map_ptr_dict[typ_name] = val_map_ptr
     
     
@@ -561,7 +561,7 @@ def expl_tree_entry_ctor(op_or_var, child_arg_ptrs=None):
 
 ExplanationTree_field_dict = {
     'children' : ListType(ExplanationTreeEntryType), #List[(op<GenericOpType> ,*ExplanationTree[::1])]
-    'inv_val_map_ptr_dict' : DictType(unicode_type,i8)
+    'inv_val_map_ptr_dict' : DictType(unicode_type, ptr_t)
 }
 ExplanationTree_fields = [(k,v) for k,v in ExplanationTree_field_dict.items()]
 # ExplanationTree, ExplanationTreeType = \
@@ -619,9 +619,9 @@ def expl_tree_ctor(children=None, planner=None):
     else:
         st.children = children
     if(planner is not None):
-        st.inv_val_map_ptr_dict = Dict.empty(unicode_type,i8)
+        st.inv_val_map_ptr_dict = Dict.empty(unicode_type, ptr_t)
         for typ_name, ptr in planner.inv_val_map_ptr_dict.items():
-            _incref_pointer(ptr)
+            _incref_ptr(ptr) #Note might not need
             st.inv_val_map_ptr_dict[typ_name] = ptr
     return st
 
@@ -632,7 +632,7 @@ def expl_tree_ctor(children=None, planner=None):
 #     op_ptr_children = Dict.empty(i8, lst_tree_entries)
 #     for child in tree.children:
 #         if(child.is_op):
-#             ptr = _pointer_from_struct(child.op)
+#             ptr = _raw_ptr_from_struct(child.op)
 #             if(ptr in op_ptr_children):
 #                 lst = op_ptr_children[ptr]
 #             else:
@@ -672,7 +672,7 @@ def _fill_arg_inds_from_rec_entries(re, new_arg_inds, expl_tree):
                 if(arg_ind not in uai):
                     uai[arg_ind] = expl_tree_ctor()
 
-                child_arg_ptrs[i] = _pointer_from_struct_incref(uai[arg_ind])
+                child_arg_ptrs[i] = _raw_ptr_from_struct_incref(uai[arg_ind])
 
             # Throw new tree entry instance into the children of 'expl_tree'
             entry = expl_tree_entry_ctor(op,child_arg_ptrs)
@@ -728,7 +728,7 @@ def fill_subgoals_from_arg_inds(planner, arg_inds, typ, depth, new_subgoals):
         for ind, expl_tree in _arg_inds.items():
             _new_subgoals[vals[ind]] = expl_tree
         # Inject the new subgoals for 'typ' into 'new_subgoals'
-        new_subgoals[typ_name] = _pointer_from_struct_incref(_new_subgoals)
+        new_subgoals[typ_name] = _ptr_from_struct_incref(_new_subgoals)
         return new_subgoals
     return impl
 
@@ -758,18 +758,18 @@ def _init_root_goals(g_typ, goal, root):
     g_typ_name = str(g_typ.instance_type)
     # print('g_typ_name', g_typ_name)
     def impl(g_typ, goal, root):
-        goals = Dict.empty(unicode_type, i8)
+        goals = Dict.empty(unicode_type, ptr_t)
 
         _goals = Dict.empty(g_typ, ExplanationTreeType)
         _goals[goal] = root
 
-        goals[g_typ_name] = _pointer_from_struct_incref(_goals)
+        goals[g_typ_name] = _ptr_from_struct_incref(_goals)
         return goals
     return impl
 
 @njit(cache=True)
 def _init_subgoals():
-    return Dict.empty(unicode_type,i8)
+    return Dict.empty(unicode_type, ptr_t)
 
 def build_explanation_tree(planner, g_typ, goal):
     root = expl_tree_ctor(None,planner)
@@ -850,7 +850,7 @@ def expl_tree_entry_get_var(tree_entry):
 
 @njit(ExplanationTreeType(ExplanationTreeEntryType,i8),cache=True)
 def expl_tree_entry_jth_arg(tree_entry, j):
-    return _struct_from_pointer(ExplanationTreeType,
+    return _struct_from_ptr(ExplanationTreeType,
         tree_entry.child_arg_ptrs[j])
 
 

@@ -25,8 +25,8 @@ from cre.gensource import assert_gen_source
 from cre.caching import unique_hash, source_to_cache, import_from_cached, source_in_cache, get_cache_path
 from cre.structref import gen_structref_code, define_structref
 from cre.context import cre_context
-from cre.utils import (_struct_from_pointer, _cast_structref, struct_get_attr_offset, _obj_cast_codegen,
-                       _pointer_from_struct_codegen, _pointer_from_struct, CastFriendlyMixin, _obj_cast_codegen)
+from cre.utils import (_struct_from_ptr, _cast_structref, struct_get_attr_offset, _obj_cast_codegen,
+                       _ptr_from_struct_codegen, _raw_ptr_from_struct, CastFriendlyMixin, _obj_cast_codegen)
 from numba.core.typeconv import Conversion
 import operator
 from numba.core.imputils import (lower_cast)
@@ -261,7 +261,7 @@ def {f_typ}_get_{attr}_as_ptr(self):
 @njit(cache=True)
 def {f_typ}_get_{attr}(self):
     return self.{attr}
-    #_struct_from_pointer({typ._fact_name}Type, self.{attr})
+    #_struct_from_ptr({typ._fact_name}Type, self.{attr})
 '''
     else:
         return \
@@ -362,7 +362,7 @@ def gen_repr_attr_code(a,t,typ_name):
 
 # def gen_assign_str(a,t):
 #     # if(isinstance(t,fact_types)):
-#         # s = f"_pointer_from_struct_incref({a}) if ({a} is not None) else 0"
+#         # s = f"_ptr_from_struct_incref({a}) if ({a} is not None) else 0"
 #     # elif(isinstance(t,ListType) and isinstance(t.dtype,fact_types)):
 #     #     # s = f"{a}_c = _cast_list(base_list_type,{a})\n    "
 #     #     # s += f"st.{a} = {a}_c" 
@@ -401,7 +401,7 @@ def gen_fact_code(typ, fields, fact_num, ind='    '):
     field_type_list = ",".join([repr_type(v) for k,v in fields])
 
 
-    # assign_str = lambda a,t: f"st.{a} = " + (f"_pointer_from_struct_incref({a}) if ({a} is not None) else 0" \
+    # assign_str = lambda a,t: f"st.{a} = " + (f"_ptr_from_struct_incref({a}) if ({a} is not None) else 0" \
     #                         if isinstance(t,fact_types) else f"{a}")
     init_fields = f'\n{ind}'.join([f"fact_lower_setattr(st,'{k}',{k})" for k,v in fields])
 
@@ -425,7 +425,6 @@ from numba.experimental.structref import new#, define_boxing
 from numba.core.extending import overload
 from cre.fact_intrinsics import define_boxing, get_fact_attr_ptr, _register_fact_structref, fact_mutability_protected_setattr, fact_lower_setattr
 from cre.fact import repr_list_attr, repr_fact_attr,  FactProxy, Fact{", BaseFactType, base_list_type, fact_to_ptr" if typ != "BaseFact" else ""}
-from cre.utils import struct_get_attr_offset, _pointer_from_struct,  _pointer_from_struct_incref, _struct_from_pointer, _cast_list
 {fact_imports}
 
 attr_offsets = np.array({attr_offsets!r},dtype=np.int16)
@@ -600,16 +599,16 @@ def downcast(context, builder, fromty, toty, val):
 
 @njit(cache=True)
 def fact_to_ptr(fact):
-    return _pointer_from_struct(fact)
+    return _raw_ptr_from_struct(fact)
 
 @njit(cache=True)
 def fact_to_ptr_incref(fact):
-    return _pointer_from_struct_incref(fact)
+    return _ptr_from_struct_incref(fact)
 
 def _fact_eq(a,b):
     if(isinstance(a,Fact) and isinstance(b,Fact)):
         def impl(a,b):
-            return _pointer_from_struct(a) ==_pointer_from_struct(b)
+            return _raw_ptr_from_struct(a) ==_raw_ptr_from_struct(b)
         return impl
 
 fact_eq = generated_jit(cache=True)(_fact_eq)

@@ -386,10 +386,10 @@ def gen_placeholder_aliases(var_ptrs):
     n_auto_gen = 0
     for var_ptr in var_ptrs:
         head_var = _struct_from_ptr(GenericVarType, var_ptr)
-        base_ptr = head_var.base_ptr
+        base_ptr = i8(head_var.base_ptr)
         if(base_ptr not in _vars):
             base_var = _struct_from_ptr(GenericVarType, base_ptr)
-            _vars[base_ptr] = base_var
+            _vars[i8(base_ptr)] = base_var
             
     for var in _vars.values():
         if(var.alias != ""):
@@ -455,7 +455,7 @@ def op_ctor(name, return_type_name, arg_type_names, head_var_ptrs,
     j = 0
     for head_ptr in head_var_ptrs:
         head_var = _struct_from_ptr(GenericVarType, head_ptr)
-        base_ptr = head_var.base_ptr
+        base_ptr = i8(head_var.base_ptr)
         if(base_ptr not in st.base_var_map):
             base_var = _struct_from_ptr(GenericVarType, base_ptr)
             alias = base_var.alias

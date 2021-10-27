@@ -395,13 +395,13 @@ if(__name__ == "__main__"):
     # dat = matching_alphas_setup()[0]
     # dat = matching_betas_setup()[0]
 
-    with cre_context("test_matching_benchmarks") as ctxt:
-        # c.get_matches(mem)
+    # with cre_context("test_matching_benchmarks") as ctxt:
+    #     # c.get_matches(mem)
 
-        mem = mem_w_n_boops(80, BOOP)
-        print(rtsys.get_allocation_stats())
-        mem = None
-        print(rtsys.get_allocation_stats())
+    #     mem = mem_w_n_boops(80, BOOP)
+    #     print(rtsys.get_allocation_stats())
+    #     mem = None
+    #     print(rtsys.get_allocation_stats())
 
    
     # gc.collect(); alloc_stats0 = rtsys.get_allocation_stats()
@@ -418,6 +418,7 @@ if(__name__ == "__main__"):
     # print(alloc_stats1.alloc-alloc_stats1.free, alloc_stats2.alloc-alloc_stats2.free)
 
 
+    # test_ref_matching()
     # test_multiple_deref()
     # test_applying()
     # test_matching()

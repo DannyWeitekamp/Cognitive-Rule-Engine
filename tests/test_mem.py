@@ -151,23 +151,24 @@ def test_retract_keyerror():
 
 ##### test_all_facts_of_type #####
 
-with cre_context("test_all_facts_of_type"):
+with cre_context("test_iter_facts_of_type"):
     TextField, TextFieldType = define_fact("TextField",tf_spec)
 
-@njit(cache=True)
-def all_of_type(mem):
-    return mem.all_facts_of_type(TextFieldType)
+# @njit(cache=True)
+# def all_of_type(mem):
+#     return mem.all_facts_of_type(TextFieldType)
 
-def test_all_facts_of_type():
-    with cre_context("test_all_facts_of_type"):
+def test_iter_facts_of_type():
+    with cre_context("test_iter_facts_of_type"):
         #NRT version
         mem = Memory()
         declare_retract(mem)
-        all_tf = all_of_type(mem)
+        all_tf = list(mem.iter_facts_of_type(TextField))
+        # all_tf = all_of_type(mem)
         assert isinstance(all_tf[0],TextField)
         assert len(all_tf) == 90
 
-        all_tf = all_of_type.py_func(mem)
+        all_tf = list(mem.iter_facts_of_type(TextField))
         assert isinstance(all_tf[0],TextField)
         assert len(all_tf) == 90
 
@@ -280,10 +281,10 @@ def test_b_retract10000(benchmark):
 
 
 if __name__ == "__main__":
-    test_declare_overloading()
+    # test_declare_overloading()
     # test_modify()
     # test_encode_decode()
     # test_declare_retract()
     # test_retract_keyerror()
     # test_subscriber()
-    # test_all_facts_of_type()
+    test_iter_facts_of_type()

@@ -22,6 +22,7 @@ import timeit
 import itertools
 import types as pytypes
 import sys
+import cloudpickle
 import __main__
 
 from cre.context import _BaseContextful, CREContextDataType, CREContext
@@ -32,7 +33,7 @@ from cre.subscriber import BaseSubscriberType
 from cre.structref import define_structref
 from cre.fact import BaseFact,BaseFactType, cast_fact
 from cre.fact_intrinsics import fact_lower_setattr
-from cre.utils import lower_setattr, _cast_structref, _meminfo_from_struct, decode_idrec, encode_idrec, \
+from cre.utils import CastFriendlyMixin, lower_setattr, _cast_structref, _meminfo_from_struct, decode_idrec, encode_idrec, \
  _raw_ptr_from_struct, _ptr_from_struct_incref,  _struct_from_ptr, _decref_ptr, _raw_ptr_from_struct_incref
 from cre.vector import new_vector, VectorType
 from cre.caching import import_from_cached, source_in_cache, source_to_cache
@@ -203,8 +204,14 @@ class Memory(structref.StructRefProxy):
     def retract(self,identifier):
         return retract(self,identifier)
 
-    def all_facts_of_type(self,typ):
-        return all_facts_of_type(self,typ)
+    def iter_facts_of_type(self,typ):
+        if(isinstance(typ,str)):
+            typ = self.context.type_registry[typ]
+        name = str(typ)
+        t_id = self.context.context_data.fact_num_to_t_id[typ._fact_num]
+        t_ids = np.empty((1,), dtype=np.uint16)
+        t_ids[0] = t_id
+        return FactIterator(self, typ, t_ids)#all_facts_of_t_id(self, t_id)
 
     def modify(self, fact, attr, val):
         return modify(self,fact, literally(attr), val)
@@ -345,20 +352,33 @@ def next_empty_f_id(mem_data,facts,t_id):
 #     if(t_id >= L):
 #         expand_mem_data_types(mem_data, 1+L-t_id)
 
-@generated_jit(cache=True)
-def resolve_t_id(mem, fact):
-    if(isinstance(fact,types.TypeRef)):
-        fact = fact.instance_type
+# @generated_jit(cache=True)
+# def resolve_t_id(mem, fact):
+#     if(isinstance(fact,types.TypeRef)):
+#         fact = fact.instance_type
 
-    fact_num = fact._fact_num
-    def impl(mem, fact):
-        t_id = mem.context_data.fact_num_to_t_id[fact_num]
-        L = len(mem.mem_data.facts)
-        if(t_id >= L):
-            expand_mem_data_types(mem.mem_data, 1+L-t_id)
-        return t_id
+#     fact_num = fact._fact_num
+#     def impl(mem, fact):
+#         t_id = mem.context_data.fact_num_to_t_id[fact_num]
+#         L = len(mem.mem_data.facts)
+#         if(t_id >= L):
+#             expand_mem_data_types(mem.mem_data, 1+L-t_id)
+#         return t_id
         
-    return impl
+#     return impl
+@njit(u2(MemoryType, BaseFactType),cache=True)
+def resolve_t_id(mem, fact):
+    # _, fact_num, a_id = decode_idrec(fact.idrec)
+    # if(fact.idrec == u8(-1)):
+    
+    # else:
+    #     t_id = fact_num
+    t_id = mem.context_data.fact_num_to_t_id[fact.fact_num]
+    L = len(mem.mem_data.facts)
+    if(t_id >= L):
+        expand_mem_data_types(mem.mem_data, 1+L-t_id)
+
+    return t_id
 
 @njit(cache=True)
 def name_to_idrec(mem,name):
@@ -401,7 +421,7 @@ def signal_subscribers_change(mem, idrec):
 
 ##### declare #####
 
-@njit(cache=True)
+@njit(u8(MemoryType,BaseFactType), cache=True)
 def declare_fact(mem,fact):
     #Incref so that the fact is not freed if this is the only reference
     fact_ptr = _raw_ptr_from_struct_incref(fact) #.4ms / 10000
@@ -483,17 +503,17 @@ def modify(mem,fact,attr,val):
 
 ##### all_facts_of_type #####
 
-@njit(cache=True)
-def all_facts_of_type(mem,typ):
-    t_id = resolve_t_id(mem,typ)
-    out = List.empty_list(typ)
-    facts = facts_for_t_id(mem.mem_data,t_id)
-    for i in range(facts.head):
-        fact_ptr = facts.data[i]
-        if(fact_ptr != 0):#u8(-1)):
-            # out.append(cast_fact(typ,b_fact))
-            out.append(_struct_from_ptr(typ,fact_ptr))
-    return out
+# @njit(cache=True)
+# def all_facts_of_t_id(mem,t_id):
+#     # t_id = resolve_t_id(mem,typ)
+#     out = List.empty_list(typ)
+#     facts = facts_for_t_id(mem.mem_data,t_id)
+#     for i in range(facts.head):
+#         fact_ptr = facts.data[i]
+#         if(fact_ptr != 0):#u8(-1)):
+#             # out.append(cast_fact(typ,b_fact))
+#             out.append(_struct_from_ptr(typ,fact_ptr))
+#     return out
 
 #### Memory Overloading #####
 @overload_method(MemoryTypeTemplate, "halt")
@@ -557,9 +577,107 @@ def mem_modify(self, fact, attr, val):
 
     return impl
 
-@overload_method(MemoryTypeTemplate, "all_facts_of_type")
-def mem_all_facts_of_type(self, typ):
-    def impl(self, typ):
-        return all_facts_of_type(self,typ)
 
-    return impl
+
+fact_iterator_field_dict = {
+    "mem" : MemoryType,
+    "t_ids": u2[::1],
+    "curr_ind": i8 ,
+    "curr_t_id_ind": i8,
+    "fact_type": types.Any
+}
+fact_iterator_fields = [(k,v) for k,v, in fact_iterator_field_dict.items()]
+
+# FactIterator, FactIteratorType = define_structref("FactIterator",fact_iter_fields)
+
+def gen_fact_iter_source(fact_type):
+    print("##", fact_type)
+    return f'''import cloudpickle
+from numba import njit, u2, types
+from numba.experimental.structref import new
+from cre.memory import FactIterator, FactIteratorType, fact_iterator_field_dict, MemoryType, fact_iter_next_raw_ptr, GenericFactIteratorType
+from cre.utils import _struct_from_ptr, _cast_structref
+fact_type = cloudpickle.loads({cloudpickle.dumps(fact_type)})
+f_iter_type = FactIteratorType([(k,v) for k,v in {{**fact_iterator_field_dict ,"fact_type": types.TypeRef(fact_type)}}.items()])
+f_iter_type._fact_type = fact_type
+print(f_iter_type)
+
+
+@njit(f_iter_type(MemoryType,u2[::1]),cache=True)
+def fact_iterator_ctor(mem, t_ids):
+    st = new(f_iter_type)
+    st.mem = mem
+    st.t_ids = t_ids
+    st.curr_ind = 0
+    st.curr_t_id_ind = 0
+    return st
+
+@njit(fact_type(f_iter_type),cache=True)
+def fact_iterator_next(it):
+    return _struct_from_ptr(fact_type, fact_iter_next_raw_ptr(_cast_structref(GenericFactIteratorType,it)))
+'''
+
+class FactIterator(structref.StructRefProxy):
+    ''' '''
+    f_iter_type_cache = {}
+    def __new__(cls, mem, fact_type, t_ids):
+        if(not isinstance(fact_type, types.StructRef)): fact_type = fact_type.fact_type
+        if(fact_type not in cls.f_iter_type_cache):
+            hash_code = unique_hash([fact_type])
+            if(not source_in_cache('FactIterator', hash_code)):
+                source = gen_fact_iter_source(fact_type)
+                source_to_cache('FactIterator', hash_code, source)
+            l = import_from_cached('FactIterator', hash_code, ['fact_iterator_ctor', 'fact_iterator_next'])
+
+            fact_iterator_ctor, fact_iterator_next = cls.f_iter_type_cache[fact_type] = l['fact_iterator_ctor'], l['fact_iterator_next']
+        else:
+            fact_iterator_ctor, fact_iterator_next  = cls.f_iter_type_cache[fact_type]
+        
+        self = fact_iterator_ctor(mem, t_ids)
+        self._fact_type = fact_type
+        self.fact_iterator_next = fact_iterator_next
+        return self
+        
+    def __next__(self):
+        return self.fact_iterator_next(self)
+
+    def __iter__(self):
+        return self
+
+
+@structref.register
+class FactIteratorType(CastFriendlyMixin, types.StructRef):
+    def __str__(self):
+        return f"cre.FactIterator[{self._fact_type}]"
+    # def preprocess_fields(self, fields):
+    #     return tuple((name, types.unliteral(typ)) for name, typ in fields)
+
+
+define_boxing(FactIteratorType, FactIterator)
+GenericFactIteratorType = FactIteratorType(fact_iterator_fields)
+GenericFactIteratorType._fact_type = BaseFactType
+
+
+@njit(i8(GenericFactIteratorType),cache=True)
+def fact_iter_next_raw_ptr(it):
+    while(True):
+        if(it.curr_t_id_ind >= len(it.t_ids)): raise StopIteration()
+        t_id = it.t_ids[it.curr_t_id_ind]
+        facts = _struct_from_ptr(VectorType, it.mem.mem_data.facts[i8(t_id)])
+        if(it.curr_ind < len(facts)):
+            ptr = facts[it.curr_ind]
+            it.curr_ind +=1
+            if(ptr != 0): return ptr
+        else:
+            it.curr_t_id_ind +=1
+
+
+
+
+
+# @overload_method(MemoryTypeTemplate, "all_facts_of_type")
+# def mem_all_facts_of_type(self, typ):
+#     def impl(self, typ):
+#         return all_facts_of_type(self,typ)
+
+#     return impl

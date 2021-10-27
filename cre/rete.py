@@ -1198,8 +1198,8 @@ rete_graph_field_dict = {
     "global_deref_idrec_map" : DictType(u8, node_list_type),
     "global_t_id_root_memory_map" : DictType(u2, NodeMemoryType),
     # "var_t_ids" : u2[::1], #NOTE: Something wrong with this... consider just not keeping
-    "match_iter_prototype_meminfo" : meminfo_type, #NOTE: Should really use deferred type
-    "match_iter_prototype_ptr" : i8, #NOTE: Should really use deferred type
+    # "match_iter_prototype_meminfo" : meminfo_type, #NOTE: Should really use deferred type
+    "match_iter_prototype_ptr" : ptr_t, #NOTE: Should really use deferred type
 }
 
 
@@ -1271,7 +1271,7 @@ def _make_rete_nodes(mem, c, index_map):
         var_inds = np.empty((1,),dtype=np.int64)
         base_var = c.vars[j]
         t_ids[0] = _get_var_t_id(mem, base_var)
-        var_inds[0] = index_map[base_var.base_ptr]
+        var_inds[0] = index_map[i8(base_var.base_ptr)]
         # _ensure_long_enough(nodes_by_nargs, 1)
         nodes_by_nargs[0].append(node_ctor(mem, t_ids, var_inds,lit=None))
 
@@ -1290,7 +1290,7 @@ def _make_rete_nodes(mem, c, index_map):
                 t_ids = np.empty((nargs,),dtype=np.uint16)
                 var_inds = np.empty((nargs,),dtype=np.int64)
                 for i, base_var_ptr in enumerate(lit.var_base_ptrs):
-                    var_inds[i] = index_map[base_var_ptr]
+                    var_inds[i] = index_map[i8(base_var_ptr)]
                     base_var = _struct_from_ptr(GenericVarType, base_var_ptr)
                     t_id = _get_var_t_id(mem, base_var)
                     t_ids[i] = t_id
@@ -1334,7 +1334,7 @@ def build_rete_graph(mem, c):
     # var_t_ids = np.zeros((len(c.vars),), dtype=np.uint16)
 
     for i, v in enumerate(c.vars):
-        index_map[v.base_ptr] = i
+        index_map[i8(v.base_ptr)] = i
 
         # base_var = _struct_from_ptr(GenericVarType, v.base_ptr)
         # if(base_var.base_type_name in mem.context_data.fact_to_t_id):
@@ -1750,8 +1750,8 @@ def new_match_iter(graph):
         m_iter.graph = graph 
         m_iter.iter_nodes = rev_m_iter_nodes 
         m_iter.is_empty = False
-        graph.match_iter_prototype_meminfo = _meminfo_from_struct(m_iter)
-        graph.match_iter_prototype_ptr = _raw_ptr_from_struct(m_iter)
+        # graph.match_iter_prototype_meminfo = _meminfo_from_struct(m_iter)
+        graph.match_iter_prototype_ptr = _ptr_from_struct_incref(m_iter)
     
     prototype = _struct_from_ptr(GenericMatchIteratorType, graph.match_iter_prototype_ptr)
     m_iter = copy_match_iter(prototype)
@@ -1983,10 +1983,10 @@ def update_graph(graph):
 @njit(GenericMatchIteratorType(MemoryType, ConditionsType), cache=True)
 def get_match_iter(mem, conds):
     # print("START")
-    if(conds.matcher_inst_ptr == 0):
+    if(i8(conds.matcher_inst_ptr) == 0):
         rete_graph = build_rete_graph(mem, conds)
-        conds.matcher_inst_meminfo = _meminfo_from_struct(rete_graph)
-        conds.matcher_inst_ptr = _raw_ptr_from_struct(rete_graph)
+        # conds.matcher_inst_meminfo = _meminfo_from_struct(rete_graph)
+        conds.matcher_inst_ptr = _ptr_from_struct_incref(rete_graph)
     # print("BUILT")
     rete_graph = _struct_from_ptr(ReteGraphType, conds.matcher_inst_ptr)
     update_graph(rete_graph)

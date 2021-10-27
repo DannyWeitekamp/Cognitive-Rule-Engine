@@ -442,6 +442,7 @@ class {typ}TypeTemplate(Fact):
 
 {typ}Type = {typ}TypeTemplate(list(zip([{base_list},{field_list}], [{base_type_list},{field_type_list}])))
 
+
 @njit(cache=True)
 def ctor({param_defaults_list}):
     st = new({typ}Type)

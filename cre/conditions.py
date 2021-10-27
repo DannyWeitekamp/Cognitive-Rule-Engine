@@ -238,8 +238,8 @@ conditions_fields_dict = {
 
 
     # Keep around a pointer and a meminfo for the matcher_inst
-    "matcher_inst_ptr" : i8, # Keep this so we can check for zero
-    "matcher_inst_meminfo" : meminfo_type, # Keep this so it is decreffed
+    "matcher_inst_ptr" : ptr_t, # Keep this so we can check for zero
+    # "matcher_inst_meminfo" : meminfo_type, # Keep this so it is decreffed
 
     # # The alpha parts of '.dnf' organized by which Var in 'vars' they use 
     # 'alpha_dnfs': ListType(dnf_type),
@@ -611,12 +611,12 @@ def build_base_var_map(left_vars,right_vars=None):
     '''
     base_var_map = Dict.empty(i8,i8)
     for v in left_vars:
-        ptr = v.base_ptr
+        ptr = i8(v.base_ptr)
         if(ptr not in base_var_map):
             base_var_map[ptr] = len(base_var_map)
     if(right_vars is not None):
         for v in right_vars:
-            ptr = v.base_ptr
+            ptr = i8(v.base_ptr)
             if(ptr not in base_var_map):
                 base_var_map[ptr] = len(base_var_map)
                 
@@ -973,7 +973,7 @@ def build_distributed_dnf(c,index_map=None):
     if(index_map is None):
         index_map = Dict.empty(i8, i8)
         for i, v in enumerate(c.vars):
-            index_map[v.base_ptr] = i
+            index_map[i8(v.base_ptr)] = i
 
     for conjunct in c.dnf:
         var_spec_conj_list = List.empty_list(literal_list_type)
@@ -986,7 +986,7 @@ def build_distributed_dnf(c,index_map=None):
         for j, lit in enumerate(conjunct):
             max_ind = -1
             for base_ptr in lit.op.base_var_map:
-                ind = index_map[base_ptr]
+                ind = index_map[i8(base_ptr)]
                 if(ind > max_ind): max_ind = ind
 
             insertion_conj = distr_conjuct[max_ind]

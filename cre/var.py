@@ -41,7 +41,7 @@ var_fields_dict = {
 
     # The pointer of the Var instance before any attribute selection
     #   e.g. if '''v = Var(Type); v_b = v.B;''' then v_b.base_ptr = &v
-    'base_ptr' : ptr_t,
+    'base_ptr' : i8,
 
     # The name of the Var 
     'alias' : unicode_type,
@@ -95,8 +95,8 @@ class Var(structref.StructRefProxy):
         st._base_type = typ
         st._head_type = typ
 
-        if(not skip_assign_alias):
-            assign_to_alias_in_parent_frame(st,alias)
+        # if(not skip_assign_alias):
+            # assign_to_alias_in_parent_frame(st,alias)
 
         # print("after")
         return st
@@ -349,6 +349,8 @@ class Var(structref.StructRefProxy):
     def get_ptr_incref(self):
         return get_var_ptr_incref(self)
 
+
+
 @njit(cache=True)    
 def get_var_ptr(self):
     return _raw_ptr_from_struct(self)
@@ -443,7 +445,7 @@ def var_ctor(var_struct_type, base_type_name="", alias=""):
     st.conj_ptr = ptr_t(0)
     st.base_type_name = base_type_name
     st.head_type_name = base_type_name
-    st.base_ptr = _ptr_from_struct_incref(st)
+    st.base_ptr = i8(_raw_ptr_from_struct(st))
     st.alias =  "" if(alias is  None) else alias
     st.deref_attrs = List.empty_list(unicode_type)
     st.deref_offsets = np.empty(0,dtype=deref_type)

@@ -16,7 +16,7 @@ from cre.structref import define_structref, define_structref_template
 from cre.memory import MemoryType, Memory, facts_for_t_id, fact_at_f_id
 # from cre.fact import define_fact, BaseFactType, cast_fact, DeferredFactRefType, Fact
 from cre.utils import (_struct_from_meminfo, _meminfo_from_struct, _cast_structref, cast_structref, decode_idrec, lower_getattr, _struct_from_ptr,  lower_setattr, lower_getattr,
-                       _raw_ptr_from_struct, _decref_ptr, _incref_ptr, _incref_structref, _ptr_from_struct_incref)
+                       _raw_ptr_from_struct, _raw_ptr_from_struct_incref, _decref_ptr, _incref_ptr, _incref_structref, _ptr_from_struct_incref)
 from cre.utils import assign_to_alias_in_parent_frame, as_typed_list, iter_typed_list
 from cre.subscriber import base_subscriber_fields, BaseSubscriber, BaseSubscriberType, init_base_subscriber, link_downstream
 from cre.vector import VectorType
@@ -367,7 +367,7 @@ def resolve_return_type(x):
 
 @njit(cache=True)
 def var_to_ptr(x):
-    return _ptr_from_struct_incref(x)
+    return _raw_ptr_from_struct_incref(x)
 
 def new_var_ptrs_from_types(types, names):
     '''Generate vars with 'types' and 'names'
@@ -479,6 +479,12 @@ def op_ctor(name, return_type_name, arg_type_names, head_var_ptrs,
 
     return st
 
+@njit(cache=True)
+def op_dtor(self):
+    for head_ptr in self.head_var_ptrs:
+        _decref_ptr(head_ptr)
+
+
 
 
 def new_op(name, members, var_ptrs=None, return_class=False):
@@ -589,7 +595,7 @@ class OpMeta(type):
         name, members = args[0], args[2]
         if(name == "Op"):
             ret = super().__new__(meta_cls,*args)
-            print(ret)
+            # print(ret)
             return ret
         # print("<<<<", [str(x.__name__) for x in args[1]])
         # members = 
@@ -719,6 +725,16 @@ class OpMeta(type):
         return cls._long_hash
 
 
+    def __del__(cls):
+        print("OP META DTOR")
+        var_ptrs_dtor(cls.default_ops)
+
+@njit(cache=True)
+def var_ptrs_dtor(var_ptrs):
+    for ptr in var_ptrs:
+        _decref_ptr(ptr)
+
+
 
 class Op(structref.StructRefProxy,metaclass=OpMeta):
     ''' Base class for an functional operation. Custom operations can be
@@ -802,6 +818,9 @@ class Op(structref.StructRefProxy,metaclass=OpMeta):
         #     return self.expr_template
         # else:
         #     return op_repr(self)
+    def __del__(self):
+        print("OP DTOR")
+        op_dtor(self)
 
     @classmethod
     def make_singleton_inst(cls,head_var_ptrs=None):
@@ -1726,4 +1745,8 @@ class __GenerateOp__(Op):
         # print("FALT")
         return flattened_inst(*args)
 
+    def __del__(self):
+        print("OP COMP DTOR")
+        # var_ptrs_dtor(self.head_var_ptrs)
+# 
 

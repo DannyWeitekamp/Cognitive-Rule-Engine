@@ -224,7 +224,7 @@ def _obj_cast_codegen(context, builder, val, frmty, toty, incref=True):
     # print(frmty, ":::",toty)
     dstruct = ctor(context, builder, value=val)
     meminfo = dstruct.meminfo
-    if(incref):
+    if(incref and context.enable_nrt):
         context.nrt.incref(builder, types.MemInfoPointer(types.voidptr), meminfo)
 
     st = cgutils.create_struct_proxy(toty)(context, builder)

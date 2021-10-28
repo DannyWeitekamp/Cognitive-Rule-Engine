@@ -9,6 +9,7 @@ from cre.utils import _struct_from_ptr
 from numba.core.runtime.nrt import rtsys
 import gc
 
+
 # with cre_context("test_matching"):
     
 
@@ -274,6 +275,12 @@ def test_multiple_types():
         assert match_names(c, mem) == [["A","A"], ["B","B"]]
 
 
+def used_bytes():
+    stats = rtsys.get_allocation_stats()
+    print(stats)
+    return stats.alloc-stats.free
+
+
 
 
 
@@ -287,6 +294,65 @@ def test_multiple_types():
 
 with cre_context("test_matching_benchmarks"):
     BOOP, BOOPType = define_fact("BOOP",{"name": "string", "B" : "number"})
+
+
+from weakref import WeakValueDictionary
+def test_mem_leaks():
+    # with cre_context("test_matching_benchmarks"):
+
+    # Lead with these because in principle when an Op is typed a singleton inst is alloced
+    (c,mem),_ = matching_alphas_setup()
+    (c,mem),_ = matching_betas_setup()
+    c,mem = None,None; gc.collect()
+
+    init_used = used_bytes()
+
+    #Do this to avoid the global ref from auto_aliasing stuff
+    
+
+
+    # print(l1)
+    # print(globals()['l1'])
+    # print(locals())
+    # print(l1,l2)
+    w = WeakValueDictionary()
+    # print(l1._meminfo.refcount, l2._meminfo.refcount)
+    # print([x._meminfo.refcount for x in w.keys()])
+    l1, l2 = Var(BOOPType,"l1"), Var(BOOPType,"l2")
+    l1, l2 = None,None; gc.collect()
+    print(used_bytes()-init_used)
+
+    l1, l2 = Var(BOOPType,"l1"), Var(BOOPType,"l2")
+    c = (l1.B > 0)
+    c = None; gc.collect()
+    print(type(c),l1._meminfo.refcount,l2._meminfo.refcount)
+    c, l1, l2 = None, None,None; gc.collect()
+    print(used_bytes()-init_used)
+
+    l1, l2 = Var(BOOPType,"l1"), Var(BOOPType,"l2")
+    c = (l1.B > 0) & (l2.B != 3) 
+    c, l1, l2 = None, None,None; gc.collect()
+    print(used_bytes()-init_used)
+
+
+
+
+    (c,mem),_ = matching_alphas_setup()
+    print(c._meminfo.refcount, mem._meminfo.refcount)
+    
+    mem = None; gc.collect()
+    print("aft_mem",used_bytes()-init_used)
+    c = None; gc.collect()
+    print("aft_c",used_bytes()-init_used)
+    # w[0] = c
+    # w[1] = mem
+    c,mem = None,None; gc.collect()
+    print(used_bytes()-init_used)
+
+    (c,mem),_ = matching_betas_setup()
+    c,mem = None,None; gc.collect()
+    print(used_bytes()-init_used)
+
 
 
 
@@ -315,8 +381,8 @@ def apply_it(mem,l1,l2,r1):
 #         apply_all_matches(c,apply_it,mem)
 #         apply_all_matches(c,apply_it,mem)
 
-with cre_context("test_matching_benchmarks") as ctxt:
-    BOOP, BOOPType = define_fact("BOOP",{"name": "string", "B" : "number"})
+# with cre_context("test_matching_benchmarks") as ctxt:
+#     BOOP, BOOPType = define_fact("BOOP",{"name": "string", "B" : "number"})
 
 def matching_alphas_setup():
     with cre_context("test_matching_benchmarks") as ctxt:
@@ -392,6 +458,7 @@ def test_b_matching_betas_lit(benchmark):
 
 if(__name__ == "__main__"):
     pass
+    test_mem_leaks()
     # dat = matching_alphas_setup()[0]
     # dat = matching_betas_setup()[0]
 

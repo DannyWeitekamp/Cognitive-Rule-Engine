@@ -25,7 +25,7 @@ def new_vector(size):
     '''
     st = new(VectorType)
     st.head = 0
-    st.data = np.empty(size,dtype=np.int64)
+    st.data = np.zeros(size,dtype=np.int64)
     return st
 
 @njit(inline='never')

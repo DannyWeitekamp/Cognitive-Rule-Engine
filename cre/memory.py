@@ -34,7 +34,7 @@ from cre.structref import define_structref
 from cre.fact import BaseFact,BaseFactType, cast_fact
 from cre.fact_intrinsics import fact_lower_setattr
 from cre.utils import CastFriendlyMixin, lower_setattr, _cast_structref, _meminfo_from_struct, decode_idrec, encode_idrec, \
- _raw_ptr_from_struct, _ptr_from_struct_incref,  _struct_from_ptr, _decref_ptr, _raw_ptr_from_struct_incref
+ _raw_ptr_from_struct, _ptr_from_struct_incref,  _struct_from_ptr, _decref_ptr, _decref_structref, _raw_ptr_from_struct_incref
 from cre.vector import new_vector, VectorType
 from cre.caching import import_from_cached, source_in_cache, source_to_cache
 
@@ -179,6 +179,11 @@ def remove_consistency_map(mem_data, index):
     _, _,_, consistency_listeners, _ = mem_data
     del consistency_listeners[index]
 
+@njit(cache=True)
+def decref_fact(x):
+    return _decref_structref(x)
+
+
 #### Knowledge Base Definition ####
 
 class Memory(structref.StructRefProxy):
@@ -199,7 +204,12 @@ class Memory(structref.StructRefProxy):
         return add_subscriber(self,subscriber)
 
     def declare(self,fact,name=None):
-        return declare(self,fact,name)
+        if(name is None):
+            idrec = declare_fact(self, fact)
+        else:
+            idrec = declare_fact_name(self, fact, name)            
+        return idrec
+
 
     def retract(self,identifier):
         return retract(self,identifier)
@@ -226,8 +236,12 @@ class Memory(structref.StructRefProxy):
     
 
     def __del__(self):
-        pass
-        # mem_data_dtor(self.mem_data)
+        print("DECONSTRUCTOR")
+        # mem_dtor(self)
+        try:
+            mem_data_dtor(self.mem_data)
+        except Exception as e:
+            print("$$",e)
 
 @njit(cache=True)
 def get_halt_flag(self):
@@ -267,6 +281,21 @@ def mem_ctor(context_data, mem_data=None):
     st.halt_flag = u1(0)
     st.backtrack_flag = u1(0)
     return st
+
+# @njit(cache=True)
+# def mem_dtor(mem):
+#     fact_vecs = mem.mem_data.facts
+#     for i in range(len(fact_vecs)):
+#         facts_ptr = fact_vecs[i]
+#         if(facts_ptr != 0):
+#             facts = _struct_from_ptr(VectorType,facts_ptr)   
+#             for j in range(len(facts)):
+#                 ptr = facts[j]
+#                 if(ptr != 0): _decref_ptr(ptr)
+                    
+#             _decref_ptr(facts_ptr)
+
+    
 
 @overload(Memory)
 def overload_Memory(context_data=None, mem_data=None):
@@ -366,14 +395,14 @@ def next_empty_f_id(mem_data,facts,t_id):
 #         return t_id
         
 #     return impl
-@njit(u2(MemoryType, BaseFactType),cache=True)
-def resolve_t_id(mem, fact):
+@njit(u2(MemoryType, i8),cache=True)
+def resolve_t_id(mem, fact_num):
     # _, fact_num, a_id = decode_idrec(fact.idrec)
     # if(fact.idrec == u8(-1)):
     
     # else:
     #     t_id = fact_num
-    t_id = mem.context_data.fact_num_to_t_id[fact.fact_num]
+    t_id = mem.context_data.fact_num_to_t_id[fact_num]
     L = len(mem.mem_data.facts)
     if(t_id >= L):
         expand_mem_data_types(mem.mem_data, 1+L-t_id)
@@ -420,15 +449,18 @@ def signal_subscribers_change(mem, idrec):
 
 
 ##### declare #####
+# @njit(u8(MemoryType,i8,i8), cache=True)
+# def declare_fact_from_ptr(mem, fact_ptr, fact_num):
+    
 
-@njit(u8(MemoryType,BaseFactType), cache=True)
-def declare_fact(mem,fact):
+
+@njit(u8(MemoryType,BaseFactType),cache=True)
+def declare_fact(mem, fact):
     #Incref so that the fact is not freed if this is the only reference
-    fact_ptr = _raw_ptr_from_struct_incref(fact) #.4ms / 10000
-
-    t_id = resolve_t_id(mem,fact)  #.1ms / 10000
-    facts = facts_for_t_id(mem.mem_data,t_id) #negligible
-    f_id = next_empty_f_id(mem.mem_data,facts,t_id) # .5ms / 10000
+    fact_ptr = i8(_raw_ptr_from_struct_incref(fact)) #.4ms / 10000
+    t_id = resolve_t_id(mem, fact.fact_num)  #.1ms / 10000
+    facts = facts_for_t_id(mem.mem_data, t_id) #negligible
+    f_id = next_empty_f_id(mem.mem_data, facts, t_id) # .5ms / 10000
 
 
     idrec = encode_idrec(t_id,f_id,0) #negligable
@@ -436,6 +468,7 @@ def declare_fact(mem,fact):
 
 
     if(f_id < len(facts)): # .2ms / 10000
+        if(facts.data[f_id] != 0): _decref_ptr(facts.data[f_id])
         facts.data[f_id] = fact_ptr
         
         # signal_subscribers_change(mem, idrec)
@@ -444,6 +477,7 @@ def declare_fact(mem,fact):
         # mem.mem_data.grow_queue.add(idrec)
         # signal_subscribers_grow(mem, idrec)
     mem.mem_data.change_queue.add(idrec)
+    # return idrec
     
     return idrec
 
@@ -457,9 +491,9 @@ def declare_fact_name(mem,fact,name):
     declare_name(mem,name,idrec)
     return idrec
 
-@njit(cache=True)
-def declare(mem,fact,name):
-    return mem.declare(fact,name)
+# @njit(u8(MemoryType,BaseFactTypeunicode_type,),cache=True)
+# def declare(mem,fact,name):
+#     return declare_fact_name(#mem.declare(fact,name)
 
 ##### retract #####
 
@@ -591,7 +625,6 @@ fact_iterator_fields = [(k,v) for k,v, in fact_iterator_field_dict.items()]
 # FactIterator, FactIteratorType = define_structref("FactIterator",fact_iter_fields)
 
 def gen_fact_iter_source(fact_type):
-    print("##", fact_type)
     return f'''import cloudpickle
 from numba import njit, u2, types
 from numba.experimental.structref import new
@@ -600,7 +633,6 @@ from cre.utils import _struct_from_ptr, _cast_structref
 fact_type = cloudpickle.loads({cloudpickle.dumps(fact_type)})
 f_iter_type = FactIteratorType([(k,v) for k,v in {{**fact_iterator_field_dict ,"fact_type": types.TypeRef(fact_type)}}.items()])
 f_iter_type._fact_type = fact_type
-print(f_iter_type)
 
 
 @njit(f_iter_type(MemoryType,u2[::1]),cache=True)

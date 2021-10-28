@@ -957,7 +957,7 @@ def get_linked_conditions_instance(conds, mem, copy=False):
 
     #Note... maybe it's simpler to just make mem an optional(memType)
     old_ptr = conds.mem_ptr
-    conds.mem_ptr = _ptr_from_struct_incref(mem)
+    conds.mem_ptr = _raw_ptr_from_struct(mem)#_ptr_from_struct_incref(mem)
     if(old_ptr != 0): _decref_ptr(old_ptr)
     return conds
 

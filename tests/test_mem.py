@@ -11,6 +11,9 @@ import pytest
 from collections import namedtuple
 from cre.subscriber import BaseSubscriberType, init_base_subscriber
 from cre.utils import _struct_from_meminfo
+import gc
+from numba.core.runtime.nrt import rtsys
+from weakref import WeakKeyDictionary
 
 
 tf_spec = {"value" : "string",
@@ -49,13 +52,9 @@ def declare_again(mem):
     t_id = mem.context_data.fact_to_t_id["TextField"]
     return retracted_f_ids_for_t_id(mem.mem_data,t_id).head#mem.mem_data.empty_f_id_heads[t_id]
 
-@njit(cache=True)
-def bad_declare_type(mem):
-    mem.declare("Bad")
 
-@njit(cache=True)
-def bad_retract_type(mem):
-    mem.retract(["A",1])
+
+
 
 def test_declare_retract():
     with cre_context("test_declare_retract"):
@@ -63,23 +62,29 @@ def test_declare_retract():
         mem = Memory()
         assert declare_retract(mem) == 10
         assert declare_again(mem) == 0
-
+        print("A")
         #Python version
         mem = Memory()
         assert declare_retract.py_func(mem) == 10
         assert declare_again.py_func(mem) == 0
 
-        with pytest.raises(TypingError):
-            bad_declare_type(mem)
+        # with pytest.raises(TypingError):
+        #     @njit(cache=True)
+        #     def bad_declare_type(mem):
+        #         mem.declare("Bad")
+        #     bad_declare_type(mem)
 
-        with pytest.raises(TypingError):
-            bad_declare_type.py_func(mem)
+        # with pytest.raises(TypingError):
+        #     bad_declare_type.py_func(mem)
 
-        with pytest.raises(TypingError):
-            bad_retract_type(mem)
+        # with pytest.raises(TypingError):
+        #     @njit(cache=True)
+        #     def bad_retract_type(mem):
+        #         mem.retract(["A",1])
+        #     bad_retract_type(mem)
 
-        with pytest.raises(TypingError):
-            bad_retract_type.py_func(mem)
+        # with pytest.raises(TypingError):
+        #     bad_retract_type.py_func(mem)
 
 ##### test_modify #####
 @njit(cache=True)
@@ -202,6 +207,76 @@ def test_grow_change_queues():
         ch_q = mem.mem_data.change_queue
         assert ch_q.data[ch_q.head-1] == idrec
 
+with cre_context("test_mem_leaks"):
+    TextField, TextFieldType = define_fact("TextField",tf_spec)
+    BOOP, BOOPType = define_fact("BOOP",{"A": "string", "B" : "number"})
+
+def used_bytes():
+    stats = rtsys.get_allocation_stats()
+    print(stats)
+    return stats.alloc-stats.free
+
+
+def test_mem_leaks():
+    with cre_context("test_mem_leaks"):
+        init_used = used_bytes()
+
+        # Empty Mem
+        mem = Memory()
+        mem = None; gc.collect()
+        print(used_bytes()-init_used)
+        assert used_bytes()-init_used == 0
+
+        # Declare a bunch of stuff
+        mem = Memory()
+        for i in range(100):
+            tf = TextField()
+            mem.declare(tf, str(i))
+        tf, mem = None, None; gc.collect()
+        assert used_bytes()-init_used == 0
+
+        # Declare More than one kind of stuff
+        mem = Memory()
+        for i in range(100):
+            tf = TextField(value=str(i))
+            b = BOOP(A=str(i), B=i)
+            mem.declare(tf, str(i))
+            mem.declare(b, "B"+str(i))
+        tf, mem, b = None, None, None; gc.collect()
+        assert used_bytes()-init_used == 0
+
+        # Declare More than one kind of stuff and retract some
+        mem = Memory()
+        for i in range(100):
+            tf = TextField(value=str(i))
+            b = BOOP(A=str(i), B=i)
+            mem.declare(tf, str(i))
+            mem.declare(b, "B"+str(i))
+        for i in range(0,100,10):
+            mem.retract(str(i))
+            mem.retract("B"+str(i))
+        tf, mem, b = None, None, None; gc.collect()
+        # print(used_bytes()-init_used)
+        assert used_bytes()-init_used == 0
+
+
+
+
+
+        # print([x._meminfo.refcount for x in w.keys()])
+        
+        # print([x._meminfo.refcount for x in w.keys()])
+        
+        
+
+
+        
+        # print()
+        # print(rtsys.get_allocation_stats())
+    # print(rtsys.get_allocation_stats())
+        
+
+
 
 
 ###################### BENCHMARKS ########################
@@ -281,10 +356,10 @@ def test_b_retract10000(benchmark):
 
 
 if __name__ == "__main__":
-    # test_declare_overloading()
+    test_declare_overloading()
     # test_modify()
-    # test_encode_decode()
     # test_declare_retract()
     # test_retract_keyerror()
     # test_subscriber()
-    test_iter_facts_of_type()
+    # test_iter_facts_of_type()
+    test_mem_leaks()

@@ -425,6 +425,7 @@ from numba.experimental.structref import new#, define_boxing
 from numba.core.extending import overload
 from cre.fact_intrinsics import define_boxing, get_fact_attr_ptr, _register_fact_structref, fact_mutability_protected_setattr, fact_lower_setattr
 from cre.fact import repr_list_attr, repr_fact_attr,  FactProxy, Fact{", BaseFactType, base_list_type, fact_to_ptr" if typ != "BaseFact" else ""}
+from cre.utils import _raw_ptr_from_struct
 {fact_imports}
 
 attr_offsets = np.array({attr_offsets!r},dtype=np.int16)
@@ -456,6 +457,12 @@ def ctor({param_defaults_list}):
 @njit(cache=True)
 def lower_setattr(self,attr,val):
     fact_mutability_protected_setattr(self,literally(attr),val)
+
+# # NOTE DELTE LATER
+# @njit(cache=True)
+# def get_self_ptr(self):
+#     return _raw_ptr_from_struct(self)
+
         
 class {typ}(FactProxy):
     __numba_ctor = ctor
@@ -472,6 +479,13 @@ class {typ}(FactProxy):
 
     def __repr__(self):
         return str(self)    
+
+    # # Well do this the right way later
+    # def __hash__(self):
+    #     return get_self_ptr(self)
+
+    # def __eq__(self,other):
+    #     return get_self_ptr(self) == get_self_ptr(other)
 
 {properties}
 
@@ -595,12 +609,18 @@ base_list_type = ListType(BaseFactType)
 
 @lower_cast(Fact, BaseFactType)
 def downcast(context, builder, fromty, toty, val):
-    return _obj_cast_codegen(context, builder, val, fromty, toty)
+    print("IMPL downcast")
+    return _obj_cast_codegen(context, builder, val, fromty, toty,incref=False)
 
 
 @njit(cache=True)
 def fact_to_ptr(fact):
     return _raw_ptr_from_struct(fact)
+
+@njit(cache=True)
+def fact_to_basefact(fact):
+    return _struct_from_ptr(BaseFactType,_raw_ptr_from_struct(fact)) 
+    # return _cast_structref(BaseFactType, fact)
 
 @njit(cache=True)
 def fact_to_ptr_incref(fact):

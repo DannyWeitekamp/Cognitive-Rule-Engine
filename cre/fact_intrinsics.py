@@ -231,7 +231,7 @@ def define_attributes(struct_typeclass):
     """
     Copied from numba.experimental.structref 0.51.2, but added protected mutability
     """
-    print("REGISTER FACT")
+    # print("REGISTER FACT")
     @infer_getattr
     class StructAttribute(AttributeTemplate):
         key = struct_typeclass
@@ -313,9 +313,9 @@ def define_attributes(struct_typeclass):
 
 
 def _register_fact_structref(fact_type):
-    from cre.fact import FactModel
+    from cre.cre_object import CREObjModel
     if fact_type is types.StructRef:
         raise ValueError(f"cannot register {types.StructRef}")
-    default_manager.register(fact_type, FactModel)
+    default_manager.register(fact_type, CREObjModel)
     define_attributes(fact_type)
     return fact_type

@@ -27,6 +27,8 @@ from cre.structref import gen_structref_code, define_structref
 from cre.context import cre_context
 from cre.utils import (_struct_from_ptr, _cast_structref, struct_get_attr_offset, _obj_cast_codegen,
                        _ptr_from_struct_codegen, _raw_ptr_from_struct, CastFriendlyMixin, _obj_cast_codegen)
+from cre.cre_object import CREObjTypeTemplate, cre_obj_field_dict, CREObjModel, CREObjType
+
 from numba.core.typeconv import Conversion
 import operator
 from numba.core.imputils import (lower_cast)
@@ -36,7 +38,7 @@ import numpy as np
 GLOBAL_FACT_COUNT = -1
 SPECIAL_ATTRIBUTES = ["inherit_from"]
 
-class Fact(CastFriendlyMixin, types.StructRef):
+class Fact(CREObjTypeTemplate):
     def __init__(self, fields):
         super().__init__(fields)
 
@@ -66,8 +68,7 @@ class Fact(CastFriendlyMixin, types.StructRef):
     #     print(state)
     #     return state
 
-class FactModel(models.StructRefModel):
-    pass
+
 
 
 
@@ -243,6 +244,12 @@ class FactProxy:
             return fact_eq(self,other)
         return False
 
+    def get_ptr(self):
+        return fact_to_ptr(self)
+
+    def get_ptr_incref(self):
+        return fact_to_ptr_incref(self)
+
     # def __setattr__(self,attr,val):
     #     from cre.fact_intrinsics import fact_lower_setattr
     #     fact_lower_setattr(self,attr,val)
@@ -301,7 +308,7 @@ def get_offsets_from_member_types(fields):
     class TempTypeTemplate(types.StructRef):
         pass
 
-    default_manager.register(TempTypeTemplate, FactModel)
+    default_manager.register(TempTypeTemplate, CREObjModel)
 
     TempType = TempTypeTemplate(fields)
 
@@ -599,14 +606,17 @@ def define_facts(specs, #: list[dict[str,dict]],
 
 ###### Base #####
 
-base_fact_fields = [
-    ("idrec", u8),
-    ("fact_num", i8)
-]
+base_fact_field_dict = {
+    **cre_obj_field_dict,
+    "fact_num": i8
+}
+
+base_fact_fields  = [(k,v) for k,v in base_fact_field_dict.items()]
 
 BaseFact, BaseFactType = _fact_from_fields("BaseFact", [])
 base_list_type = ListType(BaseFactType)
 
+@lower_cast(Fact, CREObjType)
 @lower_cast(Fact, BaseFactType)
 def downcast(context, builder, fromty, toty, val):
     print("IMPL downcast")

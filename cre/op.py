@@ -22,6 +22,7 @@ from cre.subscriber import base_subscriber_fields, BaseSubscriber, BaseSubscribe
 from cre.vector import VectorType
 from cre.fact import Fact, gen_fact_import_str, get_offsets_from_member_types
 from cre.var import Var
+from cre.cre_object import cre_obj_field_dict, CREObjTypeTemplate, CREObjProxy
 # from cre.predicate_node import BasePredicateNode,BasePredicateNodeType, get_alpha_predicate_node_definition, \
 #  get_beta_predicate_node_definition, deref_attrs, define_alpha_predicate_node, define_beta_predicate_node, AlphaPredicateNode, BetaPredicateNode
 from cre.make_source import make_source, gen_def_func, gen_assign, resolve_template, gen_def_class
@@ -164,6 +165,7 @@ _head_range_type = np.dtype([('start', np.uint8), ('length', np.uint8)])
 head_range_type = numba.from_dtype(_head_range_type)
 
 op_fields_dict = {
+    **cre_obj_field_dict, 
     "name" : unicode_type,
     "expr_template" : unicode_type,
     "shorthand_template" : unicode_type,
@@ -189,7 +191,7 @@ op_fields_dict = {
     # "is_const" : i8[::1]
 }
 
-class OpTypeTemplate(types.StructRef):
+class OpTypeTemplate(CREObjTypeTemplate):
     def preprocess_fields(self, fields):
         return tuple((name, types.unliteral(typ)) for name, typ in fields)
 
@@ -736,7 +738,7 @@ def var_ptrs_dtor(var_ptrs):
 
 
 
-class Op(structref.StructRefProxy,metaclass=OpMeta):
+class Op(CREObjProxy,metaclass=OpMeta):
     ''' Base class for an functional operation. Custom operations can be
         created by subclassing Op and defining a signature, call(), and 
         optional check() method. 
@@ -819,8 +821,9 @@ class Op(structref.StructRefProxy,metaclass=OpMeta):
         # else:
         #     return op_repr(self)
     def __del__(self):
-        print("OP DTOR")
-        op_dtor(self)
+        pass
+        # print("OP DTOR")
+        # op_dtor(self)
 
     @classmethod
     def make_singleton_inst(cls,head_var_ptrs=None):
@@ -1746,7 +1749,8 @@ class __GenerateOp__(Op):
         return flattened_inst(*args)
 
     def __del__(self):
-        print("OP COMP DTOR")
+        pass
+        # print("OP COMP DTOR")
         # var_ptrs_dtor(self.head_var_ptrs)
 # 
 

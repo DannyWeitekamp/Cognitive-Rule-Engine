@@ -17,6 +17,7 @@ from cre.utils import ptr_t, _struct_from_meminfo, _meminfo_from_struct, _cast_s
 from cre.utils import assign_to_alias_in_parent_frame
 from cre.subscriber import base_subscriber_fields, BaseSubscriber, BaseSubscriberType, init_base_subscriber, link_downstream
 from cre.vector import VectorType
+from cre.cre_object import cre_obj_field_dict, CREObjTypeTemplate
 # from cre.predicate_node import BasePredicateNode,BasePredicateNodeType, get_alpha_predicate_node_definition, \
  # get_beta_predicate_node_definition, deref_attrs, define_alpha_predicate_node, define_beta_predicate_node, AlphaPredicateNode, BetaPredicateNode
 from numba.core import imputils, cgutils
@@ -32,6 +33,7 @@ from cre.utils import deref_type, DEREF_TYPE_ATTR, DEREF_TYPE_LIST, listtype_siz
 
 
 var_fields_dict = {
+    **cre_obj_field_dict,
     # If true then instead of testing for the existence of the Var
     #  we test that the Var does not exist.
     'is_not' : u1,
@@ -64,7 +66,7 @@ var_fields_dict = {
 
 var_fields =  [(k,v) for k,v, in var_fields_dict.items()]
 
-class VarTypeTemplate(CastFriendlyStructref):
+class VarTypeTemplate(CREObjTypeTemplate):
     pass
 
 
@@ -73,7 +75,7 @@ default_manager.register(VarTypeTemplate, models.StructRefModel)
 
 GenericVarType = VarTypeTemplate([(k,v) for k,v in var_fields_dict.items()])
 
-class Var(structref.StructRefProxy):
+class Var(CREObjProxy):
     def __new__(cls, typ, alias=None, skip_assign_alias=False):
         # if(not isinstance(typ, types.StructRef)): typ = typ.fact_type
         typ = _standardize_type(typ, cre_context())

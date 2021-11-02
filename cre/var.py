@@ -17,7 +17,7 @@ from cre.utils import ptr_t, _struct_from_meminfo, _meminfo_from_struct, _cast_s
 from cre.utils import assign_to_alias_in_parent_frame
 from cre.subscriber import base_subscriber_fields, BaseSubscriber, BaseSubscriberType, init_base_subscriber, link_downstream
 from cre.vector import VectorType
-from cre.cre_object import cre_obj_field_dict, CREObjTypeTemplate
+from cre.cre_object import cre_obj_field_dict, CREObjTypeTemplate, CREObjProxy
 # from cre.predicate_node import BasePredicateNode,BasePredicateNodeType, get_alpha_predicate_node_definition, \
  # get_beta_predicate_node_definition, deref_attrs, define_alpha_predicate_node, define_beta_predicate_node, AlphaPredicateNode, BetaPredicateNode
 from numba.core import imputils, cgutils

@@ -432,7 +432,7 @@ from numba.experimental.structref import new#, define_boxing
 from numba.core.extending import overload
 from cre.fact_intrinsics import define_boxing, get_fact_attr_ptr, _register_fact_structref, fact_mutability_protected_setattr, fact_lower_setattr
 from cre.fact import repr_list_attr, repr_fact_attr,  FactProxy, Fact{", BaseFactType, base_list_type, fact_to_ptr" if typ != "BaseFact" else ""}
-from cre.utils import _raw_ptr_from_struct
+from cre.utils import _raw_ptr_from_struct, ptr_t
 {fact_imports}
 
 attr_offsets = np.array({attr_offsets!r},dtype=np.int16)

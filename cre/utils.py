@@ -766,3 +766,16 @@ def _struct_tuple_from_pointer_arr(typingctx, struct_types, ptr_arr):
         # return 
 
     return sig,codegen
+
+
+@intrinsic
+def _sizeof_type(typingctx, typ_ref):
+    typ = typ_ref.instance_type
+    def codegen(context, builder, sig, args):
+        llty = context.get_data_type(typ)
+        return context.get_constant(types.intp, context.get_abi_sizeof(llty))
+        # print(llty.__dict__)
+        
+    return i8(typ_ref,), codegen
+
+

@@ -5,10 +5,9 @@ from numba.types import CompileResultWAP
 from cre.fact import base_fact_field_dict, BaseFactType, FactProxy, Fact
 from cre.fact_intrinsics import fact_lower_setattr, _register_fact_structref
 from cre.cre_object import CREObjType, CREObjProxy, CREObjTypeTemplate
-from cre.utils import _struct_from_ptr, _obj_cast_codegen, _cast_structref, _ptr_from_struct_incref
+from cre.utils import encode_idrec, _struct_from_ptr, _obj_cast_codegen, _cast_structref, _ptr_from_struct_incref
 from numba.core.imputils import (lower_cast)
 from numba.experimental.structref import new, define_boxing, define_attributes
-from numba.experimental.function_type import _get_wrapper_address
 from numba.core.extending import overload
 
 
@@ -70,57 +69,60 @@ def int_primitive_str(a):
 
 # int_primitive_str = list(int_primitive_str.overloads.values())[0].entry_point
 
-from cre.cre_object import new_cre_obj_method_table, eq_fn_typ, hash_fn_typ, str_fn_typ
+# from cre.cre_object import new_cre_obj_method_table, eq_fn_typ, hash_fn_typ, str_fn_typ
 
-mt = new_cre_obj_method_table(
-    _get_wrapper_address(int_primitive_eq, eq_fn_typ.signature),
-    _get_wrapper_address(int_primitive_hash, hash_fn_typ.signature),
-    _get_wrapper_address(int_primitive_str, str_fn_typ.signature),
-    _get_wrapper_address(int_primitive_str, str_fn_typ.signature),
-)
+# mt = new_cre_obj_method_table(
+#     _get_wrapper_address(int_primitive_eq, eq_fn_typ.signature)
+#     _get_wrapper_address(int_primitive_hash, hash_fn_typ.signature)
+#     _get_wrapper_address(int_primitive_str, str_fn_typ.signature)
+#     _get_wrapper_address(int_primitive_str, str_fn_typ.signature)
+# )
+# print(mt)
 
-@njit(cache=True)
-def get_mt_ptr(mt):
-    return _ptr_from_struct_incref(mt)
-
-mt_ptr = get_mt_ptr(mt)
 # @njit(unicode_type(CREObjType,),cache=True)
 # def int_primitive_repr(a):
 #     return repr(_cast_structref(IntegerPrimitiveType,a).value)
+from cre.core import T_ID_BOOL_PRIMITIVE, T_ID_INTEGER_PRIMITIVE, T_ID_FLOAT_PRIMITIVE, T_ID_STRING_PRIMITIVE
 
-
-@generated_jit(cache=True)
-def primitive_ctor(x, mt_ptr):
+# @generated_jit(cache=True)
+def primitive_ctor_code_gen(x):
+    if(isinstance(x, types.Literal)): return
     if(x is types.boolean):
-        def impl(x, mt_ptr):
-            st = new(BooleanPrimitiveType); fact_lower_setattr(st,'value',x);
+        default_idrec = encode_idrec(T_ID_BOOL_PRIMITIVE,0,0xFF)
+        def impl(x):
+            st = new(BooleanPrimitiveType); 
+            fact_lower_setattr(st,'idrec',default_idrec);
+            fact_lower_setattr(st,'value',x);
             return st
 
     elif(x is i8):
-        def impl(x, mt_ptr):
-            st = new(IntegerPrimitiveType);
-            # mt_ptr = _ptr_from_struct_incref(mt)
-                
+        default_idrec = encode_idrec(T_ID_INTEGER_PRIMITIVE,0,0xFF)
+        def impl(x):
+            st = new(IntegerPrimitiveType)
+            fact_lower_setattr(st,'idrec',default_idrec);
             fact_lower_setattr(st,'value',x);
-            fact_lower_setattr(st,'method_table_ptr',mt_ptr);
-            # fact_lower_setattr(st,'__eq__', mt_ptr);
-            # fact_lower_setattr(st,'__hash__', mt_ptr);
-            # fact_lower_setattr(st,'__str__', mt_ptr);
-            # fact_lower_setattr(st,'__repr__', mt_ptr);
             return st
 
     elif(x is f8):
-        def impl(x, mt_ptr):
-            st = new(FloatPrimitiveType); fact_lower_setattr(st,'value',x);
+        default_idrec = encode_idrec(T_ID_FLOAT_PRIMITIVE,0,0xFF)
+        def impl(x):
+            st = new(FloatPrimitiveType)
+            fact_lower_setattr(st,'idrec',default_idrec);
+            fact_lower_setattr(st,'value',x);
             return st
 
     elif(x is types.unicode_type):
-        def impl(x, mt_ptr):
-            st = new(StringPrimitiveType); fact_lower_setattr(st,'value',x);
+        default_idrec = encode_idrec(T_ID_STRING_PRIMITIVE,0,0xFF)
+        def impl(x):
+            st = new(StringPrimitiveType)
+            fact_lower_setattr(st,'idrec',default_idrec);
+            fact_lower_setattr(st,'value',x);
             return st
     # else:
         # raise ValueError(f"Primitive Type not recognized {}.})
     return impl
+
+primitive_ctor = generated_jit(cache=True)(primitive_ctor_code_gen)
 
 
 class Primitive(CREObjProxy):
@@ -129,7 +131,7 @@ class Primitive(CREObjProxy):
     # _fact_name = 'Primitive'
 
     def __new__(cls, value):
-        self = primitive_ctor(value, mt_ptr)
+        self = primitive_ctor(value)
         return self
 
     def __str__(self):
@@ -137,6 +139,7 @@ class Primitive(CREObjProxy):
 
     def __repr__(self):
         return f'cre.Primitive(value={self.value})'
+
 
     @property
     def value(self):
@@ -148,7 +151,7 @@ def primitive_get_value(self):
 
 
 define_boxing(PrimitiveTypeTemplate, Primitive)
-overload(Primitive)(primitive_ctor)
+overload(Primitive)(primitive_ctor_code_gen)
 
 
 

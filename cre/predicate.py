@@ -1,10 +1,10 @@
-from numba import njit, i8, u8, types
+from numba import njit, i8, u8, types, literal_unroll, generated_jit
 from numba.typed import List
 from numba.types import ListType
 from cre.fact import base_fact_field_dict, BaseFactType, FactProxy, Fact
 from cre.fact_intrinsics import fact_lower_setattr, _register_fact_structref
-from cre.cre_object import CREObjType, CREObjProxy
-from cre.utils import _struct_from_ptr, _obj_cast_codegen
+from cre.cre_object import CREObjType, CREObjProxy, CREObjTypeTemplate
+from cre.utils import _struct_from_ptr, _cast_structref, _obj_cast_codegen, encode_idrec, decode_idrec, _incref_structref
 from cre.primitive import Primitive
 from numba.core.imputils import (lower_cast)
 from numba.experimental.structref import new, define_boxing, define_attributes, StructRefProxy
@@ -44,7 +44,7 @@ define_attributes(PredType)
 def downcast(context, builder, fromty, toty, val):
     return _obj_cast_codegen(context, builder, val, fromty, toty,incref=False)
 
-@njit(ListType(CREObjType)(),cache=True)
+@njit(cache=True)
 def init_members():
     return List.empty_list(CREObjType)
 
@@ -58,12 +58,17 @@ def add_member_from_ptr(members, ptr):
 
 # Not sure why giving signatures produces wrong type
 # @njit(PredType(CREObjType, ListType(CREObjType)),cache=False)
+
+from cre.core import T_ID_PREDICATE
+default_idrec  = encode_idrec(T_ID_PREDICATE,0,0xFF)
+# print("<<", decode_idrec(default_idrec))
+
 @njit(cache=True)
 def pred_ctor(header, members):
     st = new(PredType)
-    fact_lower_setattr(st,'idrec',u8(-1))
-    fact_lower_setattr(st,'header',header)
-    fact_lower_setattr(st,'members',members)
+    st.idrec = default_idrec
+    st.header = header
+    st.members = members
     return st
 
 class Pred(CREObjProxy):
@@ -80,10 +85,8 @@ class Pred(CREObjProxy):
                 prim = Primitive(arg)
                 add_member_from_ptr(members, prim.get_ptr())
 
-        if(isinstance(header, (FactProxy, CREObjProxy))):
-            header = arg
-        else:
-            header = Primitive(arg)
+        if(not isinstance(header, (FactProxy, CREObjProxy))):
+            header = Primitive(header)            
 
         self = pred_ctor(header, members)
         return self
@@ -96,7 +99,7 @@ class Pred(CREObjProxy):
 
     @property
     def header(self):
-        return pred_get_members(self)
+        return pred_get_header(self)
 
     @property
     def members(self):
@@ -113,8 +116,37 @@ def pred_get_members(self):
     return self.members
 
 define_boxing(PredTypeTemplate, Pred)
-overload(Pred)(pred_ctor)
 
+
+@generated_jit(cache=True)
+def assert_cre_obj(x):
+    if(isinstance(x, types.Literal)): return
+    # print("<<", x, isinstance(x,types.Literal))
+    if(isinstance(x, CREObjTypeTemplate)):
+        def impl(x):
+            return _cast_structref(CREObjType, x)
+        return impl
+    else:
+        def impl(x):
+            prim = Primitive(x)
+            return _cast_structref(CREObjType, prim)
+        return impl
+
+
+@overload(Pred, prefer_literal=False,)
+def _pred_ctor(head, *args):
+    if(isinstance(head, types.Literal) or
+        any([isinstance(x,types.Literal) for x in args])):
+        return
+        
+    def impl(head, *args):
+        members = init_members()
+        for x in literal_unroll(args):
+            members.append(assert_cre_obj(x))
+        return pred_ctor(assert_cre_obj(head), members)
+    return impl
+
+# print(">>", isinstance(2,CREObjType))
 
 
 

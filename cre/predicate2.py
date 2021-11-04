@@ -14,7 +14,7 @@ from numba.core.extending import overload, intrinsic
 #CHANGE THIS
 PRED_T_ID = 0XFF
 
-member_info_type = types.Tuple((u1,u2))
+member_info_type = types.Tuple((u2,u2))
 
 predicate_field_dict = {
     **base_fact_field_dict,
@@ -74,7 +74,7 @@ def _down_cast_helper(x):
     else:
         return x
 
-from cre.core import T_ID_BOOL_PRIMITIVE, T_ID_INTEGER_PRIMITIVE, T_ID_FLOAT_PRIMITIVE, T_ID_STRING_PRIMITIVE, T_ID_PREDICATE 
+from cre.core import T_ID_UNRESOLVED, T_ID_BOOL_PRIMITIVE, T_ID_INTEGER_PRIMITIVE, T_ID_FLOAT_PRIMITIVE, T_ID_STRING_PRIMITIVE, T_ID_PREDICATE 
 
 def _resolve_t_id_helper(x):
     if(isinstance(x, types.Boolean)):
@@ -85,19 +85,14 @@ def _resolve_t_id_helper(x):
         return T_ID_FLOAT_PRIMITIVE
     elif(x is types.unicode_type):
         return T_ID_STRING_PRIMITIVE
-    elif(isinstance(x, PredTypeTemplate)):
-        return T_ID_PREDICATE
-    elif(isinstance(x, CREObjTypeTemplate)):
-        # TODO: Fix
-        return T_ID_PREDICATE + 1
-
-    raise ValueError(f"Invalid predicate member type {type(x)}.")
+    return T_ID_UNRESOLVED
+    
 
 from numba.experimental.structref import _Utils, imputils
 from numba.core import cgutils, utils as numba_utils
 
 @intrinsic
-def _pred_get_member_offsets(typingctx, pred_type):
+def _pred_get_member_info(typingctx, pred_type):
     '''get the base address of the struct pointed to by structref 'inst' '''
     
     # ind = ind_type.literal_value
@@ -107,7 +102,7 @@ def _pred_get_member_offsets(typingctx, pred_type):
 
     count = members_type.count
     member_infos_out_type = types.UniTuple(member_info_type, count)
-    print(members_type.__dict__)
+    # print(members_type.__dict__)
 
 
     def codegen(context, builder, sig, args):
@@ -125,7 +120,7 @@ def _pred_get_member_offsets(typingctx, pred_type):
             member_ptr = builder.gep(baseptr, [cgutils.int32_t(0), cgutils.int32_t(index_of_members), cgutils.int32_t(i)], inbounds=True)
             member_ptr = builder.ptrtoint(member_ptr, cgutils.intp_t)
             offset = builder.trunc(builder.sub(member_ptr, baseptr_val), cgutils.ir.IntType(16))
-            t_id = context.get_constant(types.uint8, t_ids[i])
+            t_id = context.get_constant(u2, t_ids[i])
             member_infos.append(context.make_tuple(builder, member_info_type, (t_id, offset) ))
 
         ret = context.make_tuple(builder,member_infos_out_type, member_infos)
@@ -157,11 +152,7 @@ def pred_ctor(*members):
         st = new(pred_type)
         fact_lower_setattr(st, 'idrec', default_idrec)
         fact_lower_setattr(st, 'length', len(members))
-        fact_lower_setattr(st, 'member_info', _pred_get_member_offsets(st))
-        # member_info = tuple([(x,_pred_get_member_offset(st,literally(i))) for i,x in enumerate(literal_unroll(member_t_ids))])
-        # fact_lower_setattr(st, 'member_info', member_info)
-        #HERE !!!! # fact_lower_setattr(st, 'members_offsets', )
-        # fact_lower_setattr(st, 'member_info', member_info)
+        fact_lower_setattr(st, 'member_info', _pred_get_member_info(st))
         fact_lower_setattr(st, 'members', members)
         # print("**",  _struct_get_attr_offset(st,"members"), _struct_get_attr_offset(st,"member_info") + st.length)
         return st

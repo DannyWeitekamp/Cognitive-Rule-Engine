@@ -564,6 +564,7 @@ def conditions_str(self,add_non_conds=False):
         for i, lit in enumerate(conjunct):
             s += "~" if lit.negated else ""
             s += str(lit)
+            print(">>", str(lit))
             if(i < len(conjunct)-1): s += " & "
             if(add_non_conds): 
                 for var_ptr in lit.var_base_ptrs:

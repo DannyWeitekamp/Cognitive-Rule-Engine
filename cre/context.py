@@ -118,6 +118,7 @@ class CREContext(object):
         self.fact_ctors = {}
         self.type_registry = {**DEFAULT_REGISTERED_TYPES}
         self.op_instances = {}
+        self.deferred_types = {}
         
         self.parents_of = {}
         self.children_of = {}
@@ -139,6 +140,12 @@ class CREContext(object):
     # def _register_op_inst(self,op_inst):
     #     self.op_instances[op_inst.name] = op_inst
     #     self.type_registry[op_inst.name] = op_inst.__class__
+    def get_deferred_type(self,name):
+        if(name not in self.deferred_types):
+            from cre.fact import DeferredFactRefType
+            self.deferred_types[name] = DeferredFactRefType(name)
+        return self.deferred_types[name]
+
 
 
     def _register_fact_type(self, name, spec,

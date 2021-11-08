@@ -728,8 +728,9 @@ class OpMeta(type):
 
 
     def __del__(cls):
-        print("OP META DTOR")
-        var_ptrs_dtor(cls.default_ops)
+        pass
+        # print("OP META DTOR")
+        # var_ptrs_dtor(???)
 
 @njit(cache=True)
 def var_ptrs_dtor(var_ptrs):
@@ -1150,7 +1151,13 @@ def get_return_type_name(self):
 @njit(cache=True)
 def op_str(self):
     s = self.shorthand_template
-    arg_names = op_get_arg_names(self)
+    if(self.is_ptr_op):
+        arg_names = List.empty_list(unicode_type)
+        for head_ptr in self.head_var_ptrs:
+            arg_names.append(_struct_from_ptr(GenericVarType, head_ptr).alias)
+    else:
+        arg_names = op_get_arg_names(self)
+    print("??",arg_names)
     for i,arg_name in enumerate(arg_names):
         s =  s.replace(f'{{{i}}}',arg_name)
     return s

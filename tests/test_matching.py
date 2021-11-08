@@ -102,45 +102,57 @@ def mem_w_n_boops(n,BOOP):
 #         print("Bs", Bs)
 
 def test_ref_matching():
+    ''' This mostly tests PtrOps '''
     with cre_context("test_ref_matching"):
-        TestLL, TestLLType = define_fact("TestLL",{"name": "string", "B" :'number', "nxt" : "TestLL"})
+        TestDLL, TestDLLType = define_fact("TestDLL",{"name": "string", "prev" : "TestDLL", "next" : "TestDLL"})
         mem = Memory()
-        a = TestLL("A", B=0)
-        b = TestLL("B", B=1, nxt=a)
-        c = TestLL("C", B=2, nxt=b)
+
+        #a -> b -> c
+        a = TestDLL("A")
+        b = TestDLL("B")
+        c = TestDLL("C")
+        a.next = b
+        b.prev = a
+        b.next = c
+        c.prev = b
         mem.declare(a)
         mem.declare(b)
         mem.declare(c)
 
         print(a,b,c)
 
-        x1, x2 = Var(TestLL,"x1"), Var(TestLL,"x2")
-        c = (x1.nxt == x2)
-        # assert str(c) == '(x1.nxt == x2)'
-        print(c)
+        x1, x2 = Var(TestDLL,"x1"), Var(TestDLL,"x2")
+        c = (x1.next == x2)
+        # assert str(c) == '(x1.next == x2)'
+        # print(c)
         # print(match_names(c,mem))
 
-        assert sorted(match_names(c,mem)) == [['B','A'],['C','B']]
+        assert sorted(match_names(c,mem)) == [['A','B'],['B','C']]
         # cl = get_linked_conditions_instance(c, mem)
         # print(get_ptr_matches(cl))
         # Bs = boop_Bs_from_ptrs(get_ptr_matches(cl))
 
         # print(Bs)
-        c = x1.nxt == None
-        # assert str(c) == '(x1.nxt == None)'
+        c = x1.next == None
+        # assert str(c) == '(x1.next == None)'
         print(c)
 
-        assert match_names(c,mem) == [['A']]
+        assert match_names(c,mem) == [['C']]
 
         # cl = get_linked_conditions_instance(c, mem)
         # print(get_ptr_matches(cl))
 
 
-        c = x1.nxt == None
-        # assert str(c) == '(x1.nxt == None)'
+        c = x1.next == None
+        # assert str(c) == '(x1.next == None)'
         print(c)
 
-        assert match_names(c,mem) == [['A']]
+        assert match_names(c,mem) == [['C']]
+
+
+        c = x1 == x1.next.prev
+
+        assert match_names(c,mem) == [['A'],['B']]
 
         # cl = get_linked_conditions_instance(c, mem)
         # print(get_ptr_matches(cl))
@@ -458,7 +470,7 @@ def test_b_matching_betas_lit(benchmark):
 
 if(__name__ == "__main__"):
     pass
-    test_mem_leaks()
+    # test_mem_leaks()
     # dat = matching_alphas_setup()[0]
     # dat = matching_betas_setup()[0]
 
@@ -485,7 +497,7 @@ if(__name__ == "__main__"):
     # print(alloc_stats1.alloc-alloc_stats1.free, alloc_stats2.alloc-alloc_stats2.free)
 
 
-    # test_ref_matching()
+    test_ref_matching()
     # test_multiple_deref()
     # test_applying()
     # test_matching()

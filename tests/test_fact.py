@@ -242,6 +242,59 @@ from cre.fact_intrinsics import fact_lower_setattr
 from numba import literally
 
 
+from cre.var import Var
+def test_as_conditions():
+    with cre_context("test_as_conditions"):
+        spec = {"name" : "string", "prev" : "TestDLL", "next" : "TestDLL"}
+        TestDLL, TestDLLType = define_fact("TestDLL", spec)
+        a = TestDLL(name="A")
+        b = TestDLL(name="B")
+        c = TestDLL(name="C")
+        a.next = b
+        b.prev = a
+        b.next = c
+        c.prev = b
+
+
+        print(getattr(a,"next"))
+
+        sel = Var(TestDLL, "sel")
+        sel_n = sel.next
+        fact_ptr_to_var_map = {a.get_ptr() : sel, b.get_ptr(): sel_n}
+        a.as_conditions(fact_ptr_to_var_map)
+
+
+        spec = {"name" : "string", "parent" : "TestContainer"}
+        TestChild, TestChildType = define_fact("TestChild", spec)
+
+        c1 = TestChild(name="c1")
+        c2 = TestChild(name="c2")
+
+        spec = {"name" : "string", "children" : "ListType(TestChild)"}
+        TestContainer, TestContainerType = define_fact("TestContainer", spec)
+
+        c1 = TestChild(name="c1")
+        c2 = TestChild(name="c2")
+
+        C = TestContainer(name="C", children=List([c1,c2]))
+        c1.parent = C
+        c2.parent = C
+
+
+        sel = Var(TestChild, "sel")
+        sel_p = sel.parent
+        fact_ptr_to_var_map = {c1.get_ptr() : sel, C.get_ptr(): sel_p}
+        c1.as_conditions(fact_ptr_to_var_map)
+
+
+
+
+
+
+
+
+
+
 # @njit
 # def set_it(self,attr,other):
 #     fact_lower_setattr(self,literally(attr),other)
@@ -331,8 +384,10 @@ if __name__ == "__main__":
     # test_define_fact()
     # test_inheritence()
     # test_cast_fact()
-    test_protected_mutability()
+    # test_protected_mutability()
     # test_fact_eq()
+
+    test_as_conditions()
 
     # _test_reference_type()
 

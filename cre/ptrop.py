@@ -65,7 +65,7 @@ class UntypedPtrOp():
         members['signature'] = sig = boolean(*arg_types)
         var_ptrs = np.array([v.get_ptr_incref() for v in py_args],dtype=np.int64)
 
-        return new_ptr_op(self.name, members,var_ptrs=var_ptrs)
+        return new_ptr_op(self.name, members, var_ptrs=var_ptrs)
 
 
 

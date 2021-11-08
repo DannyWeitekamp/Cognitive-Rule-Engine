@@ -124,13 +124,14 @@ def _standardize_type(typ, context, name='', attr=''):
 
         if(typ_str.lower() in TYPE_ALIASES): 
             typ = numba_type_map[TYPE_ALIASES[typ_str.lower()]]
-        elif(typ_str == name):
-            typ = DeferredFactRefType(name)
+        # elif(typ_str == name):
+        #     typ = context.get_deferred_type(name)# DeferredFactRefType(name)
         elif(typ_str in context.type_registry):
             typ = context.type_registry[typ_str]
         else:
-            raise TypeError(f"Attribute type {typ_str!r} not recognized in spec" + 
-                f" for attribute definition {attr!r}." if attr else ".")
+            typ = context.get_deferred_type(typ_str)
+            # raise TypeError(f"Attribute type {typ_str!r} not recognized in spec" + 
+            #     f" for attribute definition {attr!r}." if attr else ".")
 
         if(is_list): typ = ListType(typ)
 
@@ -249,6 +250,48 @@ class FactProxy:
 
     def get_ptr_incref(self):
         return fact_to_ptr_incref(self)
+
+    def as_conditions(self, fact_ptr_to_var_map, keep_null=True):
+        from cre.default_ops import Equals
+        from cre.conditions import op_to_cond 
+        from cre.utils import as_typed_list
+        # print(self.__dict__)
+        # print(self._fact_type.__dict__)
+        self_ptr = self.get_ptr()
+        assert self_ptr in fact_ptr_to_var_map, "'fact_ptr_to_var_map' must include self.get_ptr()."
+        self_var = fact_ptr_to_var_map[self_ptr]
+
+        one_lit_conds = []
+        for attr, config in self._fact_type.spec.items():
+            typ = config['type']
+            val = getattr(self,attr)
+            attr_var = getattr(self_var, attr)
+            print("::",self_var, attr_var, val)
+            if(val is not None and isinstance(typ, fact_types)):
+                # Fact case
+                val_fact_ptr = val.get_ptr()
+                if(val_fact_ptr in fact_ptr_to_var_map):
+                    # one_lit_conds.append(op_to_cond(Equals(attr_var, fact_ptr_to_var_map[val_fact_ptr])))
+                    l = attr_var==fact_ptr_to_var_map[val_fact_ptr]
+                    print("<<", val_fact_ptr, fact_ptr_to_var_map[val_fact_ptr], l ,type(l))
+                    one_lit_conds.append(attr_var==fact_ptr_to_var_map[val_fact_ptr])
+            else:
+                # Primitive case
+                one_lit_conds.append(attr_var==val)
+
+        conds = one_lit_conds[0]
+        for c in one_lit_conds[1:]:
+            conds = conds & c
+
+        print(conds)
+        return conds
+
+
+
+        
+        
+
+
 
     # def __setattr__(self,attr,val):
     #     from cre.fact_intrinsics import fact_lower_setattr
@@ -580,12 +623,16 @@ def define_fact(name : str, spec : dict, context=None):
 
     fact_ctor, fact_type = _fact_from_spec(name, spec, context=context)
 
+    # Define the deferred type for this
+    dt = context.get_deferred_type(name)
+    dt.define(fact_type)
+
     # If a deffered type was used on specialization then define it
-    for attr,d in spec.items():
-        dt = d.get('type',None)
-        if(isinstance(dt,ListType)): dt = dt.dtype
-        if(isinstance(dt,DeferredFactRefType) and dt._fact_name == name):
-            dt.define(fact_type)
+    # for attr,d in spec.items():
+    #     dt = d.get('type',None)
+    #     if(isinstance(dt,ListType)): dt = dt.dtype
+        # if(isinstance(dt,DeferredFactRefType) and dt._fact_name == name):
+        #     dt.define(fact_type)
     # for k,v in spec.items():
     #     if(isinstance(v['type'],DeferredFactRefType)): spec[k]['type'] = fact_type
     context._assert_flags(name,spec)
@@ -594,6 +641,8 @@ def define_fact(name : str, spec : dict, context=None):
 
     # fact_ctor.name = fact_type.name = name
     fact_ctor.spec = fact_type.spec = spec
+
+    print("<<", name, fact_ctor)
 
     return fact_ctor, fact_type
 

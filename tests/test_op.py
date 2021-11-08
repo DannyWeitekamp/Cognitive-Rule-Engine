@@ -485,6 +485,18 @@ def test_ptr_ops():
         assert str(l2) == '(a.nxt == b.nxt)'
         assert repr(l2) == 'ObjEquals([a:BOOP].nxt, [b:BOOP].nxt)'
 
+        l3 = ObjEquals(a, a.nxt)
+        assert str(l3) == '(a == a.nxt)'
+
+        print(type(l3).__dict__)
+
+        # print(str(ObjEquals(a, a.nxt)))
+
+
+
+
+
+
 
 def test_boxing():
     x, y = Var(f8,'x'), Var(f8,'y')
@@ -494,7 +506,7 @@ def test_boxing():
         return x
 
     _Add = return_same(x + y)
-    _Add = return_same(_Add)
+    assert str(_Add) == "(x + y)"
     _Add = return_same(_Add)
     assert str(_Add) == "(x + y)"
     # print(_Add, type(_Add))
@@ -558,8 +570,8 @@ if __name__ == "__main__":
 
     #     test_commutes()
     # test_fact_args()
-    test_head_ptrs_ranges()
+    # test_head_ptrs_ranges()
     # not_jit_compilable()
-    # test_ptr_ops()
+    test_ptr_ops()
             
 

@@ -108,19 +108,19 @@ class Var(CREObjProxy):
         '''Helper function that... '''
         
         # assert(isinstance(self.base_type,Fact))
-        fact_type = base_type = self.base_type
+        base_type = self._base_type
         base_type_name = str(base_type)
 
         if(isinstance(attr_or_ind, str)):
             # ATTR case
+            curr_head_type = self._head_type
             attr = attr_or_ind
-            fd = fact_type.field_dict
-            head_type = fact_type.spec[attr]['type']
-            if(isinstance(head_type,DeferredFactRefType)):
+            fd = curr_head_type.field_dict
+            head_type = curr_head_type.spec[attr]['type']
+            if(isinstance(head_type, DeferredFactRefType)):
                 head_type = cre_context().type_registry[head_type._fact_name]
-            # head_type = fact_type.field_dict[attr]
             a_id = list(fd.keys()).index(attr)
-            offset = fact_type._attr_offsets[a_id]
+            offset = curr_head_type._attr_offsets[a_id]
             deref_type = 'attr'
         else:
             # LIST case
@@ -136,7 +136,7 @@ class Var(CREObjProxy):
 
         if(getenv("CRE_SPECIALIZE_VAR_TYPE",default=False)):
             if(deref_type == 'attr'):
-                struct_type = get_var_definition(types.TypeRef(fact_type), types.TypeRef(head_type))
+                struct_type = get_var_definition(types.TypeRef(base_type), types.TypeRef(head_type))
             else:
                 raise NotImplemented("Haven't implemented getitem() when CRE_SPECIALIZE_VAR_TYPE=true.")
         else:
@@ -531,11 +531,11 @@ class StructAttribute(AttributeTemplate):
 
         base_type = typ.field_dict['base_type']
         if(attr in head_type.field_dict):
-            new_head_type = types.TypeRef(head_type.field_dict[attr])
+            head_type = types.TypeRef(head_type.field_dict[attr])
             field_dict = {
                 **var_fields_dict,
                 **{"base_type" : base_type,
-                 "head_type" : new_head_type}
+                 "head_type" : head_type}
             }
             attrty = VarTypeTemplate([(k,v) for k,v, in field_dict.items()])
             return attrty

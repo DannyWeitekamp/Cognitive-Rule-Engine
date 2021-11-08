@@ -256,11 +256,10 @@ def test_as_conditions():
         c.prev = b
 
 
-        print(getattr(a,"next"))
+        print()
 
         sel = Var(TestDLL, "sel")
-        sel_n = sel.next
-        fact_ptr_to_var_map = {a.get_ptr() : sel, b.get_ptr(): sel_n}
+        fact_ptr_to_var_map = {a.get_ptr() : sel, b.get_ptr(): sel.next}
         a.as_conditions(fact_ptr_to_var_map)
 
 
@@ -282,9 +281,10 @@ def test_as_conditions():
 
 
         sel = Var(TestChild, "sel")
-        sel_p = sel.parent
-        fact_ptr_to_var_map = {c1.get_ptr() : sel, C.get_ptr(): sel_p}
+        fact_ptr_to_var_map = {c1.get_ptr() : sel, C.get_ptr(): sel.parent}
         c1.as_conditions(fact_ptr_to_var_map)
+
+        print(c1)
 
 
 

@@ -1157,7 +1157,6 @@ def op_str(self):
             arg_names.append(_struct_from_ptr(GenericVarType, head_ptr).alias)
     else:
         arg_names = op_get_arg_names(self)
-    print("??",arg_names)
     for i,arg_name in enumerate(arg_names):
         s =  s.replace(f'{{{i}}}',arg_name)
     return s

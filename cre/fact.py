@@ -251,33 +251,55 @@ class FactProxy:
     def get_ptr_incref(self):
         return fact_to_ptr_incref(self)
 
+    def _gen_val_var_possibilities(self, self_var):
+        for attr, config in self._fact_type.spec.items():
+            typ = config['type']
+            val = getattr(self,attr)
+            print(self._fact_type, attr)
+            attr_var = getattr(self_var, attr)
+            if(isinstance(val, List)):
+                for i in range(len(val)):
+                    item_var = attr_var[i]
+                    item_val = val[i]
+                    yield (item_val, item_var)
+            else:
+                yield (val, attr_var)
+            # else:
+                # Primitive case
+                # one_lit_conds.append(attr_var==val)
+
     def as_conditions(self, fact_ptr_to_var_map, keep_null=True):
         from cre.default_ops import Equals
         from cre.conditions import op_to_cond 
         from cre.utils import as_typed_list
-        # print(self.__dict__)
-        # print(self._fact_type.__dict__)
+
         self_ptr = self.get_ptr()
         assert self_ptr in fact_ptr_to_var_map, "'fact_ptr_to_var_map' must include self.get_ptr()."
         self_var = fact_ptr_to_var_map[self_ptr]
-
         one_lit_conds = []
-        for attr, config in self._fact_type.spec.items():
-            typ = config['type']
-            val = getattr(self,attr)
-            attr_var = getattr(self_var, attr)
-            print("::",self_var, attr_var, val)
-            if(val is not None and isinstance(typ, fact_types)):
+        
+        # for attr, config in self._fact_type.spec.items():
+        for attr_val, attr_var in self._gen_val_var_possibilities(self_var):
+            if(isinstance(attr_val, FactProxy)):
                 # Fact case
-                val_fact_ptr = val.get_ptr()
-                if(val_fact_ptr in fact_ptr_to_var_map):
-                    # one_lit_conds.append(op_to_cond(Equals(attr_var, fact_ptr_to_var_map[val_fact_ptr])))
-                    l = attr_var==fact_ptr_to_var_map[val_fact_ptr]
-                    print("<<", val_fact_ptr, fact_ptr_to_var_map[val_fact_ptr], l ,type(l))
-                    one_lit_conds.append(attr_var==fact_ptr_to_var_map[val_fact_ptr])
+                attr_val_fact_ptr = attr_val.get_ptr()
+                if(attr_val_fact_ptr in fact_ptr_to_var_map):
+                    val_var = fact_ptr_to_var_map[attr_val_fact_ptr]
+                    #FIXME: use cre_obj.__eq__()
+                    if(str(attr_var) == str(val_var)):
+                        # tautological case i.e. x.next == x.next, try create conditions like
+                        #   x == x.next.prev
+                        for attr_val2, attr_var2 in attr_val._gen_val_var_possibilities(attr_var):
+                            if(isinstance(attr_val2, FactProxy) and 
+                                attr_val2.get_ptr() == self_ptr):
+                                one_lit_conds.append(self_var==attr_var2)
+
+                    else:
+                        one_lit_conds.append(attr_var==fact_ptr_to_var_map[val_fact_ptr])
+                    
             else:
                 # Primitive case
-                one_lit_conds.append(attr_var==val)
+                one_lit_conds.append(attr_var==attr_val)
 
         conds = one_lit_conds[0]
         for c in one_lit_conds[1:]:

@@ -344,7 +344,7 @@ class UntypedOp():
                 self._specialize_cache[sig] = op_cls
             
             op_cls = self._specialize_cache[sig]
-            return op_cls.make_singleton_inst(head_var_ptrs=var_ptrs)
+            return op_cls.make_singleton_inst(head_vars=py_args)
 
 
 def resolve_return_type(x):
@@ -371,14 +371,12 @@ def resolve_return_type(x):
 def var_to_ptr(x):
     return _raw_ptr_from_struct_incref(x)
 
-def new_var_ptrs_from_types(types, names):
+def new_vars_from_types(types, names):
     '''Generate vars with 'types' and 'names'
         and output a ptr_array of their memory addresses.'''
     #TODO: Op should have deconstructor so these are decrefed.
-    ptrs = np.empty(len(types), dtype=np.int64)
-    for i, t in enumerate(types):
-        ptrs[i] = var_to_ptr(Var(t,names[i]))
-    return ptrs
+    # ptrs = np.empty(len(types), dtype=np.int64)
+    return [Var(t,names[i]) for i, t in enumerate(types)]
 
 @njit(cache=True)
 def gen_placeholder_aliases(var_ptrs):
@@ -489,7 +487,7 @@ def op_dtor(self):
 
 
 
-def new_op(name, members, var_ptrs=None, return_class=False):
+def new_op(name, members, head_vars=None, return_class=False):
     '''Creates a new custom Op with 'name' and 'members' '''
     has_check = 'check' in members
     assert 'call' in members, "Op must have call() defined"
@@ -566,7 +564,7 @@ def new_op(name, members, var_ptrs=None, return_class=False):
 
     # with PrintElapse("\tMakeInst"):
     if(cls.__name__ != "__GenerateOp__" and not return_class):
-        op_inst = cls.make_singleton_inst(head_var_ptrs=var_ptrs)
+        op_inst = cls.make_singleton_inst(head_vars=head_vars)
         return op_inst
 
     return cls
@@ -679,7 +677,7 @@ class OpMeta(type):
     def _handle_defaults(cls):
         # By default use the variable names that the user defined in the call() fn.
         cls.default_arg_names = inspect.getfullargspec(cls.call_pyfunc)[0]
-        cls.default_var_ptrs = new_var_ptrs_from_types(cls.call_sig.args, cls.default_arg_names)
+        cls.default_vars = new_vars_from_types(cls.call_sig.args, cls.default_arg_names)
 
         cls.arg_type_names = as_typed_list(unicode_type,
                             [str(x) for x in cls.signature.args])
@@ -827,11 +825,13 @@ class Op(CREObjProxy,metaclass=OpMeta):
         # op_dtor(self)
 
     @classmethod
-    def make_singleton_inst(cls,head_var_ptrs=None):
+    def make_singleton_inst(cls, head_vars=None):
         '''Creates a singleton instance of the user defined subclass of Op.
             These instances unbox into the NRT as GenericOpType.
         '''        
-        if(head_var_ptrs is None): head_var_ptrs = cls.default_var_ptrs
+        if(head_vars is None): 
+            head_vars = cls.default_vars
+        head_var_ptrs = np.array([v.get_ptr_incref() for v in head_vars], dtype=np.int64)
         # print("---------------")
         # print(cls.__name__,
         #     str(cls.signature.return_type),
@@ -1381,7 +1381,7 @@ class OpComp():
         self.arg_types = arg_types
         # self.head_types = head_types
         # print([x[0].get_ptr() for x in head_vars.values()])
-        self.head_var_ptrs = np.array([x[0].get_ptr_incref() for x in head_vars.values()],dtype=np.int64)
+        # self.head_var_ptrs = np.array([x[0].get_ptr_incref() for x in head_vars.values()],dtype=np.int64)
         self.constants = constants
         self.signature = op.signature.return_type(*arg_types)
         
@@ -1412,7 +1412,7 @@ class OpComp():
             # for i,v_p in enumerate(self.base_vars):
             #     var_ptrs[i] = v_p#v.get_ptr()
 
-            op = self._generate_op = op_cls.make_singleton_inst(self.head_var_ptrs)
+            op = self._generate_op = op_cls.make_singleton_inst([x[0] for x in self.head_vars.values()])
             op.op_comp = self
             place_holder_arg_names = [f'{{{i}}}' for i in range(len(self.base_vars))]
             set_expr_template(op, op.gen_expr(arg_names=place_holder_arg_names))

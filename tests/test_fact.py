@@ -237,7 +237,7 @@ def test_protected_mutability():
             print("RUNTIME_NB", b1.B)
             edit_it(b1)
 
-from cre.utils import lower_setattr
+from cre.utils import lower_setattr, PrintElapse
 from cre.fact_intrinsics import fact_lower_setattr
 from numba import literally
 
@@ -255,12 +255,12 @@ def test_as_conditions():
         b.next = c
         c.prev = b
 
-
-        print()
-
         sel = Var(TestDLL, "sel")
         fact_ptr_to_var_map = {a.get_ptr() : sel, b.get_ptr(): sel.next}
-        a.as_conditions(fact_ptr_to_var_map)
+        conds = a.as_conditions(fact_ptr_to_var_map)
+        print(conds)
+
+        assert str(conds) == "(sel.name == 'A') & (sel.prev == None) & (sel == sel.next.prev)"
 
 
         spec = {"name" : "string", "parent" : "TestContainer"}
@@ -282,9 +282,23 @@ def test_as_conditions():
 
         sel = Var(TestChild, "sel")
         fact_ptr_to_var_map = {c1.get_ptr() : sel, C.get_ptr(): sel.parent}
-        c1.as_conditions(fact_ptr_to_var_map)
 
-        print(c1)
+        conds = c1.as_conditions(fact_ptr_to_var_map)
+        print(str(conds))
+        conds = c1.as_conditions(fact_ptr_to_var_map)
+        conds = c1.as_conditions(fact_ptr_to_var_map)
+        conds = c1.as_conditions(fact_ptr_to_var_map)
+        conds = c1.as_conditions(fact_ptr_to_var_map)
+        conds = c1.as_conditions(fact_ptr_to_var_map)
+        conds = c1.as_conditions(fact_ptr_to_var_map)
+        conds = c1.as_conditions(fact_ptr_to_var_map)
+        conds = c1.as_conditions(fact_ptr_to_var_map)
+        print(str(conds))
+        assert str(conds) == "(sel.name == 'c1') & (sel == sel.parent.children[0])"
+
+        
+
+        # print(conds)
 
 
 

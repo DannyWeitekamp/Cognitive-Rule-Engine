@@ -26,7 +26,7 @@ from cre.caching import unique_hash, source_to_cache, import_from_cached, source
 from cre.structref import gen_structref_code, define_structref
 from cre.context import cre_context
 from cre.utils import (_struct_from_ptr, _cast_structref, struct_get_attr_offset, _obj_cast_codegen,
-                       _ptr_from_struct_codegen, _raw_ptr_from_struct, CastFriendlyMixin, _obj_cast_codegen)
+                       _ptr_from_struct_codegen, _raw_ptr_from_struct, CastFriendlyMixin, _obj_cast_codegen, PrintElapse)
 from cre.cre_object import CREObjTypeTemplate, cre_obj_field_dict, CREObjModel, CREObjType
 
 from numba.core.typeconv import Conversion
@@ -255,7 +255,7 @@ class FactProxy:
         for attr, config in self._fact_type.spec.items():
             typ = config['type']
             val = getattr(self,attr)
-            print(self._fact_type, attr)
+            # with PrintElapse("getattr_var"):
             attr_var = getattr(self_var, attr)
             if(isinstance(val, List)):
                 for i in range(len(val)):
@@ -268,7 +268,7 @@ class FactProxy:
                 # Primitive case
                 # one_lit_conds.append(attr_var==val)
 
-    def as_conditions(self, fact_ptr_to_var_map, keep_null=True):
+    def as_conditions(self, fact_ptr_to_var_map, keep_null=True, add_implicit_neighbor_self_refs=True):
         from cre.default_ops import Equals
         from cre.conditions import op_to_cond 
         from cre.utils import as_typed_list
@@ -278,34 +278,40 @@ class FactProxy:
         self_var = fact_ptr_to_var_map[self_ptr]
         one_lit_conds = []
         
-        # for attr, config in self._fact_type.spec.items():
-        for attr_val, attr_var in self._gen_val_var_possibilities(self_var):
-            if(isinstance(attr_val, FactProxy)):
-                # Fact case
-                attr_val_fact_ptr = attr_val.get_ptr()
-                if(attr_val_fact_ptr in fact_ptr_to_var_map):
-                    val_var = fact_ptr_to_var_map[attr_val_fact_ptr]
-                    #FIXME: use cre_obj.__eq__()
-                    if(str(attr_var) == str(val_var)):
-                        # tautological case i.e. x.next == x.next, try create conditions like
-                        #   x == x.next.prev
-                        for attr_val2, attr_var2 in attr_val._gen_val_var_possibilities(attr_var):
-                            if(isinstance(attr_val2, FactProxy) and 
-                                attr_val2.get_ptr() == self_ptr):
-                                one_lit_conds.append(self_var==attr_var2)
+        with PrintElapse("CONSTRUCTS"):       
+            # for attr, config in self._fact_type.spec.items():
+            for attr_val, attr_var in self._gen_val_var_possibilities(self_var):
+                if(isinstance(attr_val, FactProxy)):
+                    # Fact case
+                    attr_val_fact_ptr = attr_val.get_ptr()
+                    if(attr_val_fact_ptr in fact_ptr_to_var_map):
+                        val_var = fact_ptr_to_var_map[attr_val_fact_ptr]
+                        #   FIXME: use cre_obj.__eq__()
+                        
+                            # str(attr_var) == str(val_var)
 
-                    else:
-                        one_lit_conds.append(attr_var==fact_ptr_to_var_map[val_fact_ptr])
-                    
-            else:
-                # Primitive case
-                one_lit_conds.append(attr_var==attr_val)
+                        if(add_implicit_neighbor_self_refs and str(attr_var) == str(val_var)):
+                            # for case like x.next == x.next, try make conditions like x == x.next.prev
+                            # with PrintElapse("LOOP"):
+                            #     list(attr_val._gen_val_var_possibilities(attr_var))
+                            for attr_val2, attr_var2 in attr_val._gen_val_var_possibilities(attr_var):
+                                if(isinstance(attr_val2, FactProxy) and 
+                                    attr_val2.get_ptr() == self_ptr):
+                                    one_lit_conds.append(self_var==attr_var2)
 
-        conds = one_lit_conds[0]
-        for c in one_lit_conds[1:]:
-            conds = conds & c
+                        else:
+                            one_lit_conds.append(attr_var==fact_ptr_to_var_map[val_fact_ptr])
+                        
+                else:
+                    # Primitive case
+                    if(not keep_null and attr_val is None): continue
+                    one_lit_conds.append(attr_var==attr_val)
 
-        print(conds)
+        with PrintElapse("ANDS"):        
+            conds = one_lit_conds[0]
+            for c in one_lit_conds[1:]:
+                conds = conds & c
+
         return conds
 
 
@@ -663,8 +669,6 @@ def define_fact(name : str, spec : dict, context=None):
 
     # fact_ctor.name = fact_type.name = name
     fact_ctor.spec = fact_type.spec = spec
-
-    print("<<", name, fact_ctor)
 
     return fact_ctor, fact_type
 

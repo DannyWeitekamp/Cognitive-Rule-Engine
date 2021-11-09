@@ -168,25 +168,6 @@ def literal_not(self):
     n.negated = not n.negated
     return n
 
-@njit(cache=True)
-def literal_to_cond(lit):
-    dnf = new_dnf(1)
-    # ind = 0 if (lit.is_alpha) else 1
-    dnf[0].append(lit)
-    _vars = List.empty_list(GenericVarType)
-
-    for ptr in lit.var_base_ptrs:
-        _vars.append(_struct_from_ptr(GenericVarType, ptr))
-    # if(right_var is not None):
-    #     _vars.append(right_var)
-    # pt.negated = negated
-    c = _conditions_ctor_var_list(_vars, dnf)
-    # c = Conditions(_vars, dnf)
-    return c
-
-@njit(cache=True)
-def op_to_cond(op):
-    return literal_to_cond(literal_ctor(op))
 
 
 #TODO compartator helper?
@@ -461,6 +442,7 @@ def new_dnf(n):
         dnf.append(List.empty_list(LiteralType))
     return dnf
 
+
 @njit(cache=True)
 def _conditions_ctor_single_var(_vars,dnf=None):
     st = new(ConditionsType)
@@ -499,6 +481,8 @@ def _conditions_ctor_var_list(_vars,dnf=None):
     # st.is_initialized = False
     st.matcher_inst_ptr = 0
     return st
+
+
 
 @generated_jit(cache=True)
 @overload(Conditions,strict=False)
@@ -564,7 +548,6 @@ def conditions_str(self,add_non_conds=False):
         for i, lit in enumerate(conjunct):
             s += "~" if lit.negated else ""
             s += str(lit)
-            print(">>", str(lit))
             if(i < len(conjunct)-1): s += " & "
             if(add_non_conds): 
                 for var_ptr in lit.var_base_ptrs:
@@ -631,6 +614,27 @@ def build_var_list(base_var_map):
         var_list.append(_struct_from_ptr(GenericVarType,ptr))
     return var_list
 
+
+
+@njit(ConditionsType(LiteralType,),cache=True)
+def literal_to_cond(lit):
+    dnf = new_dnf(1)
+    # ind = 0 if (lit.is_alpha) else 1
+    dnf[0].append(lit)
+    _vars = List.empty_list(GenericVarType)
+
+    for ptr in lit.var_base_ptrs:
+        _vars.append(_struct_from_ptr(GenericVarType, ptr))
+    # if(right_var is not None):
+    #     _vars.append(right_var)
+    # pt.negated = negated
+    c = _conditions_ctor_var_list(_vars, dnf)
+    # c = Conditions(_vars, dnf)
+    return c
+
+@njit(ConditionsType(GenericOpType,), cache=True)
+def op_to_cond(op):
+    return literal_to_cond(literal_ctor(op))
 
 
 

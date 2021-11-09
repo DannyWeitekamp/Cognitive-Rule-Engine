@@ -38,7 +38,8 @@ import inspect, cloudpickle, pickle
 from textwrap import dedent, indent
 # from itertools import combinations
 from collections.abc import Iterable
-from cre.op import Op, OpMeta, UntypedOp, resolve_return_type, new_var_ptrs_from_types, op_ctor
+from cre.op import Op, OpMeta, UntypedOp, resolve_return_type, new_vars_from_types, op_ctor
+from cre.utils import PrintElapse
 import warnings
 
 
@@ -58,14 +59,23 @@ class UntypedPtrOp():
         return f'cre.{self.name}(signature=None)'
 
     def __call__(self,*py_args):
-        assert all([isinstance(x, Var) for x in py_args]), "Cannot specialize PtrOp with constants."
-        arg_types = [resolve_return_type(x) for x in py_args]
+        assert all([isinstance(x, Var) for x in py_args]), "Cannot specialize PtrOp with constants."        
+        
+        n_args = len(py_args)
+        if(n_args not in self._specialize_cache):
+            arg_types = [resolve_return_type(x) for x in py_args]
+            sig = boolean(*arg_types)
+            members = {**self.members}
+            members['signature'] = sig
+            op_cls = new_ptr_op(self.name, members,return_class=True)
+            self._specialize_cache[n_args] = op_cls
 
-        members = {**self.members}
-        members['signature'] = sig = boolean(*arg_types)
-        var_ptrs = np.array([v.get_ptr_incref() for v in py_args],dtype=np.int64)
+        op_cls = self._specialize_cache[n_args]
+        with PrintElapse("new_ptr_op"):        
+            return op_cls.make_singleton_inst(head_vars=py_args)
 
-        return new_ptr_op(self.name, members, var_ptrs=var_ptrs)
+        # with PrintElapse("new_ptr_op"):
+        #     return new_ptr_op(self.name, members, var_ptrs=var_ptrs)
 
 
 
@@ -80,7 +90,7 @@ match_head_ptrs = njit(boolean(i8[::1]),cache=True)(match_head_ptrs_pyfunc)
 '''
 
 # @njit(cache=True)
-def new_ptr_op(name, members, var_ptrs=None):
+def new_ptr_op(name, members, head_vars=None, return_class=False):
     assert 'match_head_ptrs' in members, "PtrOp must have match_head_ptrs() defined"
 
     if('signature' not in members):
@@ -94,8 +104,12 @@ def new_ptr_op(name, members, var_ptrs=None):
 
     # cls._handle_defaults()  
 
+    # Standardize shorthand definitions
+    if(hasattr(cls,'shorthand') and not isinstance(cls.shorthand,dict)):
+        cls.shorthand = {'*' : cls.shorthand}
+
     # cls.arg_type_names = as_typed_list(unicode_type,[str(x) for x in cls.signature.args])
-    cls._handle_defaults(var_ptrs)
+    cls._handle_defaults(head_vars)
 
     
     name = cls.__name__
@@ -111,15 +125,26 @@ def new_ptr_op(name, members, var_ptrs=None):
     cls.match_head_ptrs = staticmethod(cls.match_head_ptrs)
     cls.match_head_ptrs_addr = _get_wrapper_address(cls.match_head_ptrs, boolean(i8[::1]))
     
-    # Standardize shorthand definitions
-    if(hasattr(cls,'shorthand') and not isinstance(cls.shorthand,dict)):
-        cls.shorthand = {'*' : cls.shorthand}
+    
 
     # if(cls.__name__ != "__GenerateOp__"):
     #     op_inst = cls.make_singleton_inst()
     #     return op_inst
 
-    return cls.make_singleton_inst(head_var_ptrs=var_ptrs)
+    if(return_class):
+        return cls
+    else:
+    # with PrintElapse("\tnew_inst"):
+        return cls.make_singleton_inst(head_vars=head_vars)
+
+# @njit(unicode_type(i8[::1]))
+# def _var_ptrs_to_deref_arg_names(var_ptrs):
+#     for i,ptr in enumerate(var_ptrs)
+#         str_var_ptr_derefs(ptr)
+
+# def var_ptrs_to_deref_arg_names(var_ptrs):
+
+
 
 class PtrOpMeta(OpMeta):
     def __new__(meta_cls, *args):
@@ -158,26 +183,34 @@ class PtrOpMeta(OpMeta):
         return f"cre.ptrop.PtrOpMeta(name={cls.__name__!r}, signature={cls._get_simple_sig_str()})"
 
 
+    def _str_templates_from_var_ptrs(cls, head_vars=None):
+        # with PrintElapse("???"):
+        dereffed_arg_names = [f'{{{i}}}{v.get_derefs_str()}' for i,v in enumerate(head_vars)]                
+        _expr_template = f"{cls.__name__}({','.join(dereffed_arg_names)})"
+
+        if(hasattr(cls,'shorthand')):
+            _shorthand_template = resolve_template("python",cls.shorthand,'shorthand').format(*dereffed_arg_names)
+        else:
+            _shorthand_template = _expr_template
+        return _expr_template, _shorthand_template
 
 
-    def _handle_defaults(cls, var_ptrs=None):
+    def _handle_defaults(cls, head_vars=None):
         # By default use the variable names that the user defined in the call() fn.
         cls.default_arg_names = [f"a{i}" for i in range(len(cls.signature.args))]
         cls.arg_type_names = as_typed_list(unicode_type,
                             [str(x) for x in cls.signature.args])
 
-        if(var_ptrs is not None):
-            cls.default_var_ptrs = var_ptrs 
+        if(head_vars is not None):
+            cls.default_vars = head_vars 
         else: 
-            cls.default_var_ptrs = new_var_ptrs_from_types(cls.signature.args, cls.default_arg_names)
+            cls.default_vars = new_vars_from_types(cls.signature.args, cls.default_arg_names)
 
-        dereffed_arg_names = [f'{{{i}}}{str_var_ptr_derefs(ptr)}' for i,ptr in enumerate(cls.default_var_ptrs)]
-                
-        if(not hasattr(cls,'_expr_template')):
-            # mk_str = lambda i, ptr : 
-            cls._expr_template = f"{cls.__name__}({','.join(dereffed_arg_names)})"
+        _expr_template, _shorthand_template = cls._str_templates_from_var_ptrs(cls.default_vars)
         
-        cls._shorthand_template = cls.shorthand.format(*dereffed_arg_names) if(hasattr(cls,'shorthand')) else cls._expr_template
+        if(not hasattr(cls,'_expr_template')):
+            cls._expr_template = _expr_template
+        cls._shorthand_template = _shorthand_template
         # print("<<", dereffed_arg_names, cls._shorthand_template)
 
 
@@ -193,18 +226,28 @@ class PtrOpMeta(OpMeta):
 class PtrOp(Op,metaclass=PtrOpMeta):
 
     @classmethod
-    def make_singleton_inst(cls,head_var_ptrs=None):
-        if(head_var_ptrs is None): head_var_ptrs = cls.default_var_ptrs
-        op_inst = op_ctor(
-            cls.__name__,
-            str(types.boolean),
-            cls.arg_type_names,
-            head_var_ptrs,
-            str(cls._expr_template),
-            str(cls._shorthand_template),
-            match_head_ptrs_addr=cls.match_head_ptrs_addr,
-            is_ptr_op=True
-            )
+    def make_singleton_inst(cls, head_vars=None):
+        with PrintElapse("make_templates"):
+            _expr_template = cls._expr_template
+            _shorthand_template = cls._shorthand_template
+            if(head_vars is None):
+                head_vars = cls.default_vars
+            else:
+                _expr_template, _shorthand_template = cls._str_templates_from_var_ptrs(head_vars)
+                head_var_ptrs = np.array([v.get_ptr_incref() for v in head_vars], dtype=np.int64)
+
+
+        with PrintElapse("new_OP"):
+            op_inst = op_ctor(
+                cls.__name__,
+                str(types.boolean),
+                cls.arg_type_names,
+                head_var_ptrs,
+                _expr_template,
+                _shorthand_template,
+                match_head_ptrs_addr=cls.match_head_ptrs_addr,
+                is_ptr_op=True
+                )
         
         op_inst.__class__ = cls
 
@@ -217,9 +260,9 @@ class PtrOp(Op,metaclass=PtrOpMeta):
             # If all of the arguments are constants then just call the Op
             # return self.call(*py_args)
         else:
-            head_var_ptrs = np.empty((self.nargs,),dtype=np.int64)
-            for i, v in enumerate(py_args):
-                head_var_ptrs[i] = v.get_ptr()
-            return self.__class__.make_singleton_inst(head_var_ptrs)
+            # head_var_ptrs = np.empty((self.nargs,),dtype=np.int64)
+            # for i, v in enumerate(py_args):
+            #     head_var_ptrs[i] = v.get_ptr()
+            return self.__class__.make_singleton_inst(py_args)
 
 

@@ -13,7 +13,7 @@ from cre.context import cre_context
 from cre.structref import define_structref, define_structref_template, CastFriendlyStructref
 from cre.memory import MemoryType, Memory, facts_for_t_id, fact_at_f_id
 from cre.fact import define_fact, BaseFactType, cast_fact, DeferredFactRefType, Fact, _standardize_type
-from cre.utils import ptr_t, _struct_from_meminfo, _meminfo_from_struct, _cast_structref, cast_structref, decode_idrec, lower_getattr, _struct_from_ptr,  lower_setattr, lower_getattr, _raw_ptr_from_struct, _decref_ptr, _incref_ptr, _incref_structref, _ptr_from_struct_incref
+from cre.utils import PrintElapse, ptr_t, _struct_from_meminfo, _meminfo_from_struct, _cast_structref, cast_structref, decode_idrec, lower_getattr, _struct_from_ptr,  lower_setattr, lower_getattr, _raw_ptr_from_struct, _decref_ptr, _incref_ptr, _incref_structref, _ptr_from_struct_incref
 from cre.utils import assign_to_alias_in_parent_frame
 from cre.subscriber import base_subscriber_fields, BaseSubscriber, BaseSubscriberType, init_base_subscriber, link_downstream
 from cre.vector import VectorType
@@ -96,6 +96,7 @@ class Var(CREObjProxy):
         st = var_ctor(struct_type, base_type_name, alias)
         st._base_type = typ
         st._head_type = typ
+        st._derefs_str = ""
 
         # if(not skip_assign_alias):
             # assign_to_alias_in_parent_frame(st,alias)
@@ -108,9 +109,11 @@ class Var(CREObjProxy):
         '''Helper function that... '''
         
         # assert(isinstance(self.base_type,Fact))
+        # with PrintElapse("Startup"):
         base_type = self._base_type
         base_type_name = str(base_type)
 
+        _derefs_str = self.get_derefs_str()
         if(isinstance(attr_or_ind, str)):
             # ATTR case
             curr_head_type = self._head_type
@@ -121,7 +124,8 @@ class Var(CREObjProxy):
                 head_type = cre_context().type_registry[head_type._fact_name]
             a_id = list(fd.keys()).index(attr)
             offset = curr_head_type._attr_offsets[a_id]
-            deref_type = 'attr'
+            deref_type = DEREF_TYPE_ATTR
+            _derefs_str += f".{attr}"
         else:
             # LIST case
             assert isinstance(self.head_type, ListType), \
@@ -132,21 +136,31 @@ class Var(CREObjProxy):
             attr = str(attr_or_ind)
             a_id = 0
             offset = int(attr_or_ind)*listtype_sizeof_item(self.head_type)
-            deref_type = 'list'
+            deref_type = DEREF_TYPE_LIST
+            _derefs_str += f"[{attr_or_ind}]"
 
+
+        fact_num = getattr(head_type, "_fact_num", -1)
+        head_type_name = str(head_type)
+
+        # with PrintElapse("new"):
         if(getenv("CRE_SPECIALIZE_VAR_TYPE",default=False)):
             if(deref_type == 'attr'):
                 struct_type = get_var_definition(types.TypeRef(base_type), types.TypeRef(head_type))
             else:
                 raise NotImplemented("Haven't implemented getitem() when CRE_SPECIALIZE_VAR_TYPE=true.")
+            new = new_appended_var(struct_type, self, attr, a_id, offset, head_type_name, fact_num, deref_type)
         else:
-            struct_type = GenericVarType
+            new = new_appended_var_generic(self, attr, a_id, offset, head_type_name, fact_num, deref_type)
+            # struct_type = GenericVarType
         #CHECK THAT PTRS ARE SAME HERE
-        fact_num = getattr(head_type, "_fact_num", -1)
-        head_type_name = str(head_type)
-        new = new_appended_var(struct_type, self, attr, a_id, offset, head_type_name, fact_num, deref_type)
+            
+
+            
         new._base_type = base_type
         new._head_type = head_type
+        new._derefs_str = _derefs_str
+
         # new = var_ctor(struct_type, str(type_name), var_get_alias(self))
         # var_memcopy(self, new)
         # var_append_deref(new, attr, offset)
@@ -154,8 +168,10 @@ class Var(CREObjProxy):
 
 
 
+
+
     def __getattr__(self, attr):
-        if(attr in ['_head_type', '_base_type']): return None
+        if(attr in ['_head_type', '_base_type','_derefs_str']): return None
         if(attr == 'base_type'):
             base_type_ref = self._numba_type_.field_dict['base_type']
             if(base_type_ref != types.Any):
@@ -252,10 +268,19 @@ class Var(CREObjProxy):
     def __eq__(self, other): 
         from cre.default_ops import Equals, ObjEquals, ObjIsNone
         from cre.conditions import op_to_cond
+
+        # with PrintElapse("new_ptr_op"):
+        #     npo = ObjIsNone(self)
+
+        # with PrintElapse("op_to_cond"):
+        #     op_to_cond(npo)
+
         if(other is None):
-            return op_to_cond(ObjIsNone(self))
+            with PrintElapse("new_ObjIsNone"):
+                return op_to_cond(ObjIsNone(self))
         if(isinstance(other,Var) and isinstance(other.head_type,Fact)):
-            return op_to_cond(ObjEquals(self,other))
+            with PrintElapse("new_ObjEquals"):
+                return op_to_cond(ObjEquals(self,other))
 
         return Equals(self, other)
     def __ne__(self, other): 
@@ -350,6 +375,11 @@ class Var(CREObjProxy):
 
     def get_ptr_incref(self):
         return get_var_ptr_incref(self)
+
+    def get_derefs_str(self):
+        if(not hasattr(self,'_derefs_str')):
+            self._derefs_str = str_var_derefs(self)
+        return self._derefs_str
 
 
 
@@ -484,9 +514,9 @@ def str_var_derefs(self):
         attr = self.deref_attrs[i]
         deref = self.deref_offsets[i]
         if(deref.type == DEREF_TYPE_ATTR):
-            s += "." + attr
+            s += f".{attr}"
         else:
-            s += "[" + attr + "]"
+            s += f"[{attr}]"
     return s
 
 
@@ -545,15 +575,6 @@ class StructAttribute(AttributeTemplate):
 #### getattr and dereferencing ####
 
 @njit(cache=True)
-def new_appended_var(struct_type, base_var, attr, a_id, offset, head_type_name, fact_num=-1, typ='attr'):
-    _incref_structref(base_var)
-    st = new(struct_type)
-    var_memcopy(base_var,st)
-    var_append_deref(st,attr, a_id, offset, fact_num, head_type_name, typ)
-    return st
-
-
-@njit(cache=True)
 def var_memcopy(self,st):
     new_deref_attrs = List.empty_list(unicode_type)
     # new_deref_offsets = np.empty(len(),dtype=deref_type)
@@ -572,19 +593,18 @@ def var_memcopy(self,st):
     lower_setattr(st,'base_type_name',str(base_type_name))
     head_type_name = lower_getattr(self,"head_type_name")
     lower_setattr(st,'head_type_name',str(head_type_name))
-    
-    
+
 
 @njit(cache=True)
-def var_append_deref(self, attr, a_id, offset, fact_num, head_type_name, typ='attr'):
+def var_append_deref(self, attr, a_id, offset, fact_num, head_type_name, typ=DEREF_TYPE_ATTR):
     lower_getattr(self,"deref_attrs").append(attr)
     old_deref_offsets = lower_getattr(self,"deref_offsets")
     L = len(old_deref_offsets)
     new_deref_offsets = np.empty(L+1,dtype=deref_type)
     new_deref_offsets[:L] = old_deref_offsets
-    if(typ == 'attr'):
+    if(typ == DEREF_TYPE_ATTR):
         new_deref_offsets[L].type = u1(DEREF_TYPE_ATTR)
-    elif(typ == 'list'):
+    elif(typ == DEREF_TYPE_LIST):
         new_deref_offsets[L].type = u1(DEREF_TYPE_LIST)
 
     new_deref_offsets[L].a_id = u1(a_id)
@@ -593,6 +613,29 @@ def var_append_deref(self, attr, a_id, offset, fact_num, head_type_name, typ='at
 
     lower_setattr(self,'deref_offsets', new_deref_offsets)
     lower_setattr(self,'head_type_name', head_type_name)
+
+
+@njit(cache=True)
+def new_appended_var(struct_type, base_var, attr, a_id, offset, head_type_name, fact_num=-1, typ=DEREF_TYPE_ATTR):
+    _incref_structref(base_var)
+    st = new(struct_type)
+    var_memcopy(base_var,st)
+    var_append_deref(st,attr, a_id, offset, fact_num, head_type_name, typ)
+    return st
+
+@njit(GenericVarType(GenericVarType, unicode_type, u1, i8, unicode_type, i8, i8), cache=True)
+def new_appended_var_generic(base_var, attr, a_id, offset, head_type_name, fact_num=-1, typ=DEREF_TYPE_ATTR):
+    _incref_structref(base_var)
+    st = new(GenericVarType)
+    var_memcopy(base_var,st)
+    var_append_deref(st,attr, a_id, offset, fact_num, head_type_name, typ)
+    return st
+
+
+    
+    
+
+
 
 
 @lower_getattr_generic(VarTypeTemplate)
@@ -615,7 +658,7 @@ def var_getattr_impl(context, builder, typ, val, attr):
         st = ctor(context, builder, value=val)._getvalue()
 
         def new_var_and_append(self):
-            return new_appended_var(typ, self, attr, a_id, offset,'attr')
+            return new_appended_var(typ, self, attr, a_id, offset, DEREF_TYPE_ATTR)
             # st = new(typ)
             # var_memcopy(self,st)
             # var_append_deref(st,attr,offset)

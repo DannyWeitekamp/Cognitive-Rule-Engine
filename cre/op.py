@@ -175,6 +175,9 @@ op_fields_dict = {
     # Inverse of 'base_var_map'
     "inv_base_var_map" : DictType(unicode_type, i8),
     # Pointers of op's head vars (i.e. x.nxt and x.nxt.nxt are both heads of x)
+
+    "base_vars" : ListType(GenericVarType),
+    "head_vars" : ListType(GenericVarType),
     "head_var_ptrs" : i8[::1],
     "head_ranges" : head_range_type[::1],
 
@@ -301,13 +304,17 @@ class UntypedOp():
         arg_types = [] 
         all_const = True
         any_not_var = False
+        any_deref_vars = False
         for x in py_args:
+            # print(type(x))
             arg_types.append(resolve_return_type(x))
-            if(isinstance(x,(OpMeta,OpComp, Op)) or
-               (isinstance(x, Var) and len(x.deref_offsets) > 0)):
+            if(isinstance(x,(OpMeta,OpComp, Op))):
                 all_const = False
                 any_not_var = True
             elif(isinstance(x,(Var))):
+                if(len(x.deref_offsets) > 0):
+                    any_deref_vars = True
+
                 all_const = False
             else:
                 any_not_var = True
@@ -332,16 +339,66 @@ class UntypedOp():
         # self.members['signature'] = sig
         members = {**self.members, 'signature': sig}
 
-        if(any_not_var):
-            op = new_op(self.name, members)
-            return OpComp(op, *py_args).flatten()
+        if(any_not_var or any_deref_vars):
+            tup = (sig, str(py_args))#tuple([str(x) for x in py_args]))
+            # print(tup)
+            if(tup not in self._specialize_cache):
+                # print("MISS")
+                op = new_op(self.name, members)
+                op_comp = OpComp(op, *py_args)
+                op_cls = op_comp.flatten(return_class=True)
+                self._specialize_cache[tup] = op_cls
+                # op = op_cls.make_singleton_inst([x[0] for x in op_comp.head_vars.values()])
+            # else:
+                # print("HIT")
+
+            # with PrintElapse("E"):
+            op_cls = self._specialize_cache[tup]
+            head_vars = {}
+            base_to_arg_num = {}
+            for x in py_args:
+                # print(x,type(x),isinstance(x,Var))
+                if(isinstance(x,Var)):
+                    b_ptr = x.base_ptr
+                    if(b_ptr not in base_to_arg_num): base_to_arg_num[b_ptr] = len(base_to_arg_num)
+                    head_vars[(b_ptr, x.get_derefs_str())] = (x,base_to_arg_num[b_ptr])
+
+                if(isinstance(x, Op)):
+                    for h_var in x.head_vars:
+                        b_ptr = h_var.base_ptr
+                        if(b_ptr not in base_to_arg_num): base_to_arg_num[b_ptr] = len(base_to_arg_num)
+                        head_vars[(b_ptr, h_var.get_derefs_str())] = (h_var,base_to_arg_num[b_ptr])
+
+
+            # print(len(head_vars),head_vars.keys())
+            head_vars = [x[0] for x in sorted(head_vars.values(),key=lambda x : x[1])]
+
+            # print()
+            
+            #NOTE need to extract vars from input ops
+            # print("py_args", py_args)
+            # print("head_vars", head_vars)
+            op = op_cls.make_singleton_inst(head_vars=head_vars)
+            return op
+
+                # ???
+
+
+
+
+        # elif(any_not_var):
+        #     print("ANY NOT VAR")
+        #     op = new_op(self.name, members)
+        #     return OpComp(op, *py_args).flatten()
         else:
-            var_ptrs = np.array([v.get_ptr_incref() for v in py_args],dtype=np.int64)
+            var_ptrs = np.array([v.get_ptr() for v in py_args],dtype=np.int64)
             # Retreive from Cache/Make typed version 
             if(sig not in self._specialize_cache):
                 # print("MISS", sig)
                 op_cls = new_op(self.name, members,return_class=True)
                 self._specialize_cache[sig] = op_cls
+            # else:
+                # print("HIT")
             
             op_cls = self._specialize_cache[sig]
             return op_cls.make_singleton_inst(head_vars=py_args)
@@ -367,9 +424,9 @@ def resolve_return_type(x):
 
 
 
-@njit(cache=True)
-def var_to_ptr(x):
-    return _raw_ptr_from_struct_incref(x)
+# @njit(cache=True)
+# def var_to_ptr(x):
+#     return _raw_ptr_from_struct_incref(x)
 
 def new_vars_from_types(types, names):
     '''Generate vars with 'types' and 'names'
@@ -415,7 +472,7 @@ def gen_placeholder_aliases(var_ptrs):
 
 
 @njit(cache=True)
-def make_head_ranges(n_args,head_var_ptrs):
+def make_head_ranges(n_args, head_var_ptrs):
     head_ranges = np.empty((n_args,),
                             dtype=head_range_type)
     start, length = 0,0
@@ -450,14 +507,18 @@ def op_ctor(name, return_type_name, arg_type_names, head_var_ptrs,
     st.arg_type_names = arg_type_names
     st.base_var_map = Dict.empty(i8, unicode_type)
     st.inv_base_var_map = Dict.empty(unicode_type, i8)
+    st.base_vars = List.empty_list(GenericVarType)
+    st.head_vars = List.empty_list(GenericVarType)
 
     generated_aliases = gen_placeholder_aliases(head_var_ptrs)
     j = 0
     for head_ptr in head_var_ptrs:
         head_var = _struct_from_ptr(GenericVarType, head_ptr)
+        st.head_vars.append(head_var)
         base_ptr = i8(head_var.base_ptr)
         if(base_ptr not in st.base_var_map):
             base_var = _struct_from_ptr(GenericVarType, base_ptr)
+            st.base_vars.append(base_var)
             alias = base_var.alias
             if(alias == ""):
                 alias = generated_aliases[j]; j+=1;
@@ -725,10 +786,11 @@ class OpMeta(type):
         return cls._long_hash
 
 
-    def __del__(cls):
-        pass
+    # def __del__(cls):
+
+        # # pass
         # print("OP META DTOR")
-        # var_ptrs_dtor(???)
+        # var_ptrs_dtor(self.head_var_ptrs)
 
 @njit(cache=True)
 def var_ptrs_dtor(var_ptrs):
@@ -829,9 +891,13 @@ class Op(CREObjProxy,metaclass=OpMeta):
         '''Creates a singleton instance of the user defined subclass of Op.
             These instances unbox into the NRT as GenericOpType.
         '''        
-        if(head_vars is None): 
-            head_vars = cls.default_vars
-        head_var_ptrs = np.array([v.get_ptr_incref() for v in head_vars], dtype=np.int64)
+        if(isinstance(head_vars,np.ndarray)):
+            head_var_ptrs = head_vars
+        else:
+            if(head_vars is None): 
+                head_vars = cls.default_vars
+            head_var_ptrs = np.array([v.get_ptr() for v in head_vars], dtype=np.int64)
+
         # print("---------------")
         # print(cls.__name__,
         #     str(cls.signature.return_type),
@@ -853,6 +919,7 @@ class Op(CREObjProxy,metaclass=OpMeta):
             check_addr=cls.__dict__.get('check_addr',0),
             match_head_ptrs_addr=cls.match_head_ptrs_addr,
             )
+        # print("<<", op_inst, cls._expr_template)
         
         op_inst.__class__ = cls
         # set_expr_template(op_inst, cls._expr_template)
@@ -909,6 +976,10 @@ class Op(CREObjProxy,metaclass=OpMeta):
     @property
     def head_var_ptrs(self):
         return get_head_var_ptrs(self)
+
+    @property
+    def head_vars(self):
+        return get_head_vars(self)
 
     @property
     def head_ranges(self):
@@ -1131,6 +1202,10 @@ def get_head_var_ptrs(self):
     return self.head_var_ptrs
 
 @njit(cache=True)
+def get_head_vars(self):
+    return self.head_vars
+
+@njit(cache=True)
 def get_head_ranges(self):
     return self.head_ranges
 
@@ -1153,10 +1228,11 @@ def op_str(self):
     s = self.shorthand_template
     if(self.is_ptr_op):
         arg_names = List.empty_list(unicode_type)
-        for head_ptr in self.head_var_ptrs:
-            arg_names.append(_struct_from_ptr(GenericVarType, head_ptr).alias)
+        for head_var in self.head_vars:
+            arg_names.append(head_var.alias)
     else:
         arg_names = op_get_arg_names(self)
+    # print("arg_names", arg_names)
     for i,arg_name in enumerate(arg_names):
         s =  s.replace(f'{{{i}}}',arg_name)
     return s
@@ -1169,6 +1245,7 @@ def op_str(self):
 def op_repr(self):
     s = self.expr_template
     arg_names = op_get_arg_names(self)
+    # print("arg_names", arg_names)
     for i,arg_name in enumerate(arg_names):
         s =  s.replace(f'{{{i}}}',f'[{arg_name}:{self.arg_type_names[i]}]')
 
@@ -1376,6 +1453,7 @@ class OpComp():
         # print("<<",_vars)
         self.op = op
         self.base_vars = base_vars
+        # print(self.base_vars)
         self.head_vars = head_vars
         self.args = args
         self.arg_types = arg_types
@@ -1394,17 +1472,32 @@ class OpComp():
         
         self.instructions = instructions
 
-    def flatten(self):
+    def flatten(self, return_class=False):
         ''' Flattens the OpComp into a single Op. Generates the source
              for the new Op as needed.'''
         if(not hasattr(self,'_generate_op')):
             # print([type(x) for x in self.used_ops])
+
             long_hash = unique_hash([self.expr_template,*[op.unq for _,op in self.used_ops.values()]])
+            # print(long_hash)
             if(not source_in_cache('__GenerateOp__', long_hash)):
                 source = self.gen_flattened_op_src(long_hash)
                 source_to_cache('__GenerateOp__', long_hash, source)
             l = import_from_cached('__GenerateOp__', long_hash, ['__GenerateOp__'])
             op_cls = self._generate_op_cls = l['__GenerateOp__']
+            place_holder_arg_names = [f'{{{i}}}' for i in range(len(self.base_vars))]
+            op_cls._expr_template = self.gen_expr(arg_names=place_holder_arg_names)
+            op_cls._shorthand_template = self.gen_expr(arg_names=place_holder_arg_names, use_shorthand=True)
+
+            #Dynamically make subclass
+            # op_cls = type("__GenerateOp__", op_cls.__bases__,dict(op_cls.__dict__))
+            # op_cls.op_comp = self
+            
+            # print(op_cls._expr_template)
+            
+            if(return_class):
+                return op_cls
+
             # print("<<",type(op_cls))
             # print(get_cache_path('__GenerateOp__',long_hash))
 
@@ -1414,9 +1507,7 @@ class OpComp():
 
             op = self._generate_op = op_cls.make_singleton_inst([x[0] for x in self.head_vars.values()])
             op.op_comp = self
-            place_holder_arg_names = [f'{{{i}}}' for i in range(len(self.base_vars))]
-            set_expr_template(op, op.gen_expr(arg_names=place_holder_arg_names))
-            set_shorthand_template(op, op.gen_expr(arg_names=place_holder_arg_names, use_shorthand=True))
+            
             
         return self._generate_op
 

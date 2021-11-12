@@ -488,7 +488,7 @@ def test_ptr_ops():
         l3 = ObjEquals(a, a.nxt)
         assert str(l3) == '(a == a.nxt)'
 
-        print(type(l3).__dict__)
+        # print(type(l3).__dict__)
 
         # print(str(ObjEquals(a, a.nxt)))
 
@@ -552,8 +552,9 @@ class PrintElapse():
 
 if __name__ == "__main__":
     # test_boxing()
-    # test_op_arith_overloads()
-    # test_op_cmp_overloads()
+    test_op_arith_overloads()
+    test_op_cmp_overloads()
+    test_head_ptrs_ranges()
     # with PrintElapse("test_op_singleton"):
     #     test_op_singleton()
     # with PrintElapse("test_define_apply_op"):

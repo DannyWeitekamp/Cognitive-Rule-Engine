@@ -99,29 +99,29 @@ def test_ops():
     assert op('1','2','3') == 6.0
 
 if __name__ == "__main__":
-    test_to_str()
+    # test_to_str()
     # test_str_to_int()
-    # test_ops()
+    test_ops()
 
-    @njit
-    def test_nb_float():
-        str_to_float('-12312.0')
+    # @njit
+    # def test_nb_float():
+    #     str_to_float('-12312.0')
 
-    def test_py_float():
-        float("-12312.0")   
+    # def test_py_float():
+    #     float("-12312.0")   
 
-    @njit
-    def test_nb_int():
-        str_to_int("-123")  
+    # @njit
+    # def test_nb_int():
+    #     str_to_int("-123")  
 
-    def test_py_int():
-        int("-123") 
+    # def test_py_int():
+    #     int("-123") 
 
 
-    print("nb_float\t",time_ms(test_nb_float))
-    print("py_float\t",time_ms(test_py_float))
-    print("nb_int\t",time_ms(test_nb_int))
-    # print("nb_int_core\t",time_ms(test_nb_int_core))
-    print("py_int\t",time_ms(test_py_int))
-    print("float_to_str", time_ms(lambda : float_to_str(146.78)))
+    # print("nb_float\t",time_ms(test_nb_float))
+    # print("py_float\t",time_ms(test_py_float))
+    # print("nb_int\t",time_ms(test_nb_int))
+    # # print("nb_int_core\t",time_ms(test_nb_int_core))
+    # print("py_int\t",time_ms(test_py_int))
+    # print("float_to_str", time_ms(lambda : float_to_str(146.78)))
 

@@ -309,6 +309,7 @@ with cre_context("test_matching_benchmarks"):
 
 
 from weakref import WeakValueDictionary
+from cre.default_ops import LessThan, ObjEquals
 def test_mem_leaks():
     # with cre_context("test_matching_benchmarks"):
 
@@ -330,21 +331,50 @@ def test_mem_leaks():
     w = WeakValueDictionary()
     # print(l1._meminfo.refcount, l2._meminfo.refcount)
     # print([x._meminfo.refcount for x in w.keys()])
-    l1, l2 = Var(BOOPType,"l1"), Var(BOOPType,"l2")
-    l1, l2 = None,None; gc.collect()
-    print(used_bytes()-init_used)
+    for i in range(10):
+        l1, l2 = Var(BOOPType,"l1"), Var(BOOPType,"l2")
+        l1, l2 = None,None; gc.collect()
+        print(used_bytes()-init_used)
 
-    l1, l2 = Var(BOOPType,"l1"), Var(BOOPType,"l2")
-    c = (l1.B > 0)
-    c = None; gc.collect()
-    print(type(c),l1._meminfo.refcount,l2._meminfo.refcount)
-    c, l1, l2 = None, None,None; gc.collect()
-    print(used_bytes()-init_used)
+    print("LLb --")
+    for i in range(10):
+        l1, l2 = Var(BOOPType,"l1"), Var(BOOPType,"l2")
+        l1B = l1.B
+        l1, l2 = None,None; gc.collect()
+        print(used_bytes()-init_used)
 
-    l1, l2 = Var(BOOPType,"l1"), Var(BOOPType,"l2")
-    c = (l1.B > 0) & (l2.B != 3) 
-    c, l1, l2 = None, None,None; gc.collect()
-    print(used_bytes()-init_used)
+    print()
+    for i in range(10):
+        l1, l2 = Var(BOOPType,"l1"), Var(BOOPType,"l2")
+        l1B = l1.B
+        op = LessThan(l1B, l1B)
+        print(op._meminfo.refcount)
+        op, l1, l2 = None, None,None; gc.collect()
+
+        print(used_bytes()-init_used)
+
+    print()
+    for i in range(10):
+        l1, l2 = Var(BOOPType,"l1"), Var(BOOPType,"l2")
+        op = ObjEquals(l1, l2)
+        op, l1, l2 = None, None,None; gc.collect()
+        print(used_bytes()-init_used)
+
+
+    print()
+    for i in range(10):
+        l1, l2 = Var(BOOPType,"l1"), Var(BOOPType,"l2")
+        c = (l1.B > 0)
+        c = None; gc.collect()
+        # print(type(c),l1._meminfo.refcount,l2._meminfo.refcount)
+        c, l1, l2 = None, None,None; gc.collect()
+        print(used_bytes()-init_used)
+    print()
+    for i in range(10):
+        l1, l2 = Var(BOOPType,"l1"), Var(BOOPType,"l2")
+        c = (l1.B > 0) & (l2.B != 3) 
+        c, l1, l2 = None, None,None; gc.collect()
+        print(used_bytes()-init_used)
 
 
 
@@ -470,7 +500,7 @@ def test_b_matching_betas_lit(benchmark):
 
 if(__name__ == "__main__"):
     pass
-    # test_mem_leaks()
+    test_mem_leaks()
     # dat = matching_alphas_setup()[0]
     # dat = matching_betas_setup()[0]
 

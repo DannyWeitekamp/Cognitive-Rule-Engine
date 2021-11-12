@@ -39,11 +39,14 @@ var_fields_dict = {
     'is_not' : u1,
 
     # A pointer to the Var instance which is the NOT() of this Var
-    'conj_ptr' : ptr_t,
+    'conj_ptr' : i8,
 
     # The pointer of the Var instance before any attribute selection
     #   e.g. if '''v = Var(Type); v_b = v.B;''' then v_b.base_ptr = &v
     'base_ptr' : i8,
+
+    # A recounted reference to the base_ptr (only nonzero on derefs i.e. v.B)
+    'base_ptr_ref' : ptr_t,
 
     # The name of the Var 
     'alias' : unicode_type,
@@ -114,6 +117,7 @@ class Var(CREObjProxy):
         base_type_name = str(base_type)
 
         _derefs_str = self.get_derefs_str()
+        # print("_derefs_str", _derefs_str, type(_derefs_str))
         if(isinstance(attr_or_ind, str)):
             # ATTR case
             curr_head_type = self._head_type
@@ -370,6 +374,9 @@ class Var(CREObjProxy):
     #     ptr = 0#get_var_ptr(self)
     #     return ptr
 
+    def get_base_ptr(self):
+        return var_get_base_ptr(self)
+
     def get_ptr(self):
         return get_var_ptr(self)
 
@@ -377,7 +384,7 @@ class Var(CREObjProxy):
         return get_var_ptr_incref(self)
 
     def get_derefs_str(self):
-        if(not hasattr(self,'_derefs_str')):
+        if(self._derefs_str is None):
             self._derefs_str = str_var_derefs(self)
         return self._derefs_str
 
@@ -393,25 +400,25 @@ def get_var_ptr_incref(self):
     return _ptr_from_struct_incref(self)
 
 
-def var_cmp_alpha(left_var, op_str, right_var,negated):
-    from cre.conditions import pt_to_cond, gen_pterm_ctor_alpha, gen_pterm_ctor_beta
-    # Treat None as 0 for comparing against a fact ref
-    print("***", isinstance(left_var.head_type, Fact),isinstance(left_var.head_type, types.StructRef), left_var.head_type)
-    if(right_var is None and isinstance(left_var.head_type, types.StructRef)): right_var = 0
-    right_var_type = types.unliteral(types.literal(right_var)) #if (isinstance(right_var, types.NoneType)) else types.int64
-    ctor = gen_pterm_ctor_alpha(left_var, op_str, right_var_type)
-    pt = ctor(left_var, op_str, right_var)
-    lbv = cast_structref(GenericVarType,left_var)
-    return pt_to_cond(pt, lbv, None, negated)
+# def var_cmp_alpha(left_var, op_str, right_var,negated):
+#     from cre.conditions import pt_to_cond, gen_pterm_ctor_alpha, gen_pterm_ctor_beta
+#     # Treat None as 0 for comparing against a fact ref
+#     print("***", isinstance(left_var.head_type, Fact),isinstance(left_var.head_type, types.StructRef), left_var.head_type)
+#     if(right_var is None and isinstance(left_var.head_type, types.StructRef)): right_var = 0
+#     right_var_type = types.unliteral(types.literal(right_var)) #if (isinstance(right_var, types.NoneType)) else types.int64
+#     ctor = gen_pterm_ctor_alpha(left_var, op_str, right_var_type)
+#     pt = ctor(left_var, op_str, right_var)
+#     lbv = cast_structref(GenericVarType,left_var)
+#     return pt_to_cond(pt, lbv, None, negated)
     
 
-def var_cmp_beta(left_var, op_str, right_var, negated):
-    from cre.conditions import pt_to_cond, gen_pterm_ctor_alpha, gen_pterm_ctor_beta
-    ctor = gen_pterm_ctor_beta(left_var, op_str, right_var)
-    pt = ctor(left_var, op_str, right_var)
-    lbv = cast_structref(GenericVarType,left_var)
-    rbv = cast_structref(GenericVarType,right_var)
-    return pt_to_cond(pt, lbv, rbv, negated)
+# def var_cmp_beta(left_var, op_str, right_var, negated):
+#     from cre.conditions import pt_to_cond, gen_pterm_ctor_alpha, gen_pterm_ctor_beta
+#     ctor = gen_pterm_ctor_beta(left_var, op_str, right_var)
+#     pt = ctor(left_var, op_str, right_var)
+#     lbv = cast_structref(GenericVarType,left_var)
+#     rbv = cast_structref(GenericVarType,right_var)
+#     return pt_to_cond(pt, lbv, rbv, negated)
 
 
 def check_legal_cmp(var, op_str, other_var):
@@ -474,10 +481,11 @@ def get_var_definition(base_type, head_type):
 def var_ctor(var_struct_type, base_type_name="", alias=""):
     st = new(var_struct_type)
     st.is_not = u1(0)
-    st.conj_ptr = ptr_t(0)
+    st.conj_ptr = i8(0)
     st.base_type_name = base_type_name
     st.head_type_name = base_type_name
     st.base_ptr = i8(_raw_ptr_from_struct(st))
+    st.base_ptr_ref = ptr_t(0)
     st.alias =  "" if(alias is  None) else alias
     st.deref_attrs = List.empty_list(unicode_type)
     st.deref_offsets = np.empty(0,dtype=deref_type)
@@ -585,10 +593,11 @@ def var_memcopy(self,st):
     #     new_deref_offsets[i] = y
 
     lower_setattr(st,'is_not', lower_getattr(self,"is_not"))
-    lower_setattr(st,'base_ptr',lower_getattr(self,"base_ptr"))
-    lower_setattr(st,'alias',lower_getattr(self,"alias"))
+    lower_setattr(st,'base_ptr', lower_getattr(self,"base_ptr"))
+    lower_setattr(st,'base_ptr_ref', lower_getattr(self,"base_ptr_ref"))
+    lower_setattr(st,'alias', lower_getattr(self,"alias"))
     lower_setattr(st,'deref_attrs',new_deref_attrs)
-    lower_setattr(st,'deref_offsets',lower_getattr(self,"deref_offsets").copy())
+    lower_setattr(st,'deref_offsets', lower_getattr(self,"deref_offsets").copy())
     base_type_name = lower_getattr(self,"base_type_name")
     lower_setattr(st,'base_type_name',str(base_type_name))
     head_type_name = lower_getattr(self,"head_type_name")
@@ -613,22 +622,25 @@ def var_append_deref(self, attr, a_id, offset, fact_num, head_type_name, typ=DER
 
     lower_setattr(self,'deref_offsets', new_deref_offsets)
     lower_setattr(self,'head_type_name', head_type_name)
+    # lower_setattr(self,'base_ptr_ref', ptr_t(lower_getattr(self,"base_ptr")))
 
 
 @njit(cache=True)
 def new_appended_var(struct_type, base_var, attr, a_id, offset, head_type_name, fact_num=-1, typ=DEREF_TYPE_ATTR):
-    _incref_structref(base_var)
+    # _incref_structref(base_var)
     st = new(struct_type)
     var_memcopy(base_var,st)
     var_append_deref(st,attr, a_id, offset, fact_num, head_type_name, typ)
+    lower_setattr(st,'base_ptr_ref', _ptr_from_struct_incref(base_var))
     return st
 
 @njit(GenericVarType(GenericVarType, unicode_type, u1, i8, unicode_type, i8, i8), cache=True)
 def new_appended_var_generic(base_var, attr, a_id, offset, head_type_name, fact_num=-1, typ=DEREF_TYPE_ATTR):
-    _incref_structref(base_var)
+    # _incref_structref(base_var)
     st = new(GenericVarType)
     var_memcopy(base_var,st)
     var_append_deref(st,attr, a_id, offset, fact_num, head_type_name, typ)
+    lower_setattr(st,'base_ptr_ref', _ptr_from_struct_incref(base_var))
     return st
 
 

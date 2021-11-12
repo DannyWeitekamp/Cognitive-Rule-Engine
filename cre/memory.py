@@ -236,12 +236,12 @@ class Memory(structref.StructRefProxy):
     
 
     def __del__(self):
-        print("DECONSTRUCTOR")
+        # print("DECONSTRUCTOR")
         # mem_dtor(self)
         try:
             mem_data_dtor(self.mem_data)
         except Exception as e:
-            print("$$",e)
+            print("An error occured when trying to clean a cre.Memory object:\n",e)
 
 @njit(cache=True)
 def get_halt_flag(self):

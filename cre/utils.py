@@ -527,11 +527,9 @@ def _func_from_address(typingctx, func_type_ref, addr):
     '''Recovers a function from it's signature and address '''
     
     func_type = func_type_ref.instance_type
-    print(func_type)
     def codegen(context, builder, sig, args):
         _, addr = args
 
-        pyapi = context.get_python_api(builder)
         sfunc = cgutils.create_struct_proxy(func_type)(context, builder)
 
         llty = context.get_value_type(types.voidptr)
@@ -543,6 +541,20 @@ def _func_from_address(typingctx, func_type_ref, addr):
 
 
     sig = func_type(func_type_ref, addr)
+    return sig, codegen
+
+
+@intrinsic
+def _address_from_func(typingctx, func_type_ref, func):
+    '''Gets the address of a function_type'''
+    func_type = func_type_ref.instance_type
+    def codegen(context, builder, sig, args):
+        _, func = args
+        sfunc = cgutils.create_struct_proxy(func_type)(context, builder, func)
+        addr = builder.ptrtoint(sfunc.addr, cgutils.intp_t)
+        return addr
+
+    sig = i8(func_type_ref, func_type)
     return sig, codegen
 
 

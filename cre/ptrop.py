@@ -71,8 +71,8 @@ class UntypedPtrOp():
             self._specialize_cache[n_args] = op_cls
 
         op_cls = self._specialize_cache[n_args]
-        with PrintElapse("new_ptr_op"):        
-            return op_cls.make_singleton_inst(head_vars=py_args)
+        # with PrintElapse("new_ptr_op"):        
+        return op_cls.make_singleton_inst(head_vars=py_args)
 
         # with PrintElapse("new_ptr_op"):
         #     return new_ptr_op(self.name, members, var_ptrs=var_ptrs)
@@ -227,27 +227,27 @@ class PtrOp(Op,metaclass=PtrOpMeta):
 
     @classmethod
     def make_singleton_inst(cls, head_vars=None):
-        with PrintElapse("make_templates"):
-            _expr_template = cls._expr_template
-            _shorthand_template = cls._shorthand_template
-            if(head_vars is None):
-                head_vars = cls.default_vars
-            else:
-                _expr_template, _shorthand_template = cls._str_templates_from_var_ptrs(head_vars)
-                head_var_ptrs = np.array([v.get_ptr_incref() for v in head_vars], dtype=np.int64)
+        # with PrintElapse("make_templates"):
+        _expr_template = cls._expr_template
+        _shorthand_template = cls._shorthand_template
+        if(head_vars is None):
+            head_vars = cls.default_vars
+        else:
+            _expr_template, _shorthand_template = cls._str_templates_from_var_ptrs(head_vars)
+            head_var_ptrs = np.array([v.get_ptr() for v in head_vars], dtype=np.int64)
 
 
-        with PrintElapse("new_OP"):
-            op_inst = op_ctor(
-                cls.__name__,
-                str(types.boolean),
-                cls.arg_type_names,
-                head_var_ptrs,
-                _expr_template,
-                _shorthand_template,
-                match_head_ptrs_addr=cls.match_head_ptrs_addr,
-                is_ptr_op=True
-                )
+        # with PrintElapse("new_OP"):
+        op_inst = op_ctor(
+            cls.__name__,
+            str(types.boolean),
+            cls.arg_type_names,
+            head_var_ptrs,
+            _expr_template,
+            _shorthand_template,
+            match_head_ptrs_addr=cls.match_head_ptrs_addr,
+            is_ptr_op=True
+            )
         
         op_inst.__class__ = cls
 
@@ -264,5 +264,10 @@ class PtrOp(Op,metaclass=PtrOpMeta):
             # for i, v in enumerate(py_args):
             #     head_var_ptrs[i] = v.get_ptr()
             return self.__class__.make_singleton_inst(py_args)
+
+    # def __del__(cls):
+    #     # pass
+    #     print("OP META DTOR")
+    #     var_ptrs_dtor(self.head_var_ptrs)
 
 

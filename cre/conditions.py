@@ -308,6 +308,11 @@ class Conditions(structref.StructRefProxy):
     def distr_dnf(self):
         return conds_get_distr_dnf(self)
 
+    @property
+    def rete_graph(self):
+        from cre.rete import conds_get_rete_graph
+        return conds_get_rete_graph(self)
+
     def as_dnf_list(self):
         return as_dnf_list(self)
 
@@ -425,6 +430,8 @@ def conds_get_distr_dnf(self):
     if(not self.has_distr_dnf):
         self.distr_dnf = build_distributed_dnf(self)
     return self.distr_dnf
+
+
 
 
 @overload_method(ConditionsTypeTemplate,'get_matches')

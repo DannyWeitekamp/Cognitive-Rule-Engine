@@ -218,7 +218,8 @@ def test_multiple_deref():
 
 
 
-def test_NOT():
+def _test_NOT():
+    '''TODO: FIXME'''
     with cre_context("test_NOT"):
         BOOP, BOOPType = define_fact("BOOP",{"name": "string", "B" : "number"})
 
@@ -289,7 +290,7 @@ def test_multiple_types():
 
 def used_bytes():
     stats = rtsys.get_allocation_stats()
-    print(stats)
+    # print(stats)
     return stats.alloc-stats.free
 
 
@@ -330,70 +331,92 @@ def test_mem_leaks():
     # print(l1,l2)
     w = WeakValueDictionary()
     # print(l1._meminfo.refcount, l2._meminfo.refcount)
-    # print([x._meminfo.refcount for x in w.keys()])
+
+    # Vars    
     for i in range(10):
         l1, l2 = Var(BOOPType,"l1"), Var(BOOPType,"l2")
         l1, l2 = None,None; gc.collect()
-        print(used_bytes()-init_used)
+        # print(used_bytes()-init_used)
+        assert used_bytes()==init_used
 
-    print("LLb --")
+    # print()
+    # Explicit op 1 literal
     for i in range(10):
         l1, l2 = Var(BOOPType,"l1"), Var(BOOPType,"l2")
-        l1B = l1.B
-        l1, l2 = None,None; gc.collect()
-        print(used_bytes()-init_used)
-
-    print()
-    for i in range(10):
-        l1, l2 = Var(BOOPType,"l1"), Var(BOOPType,"l2")
-        l1B = l1.B
-        op = LessThan(l1B, l1B)
-        print(op._meminfo.refcount)
+        op = LessThan(l1.B, l1.B)
         op, l1, l2 = None, None,None; gc.collect()
+        if(i==0): init_used = used_bytes()
+        # print(used_bytes()-init_used)
+        assert used_bytes()==init_used
 
-        print(used_bytes()-init_used)
-
-    print()
+    # print()
+    # Explicit ptrop 1 literal
     for i in range(10):
         l1, l2 = Var(BOOPType,"l1"), Var(BOOPType,"l2")
         op = ObjEquals(l1, l2)
         op, l1, l2 = None, None,None; gc.collect()
-        print(used_bytes()-init_used)
+        if(i==0): init_used = used_bytes()
+        # print(used_bytes()-init_used)
+        assert used_bytes()==init_used
 
 
-    print()
+    # Shorthand 1 literal
     for i in range(10):
         l1, l2 = Var(BOOPType,"l1"), Var(BOOPType,"l2")
         c = (l1.B > 0)
         c = None; gc.collect()
         # print(type(c),l1._meminfo.refcount,l2._meminfo.refcount)
         c, l1, l2 = None, None,None; gc.collect()
-        print(used_bytes()-init_used)
-    print()
+        if(i==0): init_used = used_bytes()
+        # print(used_bytes()-init_used)
+        assert used_bytes()==init_used
+    # print()
+
+    # AND
     for i in range(10):
         l1, l2 = Var(BOOPType,"l1"), Var(BOOPType,"l2")
         c = (l1.B > 0) & (l2.B != 3) 
         c, l1, l2 = None, None,None; gc.collect()
-        print(used_bytes()-init_used)
+        if(i==0): init_used = used_bytes()
+        # print(used_bytes()-init_used)
+        assert used_bytes()==init_used
 
 
 
+    # Alphas setup 
+    (c,mem),_ = matching_alphas_setup()    
+    c, mem = None, None; gc.collect()
+    assert used_bytes()==init_used
 
-    (c,mem),_ = matching_alphas_setup()
-    print(c._meminfo.refcount, mem._meminfo.refcount)
-    
-    mem = None; gc.collect()
-    print("aft_mem",used_bytes()-init_used)
-    c = None; gc.collect()
-    print("aft_c",used_bytes()-init_used)
-    # w[0] = c
-    # w[1] = mem
-    c,mem = None,None; gc.collect()
-    print(used_bytes()-init_used)
-
+    # Betas setup
     (c,mem),_ = matching_betas_setup()
     c,mem = None,None; gc.collect()
-    print(used_bytes()-init_used)
+    assert used_bytes()==init_used
+
+    (c,mem),_ = matching_alphas_setup()
+    print("c", c._meminfo.refcount)
+
+    from cre.rete import update_graph, build_rete_graph
+    # rete_graph = build_rete_graph(mem, c)
+    # update_graph(rete_graph)
+    with cre_context("test_matching_benchmarks") as ctxt:
+        matches = c.get_matches(mem)
+
+    # distr_dnf = c.distr_dnf
+    # rete_graph = c.rete_graph
+    # print("c", c._meminfo.refcount, 'rete_graph', rete_graph._meminfo.refcount, "matches", matches._meminfo.refcount)
+    c,matches,mem,ctxt = None,None,None,None; gc.collect()
+
+    # print('rete_graph', rete_graph._meminfo.refcount)
+
+
+    # print(used_bytes(),init_used)
+    assert used_bytes()==init_used
+
+
+
+
+
 
 
 
@@ -482,18 +505,20 @@ def do_update_graph(c,mem):
 
 def test_b_matching_alphas_lit(benchmark):
     # with cre_context("test_matching_benchmarks") as ctxt:
-    benchmark.pedantic(apply_get_matches,setup=matching_alphas_setup, warmup_rounds=1, rounds=20)
-    alloc_stats = rtsys.get_allocation_stats()
-    gc.collect()
-    assert(alloc_stats.free==alloc_stats.alloc), f'{alloc_stats}'
+    benchmark.pedantic(apply_get_matches,setup=matching_alphas_setup, warmup_rounds=1, rounds=10)
+    # alloc_stats = rtsys.get_allocation_stats()
+    # gc.collect()
+    # print(alloc_stats.alloc-alloc_stats.free)
+    # assert(alloc_stats.free==alloc_stats.alloc), f'{alloc_stats}'
 
 def test_b_matching_betas_lit(benchmark):
     # with cre_context("test_matching_benchmarks") as ctxt:
     # alloc_stats1 = rtsys.get_allocation_stats()
-    benchmark.pedantic(do_update_graph,setup=matching_betas_setup, warmup_rounds=1, rounds=20)
-    alloc_stats = rtsys.get_allocation_stats()
-    gc.collect()
-    assert(alloc_stats.free==alloc_stats.alloc), f'{alloc_stats}'
+    benchmark.pedantic(do_update_graph,setup=matching_betas_setup, warmup_rounds=1, rounds=10)
+    # alloc_stats = rtsys.get_allocation_stats()
+    # gc.collect()
+    # print(alloc_stats.alloc-alloc_stats.free)
+    # assert(alloc_stats.free==alloc_stats.alloc), f'{alloc_stats}'
 
 
 # def diff_increases()
@@ -527,7 +552,7 @@ if(__name__ == "__main__"):
     # print(alloc_stats1.alloc-alloc_stats1.free, alloc_stats2.alloc-alloc_stats2.free)
 
 
-    test_ref_matching()
+    # test_ref_matching()
     # test_multiple_deref()
     # test_applying()
     # test_matching()

@@ -40,6 +40,7 @@ from textwrap import dedent, indent
 from collections.abc import Iterable
 from cre.op import Op, OpMeta, UntypedOp, resolve_return_type, new_vars_from_types, op_ctor
 from cre.utils import PrintElapse
+from cre.cre_object import CREObjType
 import warnings
 
 
@@ -63,12 +64,16 @@ class UntypedPtrOp():
         
         n_args = len(py_args)
         if(n_args not in self._specialize_cache):
-            arg_types = [resolve_return_type(x) for x in py_args]
+            arg_types = [CREObjType for x in py_args]
             sig = boolean(*arg_types)
             members = {**self.members}
             members['signature'] = sig
             op_cls = new_ptr_op(self.name, members,return_class=True)
             self._specialize_cache[n_args] = op_cls
+        # else:
+        #     print("HIT")
+        #     print("<<",self._specialize_cache[n_args]._expr_template)
+
 
         op_cls = self._specialize_cache[n_args]
         # with PrintElapse("new_ptr_op"):        

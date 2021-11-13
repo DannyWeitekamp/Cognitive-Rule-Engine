@@ -1191,7 +1191,7 @@ node_mem_list_type = ListType(NodeMemoryType)
 rete_graph_field_dict = {
     "change_head" : i8,
     "mem" : MemoryType,
-    "conds" : ConditionsType,
+    # "conds" : ConditionsType,
     "nodes_by_nargs" : ListType(ListType(BaseReteNodeType)),
     "var_root_nodes" : DictType(i8,BaseReteNodeType),
     "var_end_nodes" : DictType(i8,BaseReteNodeType),
@@ -1211,7 +1211,7 @@ def rete_graph_ctor(mem, conds, nodes_by_nargs, var_root_nodes, var_end_nodes,
     st = new(ReteGraphType)
     st.change_head = 0
     st.mem = mem
-    st.conds = conds
+    # st.conds = conds
     st.nodes_by_nargs = nodes_by_nargs
     st.var_root_nodes = var_root_nodes
     st.var_end_nodes = var_end_nodes
@@ -1230,10 +1230,16 @@ def rete_graph_ctor(mem, conds, nodes_by_nargs, var_root_nodes, var_end_nodes,
 #         _decref_ptr(self.match_iter_prototype_ptr)
 
 
-@njit(ConditionsType(ReteGraphType,), cache=True)
-def rete_graph_get_conds(self):
-    return self.conds
+# @njit(ConditionsType(ReteGraphType,), cache=True)
+# def rete_graph_get_conds(self):
+#     return self.conds
 
+
+@njit(cache=False)
+def conds_get_rete_graph(self):
+    if(not self.matcher_inst_ptr == 0):
+        return _struct_from_ptr(ReteGraphType,self.matcher_inst_ptr)
+    return None
 
 @njit(cache=True)
 def _global_map_insert(idrec, g_map, node):
@@ -1571,7 +1577,7 @@ def parse_mem_change_queue(r_graph):
 
 
 match_iterator_node_field_dict = {
-    "graph" : ReteGraphType,
+    # "graph" : ReteGraphType,
     "node" : BaseReteNodeType,
     "associated_arg_ind" : i8,
     "depends_on_var_ind" : i8,
@@ -1661,6 +1667,10 @@ class MatchIterator(structref.StructRefProxy):
     def __iter__(self):
         return self
 
+    def __del__(self):
+        pass
+
+
 
 
 @structref.register
@@ -1688,12 +1698,12 @@ def downcast(context, builder, fromty, toty, val):
 # def copy_iter_nodes()
 
 
-@njit(GenericMatchIteratorType(GenericMatchIteratorType),cache=True)
-def copy_match_iter(m_iter):
+@njit(GenericMatchIteratorType(GenericMatchIteratorType, ReteGraphType),cache=True)
+def copy_match_iter(m_iter, graph):
     m_iter_nodes = List.empty_list(MatchIterNodeType)
     for i,m_node in enumerate(m_iter.iter_nodes):
         new_m_node = new(MatchIterNodeType)
-        new_m_node.graph = m_node.graph
+        # new_m_node.graph = m_node.graph
         new_m_node.node = m_node.node
         new_m_node.var_ind = m_node.var_ind
         new_m_node.associated_arg_ind = m_node.associated_arg_ind
@@ -1704,7 +1714,7 @@ def copy_match_iter(m_iter):
         m_iter_nodes.append(new_m_node)
 
     new_m_iter = new(GenericMatchIteratorType)
-    new_m_iter.graph = m_iter.graph 
+    new_m_iter.graph = graph 
     new_m_iter.iter_nodes = m_iter_nodes 
     new_m_iter.is_empty = m_iter.is_empty
 
@@ -1722,7 +1732,7 @@ def new_match_iter(graph):
             node = graph.var_end_nodes[i]
 
             m_node = new(MatchIterNodeType)
-            m_node.graph = graph
+            # m_node.graph = graph
             m_node.node = node
             m_node.var_ind = i
             m_node.associated_arg_ind = np.argmax(node.var_inds==i)#node.outputs[np.argmax(node.var_inds==i)]
@@ -1747,14 +1757,14 @@ def new_match_iter(graph):
             rev_m_iter_nodes.append(m_iter_nodes[i])
 
         m_iter = new(GenericMatchIteratorType)
-        m_iter.graph = graph 
+        # m_iter.graph = graph #Don't keep ref in the prototype to avoid cyclic refs
         m_iter.iter_nodes = rev_m_iter_nodes 
         m_iter.is_empty = False
         # graph.match_iter_prototype_meminfo = _meminfo_from_struct(m_iter)
         graph.match_iter_prototype_ptr = _ptr_from_struct_incref(m_iter)
     
     prototype = _struct_from_ptr(GenericMatchIteratorType, graph.match_iter_prototype_ptr)
-    m_iter = copy_match_iter(prototype)
+    m_iter = copy_match_iter(prototype,graph)
     
     return m_iter
 

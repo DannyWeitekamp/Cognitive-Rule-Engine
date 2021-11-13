@@ -475,7 +475,12 @@ def test_ptr_ops():
         a,b,c = Var(BOOP,"a"), Var(BOOP,"b"), Var(BOOP,"c")    
 
         l1 = ObjIsNone(a.nxt)
+
+
+        # l2 = ObjEquals(b.nxt, c.nxt)
         l2 = ObjEquals(a.nxt, b.nxt)
+
+
 
         #TODO: need to make test for this
         # assert l1.match_head_ptrs(np.zeros(1,dtype=np.int64)) == True
@@ -483,8 +488,11 @@ def test_ptr_ops():
         # assert l2.match_head_ptrs(np.arange(2,dtype=np.int64)) == False
 
         assert str(l2) == '(a.nxt == b.nxt)'
-        assert repr(l2) == 'ObjEquals([a:BOOP].nxt, [b:BOOP].nxt)'
 
+        print(repr(l2))
+        assert repr(l2) == 'ObjEquals([a:cre.CREObjType].nxt, [b:cre.CREObjType].nxt)'
+
+        # l3 = ObjEquals(a, b.nxt)
         l3 = ObjEquals(a, a.nxt)
         assert str(l3) == '(a == a.nxt)'
 

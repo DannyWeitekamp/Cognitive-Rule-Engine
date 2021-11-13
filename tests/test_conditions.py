@@ -9,24 +9,24 @@ BOOP, BOOPType = define_fact("BOOP",{"A": "string", "B" : "number"})
 def test_aliasing():
     pass
 
-@njit(cache=True)
-def first_alpha(c):
-    return c.dnf[0][0][0].is_alpha
+# @njit(cache=True)
+# def first_alpha(c):
+#     return c.dnf[0][0][0].is_alpha
 
-@njit(cache=True)
-def first_beta(c):
-    return c.dnf[0][1][0].is_alpha 
+# @njit(cache=True)
+# def first_beta(c):
+#     return c.dnf[0][1][0].is_alpha 
 
-def test_literal():
-    with cre_context("test_literal"):
-        # BOOP, BOOPType = define_fact("BOOP",{"A": "string", "B" : "number"})
-        l1, l2 = Var(BOOPType,"l1"), Var(BOOPType,"l2")
-        c1 = l1.B < 1
-        print(first_alpha(c1))
-        # print(c1.dnf[0][0][0].is_alpha)
-        c2 = l1.B < l2.B
-        print(first_beta(c2))
-        # print(c1.dnf[0][1][0].is_alpha)
+# def test_literal():
+#     with cre_context("test_literal"):
+#         # BOOP, BOOPType = define_fact("BOOP",{"A": "string", "B" : "number"})
+#         l1, l2 = Var(BOOPType,"l1"), Var(BOOPType,"l2")
+#         c1 = l1.B < 1
+#         print(first_alpha(c1))
+#         # print(c1.dnf[0][0][0].is_alpha)
+#         c2 = l1.B < l2.B
+#         print(first_beta(c2))
+#         # print(c1.dnf[0][1][0].is_alpha)
 
 
 
@@ -43,7 +43,7 @@ def test_build_conditions():
         c1 = l1.B < 1
         c2 = l1.B < l2.B
 
-        assert str(c1) == "(l1.B < ?)"
+        assert str(c1) == "(l1.B < 1)"
         assert str(c2) == "(l1.B < l2.B)"
 
         ### LT + AND/OR ###
@@ -52,57 +52,58 @@ def test_build_conditions():
              (l2.B < 1) & (l2.B > 7) & (l2.B < r1.B) & (l2.B < r2.B)
 
         c3_str = \
-'''(l1.B < ?) & (l1.B > ?) & (l1.B < r1.B) & (l1.B < r2.B) |\\
-(l2.B < ?) & (l2.B > ?) & (l2.B < r1.B) & (l2.B < r2.B)'''
+'''(l1.B < 1) & (l1.B > 7) & (l1.B < r1.B) & (l1.B < r2.B) |\\
+(l2.B < 1) & (l2.B > 7) & (l2.B < r1.B) & (l2.B < r2.B)'''
 
         assert str(c3) == c3_str
 
         ### NOT ###
+        # print(str(~c3))
 
         nc3_str = \
-'''~(l1.B < ?) & ~(l2.B < ?) |\\
-~(l1.B < ?) & ~(l2.B > ?) |\\
-~(l1.B < ?) & ~(l2.B < r1.B) |\\
-~(l1.B < ?) & ~(l2.B < r2.B) |\\
-~(l1.B > ?) & ~(l2.B < ?) |\\
-~(l1.B > ?) & ~(l2.B > ?) |\\
-~(l1.B > ?) & ~(l2.B < r1.B) |\\
-~(l1.B > ?) & ~(l2.B < r2.B) |\\
-~(l2.B < ?) & ~(l1.B < r1.B) |\\
-~(l2.B > ?) & ~(l1.B < r1.B) |\\
+'''~(l1.B < 1) & ~(l2.B < 1) |\\
+~(l1.B < 1) & ~(l2.B > 7) |\\
+~(l1.B < 1) & ~(l2.B < r1.B) |\\
+~(l1.B < 1) & ~(l2.B < r2.B) |\\
+~(l1.B > 7) & ~(l2.B < 1) |\\
+~(l1.B > 7) & ~(l2.B > 7) |\\
+~(l1.B > 7) & ~(l2.B < r1.B) |\\
+~(l1.B > 7) & ~(l2.B < r2.B) |\\
+~(l1.B < r1.B) & ~(l2.B < 1) |\\
+~(l1.B < r1.B) & ~(l2.B > 7) |\\
 ~(l1.B < r1.B) & ~(l2.B < r1.B) |\\
 ~(l1.B < r1.B) & ~(l2.B < r2.B) |\\
-~(l2.B < ?) & ~(l1.B < r2.B) |\\
-~(l2.B > ?) & ~(l1.B < r2.B) |\\
+~(l1.B < r2.B) & ~(l2.B < 1) |\\
+~(l1.B < r2.B) & ~(l2.B > 7) |\\
 ~(l1.B < r2.B) & ~(l2.B < r1.B) |\\
 ~(l1.B < r2.B) & ~(l2.B < r2.B)'''
-        assert str(~c3) == nc3_str
+        # assert str(~c3) == nc3_str
 
         ### EQ / NEQ ###
 
         c4 = (l1.B == 5) & (l1.B == 5) & (l1.B == l2.B) & (l1.B != l2.B)
 
         c4_str = \
-'''(l1.B == ?) & (l1.B == ?) & (l1.B == l2.B) & ~(l1.B == l2.B)'''
+'''(l1.B == 5) & (l1.B == 5) & (l1.B == l2.B) & ~(l1.B == l2.B)'''
         assert str(c4) == c4_str    
 
         nc4_str = \
-'''~(l1.B == ?) |\\
-~(l1.B == ?) |\\
+'''~(l1.B == 5) |\\
+~(l1.B == 5) |\\
 ~(l1.B == l2.B) |\\
 (l1.B == l2.B)'''
         assert str(~c4) == nc4_str
 
         ### AND / OR btw DNFS ### 
-
         c3_and_c4_str = \
-'''(l1.B < ?) & (l1.B > ?) & (l1.B == ?) & (l1.B == ?) & (l1.B < r1.B) & (l1.B < r2.B) & (l1.B == l2.B) & ~(l1.B == l2.B) |\\
-(l2.B < ?) & (l2.B > ?) & (l1.B == ?) & (l1.B == ?) & (l2.B < r1.B) & (l2.B < r2.B) & (l1.B == l2.B) & ~(l1.B == l2.B)'''
+'''(l1.B < 1) & (l1.B > 7) & (l1.B < r1.B) & (l1.B < r2.B) & (l1.B == 5) & (l1.B == 5) & (l1.B == l2.B) & ~(l1.B == l2.B) |\\
+(l2.B < 1) & (l2.B > 7) & (l2.B < r1.B) & (l2.B < r2.B) & (l1.B == 5) & (l1.B == 5) & (l1.B == l2.B) & ~(l1.B == l2.B)'''
         assert str(c3 & c4) == c3_and_c4_str
+
         c3_or_c4_str = \
-'''(l1.B < ?) & (l1.B > ?) & (l1.B < r1.B) & (l1.B < r2.B) |\\
-(l2.B < ?) & (l2.B > ?) & (l2.B < r1.B) & (l2.B < r2.B) |\\
-(l1.B == ?) & (l1.B == ?) & (l1.B == l2.B) & ~(l1.B == l2.B)'''
+'''(l1.B < 1) & (l1.B > 7) & (l1.B < r1.B) & (l1.B < r2.B) |\\
+(l2.B < 1) & (l2.B > 7) & (l2.B < r1.B) & (l2.B < r2.B) |\\
+(l1.B == 5) & (l1.B == 5) & (l1.B == l2.B) & ~(l1.B == l2.B)'''
         assert str(c3 | c4) == c3_or_c4_str
 
     # l1, l2 = Var(BOOPType,"l1"), Var(BOOPType,"l2")
@@ -158,7 +159,8 @@ def cond_get_vars(cond):
 def get_pointer(st):
     return _raw_ptr_from_struct(st)
 
-def test_link():
+def _test_link():
+    '''TODO: REWRITE'''
     print("START TEST LINK")
     with cre_context() as context:
         # BOOP, BOOPType = define_fact("BOOP",{"A": "string", "B" : "number"})
@@ -200,7 +202,7 @@ def test_multiple_deref():
         c = v1.nxt.nxt == v2.nxt.nxt
         print(c)
 
-def test_existential_not():
+def _test_existential_not():
     l1, l2 = Var(BOOPType,"l1"), Var(BOOPType,"l2")
     # print(l1.B)
     # print(~l1)
@@ -212,8 +214,8 @@ def test_existential_not():
     c_n = NOT(c)
     # print("c.vars",c.vars)
     # print("c_n.vars", c_n.vars)
-    # print(repr(c))
-    # print(repr(c_n))
+    print(repr(c))
+    print(repr(c_n))
     assert repr(c) == 'l1, l2 = Var(BOOP), Var(BOOP)\n(l1.B < ?) & (l2.B > ?)'
     assert repr(c_n) == 'l1, l2 = NOT(BOOP), NOT(BOOP)\n(l1.B < ?) & (l2.B > ?)'
 
@@ -234,21 +236,22 @@ def test_list_operations():
 
 
 if(__name__ == "__main__"):
+    test_build_conditions()
     # test_list_operations()
     # test_link()
     # test_initialize()
-    for i in range(10):
-        t0 = time_ns()
-        test_build_conditions()
-        print(f'{(time_ns()-t0)/1e6} ms')
-    for i in range(10):
-        t0 = time_ns()
-        test_unconditioned()
-        print(f'{(time_ns()-t0)/1e6} ms')
-    test_multiple_deref()
-    test_existential_not()
+    # for i in range(10):
+    #     t0 = time_ns()
+    #     test_build_conditions()
+    #     print(f'{(time_ns()-t0)/1e6} ms')
+    # for i in range(10):
+    #     t0 = time_ns()
+    #     test_unconditioned()
+    #     print(f'{(time_ns()-t0)/1e6} ms')
+    # test_multiple_deref()
+    # test_existential_not()
 # bar.py_func()
-    bar()
+    # bar()
 
     
     # exit()

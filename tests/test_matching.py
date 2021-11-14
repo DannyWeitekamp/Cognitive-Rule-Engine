@@ -321,19 +321,8 @@ def test_mem_leaks():
 
     init_used = used_bytes()
 
-    #Do this to avoid the global ref from auto_aliasing stuff
-    
-
-
-    # print(l1)
-    # print(globals()['l1'])
-    # print(locals())
-    # print(l1,l2)
-    w = WeakValueDictionary()
-    # print(l1._meminfo.refcount, l2._meminfo.refcount)
-
     # Vars    
-    for i in range(10):
+    for i in range(2):
         l1, l2 = Var(BOOPType,"l1"), Var(BOOPType,"l2")
         l1, l2 = None,None; gc.collect()
         # print(used_bytes()-init_used)
@@ -341,7 +330,7 @@ def test_mem_leaks():
 
     # print()
     # Explicit op 1 literal
-    for i in range(10):
+    for i in range(2):
         l1, l2 = Var(BOOPType,"l1"), Var(BOOPType,"l2")
         op = LessThan(l1.B, l1.B)
         op, l1, l2 = None, None,None; gc.collect()
@@ -351,7 +340,7 @@ def test_mem_leaks():
 
     # print()
     # Explicit ptrop 1 literal
-    for i in range(10):
+    for i in range(2):
         l1, l2 = Var(BOOPType,"l1"), Var(BOOPType,"l2")
         op = ObjEquals(l1, l2)
         op, l1, l2 = None, None,None; gc.collect()
@@ -361,7 +350,7 @@ def test_mem_leaks():
 
 
     # Shorthand 1 literal
-    for i in range(10):
+    for i in range(2):
         l1, l2 = Var(BOOPType,"l1"), Var(BOOPType,"l2")
         c = (l1.B > 0)
         c = None; gc.collect()
@@ -373,7 +362,7 @@ def test_mem_leaks():
     # print()
 
     # AND
-    for i in range(10):
+    for i in range(2):
         l1, l2 = Var(BOOPType,"l1"), Var(BOOPType,"l2")
         c = (l1.B > 0) & (l2.B != 3) 
         c, l1, l2 = None, None,None; gc.collect()

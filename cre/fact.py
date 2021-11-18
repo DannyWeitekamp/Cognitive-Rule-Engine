@@ -27,12 +27,12 @@ from cre.structref import gen_structref_code, define_structref
 from cre.context import cre_context
 from cre.utils import (_struct_from_ptr, _cast_structref, struct_get_attr_offset, _obj_cast_codegen,
                        _ptr_from_struct_codegen, _raw_ptr_from_struct, CastFriendlyMixin, _obj_cast_codegen, PrintElapse)
-from cre.cre_object import CREObjTypeTemplate, cre_obj_field_dict, CREObjModel, CREObjType
+from cre.cre_object import CREObjTypeTemplate, cre_obj_field_dict, CREObjModel, CREObjType, member_info_type, id_member_info_type, id_members_info_ctor
 
 from numba.core.typeconv import Conversion
 import operator
 from numba.core.imputils import (lower_cast)
-
+import cloudpickle
 import numpy as np
 
 GLOBAL_FACT_COUNT = -1
@@ -330,7 +330,7 @@ def gen_fact_import_str(t):
     return f"from cre_cache.{t._fact_name}._{t._hash_code} import {t._fact_name + 'Type'}"
 
 def _gen_getter_jit(f_typ,typ,attr):
-    if(isinstance(typ,(types.StructRef,DeferredFactRefType))):
+    if(isinstance(typ,(Fact,DeferredFactRefType))):
         return \
 f'''@njit(cache=True)
 def {f_typ}_get_{attr}_as_ptr(self):
@@ -365,7 +365,7 @@ def get_type_default(t):
 
 
 
-fact_types = (types.StructRef, DeferredFactRefType)
+fact_types = (Fact, DeferredFactRefType)
 
 #### Resolving Byte Offsets of Struct Members ####
 
@@ -387,7 +387,6 @@ def get_offsets_from_member_types(fields):
 
 def repr_type(typ):
     '''Helper function for turning a type into code that reproduces it'''
-    
     if(isinstance(typ,fact_types)):
         # To avoid various typing issues fact refs are just i8 (i.e. raw pointers)
         return 'BaseFactType'
@@ -396,6 +395,9 @@ def repr_type(typ):
         dt = typ.dtype
         dtype_repr = f'BaseFactType' if(isinstance(dt,fact_types)) else repr(dt)
         return f'ListType({dtype_repr})'
+    elif(isinstance(typ, UniTuple)):
+        typ.type 
+
     else:
         return repr(typ)
 
@@ -456,27 +458,39 @@ def gen_repr_attr_code(a,t,typ_name):
 def gen_fact_code(typ, fields, fact_num, ind='    '):
     '''Generate the source code for a new fact '''
     fact_imports = ""
+
+    _fields = []
     for attr,t in fields:
-        if(isinstance(t,types.StructRef)):
+        if(isinstance(t,Fact)):
             fact_imports += f"{gen_fact_import_str(t)}\n"
         elif(isinstance(t,types.ListType) and isinstance(t.dtype,types.StructRef)):
             fact_imports += f"{gen_fact_import_str(t.dtype)}\n"
 
+        # Downcast any facts to BaseFactType since references to undefined fact types not supported
+        if(isinstance(t,fact_types)):
+            _fields.append((attr,BaseFactType))
+        else:
+            _fields.append((attr,t))
+    fields = _fields
 
-    all_fields = base_fact_fields+fields
+    _base_fact_field_dict = {**base_fact_field_dict}
+    all_fields = [(k,v) for k,v in _base_fact_field_dict.items()] + fields
+    all_fields = [(k,v) for (k,v) in all_fields]
+
+    # all_fields = base_fact_fields+fields
     properties = "\n".join([_gen_props(typ,attr) for attr,t in all_fields])
     getter_jits = "\n".join([_gen_getter_jit(typ,t,attr) for attr,t in all_fields])
-    field_list = ",".join(["'%s'"%attr for attr,t in fields])
+    # field_list = ",".join(["'%s'"%attr for attr,t in fields])
 
     param_defaults_list = ",".join([f"{attr}={get_type_default(t)!r}" for attr,t in fields])
     param_list = ",".join([f"{attr}" for attr,t in fields])
 
-    base_list = ",".join([f"'{k}'" for k,v in base_fact_fields])
-    base_type_list = ",".join([str(v) for k,v in base_fact_fields])
+    # base_list = ",".join([f"'{k}'" for k,v in _base_fact_fields])
+    # base_type_list = ",".join([str(v) for k,v in _base_fact_fields])
 
-    fact_types = (types.StructRef, DeferredFactRefType)
+    # fact_types = (types.StructRef, DeferredFactRefType)
     
-    field_type_list = ",".join([repr_type(v) for k,v in fields])
+    # field_type_list = ",".join([repr_type(v) for k,v in fields])
 
 
     # assign_str = lambda a,t: f"st.{a} = " + (f"_ptr_from_struct_incref({a}) if ({a} is not None) else 0" \
@@ -485,12 +499,13 @@ def gen_fact_code(typ, fields, fact_num, ind='    '):
 
     str_temp = ", ".join([gen_repr_attr_code(k,v,typ) for k,v in fields])
 
-    attr_offsets = get_offsets_from_member_types(base_fact_fields+fields)
+    #TODO get rid of this
+    attr_offsets = get_offsets_from_member_types(all_fields)
 
 # The source code template for a user defined fact. Written to the
 #  system cache so it can be its own module. Doing so helps njit(cache=True)
 #  work when using user defined facts.
-
+# {typ}Type = {typ}TypeTemplate(list(zip([{base_list},{field_list}], [{base_type_list},{field_type_list}])))
     code = \
 f'''
 import numpy as np
@@ -501,12 +516,15 @@ from numba.core.types import unicode_type, ListType
 from numba.experimental import structref
 from numba.experimental.structref import new#, define_boxing
 from numba.core.extending import overload
-from cre.fact_intrinsics import define_boxing, get_fact_attr_ptr, _register_fact_structref, fact_mutability_protected_setattr, fact_lower_setattr
+from cre.fact_intrinsics import define_boxing, get_fact_attr_ptr, _register_fact_structref, fact_mutability_protected_setattr, fact_lower_setattr, _fact_get_identity_member_infos
 from cre.fact import repr_list_attr, repr_fact_attr,  FactProxy, Fact{", BaseFactType, base_list_type, fact_to_ptr" if typ != "BaseFact" else ""}
 from cre.utils import _raw_ptr_from_struct, ptr_t
+import cloudpickle
+from cre.cre_object import id_members_info_ctor
 {fact_imports}
 
 attr_offsets = np.array({attr_offsets!r},dtype=np.int16)
+
 
 @_register_fact_structref
 class {typ}TypeTemplate(Fact):
@@ -519,14 +537,25 @@ class {typ}TypeTemplate(Fact):
     def preprocess_fields(self, fields):
         return tuple((name, types.unliteral(typ)) for name, typ in fields)
 
-{typ}Type = {typ}TypeTemplate(list(zip([{base_list},{field_list}], [{base_type_list},{field_type_list}])))
+field_list = cloudpickle.loads({cloudpickle.dumps(all_fields)})
+print(field_list)
+{typ}Type = {typ}TypeTemplate(field_list)
 
+
+@njit(cache=True)
+def get_identity_member_infos():
+    st = new({typ}Type)
+    return _fact_get_identity_member_infos(st)
+
+identity_member_infos = get_identity_member_infos()
+{typ}TypeTemplate._identity_member_infos = identity_member_infos
 
 @njit(cache=True)
 def ctor({param_defaults_list}):
     st = new({typ}Type)
     fact_lower_setattr(st,'idrec',u8(-1))
     fact_lower_setattr(st,'fact_num',{fact_num})
+    fact_lower_setattr(st, 'identity_member_infos', id_members_info_ctor(identity_member_infos))
     {init_fields}
     return st
 
@@ -536,11 +565,6 @@ def ctor({param_defaults_list}):
 def lower_setattr(self,attr,val):
     fact_mutability_protected_setattr(self,literally(attr),val)
 
-# # NOTE DELTE LATER
-# @njit(cache=True)
-# def get_self_ptr(self):
-#     return _raw_ptr_from_struct(self)
-
         
 class {typ}(FactProxy):
     __numba_ctor = ctor
@@ -548,6 +572,7 @@ class {typ}(FactProxy):
     _fact_name = '{typ}'
     _fact_num = {fact_num}
     _attr_offsets = attr_offsets
+    _identity_member_infos = identity_member_infos
 
     def __new__(cls, *args,**kwargs):
         return ctor(*args,**kwargs)
@@ -683,7 +708,8 @@ def define_facts(specs, #: list[dict[str,dict]],
 
 base_fact_field_dict = {
     **cre_obj_field_dict,
-    "fact_num": i8
+    "fact_num": i8,
+    # "member_info" : types.UniTuple(member_info_type,1),# sentry type will be as long as there are members
 }
 
 base_fact_fields  = [(k,v) for k,v in base_fact_field_dict.items()]

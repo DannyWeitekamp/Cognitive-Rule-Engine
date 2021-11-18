@@ -17,10 +17,13 @@ from numba.core.extending import (
 )
 from numba.core.typing.templates import AttributeTemplate
 from numba.core.datamodel import default_manager, models
+from numba.core import cgutils, utils as numba_utils
 from numba.experimental.structref import _Utils, imputils
 from numba.typed.typedobjectutils import _nonoptional
 
 from cre.utils import _raw_ptr_from_struct, _struct_from_ptr, _cast_structref, _ptr_from_struct_codegen
+from cre.cre_object import _resolve_t_id_helper, member_info_type
+
 
 
 def define_boxing(struct_type, obj_class):
@@ -319,3 +322,81 @@ def _register_fact_structref(fact_type):
     default_manager.register(fact_type, CREObjModel)
     define_attributes(fact_type)
     return fact_type
+
+
+@intrinsic
+def _fact_get_identity_member_infos(typingctx, fact_type):
+    from cre.fact import base_fact_fields, base_fact_field_dict
+
+    t_ids = [_resolve_t_id_helper(x) for a,x in fact_type._fields if a not in base_fact_fields]
+    member_infos_out_type = types.UniTuple(member_info_type, len(t_ids))
+
+
+    def codegen(context, builder, sig, args):
+        [fact,] = args
+        utils = _Utils(context, builder, fact_type)
+
+        baseptr = utils.get_data_pointer(fact)
+        baseptr_val = builder.ptrtoint(baseptr, cgutils.intp_t)
+        dataval = utils.get_data_struct(fact)
+
+        member_infos = []
+        i = 0
+        for attr, typ in fact_type._fields:
+            # print("<<", attr, base_fact_field_dict)
+            if(attr not in base_fact_field_dict):
+                index_of_member = datamodel.get_field_position(attr)
+                member_ptr = builder.gep(baseptr, [cgutils.int32_t(0), cgutils.int32_t(index_of_member)], inbounds=False)
+                member_ptr = builder.ptrtoint(member_ptr, cgutils.intp_t)
+                offset = builder.trunc(builder.sub(member_ptr, baseptr_val), cgutils.ir.IntType(16))
+                t_id = context.get_constant(u2, t_ids[i])
+                member_infos.append(context.make_tuple(builder, member_info_type, (t_id, offset)))
+                i += 1
+
+        ret = context.make_tuple(builder,member_infos_out_type, member_infos)
+        return ret
+
+    sig = member_infos_out_type(fact_type_ref)
+    return sig, codegen
+
+
+
+@intrinsic
+def _fact_get_identity_member_infos(typingctx, fact_type):
+    from cre.fact import base_fact_field_dict
+    '''get the base address of the struct pointed to by structref 'inst' '''
+    
+    # members_type = [v for k,v in fact_type._fields if k == 'members'][0]
+    t_ids = [_resolve_t_id_helper(x) for a,x in fact_type._fields if a not in base_fact_field_dict]
+
+    # count = members_type.count
+    member_infos_out_type = types.UniTuple(member_info_type, len(t_ids))
+
+    
+    def codegen(context, builder, sig, args):
+        [fact,] = args
+
+        utils = _Utils(context, builder, fact_type)
+
+        baseptr = utils.get_data_pointer(fact)
+        baseptr_val = builder.ptrtoint(baseptr, cgutils.intp_t)
+        dataval = utils.get_data_struct(fact)
+        # index_of_members = dataval._datamodel.get_field_position("members")
+
+        member_infos = []
+        i = 0
+        for attr, typ in fact_type._fields:
+            if(attr not in base_fact_field_dict):
+                index_of_member = dataval._datamodel.get_field_position(attr)
+                member_ptr = builder.gep(baseptr, [cgutils.int32_t(0), cgutils.int32_t(index_of_member)], inbounds=True)
+                member_ptr = builder.ptrtoint(member_ptr, cgutils.intp_t)
+                offset = builder.trunc(builder.sub(member_ptr, baseptr_val), cgutils.ir.IntType(16))
+                t_id = context.get_constant(u2, t_ids[i])
+                member_infos.append(context.make_tuple(builder, member_info_type, (t_id, offset) ))
+                i += 1
+
+        ret = context.make_tuple(builder,member_infos_out_type, member_infos)
+        return ret
+
+    sig = member_infos_out_type(fact_type)
+    return sig, codegen

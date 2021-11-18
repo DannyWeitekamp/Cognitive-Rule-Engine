@@ -791,3 +791,16 @@ def _sizeof_type(typingctx, typ_ref):
     return i8(typ_ref,), codegen
 
 
+@intrinsic
+def _get_member_offsets(typingctx, typ_ref):
+    typ = typ_ref.instance_type
+    n_members = len(typ._fields)
+    def codegen(context, builder, sig, args):
+        llty = context.get_data_type(typ)
+        
+        return context.get_constant(types.intp, context.get_abi_sizeof(llty))
+        # print(llty.__dict__)
+        
+    return types.UniTuple(u2,n_members)(typ_ref,), codegen
+
+

@@ -303,6 +303,13 @@ def test_as_conditions():
 
 
 
+# def test_get_member_infos():
+#     with cre_context("test_get_member_infos"):
+#         spec = {"A" : "string", "B" : "number"}
+#         BOOP, BOOPType = define_fact("BOOP", spec)
+#         b = BOOP("A",0)
+#         # b.
+
 
 
 
@@ -389,6 +396,8 @@ def _test_reference_type():
 
 
 if __name__ == "__main__":
+    pass
+    # test_get_member_infos()
     # test_list_type()
     
     # _test_list_type()
@@ -397,11 +406,11 @@ if __name__ == "__main__":
     # test__merge_spec_inheritance()
     # test_define_fact()
     # test_inheritence()
-    # test_cast_fact()
+    test_cast_fact()
     # test_protected_mutability()
     # test_fact_eq()
 
-    test_as_conditions()
+    # test_as_conditions()
 
     # _test_reference_type()
 

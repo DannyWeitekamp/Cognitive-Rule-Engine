@@ -475,7 +475,7 @@ def gen_fact_code(typ, fields, fact_num, ind='    '):
 
     _base_fact_field_dict = {**base_fact_field_dict}
     all_fields = [(k,v) for k,v in _base_fact_field_dict.items()] + fields
-    all_fields = [(k,v) for (k,v) in all_fields]+[("identity_member_infos", UniTuple(member_info_type,len(_fields)))]
+    # all_fields = [(k,v) for (k,v) in all_fields]
 
     # all_fields = base_fact_fields+fields
     properties = "\n".join([_gen_props(typ,attr) for attr,t in all_fields])
@@ -512,15 +512,15 @@ import numpy as np
 from numba.core import types
 from numba import njit, literally
 from numba.core.types import *
-from numba.core.types import unicode_type, ListType
+from numba.core.types import unicode_type, ListType, UniTuple
 from numba.experimental import structref
 from numba.experimental.structref import new#, define_boxing
 from numba.core.extending import overload
-from cre.fact_intrinsics import define_boxing, get_fact_attr_ptr, _register_fact_structref, fact_mutability_protected_setattr, fact_lower_setattr, _fact_get_identity_member_infos
+from cre.fact_intrinsics import define_boxing, get_fact_attr_ptr, _register_fact_structref, fact_mutability_protected_setattr, fact_lower_setattr, _fact_get_chr_mbrs_infos
 from cre.fact import repr_list_attr, repr_fact_attr,  FactProxy, Fact{", BaseFactType, base_list_type, fact_to_ptr" if typ != "BaseFact" else ""}
-from cre.utils import _raw_ptr_from_struct, ptr_t, _get_member_offset
+from cre.utils import _raw_ptr_from_struct, ptr_t, _get_member_offset, _cast_structref
 import cloudpickle
-# from cre.cre_object import id_members_info_ctor
+from cre.cre_object import member_info_type
 {fact_imports}
 
 attr_offsets = np.array({attr_offsets!r},dtype=np.int16)
@@ -540,28 +540,29 @@ class {typ}TypeTemplate(Fact):
 field_list = cloudpickle.loads({cloudpickle.dumps(all_fields)})
 print(field_list)
 {typ}Type = {typ}TypeTemplate(field_list)
+{typ}Type_w_mbr_infos = {typ}TypeTemplate(field_list+[("chr_mbrs_infos", UniTuple(member_info_type,{len(_fields)}))])
 
 
 @njit(cache=True)
-def get_identity_member_infos():
+def get_chr_mbrs_infos():
     st = new({typ}Type)
-    return _fact_get_identity_member_infos(st)
+    return _fact_get_chr_mbrs_infos(st)
 
-identity_member_infos = get_identity_member_infos()
-{typ}TypeTemplate._identity_member_infos = identity_member_infos
+chr_mbrs_infos = get_chr_mbrs_infos()
+{typ}TypeTemplate._chr_mbrs_infos = chr_mbrs_infos
 
-print("identity_member_infos" , identity_member_infos)
+print("chr_mbrs_infos" , chr_mbrs_infos)
 
 @njit(cache=True)
 def ctor({param_defaults_list}):
-    st = new({typ}Type)
+    st = new({typ}Type_w_mbr_infos)
     fact_lower_setattr(st,'idrec',u8(-1))
     fact_lower_setattr(st,'fact_num',{fact_num})
-    # print(identity_member_infos)
-    fact_lower_setattr(st, 'identity_member_infos', identity_member_infos)
-    fact_lower_setattr(st, 'identity_member_infos_offset', _get_member_offset(st,'identity_member_infos'))
+    # print(chr_mbrs_infos)
+    fact_lower_setattr(st, 'chr_mbrs_infos', chr_mbrs_infos)
+    fact_lower_setattr(st, 'chr_mbrs_infos_offset', _get_member_offset(st,'chr_mbrs_infos'))
     {init_fields}
-    return st
+    return _cast_structref({typ}Type,st)
 
 {getter_jits}
 
@@ -576,7 +577,7 @@ class {typ}(FactProxy):
     _fact_name = '{typ}'
     _fact_num = {fact_num}
     _attr_offsets = attr_offsets
-    _identity_member_infos = identity_member_infos
+    _chr_mbrs_infos = chr_mbrs_infos
 
     def __new__(cls, *args,**kwargs):
         return ctor(*args,**kwargs)

@@ -24,7 +24,7 @@ predicate_field_dict = {
     # # "member_offsets" : types.UniTuple(u2,1),
     # "member_info" : types.UniTuple(member_info_type,1),
     "members": types.Any,
-    "identity_member_infos" : types.UniTuple(member_info_type,1),
+    "chr_mbrs_infos" : types.UniTuple(member_info_type,1),
 }
 
 predicate_fields = [(k,v) for k,v in predicate_field_dict.items()]
@@ -94,7 +94,7 @@ from numba.experimental.structref import _Utils, imputils
 from numba.core import cgutils, utils as numba_utils
 
 @intrinsic
-def _pred_get_identity_member_infos(typingctx, pred_type):
+def _pred_get_chr_mbrs_infos(typingctx, pred_type):
     '''get the base address of the struct pointed to by structref 'inst' '''
     
     # ind = ind_type.literal_value
@@ -145,7 +145,7 @@ def pred_ctor(*members):
     member_info_tup_type = types.UniTuple(member_info_type,len(member_types))
     member_t_ids = tuple([_resolve_t_id_helper(x) for x in member_types])
 
-    pred_d = {**predicate_field_dict,"members" : member_types,"identity_member_infos":member_info_tup_type}
+    pred_d = {**predicate_field_dict,"members" : member_types,"chr_mbrs_infos":member_info_tup_type}
     pred_type = PredTypeTemplate([(k,v) for k,v in pred_d.items()])
 
     
@@ -154,12 +154,12 @@ def pred_ctor(*members):
         st = new(pred_type)
         fact_lower_setattr(st, 'idrec', default_idrec)
         fact_lower_setattr(st, 'num_identity_members', len(members))
-        fact_lower_setattr(st, 'identity_member_infos', _pred_get_identity_member_infos(st))
-        fact_lower_setattr(st, 'identity_member_infos_offset', _get_member_offset(st,'identity_member_infos'))
-        # print(_pred_get_identity_member_infos(st))
-        # identity_member_infos = id_members_info_ctor(_pred_get_identity_member_infos(st))
-        # fact_lower_setattr(st, 'identity_member_infos', identity_member_infos)
-        # _pred_get_identity_member_infos(st)
+        fact_lower_setattr(st, 'chr_mbrs_infos', _pred_get_chr_mbrs_infos(st))
+        fact_lower_setattr(st, 'chr_mbrs_infos_offset', _get_member_offset(st,'chr_mbrs_infos'))
+        # print(_pred_get_chr_mbrs_infos(st))
+        # chr_mbrs_infos = id_members_info_ctor(_pred_get_chr_mbrs_infos(st))
+        # fact_lower_setattr(st, 'chr_mbrs_infos', chr_mbrs_infos)
+        # _pred_get_chr_mbrs_infos(st)
         fact_lower_setattr(st, 'members', members)
         # print("**",  _struct_get_attr_offset(st,"members"), _struct_get_attr_offset(st,"member_info") + st.length)
         return st
@@ -239,9 +239,9 @@ def _pred_ctor(*args):
 
 # @njit(i8(GenericPredType), cache=True)
 # def pred_get_member_info_ptr(x):
-#     data_ptr = _struct_get_data_ptr(x.identity_member_infos)
-#     member_info_offset = _struct_get_attr_offset(x.identity_member_infos,"data")
-#     return _struct_get_data_ptr(x.identity_member_infos) + member_info_offset
+#     data_ptr = _struct_get_data_ptr(x.chr_mbrs_infos)
+#     member_info_offset = _struct_get_attr_offset(x.chr_mbrs_infos,"data")
+#     return _struct_get_data_ptr(x.chr_mbrs_infos) + member_info_offset
 
 # @njit(i8(GenericPredType), cache=True)
 # def pred_get_members_ptr(x):
@@ -271,8 +271,8 @@ def _pred_ctor(*args):
 def pred_iter_t_id_item_ptrs(_x):
     x = _cast_structref(GenericPredType,_x)
     data_ptr = _struct_get_data_ptr(x)
-    # member_info_ptr = _struct_get_data_ptr(x.identity_member_infos) + _struct_get_attr_offset(x.identity_member_infos,"data")
-    member_info_ptr = data_ptr + x.identity_member_infos_offset
+    # member_info_ptr = _struct_get_data_ptr(x.chr_mbrs_infos) + _struct_get_attr_offset(x.chr_mbrs_infos,"data")
+    member_info_ptr = data_ptr + x.chr_mbrs_infos_offset
     
     for i in range(x.num_identity_members):
         t_id, member_offset = _load_ptr(member_info_type, member_info_ptr)

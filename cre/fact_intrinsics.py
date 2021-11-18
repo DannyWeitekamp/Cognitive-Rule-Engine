@@ -325,7 +325,7 @@ def _register_fact_structref(fact_type):
 
 
 @intrinsic
-def _fact_get_identity_member_infos(typingctx, fact_type):
+def _fact_get_chr_mbrs_infos(typingctx, fact_type):
     from cre.fact import base_fact_fields, base_fact_field_dict
 
     t_ids = [_resolve_t_id_helper(x) for a,x in fact_type._fields if a not in base_fact_fields]
@@ -362,12 +362,12 @@ def _fact_get_identity_member_infos(typingctx, fact_type):
 
 
 @intrinsic
-def _fact_get_identity_member_infos(typingctx, fact_type):
+def _fact_get_chr_mbrs_infos(typingctx, fact_type):
     from cre.fact import base_fact_field_dict
     '''get the base address of the struct pointed to by structref 'inst' '''
     
     # members_type = [v for k,v in fact_type._fields if k == 'members'][0]
-    t_ids = [_resolve_t_id_helper(x) for a,x in fact_type._fields if a not in base_fact_field_dict and a != "identity_member_infos"]
+    t_ids = [_resolve_t_id_helper(x) for a,x in fact_type._fields if a not in base_fact_field_dict and a != "chr_mbrs_infos"]
 
     # count = members_type.count
     member_infos_out_type = types.UniTuple(member_info_type, len(t_ids))
@@ -386,7 +386,7 @@ def _fact_get_identity_member_infos(typingctx, fact_type):
         member_infos = []
         i = 0
         for attr, typ in fact_type._fields:
-            if(attr not in base_fact_field_dict and attr != "identity_member_infos"):
+            if(attr not in base_fact_field_dict and attr != "chr_mbrs_infos"):
                 index_of_member = dataval._datamodel.get_field_position(attr)
                 member_ptr = builder.gep(baseptr, [cgutils.int32_t(0), cgutils.int32_t(index_of_member)], inbounds=True)
                 member_ptr = builder.ptrtoint(member_ptr, cgutils.intp_t)

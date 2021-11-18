@@ -3,8 +3,8 @@ from numba.typed import List
 from numba.types import ListType, unicode_type
 from cre.fact import base_fact_field_dict, BaseFactType, FactProxy, Fact
 from cre.fact_intrinsics import fact_lower_setattr, _register_fact_structref
-from cre.cre_object import CREObjType, CREObjProxy, CREObjTypeTemplate, member_info_type, IdentityMemberInfos, id_member_info_type, id_members_info_ctor, IdentityMemberInfosType
-from cre.utils import _struct_get_attr_offset, _sizeof_type, _struct_get_data_ptr, _load_ptr, _struct_get_attr_offset, _struct_from_ptr, _cast_structref, _obj_cast_codegen, encode_idrec, decode_idrec, _incref_structref
+from cre.cre_object import CREObjType, CREObjProxy, CREObjTypeTemplate, member_info_type
+from cre.utils import _struct_get_attr_offset, _sizeof_type, _struct_get_data_ptr, _load_ptr, _struct_get_attr_offset, _struct_from_ptr, _cast_structref, _obj_cast_codegen, encode_idrec, decode_idrec, _incref_structref, _get_member_offset
 from cre.primitive import Primitive
 from numba.core.imputils import (lower_cast)
 from numba.experimental.structref import new, define_boxing, define_attributes, StructRefProxy
@@ -24,6 +24,7 @@ predicate_field_dict = {
     # # "member_offsets" : types.UniTuple(u2,1),
     # "member_info" : types.UniTuple(member_info_type,1),
     "members": types.Any,
+    "identity_member_infos" : types.UniTuple(member_info_type,1),
 }
 
 predicate_fields = [(k,v) for k,v in predicate_field_dict.items()]
@@ -141,10 +142,10 @@ def _pred_get_identity_member_infos(typingctx, pred_type):
 @generated_jit(cache=True)
 def pred_ctor(*members):
     member_types = types.Tuple(tuple([_down_cast_helper(x) for x in members[0].types]))
-    # member_info_tup_type = types.UniTuple(member_info_type,len(member_types))
+    member_info_tup_type = types.UniTuple(member_info_type,len(member_types))
     member_t_ids = tuple([_resolve_t_id_helper(x) for x in member_types])
 
-    pred_d = {**predicate_field_dict,"members" : member_types}
+    pred_d = {**predicate_field_dict,"members" : member_types,"identity_member_infos":member_info_tup_type}
     pred_type = PredTypeTemplate([(k,v) for k,v in pred_d.items()])
 
     
@@ -153,9 +154,12 @@ def pred_ctor(*members):
         st = new(pred_type)
         fact_lower_setattr(st, 'idrec', default_idrec)
         fact_lower_setattr(st, 'num_identity_members', len(members))
+        fact_lower_setattr(st, 'identity_member_infos', _pred_get_identity_member_infos(st))
+        fact_lower_setattr(st, 'identity_member_infos_offset', _get_member_offset(st,'identity_member_infos'))
         # print(_pred_get_identity_member_infos(st))
-        identity_member_infos = id_members_info_ctor(_pred_get_identity_member_infos(st))
-        fact_lower_setattr(st, 'identity_member_infos', identity_member_infos)
+        # identity_member_infos = id_members_info_ctor(_pred_get_identity_member_infos(st))
+        # fact_lower_setattr(st, 'identity_member_infos', identity_member_infos)
+        # _pred_get_identity_member_infos(st)
         fact_lower_setattr(st, 'members', members)
         # print("**",  _struct_get_attr_offset(st,"members"), _struct_get_attr_offset(st,"member_info") + st.length)
         return st
@@ -267,7 +271,8 @@ def _pred_ctor(*args):
 def pred_iter_t_id_item_ptrs(_x):
     x = _cast_structref(GenericPredType,_x)
     data_ptr = _struct_get_data_ptr(x)
-    member_info_ptr = _struct_get_data_ptr(x.identity_member_infos) + _struct_get_attr_offset(x.identity_member_infos,"data")
+    # member_info_ptr = _struct_get_data_ptr(x.identity_member_infos) + _struct_get_attr_offset(x.identity_member_infos,"data")
+    member_info_ptr = data_ptr + x.identity_member_infos_offset
     
     for i in range(x.num_identity_members):
         t_id, member_offset = _load_ptr(member_info_type, member_info_ptr)

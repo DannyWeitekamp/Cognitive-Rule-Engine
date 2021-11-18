@@ -27,7 +27,7 @@ from cre.structref import gen_structref_code, define_structref
 from cre.context import cre_context
 from cre.utils import (_struct_from_ptr, _cast_structref, struct_get_attr_offset, _obj_cast_codegen,
                        _ptr_from_struct_codegen, _raw_ptr_from_struct, CastFriendlyMixin, _obj_cast_codegen, PrintElapse)
-from cre.cre_object import CREObjTypeTemplate, cre_obj_field_dict, CREObjModel, CREObjType, member_info_type, id_member_info_type, id_members_info_ctor
+from cre.cre_object import CREObjTypeTemplate, cre_obj_field_dict, CREObjModel, CREObjType, member_info_type
 
 from numba.core.typeconv import Conversion
 import operator
@@ -475,7 +475,7 @@ def gen_fact_code(typ, fields, fact_num, ind='    '):
 
     _base_fact_field_dict = {**base_fact_field_dict}
     all_fields = [(k,v) for k,v in _base_fact_field_dict.items()] + fields
-    all_fields = [(k,v) for (k,v) in all_fields]
+    all_fields = [(k,v) for (k,v) in all_fields]+[("identity_member_infos", UniTuple(member_info_type,len(_fields)))]
 
     # all_fields = base_fact_fields+fields
     properties = "\n".join([_gen_props(typ,attr) for attr,t in all_fields])
@@ -518,9 +518,9 @@ from numba.experimental.structref import new#, define_boxing
 from numba.core.extending import overload
 from cre.fact_intrinsics import define_boxing, get_fact_attr_ptr, _register_fact_structref, fact_mutability_protected_setattr, fact_lower_setattr, _fact_get_identity_member_infos
 from cre.fact import repr_list_attr, repr_fact_attr,  FactProxy, Fact{", BaseFactType, base_list_type, fact_to_ptr" if typ != "BaseFact" else ""}
-from cre.utils import _raw_ptr_from_struct, ptr_t
+from cre.utils import _raw_ptr_from_struct, ptr_t, _get_member_offset
 import cloudpickle
-from cre.cre_object import id_members_info_ctor
+# from cre.cre_object import id_members_info_ctor
 {fact_imports}
 
 attr_offsets = np.array({attr_offsets!r},dtype=np.int16)
@@ -550,12 +550,16 @@ def get_identity_member_infos():
 identity_member_infos = get_identity_member_infos()
 {typ}TypeTemplate._identity_member_infos = identity_member_infos
 
+print("identity_member_infos" , identity_member_infos)
+
 @njit(cache=True)
 def ctor({param_defaults_list}):
     st = new({typ}Type)
     fact_lower_setattr(st,'idrec',u8(-1))
     fact_lower_setattr(st,'fact_num',{fact_num})
-    fact_lower_setattr(st, 'identity_member_infos', id_members_info_ctor(identity_member_infos))
+    # print(identity_member_infos)
+    fact_lower_setattr(st, 'identity_member_infos', identity_member_infos)
+    fact_lower_setattr(st, 'identity_member_infos_offset', _get_member_offset(st,'identity_member_infos'))
     {init_fields}
     return st
 

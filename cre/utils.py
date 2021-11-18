@@ -797,10 +797,45 @@ def _get_member_offsets(typingctx, typ_ref):
     n_members = len(typ._fields)
     def codegen(context, builder, sig, args):
         llty = context.get_data_type(typ)
-        
+
         return context.get_constant(types.intp, context.get_abi_sizeof(llty))
         # print(llty.__dict__)
         
     return types.UniTuple(u2,n_members)(typ_ref,), codegen
 
+
+
+@intrinsic
+def _get_member_offset(typingctx, struct_type, attr_literal):
+    print("TRY")
+    if(not isinstance(attr_literal,types.Literal)):
+        print("FAIL")
+        return
+
+    attr = attr_literal.literal_value
+
+    print("ATTTR",attr)
+
+    def codegen(context, builder, sig, args):
+        [st,_] = args
+        # print("C")
+
+        utils = _Utils(context, builder, struct_type)
+        # print("A")
+        baseptr = utils.get_data_pointer(st)
+        baseptr_val = builder.ptrtoint(baseptr, cgutils.intp_t)
+        # print("B")
+        dataval = utils.get_data_struct(st)
+        index_of_member = dataval._datamodel.get_field_position(attr)
+        # print(index_of_member)
+
+        member_ptr = builder.gep(baseptr, [cgutils.int32_t(0), cgutils.int32_t(index_of_member)], inbounds=True)
+        member_ptr = builder.ptrtoint(member_ptr, cgutils.intp_t)
+        offset = builder.trunc(builder.sub(member_ptr, baseptr_val), cgutils.ir.IntType(16))
+        # print(offset)
+
+        return offset
+
+    sig = u2(struct_type, attr_literal)
+    return sig, codegen
 

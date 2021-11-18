@@ -367,7 +367,7 @@ def _fact_get_identity_member_infos(typingctx, fact_type):
     '''get the base address of the struct pointed to by structref 'inst' '''
     
     # members_type = [v for k,v in fact_type._fields if k == 'members'][0]
-    t_ids = [_resolve_t_id_helper(x) for a,x in fact_type._fields if a not in base_fact_field_dict]
+    t_ids = [_resolve_t_id_helper(x) for a,x in fact_type._fields if a not in base_fact_field_dict and a != "identity_member_infos"]
 
     # count = members_type.count
     member_infos_out_type = types.UniTuple(member_info_type, len(t_ids))
@@ -386,7 +386,7 @@ def _fact_get_identity_member_infos(typingctx, fact_type):
         member_infos = []
         i = 0
         for attr, typ in fact_type._fields:
-            if(attr not in base_fact_field_dict):
+            if(attr not in base_fact_field_dict and attr != "identity_member_infos"):
                 index_of_member = dataval._datamodel.get_field_position(attr)
                 member_ptr = builder.gep(baseptr, [cgutils.int32_t(0), cgutils.int32_t(index_of_member)], inbounds=True)
                 member_ptr = builder.ptrtoint(member_ptr, cgutils.intp_t)
@@ -394,7 +394,7 @@ def _fact_get_identity_member_infos(typingctx, fact_type):
                 t_id = context.get_constant(u2, t_ids[i])
                 member_infos.append(context.make_tuple(builder, member_info_type, (t_id, offset) ))
                 i += 1
-
+                # print("<<", attr, typ)
         ret = context.make_tuple(builder,member_infos_out_type, member_infos)
         return ret
 

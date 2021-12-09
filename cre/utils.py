@@ -233,6 +233,7 @@ def _obj_cast_codegen(context, builder, val, frmty, toty, incref=True):
     return st._getvalue()
 
 
+
 @intrinsic
 def _cast_structref(typingctx, cast_type_ref, inst_type):
     cast_type = cast_type_ref.instance_type
@@ -807,14 +808,12 @@ def _get_member_offsets(typingctx, typ_ref):
 
 @intrinsic
 def _get_member_offset(typingctx, struct_type, attr_literal):
-    print("TRY")
     if(not isinstance(attr_literal,types.Literal)):
-        print("FAIL")
         return
 
     attr = attr_literal.literal_value
 
-    print("ATTTR",attr)
+    # print("ATTTR",attr)
 
     def codegen(context, builder, sig, args):
         [st,_] = args

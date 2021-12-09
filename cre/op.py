@@ -7,7 +7,7 @@ from numba.typed import List, Dict
 from numba.types import ListType, DictType, unicode_type, void, Tuple
 from numba.experimental import structref
 from numba.experimental.structref import new, define_boxing, define_attributes, _Utils
-from numba.extending import NativeValue, box, unbox, overload_method, intrinsic, overload_attribute, intrinsic, lower_getattr_generic, overload, infer_getattr, lower_setattr_generic
+from numba.extending import lower_cast, NativeValue, box, unbox, overload_method, intrinsic, overload_attribute, intrinsic, lower_getattr_generic, overload, infer_getattr, lower_setattr_generic
 from numba.core.typing.templates import AttributeTemplate
 from numba.core.errors import NumbaError, NumbaPerformanceWarning
 from cre.caching import gen_import_str, unique_hash,import_from_cached, source_to_cache, source_in_cache, cache_safe_exec, get_cache_path
@@ -17,12 +17,13 @@ from cre.memory import MemoryType, Memory, facts_for_t_id, fact_at_f_id
 # from cre.fact import define_fact, BaseFactType, cast_fact, DeferredFactRefType, Fact
 from cre.utils import (_struct_from_meminfo, _meminfo_from_struct, _cast_structref, cast_structref, decode_idrec, lower_getattr, _struct_from_ptr,  lower_setattr, lower_getattr,
                        _raw_ptr_from_struct, _raw_ptr_from_struct_incref, _decref_ptr, _incref_ptr, _incref_structref, _ptr_from_struct_incref)
-from cre.utils import assign_to_alias_in_parent_frame, as_typed_list, iter_typed_list
+from cre.utils import encode_idrec, assign_to_alias_in_parent_frame, as_typed_list, iter_typed_list
 from cre.subscriber import base_subscriber_fields, BaseSubscriber, BaseSubscriberType, init_base_subscriber, link_downstream
 from cre.vector import VectorType
 from cre.fact import Fact, gen_fact_import_str, get_offsets_from_member_types
 from cre.var import Var
-from cre.cre_object import cre_obj_field_dict, CREObjTypeTemplate, CREObjProxy
+from cre.cre_object import CREObjType, cre_obj_field_dict, CREObjTypeTemplate, CREObjProxy
+from cre.core import T_ID_OP
 # from cre.predicate_node import BasePredicateNode,BasePredicateNodeType, get_alpha_predicate_node_definition, \
 #  get_beta_predicate_node_definition, deref_attrs, define_alpha_predicate_node, define_beta_predicate_node, AlphaPredicateNode, BetaPredicateNode
 from cre.make_source import make_source, gen_def_func, gen_assign, resolve_template, gen_def_class
@@ -197,6 +198,11 @@ op_fields_dict = {
 class OpTypeTemplate(CREObjTypeTemplate):
     def preprocess_fields(self, fields):
         return tuple((name, types.unliteral(typ)) for name, typ in fields)
+
+    def __str__(self):
+        return f"cre.GenericOpType"
+
+# lower_cast(OpTypeTemplate, CREObjType)(impl_cre_obj_downcast)
 
 
 @register_default(OpTypeTemplate)
@@ -404,6 +410,8 @@ class UntypedOp():
             return op_cls.make_singleton_inst(head_vars=py_args)
 
 
+
+
 def resolve_return_type(x):
     if(isinstance(x,Var)):
         return x.head_type
@@ -501,6 +509,7 @@ def op_ctor(name, return_type_name, arg_type_names, head_var_ptrs,
             call_addr=0, call_multi_addr=0, check_addr=0, match_head_ptrs_addr=0, is_ptr_op=False):
     '''The constructor for an Op instance that can be passed to the numba runtime'''
     st = new(GenericOpType)
+    st.idrec = encode_idrec(T_ID_OP, 0, 0)
     st.name = name
     st.return_type_name = return_type_name
 

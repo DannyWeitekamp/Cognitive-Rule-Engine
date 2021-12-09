@@ -1,8 +1,12 @@
+from numba import f8
 from cre.conditions import *
 from cre.memory import Memory
 from cre.context import cre_context
+from cre.cre_object import CREObjType
 from time import time_ns
-from cre.utils import  _raw_ptr_from_struct
+from cre.utils import  _raw_ptr_from_struct, _cast_structref
+
+import  cre.dynamic_exec
 
 BOOP, BOOPType = define_fact("BOOP",{"A": "string", "B" : "number"})
 
@@ -235,8 +239,165 @@ def test_list_operations():
         assert str(c) == "~(v.items[0] == v.items[1])"
 
 
+
+@njit(cache=True)
+def hsh(x):
+    return hash(x)
+
+
+def test_hash():
+    ''' Tests hashing for Var, Literal, and Conditions '''
+    with cre_context("test_hash"):
+        TestLL, TestLLType = define_fact("TestLL",{"name": "string", "B" :'number', "nxt" : "TestLL"})
+
+        ### VAR ### 
+        a1 = Var(TestLLType)
+        a2 = a1
+        b1 = Var(TestLLType)
+
+        assert hsh(a1) == hsh(a2)
+        assert hsh(a1) != hsh(b1)
+
+        a1 = Var(TestLLType)
+        b1 = Var(TestLLType).nxt
+        b2 = Var(TestLLType).nxt.nxt.B
+
+        assert hsh(a1) != hsh(b1)
+        assert hsh(a1) != hsh(b2)
+
+        ### LITERAL ### 
+        x, y, z = Var(f8,'x'), Var(f8,'y'), Var(f8,'z')
+        x2, y2, z2 = Var(f8,'x'), Var(f8,'y'), Var(f8,'z')
+
+        a1 = literal_ctor((x + z) + (y + z))
+        a2 = literal_ctor((x + z) + (y + z))
+        b1 = literal_not(literal_ctor((x + z) + (y + z)))
+        b2 = literal_ctor((x + z) + (y + x))
+        b3 = literal_ctor((x2 + z2) + (y2 + z2))
+
+        assert hsh(a1) == hsh(a2)
+        assert hsh(a1) != hsh(b1)
+        assert hsh(a1) != hsh(b2)
+        assert hsh(a1) != hsh(b3)
+
+        ### CONDITIONS ### 
+        X,Y = Var(TestLLType,"X"), Var(TestLLType,"Y")
+        a1 = ( (X.B == 0) &
+               ((X.nxt.B == Y.B) | (X.nxt.name == Y.name)) )
+        a2 = ( (X.B == 0) &
+               ((X.nxt.B == Y.B) | (X.nxt.name == Y.name)) )
+
+        b1 = ( (A:=Var(TestLLType)) & (A.B == 0) &
+               (B:=Var(TestLLType)) & ((A.nxt.B == B.B) | (A.nxt.name == B.name)) )
+        b2 = ( (X.B < 0) &
+               ((X.nxt.B == Y.B) | (X.nxt.name == Y.name)) )
+        b3 = ( (X.B == 0) &
+               ((X.nxt.B == Y.B)) )
+
+        print(hsh(a1), hsh(a2), hsh(b1), hsh(b2), hsh(b3))
+
+        assert hsh(a1) == hsh(a2)
+        assert hsh(a1) != hsh(b1)
+        assert hsh(a1) != hsh(b2)
+        assert hsh(a1) != hsh(b3)
+
+
+
+
+        
+
+
+@njit(cache=True)
+def eq(a,b):
+    return _cast_structref(CREObjType, a)==_cast_structref(CREObjType, b)
+
+def test_eq():
+        TestLL, TestLLType = define_fact("TestLL",{"name": "string", "B" :'number', "nxt" : "TestLL"})
+
+        ### VAR ### 
+        a1 = Var(TestLLType)
+        a2 = a1
+        b1 = Var(TestLLType)
+
+        assert eq(a1,a2)
+        assert not eq(a1,b1)
+
+        a1 = Var(TestLLType)
+        b1 = Var(TestLLType).nxt
+        b2 = Var(TestLLType).nxt.nxt.B
+
+        assert not eq(a1,b1)
+        assert not eq(a1,b2)
+
+        ### LITERAL ### 
+        x, y, z = Var(f8,'x'), Var(f8,'y'), Var(f8,'z')
+        x2, y2, z2 = Var(f8,'x'), Var(f8,'y'), Var(f8,'z')
+
+        a1 = literal_ctor((x + z) + (y + z))
+        a2 = literal_ctor((x + z) + (y + z))
+        b1 = literal_not(literal_ctor((x + z) + (y + z)))
+        b2 = literal_ctor((x + z) + (y + x))
+        b3 = literal_ctor((x2 + z2) + (y2 + z2))
+
+        assert eq(a1,a2)
+        assert not eq(a1,b1)
+        assert not eq(a1,b2)
+        assert not eq(a1,b3)
+
+        ### CONDITIONS ### 
+        X,Y = Var(TestLLType,"X"), Var(TestLLType,"Y")
+        a1 = ( (X.B == 0) &
+               ((X.nxt.B == Y.B) | (X.nxt.name == Y.name)) )
+        a2 = ( (X.B == 0) &
+               ((X.nxt.B == Y.B) | (X.nxt.name == Y.name)) )
+
+        b1 = ( (A:=Var(TestLLType)) & (A.B == 0) &
+               (B:=Var(TestLLType)) & ((A.nxt.B == B.B) | (A.nxt.name == B.name)) )
+        b2 = ( (X.B < 0) &
+               ((X.nxt.B == Y.B) | (X.nxt.name == Y.name)) )
+        b3 = ( (X.B == 0) &
+               ((X.nxt.B == Y.B)) )
+
+        assert eq(a1,a2)
+        assert not eq(a1,b1)
+        assert not eq(a1,b2)
+        assert not eq(a1,b3)
+
+from cre.conditions import conds_to_op_sets, best_intersection, make_base_ptrs_to_inds, intersect_op_sets
+def test_anti_unify():
+
+    x, y, z = Var(f8,'x'), Var(f8,'y'), Var(f8,'z')
+    a, b, c, d = Var(f8,'a'), Var(f8,'b'), Var(f8,'c'), Var(f8,'d')
+
+    c1 = (x < y) & (y < z) & (y < z) & (z != x) & (y != 0) 
+    c2 = (a < b) & (b < c) & (b < c) & (b < c) & (c != a) & (b != 0) & (d != 0)
+
+    # For ? < ?
+    # x -> [1,1,0,0]
+    # y -> [1,1,1,0]
+    # z -> [0,1,1,0]
+
+    osl1 = conds_to_op_sets(c1)
+    osl2 = conds_to_op_sets(c2)
+    bpti1 = make_base_ptrs_to_inds(c1)
+    bpti2 = make_base_ptrs_to_inds(c2)
+    intersect_op_sets(osl1[0], osl2[0], bpti1, bpti2)
+    intersect_op_sets(osl2[0], osl1[0], bpti2, bpti1)
+
+
+
+    
+
+
+
+import logging
+print([name for name in logging.root.manager.loggerDict])
+logger = logging.getLogger()
+logger.setLevel(logging.DEBUG)
+
 if(__name__ == "__main__"):
-    test_build_conditions()
+    test_anti_unify()
+    # test_build_conditions()
     # test_list_operations()
     # test_link()
     # test_initialize()
@@ -252,6 +413,9 @@ if(__name__ == "__main__"):
     # test_existential_not()
 # bar.py_func()
     # bar()
+    # test_hash()
 
-    
+    # test_eq()
+    # 
     # exit()
+

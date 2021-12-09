@@ -2,8 +2,10 @@ from cre.fact import _fact_from_spec, _standardize_spec, _merge_spec_inheritance
      define_fact, cast_fact, _cast_structref, BaseFact, BaseFactType, DeferredFactRefType
 from cre.context import cre_context
 from cre.memory import Memory
+from cre.cre_object import CREObjType
 from numba import njit, u8
 from numba.typed import List
+import cre.dynamic_exec
 import pytest
 
 def test__standardize_spec():
@@ -368,16 +370,16 @@ def _test_reference_type():
         b = TestRef("B", a)
 
         # assert str(a) == 
-        print(a, b)
-        print(a)
+        # print(a, b)
+        # print(a)
 
-        print(TestRef("B"))
+        # print(TestRef("B"))
 
 
         spec = {"name" : "string", "next" : "TestLL"}
         TestLL, TestLLType = define_fact("TestLL", spec)
 
-        print(TestLLType.name)
+        # print(TestLLType.name)
 
         t1 = TestLL("A")
         t2 = TestLL("B",next=t1)
@@ -389,15 +391,84 @@ def _test_reference_type():
 
         
 
+@njit(cache=True)
+def as_cre_obj(x):
+    return _cast_structref(CREObjType,x)
 
 
+@njit(cache=True)
+def eq(a,b):
+    return a == b
 
+def test_eq():
+    with cre_context("test_list_type"):
+        spec = {"A" : "string", "B" : "number"}
+        BOOP, BOOPType = define_fact("BOOP", spec)
+        a1 = as_cre_obj(BOOP("HI",2))
+        a2 = as_cre_obj(BOOP("HI",2))
+        b1 = as_cre_obj(BOOP("HI",3))
+        b2 = as_cre_obj(BOOP("HO",2))
+
+    # print(eq(a1, a2))
+        assert eq(a1, a2)
+        assert not eq(a1, b1)
+        assert not eq(a1, b2)
+
+@njit(cache=True)
+def hsh(x):
+    return hash(x)
+
+
+def test_hash():
+    with cre_context("test_list_type"):
+        spec = {"A" : "string", "B" : "number"}
+        BOOP, BOOPType = define_fact("BOOP", spec)
+
+        a1 = as_cre_obj(BOOP("HI",2))
+        a2 = as_cre_obj(BOOP("HI",2))
+        b1 = as_cre_obj(BOOP("HI",3))
+        b2 = as_cre_obj(BOOP("HO",2))
+
+        assert hsh(a1) == hsh(a2)
+        assert hsh(a1) != hsh(b1)
+        assert hsh(a1) != hsh(b2)
+
+        a3_boop = BOOP("HI",2)
+        a3 = as_cre_obj(a3_boop)
+        assert hsh(a3) == hsh(a1)
+
+        # check that mutation causes rehash
+        a3_boop.B = 7
+        assert hsh(a3) != hsh(a1)
+
+with cre_context("_b_boop_ctor_1000"):
+    # def _define_boop():
+    #     with cre_context("_b_boop_ctor_1000"):
+    spec = {"A" : "string", "B" : "number"}
+    BOOP, BOOPType = define_fact("BOOP", spec)
+            # return (BOOP,), {}
+
+    @njit(cache=True)
+    def _b_boop_ctor_10000():
+        for i in range(10000):
+            b = BOOP("HI",i)
+
+def test_b_boop_ctor_10000(benchmark):
+    benchmark.pedantic(_b_boop_ctor_10000, warmup_rounds=1, rounds=10)
+
+
+# @njit(cache=True)
+def _b_py_dict_boop_10000():
+    for i in range(10000):
+        b = {"A" : "HI", "B" : i}
+
+def test_b_py_dict_boop_10000(benchmark):
+    benchmark.pedantic(_b_py_dict_boop_10000, warmup_rounds=1, rounds=10)
 
 
 
 if __name__ == "__main__":
     pass
-    # test_get_member_infos()
     # test_list_type()
     
     # _test_list_type()
@@ -406,13 +477,15 @@ if __name__ == "__main__":
     # test__merge_spec_inheritance()
     # test_define_fact()
     # test_inheritence()
-    test_cast_fact()
+    # test_cast_fact()
     # test_protected_mutability()
     # test_fact_eq()
 
     # test_as_conditions()
 
     # _test_reference_type()
+    # test_hash()
+    # test_eq()
 
 
 

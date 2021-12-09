@@ -827,8 +827,53 @@ Predicates. Instead of having groundings it makes sense to just have predicates 
 
 
 
+----- Nov 28 ----
+Should probably replace 'predicate' with 'wme' since officially a predicate is a function that can take a number of terms, but a wme is strictly gounded.
 
+We need to be able to hash/eq a few tricky items
+1) Var(): requires hashing 
+	-'base_ptr'
+	-the array of offsets
+ possibilities:
+	-instead of an array a fixed allocation at runtime
+	-just hardcode it  
+	-make a special hash function for the deref_type
 
+2) Op(): requires hashing 
+	-call, match addr, or name
+	-the list of head_vars
+ possibilities:
+	-instead of an array a fixed allocation at runtime
+	-just hardcode it  
+	-make a special hash function for the List of head_vars
+
+3) Literal: requires hashing
+	-The underlying op
+	-The negation 
+
+4) Condition: requires hashing
+	-All the literals + some extra thing for disjunction
+
+if something like:
+
+c1,c2 = (
+	(x:=Var(float)) & 
+	(y:=Var(float)) & (x < y)
+)
+
+Is instantiated twice then (c1 == c2) >>> true
+even though x of c1 is not the same instance as c2
+
+This makes me feel like we probably need to hardcode most of these. 
+Since the hash of the literals won't be the same...
+
+At the Op level however it might make sense to just disregard the particulars of the variables since Add(a,b) is functionally equivalent to Add(x,y)... or maybe not.
+
+We would however not want (a < b) & (x > y) to be equal to (a < b) & (a > b) which would be the case if we disregarded the var instances. 
+
+Perhaps the best thing then is to be as strict as possible with __hash__ and __eq__ for these and require that the vars are literally the same instance. This doesn't solve our above issue... but maybe that is fine, we could have an extra function like same_behavior() that checks for things like different variables, and reorderings of literals. 
+
+   
 
 
 

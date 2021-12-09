@@ -192,6 +192,10 @@ def fact_setattr_codegen(context, builder, sig, args, attr, mutability_protected
     context.nrt.decref(builder, field_type, old_value)
     # write new
     setattr(dataval, attr, casted)
+
+    if(mutability_protected):
+        # Make sure that hash_val is 0 to force it to be recalculated
+        setattr(dataval, "hash_val", cgutils.intp_t(0))
     return dataval
         # ret = _obj_cast_codegen(context, builder, ret, field_type, ret_type, False)
 
@@ -324,40 +328,40 @@ def _register_fact_structref(fact_type):
     return fact_type
 
 
-@intrinsic
-def _fact_get_chr_mbrs_infos(typingctx, fact_type):
-    from cre.fact import base_fact_fields, base_fact_field_dict
+# @intrinsic
+# def _fact_get_chr_mbrs_infos(typingctx, fact_type):
+#     from cre.fact import base_fact_fields, base_fact_field_dict
 
-    t_ids = [_resolve_t_id_helper(x) for a,x in fact_type._fields if a not in base_fact_fields]
-    member_infos_out_type = types.UniTuple(member_info_type, len(t_ids))
+#     t_ids = [_resolve_t_id_helper(x) for a,x in fact_type._fields if a not in base_fact_fields]
+#     member_infos_out_type = types.UniTuple(member_info_type, len(t_ids))
 
 
-    def codegen(context, builder, sig, args):
-        [fact,] = args
-        utils = _Utils(context, builder, fact_type)
+#     def codegen(context, builder, sig, args):
+#         [fact,] = args
+#         utils = _Utils(context, builder, fact_type)
 
-        baseptr = utils.get_data_pointer(fact)
-        baseptr_val = builder.ptrtoint(baseptr, cgutils.intp_t)
-        dataval = utils.get_data_struct(fact)
+#         baseptr = utils.get_data_pointer(fact)
+#         baseptr_val = builder.ptrtoint(baseptr, cgutils.intp_t)
+#         dataval = utils.get_data_struct(fact)
 
-        member_infos = []
-        i = 0
-        for attr, typ in fact_type._fields:
-            # print("<<", attr, base_fact_field_dict)
-            if(attr not in base_fact_field_dict):
-                index_of_member = datamodel.get_field_position(attr)
-                member_ptr = builder.gep(baseptr, [cgutils.int32_t(0), cgutils.int32_t(index_of_member)], inbounds=False)
-                member_ptr = builder.ptrtoint(member_ptr, cgutils.intp_t)
-                offset = builder.trunc(builder.sub(member_ptr, baseptr_val), cgutils.ir.IntType(16))
-                t_id = context.get_constant(u2, t_ids[i])
-                member_infos.append(context.make_tuple(builder, member_info_type, (t_id, offset)))
-                i += 1
+#         member_infos = []
+#         i = 0
+#         for attr, typ in fact_type._fields:
+#             # print("<<", attr, base_fact_field_dict)
+#             if(attr not in base_fact_field_dict):
+#                 index_of_member = datamodel.get_field_position(attr)
+#                 member_ptr = builder.gep(baseptr, [cgutils.int32_t(0), cgutils.int32_t(index_of_member)], inbounds=False)
+#                 member_ptr = builder.ptrtoint(member_ptr, cgutils.intp_t)
+#                 offset = builder.trunc(builder.sub(member_ptr, baseptr_val), cgutils.ir.IntType(16))
+#                 t_id = context.get_constant(u2, t_ids[i])
+#                 member_infos.append(context.make_tuple(builder, member_info_type, (t_id, offset)))
+#                 i += 1
 
-        ret = context.make_tuple(builder,member_infos_out_type, member_infos)
-        return ret
+#         ret = context.make_tuple(builder,member_infos_out_type, member_infos)
+#         return ret
 
-    sig = member_infos_out_type(fact_type_ref)
-    return sig, codegen
+#     sig = member_infos_out_type(fact_type_ref)
+#     return sig, codegen
 
 
 

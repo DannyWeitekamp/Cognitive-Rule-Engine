@@ -5,9 +5,11 @@ import numpy as np
 from cre.op import Op, GenericOpType
 from cre.default_ops import Add
 from cre.var import Var
-from cre.utils import _func_from_address
+from cre.utils import _func_from_address, _cast_structref
 from cre.context import cre_context
+from cre.cre_object import CREObjType
 from cre.fact import define_fact
+import cre.dynamic_exec 
 import re
 import pytest
 
@@ -546,6 +548,50 @@ def test_head_ptrs_ranges():
         assert len(op.head_var_ptrs) == 5
         assert op.head_ranges.tolist() == [(0,1), (1,2), (3,2)]
 
+@njit(cache=True)
+def hsh(x):
+    return hash(x)
+
+def test_hash():
+    x, y, z = Var(f8,'x'), Var(f8,'y'), Var(f8,'z')
+    x2, y2, z2 = Var(f8,'x'), Var(f8,'y'), Var(f8,'z')
+
+    a1 = (x + z) + (y + z)
+    a2 = (x + z) + (y + z)
+    b1 = (x + z) + (y + x)
+    b2 = (x2 + z2) + (y2 + z2)
+    print(hsh(a1),hsh(a2),hsh(b1), hsh(b2))
+    assert hsh(a1) == hsh(a2)
+    assert hsh(a1) != hsh(b1)
+    assert hsh(a1) != hsh(b2)
+
+    # Don't worry about hashing the python proxy for now
+    # print(hash(a1),hash(a2),hash(b1), hash(b2))
+    # assert hash(a1) == hash(a2)
+    # assert hash(a1) != hash(b1)
+    # assert hash(a1) != hash(b2)
+
+@njit(cache=True)
+def eq(a,b):
+    return _cast_structref(CREObjType, a)==_cast_structref(CREObjType, b)
+
+def test_eq():
+    x, y, z = Var(f8,'x'), Var(f8,'y'), Var(f8,'z')
+    x2, y2, z2 = Var(f8,'x'), Var(f8,'y'), Var(f8,'z')
+
+    a1 = (x + z) + (y + z)
+    a2 = (x + z) + (y + z)
+    b1 = (x + z) + (y + x)
+    b2 = (x2 + z2) + (y2 + z2)
+
+    assert eq(a1,a2)
+    assert not eq(a1, b1)
+    assert not eq(a1, b2)
+
+    # assert a1 == a2
+    # assert a1 != b1
+    # assert a1 != b2
+
 
 import time
 class PrintElapse():
@@ -559,10 +605,11 @@ class PrintElapse():
 
 
 if __name__ == "__main__":
+    pass
     # test_boxing()
-    test_op_arith_overloads()
-    test_op_cmp_overloads()
-    test_head_ptrs_ranges()
+    # test_op_arith_overloads()
+    # test_op_cmp_overloads()
+    # test_head_ptrs_ranges()
     # with PrintElapse("test_op_singleton"):
     #     test_op_singleton()
     # with PrintElapse("test_define_apply_op"):
@@ -581,6 +628,8 @@ if __name__ == "__main__":
     # test_fact_args()
     # test_head_ptrs_ranges()
     # not_jit_compilable()
-    test_ptr_ops()
+    # test_ptr_ops()
+    test_hash()
+    test_eq()
             
 

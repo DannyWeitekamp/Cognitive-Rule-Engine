@@ -1,11 +1,11 @@
 import operator
 import numpy as np
-from numba import types, njit, i8, u8, i4, u1, i8, literally, generated_jit
+from numba import types, njit, f8, i8, u8, i4, u1, i8, i2, u2, literally, generated_jit
 from numba.typed import List, Dict
 from numba.types import ListType, DictType, unicode_type, void, Tuple, UniTuple, optional
 from numba.experimental import structref
 from numba.experimental.structref import new, define_boxing, define_attributes, _Utils
-from numba.extending import overload_method, intrinsic, overload_attribute, intrinsic, lower_getattr_generic, overload, infer_getattr, lower_setattr_generic
+from numba.extending import lower_cast, overload_method, intrinsic, overload_attribute, intrinsic, lower_getattr_generic, overload, infer_getattr, lower_setattr_generic
 from numba.core.typing.templates import AttributeTemplate
 from cre.caching import gen_import_str, unique_hash,import_from_cached, source_to_cache, source_in_cache
 from cre.context import cre_context
@@ -17,6 +17,8 @@ from cre.utils import assign_to_alias_in_parent_frame, meminfo_type
 from cre.subscriber import base_subscriber_fields, BaseSubscriber, BaseSubscriberType, init_base_subscriber, link_downstream
 from cre.vector import VectorType
 from cre.op import GenericOpType, op_str, op_repr, Op
+from cre.cre_object import CREObjType, CREObjTypeTemplate
+from cre.core import T_ID_CONDITIONS, T_ID_LITERAL
 # from cre.predicate_node import BasePredicateNode,BasePredicateNodeType, get_alpha_predicate_node_definition, \
  # get_beta_predicate_node_definition, deref_attrs, define_alpha_predicate_node, define_beta_predicate_node, AlphaPredicateNode, BetaPredicateNode, \
  # LiteralLinkDataType, generate_link_data
@@ -88,6 +90,7 @@ def generate_link_data(pn, mem):
 
 literal_fields_dict = {
     # "str_val" : unicode_type,
+    **cre_obj_field_dict,
     "op" : GenericOpType,
     "var_base_ptrs" : i8[:],#UniTuple(i8,2),
     "negated" : u1,
@@ -99,8 +102,14 @@ literal_fields_dict = {
 literal_fields =  [(k,v) for k,v, in literal_fields_dict.items()]
 
 @structref.register
-class LiteralTypeTemplate(types.StructRef):
-    pass
+class LiteralTypeTemplate(CREObjTypeTemplate):
+    def __str__(self):
+        return f"cre.LiteralType"
+
+
+# @lower_cast(LiteralTypeTemplate, CREObjType)
+# def downcast(context, builder, fromty, toty, val):
+#     return _obj_cast_codegen(context, builder, val, fromty, toty,incref=False)
 
 class Literal(structref.StructRefProxy):
     def __new__(cls, *args):
@@ -131,6 +140,7 @@ LiteralType = LiteralTypeTemplate(literal_fields)
 # @overload(Literal)
 def literal_ctor(op):
     st = new(LiteralType)
+    st.idrec = encode_idrec(T_ID_LITERAL, 0, 0)
     st.op = op
     st.var_base_ptrs = np.empty(len(op.base_var_map),dtype=np.int64)
     for i, ptr in enumerate(op.base_var_map):
@@ -153,6 +163,7 @@ def _literal_str(self):
 def literal_copy(self):
     st = new(LiteralType)
     # st.str_val = self.str_val
+    st.idrec = self.idrec
     st.op = self.op
     st.var_base_ptrs = self.var_base_ptrs
     st.negated = self.negated
@@ -192,15 +203,14 @@ distr_dnf_type = ListType(ListType(ListType(LiteralType)))
 
 conditions_fields_dict = {
     ### Fields that are filled on in instantiation ### 
+    **cre_obj_field_dict,
 
     # The variables used by the condition
     'vars': ListType(GenericVarType),
 
     # 'not_vars' : ListType(GenericVarType),
 
-    # The Disjunctive Normal Form of the condition but organized
-    #  so that every conjunct has a seperate lists for alpha and 
-    #  beta terms.
+    # The Disjunctive Normal Form of the condition.
     'dnf': dnf_type,
 
     # A mapping from Var pointers to their associated index
@@ -232,9 +242,14 @@ conditions_fields_dict = {
 conditions_fields =  [(k,v) for k,v, in conditions_fields_dict.items()]
 
 @structref.register
-class ConditionsTypeTemplate(types.StructRef):
-    pass
+class ConditionsTypeTemplate(CREObjTypeTemplate):
+    def __str__(self):
+        return f"cre.ConditionsType"
 
+
+ConditionsType = ConditionsTypeTemplate(conditions_fields)
+
+# lower_cast(ConditionsTypeTemplate, CREObjType)(impl_cre_obj_downcast)
 
 # Manually register the type to avoid automatic getattr overloading 
 # default_manager.register(VarTypeTemplate, models.StructRefModel)
@@ -327,7 +342,7 @@ class Conditions(structref.StructRefProxy):
 
 define_boxing(ConditionsTypeTemplate,Conditions)
 
-ConditionsType = ConditionsTypeTemplate(conditions_fields)
+
 
 @njit(unicode_type(ConditionsType,unicode_type,types.boolean), cache=True)
 def conds_get_delimited_type_names(self,delim,ignore_ext_nots):
@@ -453,6 +468,7 @@ def new_dnf(n):
 @njit(cache=True)
 def _conditions_ctor_single_var(_vars,dnf=None):
     st = new(ConditionsType)
+    st.idrec = encode_idrec(T_ID_CONDITIONS, 0, 0)
     st.vars = List.empty_list(GenericVarType)
     st.vars.append(_struct_from_ptr(GenericVarType,_vars.base_ptr)) 
     st.base_var_map = build_base_var_map(st.vars)
@@ -466,6 +482,7 @@ def _conditions_ctor_single_var(_vars,dnf=None):
 @njit(cache=True)
 def _conditions_ctor_base_var_map(_vars,dnf=None):
     st = new(ConditionsType)
+    st.idrec = encode_idrec(T_ID_CONDITIONS, 0, 0)
     st.vars = build_var_list(_vars)
     st.base_var_map = _vars.copy() # is shallow copy
     st.dnf = dnf if(dnf) else new_dnf(len(_vars))
@@ -477,6 +494,7 @@ def _conditions_ctor_base_var_map(_vars,dnf=None):
 @njit(cache=True)
 def _conditions_ctor_var_list(_vars,dnf=None):
     st = new(ConditionsType)
+    st.idrec = encode_idrec(T_ID_CONDITIONS, 0, 0)
     st.vars = List.empty_list(GenericVarType)
     for x in _vars:
         st.vars.append(_struct_from_ptr(GenericVarType,x.base_ptr))
@@ -1022,6 +1040,604 @@ def build_distributed_dnf(c,index_map=None):
     # print(distr_dnf)
     return distr_dnf
 
+
+
+#### Intersecting Conditions #### 
+
+
+base_var_ptr_array_type = i8[::1]
+var_set_list_type = ListType(base_var_ptr_array_type)
+
+
+# NOTE: if ever going to use dynamic ops then need to use more than call_addr
+
+# op.call_addr -> list of arrays of base_ptrs 
+op_set_type = DictType(i8,var_set_list_type)
+
+
+@njit(cache=True)
+def conds_to_op_sets(self):
+    op_sets = List.empty_list(op_set_type)
+    for conjunct in self.dnf:
+        d = Dict.empty(i8, var_set_list_type)
+        for lit in conjunct:
+            if(lit.op.call_addr not in d):
+                l = d[lit.op.call_addr] = List.empty_list(base_var_ptr_array_type)
+            else:
+                l = d[lit.op.call_addr]
+
+            base_var_ptrs = np.empty(len(lit.op.base_vars), dtype=np.int64)
+            for i, base_var in enumerate(lit.op.base_vars):
+                base_var_ptrs[i] = base_var.base_ptr
+
+            l.append(base_var_ptrs)
+        op_sets.append(d)
+    return op_sets
+
+
+@njit(cache=True)
+def intersect_keys(a,b):
+    l = List()
+    for k,v in a.items():
+        if(k in b): l.append(k)
+    return l
+
+# @njit(cache=True)
+# def intersect_and_remap_op_sets(op_set_a, op_set_b, base_ptrs_to_inds):
+#     remapping_votes = np.empty(())
+#     d = Dict()
+#     for k,v in a.items():
+#         d[k] = v
+#     for k,v in b.items():
+#         d[k] = v
+#     return d
+
+u2_arr = u2[::1]
+@njit(cache=True)
+def base_sets_to_inds(base_sets, base_ptrs_to_inds):
+    l = List.empty_list(u2_arr)
+    for base_set in base_sets:
+        base_inds = np.empty(len(base_set), dtype=np.uint16)
+        for i, v in enumerate(base_set):
+            base_inds[i] = base_ptrs_to_inds[v]
+        l.append(base_inds)
+    return l
+
+@njit(cache=True)
+def remap_is_valid(remap, poss_remaps):
+    for i, j in enumerate(remap):
+        if(j > poss_remaps.shape[1]): return False
+        poss_remaps[i, j]
+
+@njit(cache=True, locals={"remaps":i2[:,::1]})
+def get_possible_remap_inds(a_base_ind_set, b_base_ind_set, n_a, n_b):
+    ''' Given arrays of var indicies corresponding to a common type of literal (e.g. (x<y) & (a<b))
+        between Conditions A and B. Generate all possible remappings of variables in 
+        A to variables in B. Each remapping is represented by an array of indices 
+        of variables in B. For example if A has vars {a,b,c} and B has vars {x,y,z}
+        then the remapping [a,b,c] -> [y,z,x] is represented as [1,2,0]. Unresolved
+        vars are represented as -1. For example [a,b,-] -> [y,x,-] is represented as [1,0,-1]
+    '''
+
+    # Produce a boolean matrix identifying feasible remapping pairs
+    poss_remap_matrix = np.zeros((n_a,n_b), dtype=np.uint8)
+    for a_base_inds in a_base_ind_set:
+        for b_base_inds in b_base_ind_set:
+            if(len(a_base_inds) == len(b_base_inds)):
+                for ind_a, ind_b in zip(a_base_inds, b_base_inds):
+                    poss_remap_matrix[ind_a, ind_b] = True
+
+    # The marginal sums, i.e. number of remappings of each varibles in A and B, respectively
+    num_remaps_per_a = poss_remap_matrix.sum(axis=1)
+    num_remaps_per_b = poss_remap_matrix.sum(axis=0)
+
+    n_possibilities = 1
+    for n_remaps in num_remaps_per_a:
+        if(n_remaps != 0): n_possibilities *= n_remaps
+    
+    print("num_remaps_per_a", num_remaps_per_a)
+    print("n_possibilities", n_possibilities)
+
+    # Find the first variable that is remappable 
+    first_i = 0
+    for i,n in enumerate(num_remaps_per_a): 
+        if(n > 0): first_i = i; break;
+
+    # Use the poss_remap_matrix to fill in a 2d-array of remap options (-1 padded) 
+    remap_options = -np.ones((n_a,n_b), dtype=np.int16)
+    for i in range(n_a):
+        k = 0
+        for j in range(n_b):
+            if(poss_remap_matrix[i,j]):
+                remap_options[i,k] = j
+                k += 1
+
+    # Build the set of possible remaps by taking the cartsian product of remap_options
+    remaps = np.empty((n_possibilities, n_a), dtype=np.int16)
+    c = 0
+    remap_inds = remap_options[:,0].copy()
+    j_iters = np.zeros(n_a, dtype=np.int16)
+    iter_i = first_i; iter_j = j_iters[first_i] = -1; done = False;
+    while(not done):  
+        # Increment to the next possibility for the first variable 
+        iter_j = j_iters[iter_i] = j_iters[iter_i] + 1      
+
+        # If this overflows find the next variable that can be incremented without overflowing
+        while(iter_j >= num_remaps_per_a[iter_i]):
+            # When the iter overflows the set of possibilities reset it to the beginning
+            remap_inds[iter_i] = remap_options[iter_i,0]
+            j_iters[iter_i] = 0
+
+            # Move on to the next set and iterate it, if that would 
+            #  go beyond the last var in A then we're done.
+            iter_i += 1
+            if(iter_i >= n_a):
+                done = True; break; 
+            iter_j = j_iters[iter_i] = j_iters[iter_i] + 1      
+        if(done): break
+
+        remap_inds[iter_i] = remap_options[iter_i,iter_j]
+        iter_i = first_i
+
+        remaps[c, :] = remap_inds
+        c += 1
+        
+    return remaps
+
+
+@njit(cache=True)
+def get_matched_mask(a_base_ind_set, b_base_ind_set, remap):
+    a_inds_remapped = np.zeros(len(a_base_ind_set[0]),dtype=np.int16)
+    matched_As = np.zeros(len(a_base_ind_set),dtype=np.uint8)
+    matched_Bs = np.zeros(len(b_base_ind_set),dtype=np.uint8)
+    for i, a_base_inds in enumerate(a_base_ind_set):
+        # Apply this mapping for A -> B 
+        for ix, ind in enumerate(a_base_inds):
+           a_inds_remapped[ix] = remap[a_base_inds[ix]]
+
+        # Greedily assign literals in remapped A to literals in B
+        for j, b_base_inds in enumerate(b_base_ind_set):
+            if(not matched_Bs[j] and np.array_equal(a_inds_remapped, b_base_inds)):
+                matched_As[i] = 1
+                matched_Bs[j] = 1
+                break
+    return matched_As
+
+@njit(cache=True)
+def try_merge_remaps(ref_remap, remap):
+    merged_remap = ref_remap.copy()
+    status = 0 # 0 = same, 1 = new, 2 = not same
+    for k, (ref_ind, ind) in enumerate(zip(ref_remap, remap)):
+        if(ind == -1):
+            pass
+        elif(ref_ind == -1 and ind != -1):
+            status = 1
+            merged_remap[k] = ind
+        elif(ref_ind != ind):
+            status = 2
+            break
+    return status, merged_remap
+
+
+i2_arr = i2[::1]
+f8_i2_arr_tup = Tuple((f8,i2[::1]))
+
+@njit(cache=True)
+def intersect_op_sets(op_set_a, op_set_b, bpti_a, bpti_b, remap_inds=None):
+    op_key_intersection = intersect_keys(op_set_a, op_set_b)
+
+    scored_remaps = List.empty_list(f8_i2_arr_tup)
+    # For every unique type of literal (e.g. (x<y) & (a<b))
+    for _, k in enumerate(op_key_intersection):
+        a_base_ind_set = base_sets_to_inds(op_set_a[k],bpti_a)
+        b_base_ind_set = base_sets_to_inds(op_set_b[k],bpti_b)
+
+        remaps = get_possible_remap_inds(a_base_ind_set, b_base_ind_set, len(bpti_a), len(bpti_b))
+        scores = np.empty(len(remaps),dtype=np.float64)
+        for c, remap in enumerate(remaps):
+            print("remap: ", remap)
+            matched_As = get_matched_mask(a_base_ind_set,b_base_ind_set,remap)
+            scores[c] = np.sum(matched_As)
+
+        # Order by score, drop remaps that have a score of zero 
+        order = np.argsort(scores)
+        first_nonzero = 0
+        for ind in order:
+            if(scores[ind] > 0): break
+            first_nonzero +=1
+        print("first_nonzero", first_nonzero)
+        order = order[first_nonzero:][::-1]
+        # ordered_scores, ordered_remaps = np.empty_like(scores), np.empty_like(remaps)
+        # for i,ind in enumerate(order):
+        #     ordered_scores[i] = scores[ind]
+        #     ordered_remaps[i] = remaps[ind]
+        # scores = ordered_scores
+        # remaps = ordered_remaps
+
+        print(scores, remaps)
+
+        
+            # ref_remap = scored_remaps[]
+
+        og_L = len(scored_remaps)
+        ref_was_merged = np.zeros(og_L, dtype=np.uint8)
+        n_merged = 0
+        for i, ind in enumerate(order):
+            score, remap = scores[ind], remaps[ind]
+
+            was_merged = False
+            for j in range(len(scored_remaps)):
+                if(not ref_was_merged[j]):
+                    ref_score, ref_remap = scored_remaps[j]
+                    merged_remap = ref_remap.copy()
+
+                    # status : 0 = same, 1 = new, 2 = not same
+                    status, merged_remap = try_merge_remaps(ref_remap, remap)
+                    
+                    if(status != 2):
+                        if(status == 1):
+                            # If they aren't quite same append the merge
+                            scored_remaps.append((ref_score+score, merged_remap))
+                        else:
+                            # When they are the same replace the old one
+                            scored_remaps[j] = (ref_score+score, merged_remap)
+                        was_merged = True
+
+                        # Mask out j to ensure we don't merge two remaps from this 
+                        #  literal set. We should only mask the first possibility which
+                        #  has the largest score 
+                        ref_was_merged[j] = 1
+                    
+                    print("<<", status, ref_remap, remap, merged_remap)
+            if(not was_merged):
+                scored_remaps.append((score,remap))
+
+
+        scores = np.empty(len(scored_remaps),dtype=np.float64)
+        for i,(s,_) in enumerate(scored_remaps): scores[i] = s
+        order = np.argsort(scores)[::-1]
+
+
+        
+        scored_remaps = List([scored_remaps[ind] for ind in order])
+        print(scored_remaps)
+
+        # best_remap = scored_remaps[0]
+        # scored_remaps =  sorted(scored_remaps)
+
+        
+
+
+
+
+
+
+
+
+
+
+        
+        # print("scores", scores)
+        # print("remaps", remaps)
+
+
+        # print("argsort scores",)
+
+
+
+
+
+
+
+
+
+
+        
+            # while(remap_options[iter_i,iter_j] == -1):
+            #     pass
+
+# 0 0 1
+# 1 0 1
+# 0 1 1
+# 1 1 1
+# 0 2 1
+#
+
+            
+
+
+
+
+
+
+        
+        # initial_remap = np.zeros(len(bpti_a), dtype=np.int16)
+
+        # first_i = -1
+        # for i in range(len(num_remaps_per_a)):
+        #     if(first_i == -1 and num_remaps_per_a[i] > 0): first_i = i
+        #     for j in range(len(bpti_a)):
+        #         if(poss_remap_matrix[i,j]):
+        #             initial_remap[i] = j; break;
+
+        # for i in range(len(bpti_a)):
+        #     if(num_remaps_per_b[i] <= 0): initial_remap[i] = -1
+
+        # remap = initial_remap.copy()
+        # iter_i = first_i
+        # iter_j = remap[iter_i]
+
+        # print("first:", first_i)
+        # print("initial remap:", remap)
+
+
+
+        
+        # # present_inds = 
+        # # next valid remap
+        # done = False
+        # while(not done):
+        #     iter_j = remap[iter_i]
+        #     if(poss_remap_matrix[iter_i, iter_j]):
+        #         print(remap, True)            
+
+        #     iter_j = remap[iter_i] = remap[iter_i] + 1
+                
+        #     # When iter_j exceeds the last var in B then we have exhausted the mapping
+        #     #  possibilities for the first var in A. Find the next var in A to try the
+        #     #  next possibility for.
+        #     while(iter_j >= len(bpti_b)):
+        #         remap[iter_i] = initial_remap[iter_i]
+
+        #         iter_i += 1
+        #         # Skip variables from A that aren't present in this literal set
+        #         while(num_remaps_per_a[iter_i] <= 0): iter_i += 1
+
+        #         # iter_i exceeds the last var in A then we're done
+        #         if(iter_i >= len(bpti_a)): 
+        #             done = True; break;
+
+
+        #         iter_j = remap[iter_i] = remap[iter_i] + 1            
+        #         while(poss_remap_matrix[iter_i, iter_j] == 0):
+        #             iter_j = remap[iter_i] = remap[iter_i] + 1
+                
+        #     # 
+        #     iter_i = first_i
+            
+
+        # # print("----")
+                
+
+        
+
+        # for i in range(len(bpti_a)):
+        #     for j in range(len(bpti_b)):
+        #         if(poss_remap_matrix[i,j]):
+
+
+            
+                # print(a_base_inds, b_base_inds)
+
+        # print(poss_remap_matrix)
+
+
+
+
+
+
+
+        # possible_remaps = np.array()
+
+        # print(a_base_sets,b_base_sets)
+
+
+
+
+
+
+    # for k in op_intersection:
+    #     a_base_sets = op_set_a[k]
+    #     b_base_sets = op_set_b[k]
+
+    #     for b_base_set in b_base_sets:
+    #         if(remapping):
+    #             new_b_base_set = np.empty(len(b_base_set),dtype=np.int64)
+    #             for i, ptr in b_base_set:
+    #                 new_b_base_set[i] = remapping[ptr]
+    #             b_base_set = new_b_base_set
+    #         for a_base_set in a_base_sets:
+    #             if(np.array_equal(a_base_set, b_base_set))
+
+
+
+    
+#     return d
+
+@njit(cache=True,locals={"i" : u2})
+def make_base_ptrs_to_inds(self):
+    base_ptrs_to_inds = Dict.empty(i8,u2)
+    i = u2(0)
+    for v in self.vars:
+        base_ptrs_to_inds[v.base_ptr] = i; i += 1;
+    # for v in other.vars:
+    #     base_ptrs_to_inds[v.base_ptr] = i; i += 1;
+
+    return base_ptrs_to_inds
+
+# def get_op_set_re():
+
+
+
+
+@njit(cache=True)
+def best_intersection(self, other):
+    return None
+    
+
+#     for conjunct_a in self.dnf:
+#         for conjunct_b in other.dnf:
+#             op_set_a = Dict.empty(i8,u1)
+#             op_set_b = Dict.empty(i8,u1)
+
+
+# Once the op intersection has been found then we can speed up the combinatorial
+# checking of var agreement using np.arrays
+# let x,y be (n*2) arrays M be a replacement matrix from Vy -> Vx that represents
+# all of the ways of substituting a var in y for one in x
+# i.e.
+'''
+x,y,z ->
+[a,b,c,Ø] x [a,b,c,Ø] x [a,b,c,Ø]
+[
+ [a,b,c]
+ [c,a,b]
+ [b,c,a]
+ []
+]
+
+Very few of these are actually worth checking, for instance (1)
+(a < b) & (b < c) 
+(x < y) & (y < z)
+
+x -> [a,b,Ø], y -> [b,Ø], z -> [c,b,Ø]
+
+there is no point in replacing x -> c for instance since that replacement isn't
+consistent with any of the present literals
+
+so the posibilities are 
+x,y,z -> [a,b,c], [a,b,b], [b,b,c], [b,b,b], 
+        ... or some others where we have to drop literals because of Ø
+
+It probably doesn't make sense to reject repeat variables outright
+Formally the mapping doesn't necessarily need to be injective
+
+for instance (2)
+(a < b) & (b < c) 
+(x < y) & (q < z)
+
+The best antiunification is 
+
+x,y,q,z -> [a,b,b,c]
+
+On this note it probably makes sense to choose the Conditions object
+with the fewest variables to be the one that defines the set of variables that is kept,
+or if this inconsistency is annoying then we could do this and then map back to the left one
+
+
+This can probably actually be reformulated as a SAT problem, although
+ it's not clear that this would be more efficient or easier.
+ The plotkin idea seems like this, just combine each candidate pair to make a new literal like
+ Xaz | Xay, etc.
+
+One question is can we resolve variables greedily
+for instance in (1) we might be tempted to resolve y -> b which
+would mean z -> c satisfies the first literal and x -> a satisfies the second
+
+One way of thinking about this is that the variable y spans 2 literals, and has one
+option, otherwise we choose Ø which drops both literals. Thus if we can establish
+that resolving the maximium spanning variable first can't screw us over then we can
+make a greedy algorithm gaurenteed to find the best lgg. 
+
+
+Let's try another example 
+
+(x < y) & (y < z) & (y < r)
+(a < b) & (b < c) 
+
+
+x -> [a,c], y -> [b], z-> [c,b], r -> [c,b]
+
+Here there are two best mappings x,y,z,r -> [a,b,c,Ø], [a,b,Ø,c]
+
+I wonder if we can reformulate this as a sort of graph coloring problem in which case,
+it is probably np-hard. For instance the set with more variables constitutes the nodes
+and the set with fewer is the colors and the intersecting set of literals are the edges...
+Not sure this totally works, since we're allowed to get rid of edges.
+
+So what's a good way to try all the mappings?
+
+Could probably just encode them all going off of the instance above
+
+ref [[a,b],[b,c]]
+
+ops [[a,b],[b,c]] : x,y,z,r -> [a,b,c,Ø]
+ops [[a,b],[b,b]] : x,y,z,r -> [a,b,b,Ø]
+ops [[b,b],[b,c]] : x,y,z,r -> [b,b,c,Ø]
+ops [[b,b],[b,b]] : x,y,z,r -> [b,b,b,Ø]
+ops [[a,b],[b,c]] : x,y,z,r -> [a,b,Ø,c]
+ops [[a,b],[b,b]] : x,y,z,r -> [a,b,Ø,b]
+ops [[b,b],[b,c]] : x,y,z,r -> [b,b,Ø,c]
+ops [[b,b],[b,b]] : x,y,z,r -> [b,b,Ø,b]
+
+so clearly the first one is best but if there were other literals added in
+then we might find for instance that c -> b was actually a good choice,
+in which case we would have to drop a literal like (b < c), but we might keep others,
+in the process.
+
+For instance: 
+
+(x < y) & (y < z) & (z != x) & (y != 0) 
+(a < b) & (b < c) & (b != a) & (c != 0)
+
+x -> [a,c], y -> [b,c], z -> [c,b]
+
+pre [[x,y],[y,z],[z,x],[y,-]]
+ref [[a,b],[b,c],[b,a],[c,-]]
+
+ops [[a,c],[c,c],[c,a],[c,-]] : x,y,z -> [a,c,c] 1
+ops [[a,c],[c,b],[b,a],[c,-]] : x,y,z -> [a,c,b] 2
+ops [[b,c],[c,c],[b,c],[c,-]] : x,y,z -> [b,c,c] 1
+ops [[b,c],[c,b],[b,b],[c,-]] : x,y,z -> [b,c,b] 1
+
+ops [[a,b],[b,c],[c,a],[b,-]] : x,y,z -> [a,b,c] 2
+ops [[a,b],[b,b],[b,a],[b,-]] : x,y,z -> [a,b,b] 2
+ops [[b,b],[b,c],[b,c],[c,-]] : x,y,z -> [b,b,c] 2
+ops [[b,b],[b,b],[b,b],[b,-]] : x,y,z -> [b,b,b] 0
+
+Here there are several best options 
+
+
+In code we can represent this as 
+
+ptrs -> inds dicts i.e.
+{x,y,z} -> {0,1,2}
+{a,b,c} -> {3,4,5}
+
+
+arr = of_size(prod(n_possibilities), min(n_varl, n_varr)) 
+for left_vars ..
+    for remap_poss ...
+        arr[?:?:?] = remap_poss
+
+remapped_pre = empty
+scores_arr = of_size(prod(n_possibilities))
+for k,remap in enumerate(arr):
+    for i,v in range(len(pre)):
+        for j,v in range(d):
+            remapped_pre[i,j] = remap[pre[i,j]]
+
+    scores_arr[k] = sum(all(remapped_pre == ref,ind=-1)*weights)
+
+
+    
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+'''
+        
 
 # @njit(cache=True)
 # def initialize_conditions(conds):

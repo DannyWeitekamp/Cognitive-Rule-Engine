@@ -482,8 +482,9 @@ def gen_fact_code(typ, fields, fact_num, ind='    '):
     getter_jits = "\n".join([_gen_getter_jit(typ,t,attr) for attr,t in all_fields])
     # field_list = ",".join(["'%s'"%attr for attr,t in fields])
 
-    param_defaults_list = ",".join([f"{attr}={get_type_default(t)!r}" for attr,t in fields])
-    param_list = ",".join([f"{attr}" for attr,t in fields])
+    param_defaults_seq = ",".join([f"{attr}={get_type_default(t)!r}" for attr,t in fields])
+    param_seq = ",".join([f"{attr}" for attr,t in fields])
+    attr_tup = tuple([attr for attr,t in fields])
 
     # base_list = ",".join([f"'{k}'" for k,v in _base_fact_fields])
     # base_type_list = ",".join([str(v) for k,v in _base_fact_fields])
@@ -520,7 +521,7 @@ from cre.fact_intrinsics import define_boxing, get_fact_attr_ptr, _register_fact
 from cre.fact import repr_list_attr, repr_fact_attr,  FactProxy, Fact{", BaseFactType, base_list_type, fact_to_ptr" if typ != "BaseFact" else ""}
 from cre.utils import _raw_ptr_from_struct, ptr_t, _get_member_offset, _cast_structref
 import cloudpickle
-from cre.cre_object import member_info_type
+from cre.cre_object import member_info_type, set_chr_mbrs
 {fact_imports}
 
 attr_offsets = np.array({attr_offsets!r},dtype=np.int16)
@@ -538,7 +539,6 @@ class {typ}TypeTemplate(Fact):
         return tuple((name, types.unliteral(typ)) for name, typ in fields)
 
 field_list = cloudpickle.loads({cloudpickle.dumps(all_fields)})
-print(field_list)
 {typ}Type = {typ}TypeTemplate(field_list)
 {typ}Type_w_mbr_infos = {typ}TypeTemplate(field_list+[("chr_mbrs_infos", UniTuple(member_info_type,{len(_fields)}))])
 
@@ -551,16 +551,13 @@ def get_chr_mbrs_infos():
 chr_mbrs_infos = get_chr_mbrs_infos()
 {typ}TypeTemplate._chr_mbrs_infos = chr_mbrs_infos
 
-print("chr_mbrs_infos" , chr_mbrs_infos)
-
 @njit(cache=True)
-def ctor({param_defaults_list}):
+def ctor({param_defaults_seq}):
     st = new({typ}Type_w_mbr_infos)
     fact_lower_setattr(st,'idrec',u8(-1))
+    fact_lower_setattr(st,'hash_val',0)
     fact_lower_setattr(st,'fact_num',{fact_num})
-    # print(chr_mbrs_infos)
-    fact_lower_setattr(st, 'chr_mbrs_infos', chr_mbrs_infos)
-    fact_lower_setattr(st, 'chr_mbrs_infos_offset', _get_member_offset(st,'chr_mbrs_infos'))
+    set_chr_mbrs(st, {attr_tup!r})
     {init_fields}
     return _cast_structref({typ}Type,st)
 
@@ -588,19 +585,12 @@ class {typ}(FactProxy):
     def __repr__(self):
         return str(self)    
 
-    # # Well do this the right way later
-    # def __hash__(self):
-    #     return get_self_ptr(self)
-
-    # def __eq__(self,other):
-    #     return get_self_ptr(self) == get_self_ptr(other)
-
 {properties}
 
 @overload({typ})
-def _ctor({param_defaults_list}):
-    def impl({param_defaults_list}):
-        return ctor({param_list})
+def _ctor({param_defaults_seq}):
+    def impl({param_defaults_seq}):
+        return ctor({param_seq})
     return impl
 
 define_boxing({typ}TypeTemplate,{typ})
@@ -722,10 +712,9 @@ base_fact_fields  = [(k,v) for k,v in base_fact_field_dict.items()]
 BaseFact, BaseFactType = _fact_from_fields("BaseFact", [])
 base_list_type = ListType(BaseFactType)
 
-@lower_cast(Fact, CREObjType)
+# @lower_cast(Fact, CREObjType)
 @lower_cast(Fact, BaseFactType)
 def downcast(context, builder, fromty, toty, val):
-    print("IMPL downcast")
     return _obj_cast_codegen(context, builder, val, fromty, toty,incref=False)
 
 
@@ -782,5 +771,11 @@ def cast_fact(typ, val):
 
     
 
+
+
+#### Hashing ####
+
+# @njit(cache=True)
+# def fact_hash():
 
 

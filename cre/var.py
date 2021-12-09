@@ -6,7 +6,7 @@ from numba.typed import List
 from numba.types import ListType, unicode_type, void, Tuple
 from numba.experimental import structref
 from numba.experimental.structref import new, define_boxing, define_attributes, _Utils
-from numba.extending import overload_method, intrinsic, overload_attribute, intrinsic, lower_getattr_generic, overload, infer_getattr, lower_setattr_generic
+from numba.extending import lower_cast, overload_method, intrinsic, overload_attribute, intrinsic, lower_getattr_generic, overload, infer_getattr, lower_setattr_generic
 from numba.core.typing.templates import AttributeTemplate
 from cre.caching import gen_import_str, unique_hash,import_from_cached, source_to_cache, source_in_cache
 from cre.context import cre_context
@@ -14,10 +14,10 @@ from cre.structref import define_structref, define_structref_template, CastFrien
 from cre.memory import MemoryType, Memory, facts_for_t_id, fact_at_f_id
 from cre.fact import define_fact, BaseFactType, cast_fact, DeferredFactRefType, Fact, _standardize_type
 from cre.utils import PrintElapse, ptr_t, _struct_from_meminfo, _meminfo_from_struct, _cast_structref, cast_structref, decode_idrec, lower_getattr, _struct_from_ptr,  lower_setattr, lower_getattr, _raw_ptr_from_struct, _decref_ptr, _incref_ptr, _incref_structref, _ptr_from_struct_incref
-from cre.utils import assign_to_alias_in_parent_frame
+from cre.utils import assign_to_alias_in_parent_frame, encode_idrec
 from cre.subscriber import base_subscriber_fields, BaseSubscriber, BaseSubscriberType, init_base_subscriber, link_downstream
 from cre.vector import VectorType
-from cre.cre_object import cre_obj_field_dict, CREObjTypeTemplate, CREObjProxy
+from cre.cre_object import cre_obj_field_dict,CREObjType, CREObjTypeTemplate, CREObjProxy, set_chr_mbrs
 # from cre.predicate_node import BasePredicateNode,BasePredicateNodeType, get_alpha_predicate_node_definition, \
  # get_beta_predicate_node_definition, deref_attrs, define_alpha_predicate_node, define_beta_predicate_node, AlphaPredicateNode, BetaPredicateNode
 from numba.core import imputils, cgutils
@@ -27,7 +27,8 @@ from numba.core.datamodel import default_manager, models
 from operator import itemgetter
 from copy import copy
 from os import getenv
-from cre.utils import deref_type, DEREF_TYPE_ATTR, DEREF_TYPE_LIST, listtype_sizeof_item
+from cre.utils import deref_type, DEREF_TYPE_ATTR, DEREF_TYPE_LIST, listtype_sizeof_item, _obj_cast_codegen
+from cre.core import T_ID_VAR
 # import inspect
 
 
@@ -70,7 +71,13 @@ var_fields_dict = {
 var_fields =  [(k,v) for k,v, in var_fields_dict.items()]
 
 class VarTypeTemplate(CREObjTypeTemplate):
-    pass
+    def __str__(self):
+        return f"cre.GenericVarType"
+
+# @lower_cast(VarTypeTemplate, CREObjType)
+# def downcast(context, builder, fromty, toty, val):
+#     return _obj_cast_codegen(context, builder, val, fromty, toty,incref=False)
+
 
 
 # Manually register the type to avoid automatic getattr overloading 
@@ -370,9 +377,10 @@ class Var(CREObjProxy):
     def __setstate__(self, d):
         self.__dict__ = d
 
-    # def __hash__(self):
-    #     ptr = 0#get_var_ptr(self)
-    #     return ptr
+    def __hash__(self):
+        from cre.dynamic_exec import _cre_obj_hash
+        # ptr = 0#get_var_ptr(self)
+        return _cre_obj_hash(self)
 
     def get_base_ptr(self):
         return var_get_base_ptr(self)
@@ -480,6 +488,7 @@ def get_var_definition(base_type, head_type):
 @njit(cache=True)
 def var_ctor(var_struct_type, base_type_name="", alias=""):
     st = new(var_struct_type)
+    st.idrec = encode_idrec(T_ID_VAR,0,0)
     st.is_not = u1(0)
     st.conj_ptr = i8(0)
     st.base_type_name = base_type_name
@@ -559,6 +568,9 @@ def overload_str_var(self):
 class StructAttribute(AttributeTemplate):
     key = VarTypeTemplate
     def generic_resolve(self, typ, attr):
+        from numba.cpython.hashing import _Py_hash_t
+        if(attr == "__hash__"): return types.FunctionType(_Py_hash_t(CREObjType,))
+
         if attr in typ.field_dict:
             attrty = typ.field_dict[attr]
             return attrty
@@ -591,7 +603,7 @@ def var_memcopy(self,st):
     # old_deref_offsets
     # for i,y in enumerate(lower_getattr(self,"deref_offsets")):
     #     new_deref_offsets[i] = y
-
+    lower_setattr(st,'idrec', lower_getattr(self,"idrec"))
     lower_setattr(st,'is_not', lower_getattr(self,"is_not"))
     lower_setattr(st,'base_ptr', lower_getattr(self,"base_ptr"))
     lower_setattr(st,'base_ptr_ref', lower_getattr(self,"base_ptr_ref"))

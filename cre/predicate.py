@@ -152,8 +152,11 @@ def pred_ctor(*members):
 
     def impl(*members):
         st = new(pred_type)
-        fact_lower_setattr(st, 'idrec', default_idrec)
-        fact_lower_setattr(st, 'num_identity_members', len(members))
+        # Force zero to avoid immutability issues
+        fact_lower_setattr(st, 'idrec', u8(-1))
+
+        fact_lower_setattr(st, 'hash_val', 0)
+        fact_lower_setattr(st, 'num_chr_mbrs', len(members))
         fact_lower_setattr(st, 'chr_mbrs_infos', _pred_get_chr_mbrs_infos(st))
         fact_lower_setattr(st, 'chr_mbrs_infos_offset', _get_member_offset(st,'chr_mbrs_infos'))
         # print(_pred_get_chr_mbrs_infos(st))
@@ -161,6 +164,9 @@ def pred_ctor(*members):
         # fact_lower_setattr(st, 'chr_mbrs_infos', chr_mbrs_infos)
         # _pred_get_chr_mbrs_infos(st)
         fact_lower_setattr(st, 'members', members)
+
+        # Set this last to avoid immutability
+        fact_lower_setattr(st, 'idrec', default_idrec)
         # print("**",  _struct_get_attr_offset(st,"members"), _struct_get_attr_offset(st,"member_info") + st.length)
         return st
     return impl
@@ -267,17 +273,7 @@ def _pred_ctor(*args):
 #     # print(t_id, diff)
 #     return t_id_ptr+1, item_ptr+diff
 
-@njit(cache=True)
-def pred_iter_t_id_item_ptrs(_x):
-    x = _cast_structref(GenericPredType,_x)
-    data_ptr = _struct_get_data_ptr(x)
-    # member_info_ptr = _struct_get_data_ptr(x.chr_mbrs_infos) + _struct_get_attr_offset(x.chr_mbrs_infos,"data")
-    member_info_ptr = data_ptr + x.chr_mbrs_infos_offset
-    
-    for i in range(x.num_identity_members):
-        t_id, member_offset = _load_ptr(member_info_type, member_info_ptr)
-        yield t_id, data_ptr + member_offset
-        member_info_ptr += _sizeof_type(member_info_type)
+
     # print()
 
 

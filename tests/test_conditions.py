@@ -363,7 +363,7 @@ def test_eq():
         assert not eq(a1,b2)
         assert not eq(a1,b3)
 
-from cre.conditions import conds_to_op_sets, best_intersection, make_base_ptrs_to_inds, intersect_op_sets
+from cre.conditions import conds_to_lit_sets, best_intersection, make_base_ptrs_to_inds, score_remaps
 def test_anti_unify():
 
     x, y, z = Var(f8,'x'), Var(f8,'y'), Var(f8,'z')
@@ -376,13 +376,19 @@ def test_anti_unify():
     # x -> [1,1,0,0]
     # y -> [1,1,1,0]
     # z -> [0,1,1,0]
+    test_frzn_ind_arr_type()
+    raise ValueError()
 
-    osl1 = conds_to_op_sets(c1)
-    osl2 = conds_to_op_sets(c2)
+    lsl1 = conds_to_lit_sets(c1)
+    lsl2 = conds_to_lit_sets(c2)
+
+    # print(lsl1[0].keys())
     bpti1 = make_base_ptrs_to_inds(c1)
     bpti2 = make_base_ptrs_to_inds(c2)
-    intersect_op_sets(osl1[0], osl2[0], bpti1, bpti2)
-    intersect_op_sets(osl2[0], osl1[0], bpti2, bpti1)
+    score_remaps(lsl1[0], lsl2[0], bpti1, bpti2)
+    score_remaps(lsl2[0], lsl1[0], bpti2, bpti1)
+
+
 
 
 

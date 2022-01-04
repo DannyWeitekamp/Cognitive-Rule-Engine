@@ -180,6 +180,14 @@ def literal_not(self):
     return n
 
 
+literal_unique_tuple_type = Tuple((u1, i8))
+@njit(literal_unique_tuple_type(LiteralType), cache=True)
+def literal_get_unique_tuple(self):
+    '''Outputs a tuple that uniquely identifies an instance
+         of a literal independant of the Vars in its underlying op
+    '''
+    return (self.negated, self.op.call_addr)
+
 
 #TODO compartator helper?
 
@@ -1044,41 +1052,47 @@ def build_distributed_dnf(c,index_map=None):
 
 #### Intersecting Conditions #### 
 
-
-base_var_ptr_array_type = i8[::1]
-var_set_list_type = ListType(base_var_ptr_array_type)
+# The literal instance plus base_var_ptrs
+# literal_inst_record_type = Tuple( (LiteralType, i8[::1]) )
+# lit_list_type = ListType(LiteralType)
 
 
 # NOTE: if ever going to use dynamic ops then need to use more than call_addr
 
 # op.call_addr -> list of arrays of base_ptrs 
-op_set_type = DictType(i8,var_set_list_type)
+# lit_set_type = DictType(i8,var_set_list_type)
 
 
 @njit(cache=True)
-def conds_to_op_sets(self):
-    op_sets = List.empty_list(op_set_type)
+def conds_to_lit_sets(self):
+    lit_sets = List()
     for conjunct in self.dnf:
-        d = Dict.empty(i8, var_set_list_type)
+        d = Dict()#Dict.empty(i8, var_set_list_type)
         for lit in conjunct:
-            if(lit.op.call_addr not in d):
-                l = d[lit.op.call_addr] = List.empty_list(base_var_ptr_array_type)
+            unq_tup = literal_get_unique_tuple(lit)
+            # print(unq_tup)
+            if(unq_tup not in d):
+                l = d[unq_tup] = List.empty_list(LiteralType)
             else:
-                l = d[lit.op.call_addr]
+                l = d[unq_tup]
 
             base_var_ptrs = np.empty(len(lit.op.base_vars), dtype=np.int64)
             for i, base_var in enumerate(lit.op.base_vars):
                 base_var_ptrs[i] = base_var.base_ptr
 
-            l.append(base_var_ptrs)
-        op_sets.append(d)
-    return op_sets
+            l.append(lit)
+
+        # print(d)
+        lit_sets.append(d)
+    # print(lit_sets)
+    return lit_sets
 
 
 @njit(cache=True)
-def intersect_keys(a,b):
+def intersect_keys(a, b):
     l = List()
-    for k,v in a.items():
+    for k in a:
+        print(k, k in b)
         if(k in b): l.append(k)
     return l
 
@@ -1094,9 +1108,12 @@ def intersect_keys(a,b):
 
 u2_arr = u2[::1]
 @njit(cache=True)
-def base_sets_to_inds(base_sets, base_ptrs_to_inds):
+def lit_set_to_ind_sets(lit_set, base_ptrs_to_inds):
+    ''' Takes a list of literals and a mapping from base_var_ptrs to indicies
+        and outputs a list of arrays of indicies'''
     l = List.empty_list(u2_arr)
-    for base_set in base_sets:
+    for lit in lit_set:
+        base_set = lit.var_base_ptrs
         base_inds = np.empty(len(base_set), dtype=np.uint16)
         for i, v in enumerate(base_set):
             base_inds[i] = base_ptrs_to_inds[v]
@@ -1110,7 +1127,7 @@ def remap_is_valid(remap, poss_remaps):
         poss_remaps[i, j]
 
 @njit(cache=True, locals={"remaps":i2[:,::1]})
-def get_possible_remap_inds(a_base_ind_set, b_base_ind_set, n_a, n_b):
+def get_possible_remap_inds(a_ind_set, b_ind_set, n_a, n_b):
     ''' Given arrays of var indicies corresponding to a common type of literal (e.g. (x<y) & (a<b))
         between Conditions A and B. Generate all possible remappings of variables in 
         A to variables in B. Each remapping is represented by an array of indices 
@@ -1121,8 +1138,8 @@ def get_possible_remap_inds(a_base_ind_set, b_base_ind_set, n_a, n_b):
 
     # Produce a boolean matrix identifying feasible remapping pairs
     poss_remap_matrix = np.zeros((n_a,n_b), dtype=np.uint8)
-    for a_base_inds in a_base_ind_set:
-        for b_base_inds in b_base_ind_set:
+    for a_base_inds in a_ind_set:
+        for b_base_inds in b_ind_set:
             if(len(a_base_inds) == len(b_base_inds)):
                 for ind_a, ind_b in zip(a_base_inds, b_base_inds):
                     poss_remap_matrix[ind_a, ind_b] = True
@@ -1186,17 +1203,17 @@ def get_possible_remap_inds(a_base_ind_set, b_base_ind_set, n_a, n_b):
 
 
 @njit(cache=True)
-def get_matched_mask(a_base_ind_set, b_base_ind_set, remap):
-    a_inds_remapped = np.zeros(len(a_base_ind_set[0]),dtype=np.int16)
-    matched_As = np.zeros(len(a_base_ind_set),dtype=np.uint8)
-    matched_Bs = np.zeros(len(b_base_ind_set),dtype=np.uint8)
-    for i, a_base_inds in enumerate(a_base_ind_set):
+def get_matched_mask(a_ind_set, b_ind_set, remap):
+    a_inds_remapped = np.zeros(len(a_ind_set[0]),dtype=np.int16)
+    matched_As = np.zeros(len(a_ind_set),dtype=np.uint8)
+    matched_Bs = np.zeros(len(b_ind_set),dtype=np.uint8)
+    for i, a_base_inds in enumerate(a_ind_set):
         # Apply this mapping for A -> B 
         for ix, ind in enumerate(a_base_inds):
            a_inds_remapped[ix] = remap[a_base_inds[ix]]
 
         # Greedily assign literals in remapped A to literals in B
-        for j, b_base_inds in enumerate(b_base_ind_set):
+        for j, b_base_inds in enumerate(b_ind_set):
             if(not matched_Bs[j] and np.array_equal(a_inds_remapped, b_base_inds)):
                 matched_As[i] = 1
                 matched_Bs[j] = 1
@@ -1223,20 +1240,26 @@ i2_arr = i2[::1]
 f8_i2_arr_tup = Tuple((f8,i2[::1]))
 
 @njit(cache=True)
-def intersect_op_sets(op_set_a, op_set_b, bpti_a, bpti_b, remap_inds=None):
-    op_key_intersection = intersect_keys(op_set_a, op_set_b)
+def score_remaps(lit_set_a, lit_set_b, bpti_a, bpti_b, remap_inds=None):
+    # print(lit_set_a, lit_set_b)
+    op_key_intersection = intersect_keys(lit_set_a, lit_set_b)
 
     scored_remaps = List.empty_list(f8_i2_arr_tup)
     # For every unique type of literal (e.g. (x<y) & (a<b))
     for _, k in enumerate(op_key_intersection):
-        a_base_ind_set = base_sets_to_inds(op_set_a[k],bpti_a)
-        b_base_ind_set = base_sets_to_inds(op_set_b[k],bpti_b)
+        # print("<<", k)
+        # print(lit_set_a[k])
 
-        remaps = get_possible_remap_inds(a_base_ind_set, b_base_ind_set, len(bpti_a), len(bpti_b))
+        a_ind_set = lit_set_to_ind_sets(lit_set_a[k], bpti_a)
+        b_ind_set = lit_set_to_ind_sets(lit_set_b[k], bpti_b)
+
+        # print(a_ind_set)
+
+        remaps = get_possible_remap_inds(a_ind_set, b_ind_set, len(bpti_a), len(bpti_b))
         scores = np.empty(len(remaps),dtype=np.float64)
         for c, remap in enumerate(remaps):
-            print("remap: ", remap)
-            matched_As = get_matched_mask(a_base_ind_set,b_base_ind_set,remap)
+            # print("remap: ", remap)
+            matched_As = get_matched_mask(a_ind_set,b_ind_set,remap)
             scores[c] = np.sum(matched_As)
 
         # Order by score, drop remaps that have a score of zero 
@@ -1245,26 +1268,14 @@ def intersect_op_sets(op_set_a, op_set_b, bpti_a, bpti_b, remap_inds=None):
         for ind in order:
             if(scores[ind] > 0): break
             first_nonzero +=1
-        print("first_nonzero", first_nonzero)
+        # print("first_nonzero", first_nonzero)
         order = order[first_nonzero:][::-1]
-        # ordered_scores, ordered_remaps = np.empty_like(scores), np.empty_like(remaps)
-        # for i,ind in enumerate(order):
-        #     ordered_scores[i] = scores[ind]
-        #     ordered_remaps[i] = remaps[ind]
-        # scores = ordered_scores
-        # remaps = ordered_remaps
-
-        print(scores, remaps)
-
-        
-            # ref_remap = scored_remaps[]
 
         og_L = len(scored_remaps)
         ref_was_merged = np.zeros(og_L, dtype=np.uint8)
         n_merged = 0
         for i, ind in enumerate(order):
             score, remap = scores[ind], remaps[ind]
-
             was_merged = False
             for j in range(len(scored_remaps)):
                 if(not ref_was_merged[j]):
@@ -1281,31 +1292,91 @@ def intersect_op_sets(op_set_a, op_set_b, bpti_a, bpti_b, remap_inds=None):
                         else:
                             # When they are the same replace the old one
                             scored_remaps[j] = (ref_score+score, merged_remap)
+                            # Mask out j to ensure we don't merge two remaps from this 
+                            #  literal set into a ref_remap from a previous one. We'll 
+                            #  only mask the first possibility which has the largest score. 
+                            ref_was_merged[j] = 1
                         was_merged = True
 
-                        # Mask out j to ensure we don't merge two remaps from this 
-                        #  literal set. We should only mask the first possibility which
-                        #  has the largest score 
-                        ref_was_merged[j] = 1
+                        
                     
-                    print("<<", status, ref_remap, remap, merged_remap)
+                    # print("<<", status, ref_remap, remap, merged_remap)
             if(not was_merged):
                 scored_remaps.append((score,remap))
 
-
+        # Sort the scored_remap list
         scores = np.empty(len(scored_remaps),dtype=np.float64)
         for i,(s,_) in enumerate(scored_remaps): scores[i] = s
         order = np.argsort(scores)[::-1]
-
-
-        
         scored_remaps = List([scored_remaps[ind] for ind in order])
-        print(scored_remaps)
+    print(scored_remaps)
+    return scored_remaps
 
         # best_remap = scored_remaps[0]
         # scored_remaps =  sorted(scored_remaps)
 
+# from collections import namedtuple
+FrozenArr, FrozenArrType = define_structref("FrozenArr", [("arr" ,i8[::1])])
+# FrozenArr = namedtuple("FrozenArr", ['arr'])
+# FrozenArrType_i8 = numba.types.NamedTuple([i8[::1]],FrozenArr)
+
+@overload(hash)
+@overload_method(FrozenArrType, '__hash__')
+def _impl_hash_FrozenArr(x):
+    print(x)
+    if(x is FrozenArrType):
+        print("<<", x.__dict__)
+        def impl(x):
+            return np.sum(x.arr)
+        return impl
+
+@overload(operator.eq)
+def _impl_eq_FrozenArr(a, b):
+    # print(a,b, isinstance(a,CREObjTypeTemplate) and isinstance(b,CREObjTypeTemplate))
+    if(getattr(a,'instance_class') is FrozenArr and getattr(b,'instance_class') is FrozenArr):
+        print(a,b)
+        def impl(a, b):
+            return np.array_equal(a.arr, b.arr)
+        return impl
+
+
+@njit(cache=True)
+def test_frzn_ind_arr_type():
+    a1 = FrozenArr(np.arange(3,dtype=np.int64))
+    a2 = FrozenArr(np.arange(3,dtype=np.int64))
+    b = FrozenArr(np.arange(3,dtype=np.int64)+1)
+    # print(a1,a2,b)
+    # print(hash(a1),hash(a2),hash(b))
+    # print(a1 == a2)
+    # print(a1 == b)
+    # d = Dict()
+    # d[]
+
+
         
+@njit(cache=True)
+def conds_antiunify(ca, cb):
+    ls_as = conds_to_lit_sets(ca)
+    ls_bs = conds_to_lit_sets(cb)
+
+    bpti_a = make_base_ptrs_to_inds(c1)
+    bpti_b = make_base_ptrs_to_inds(c2)
+
+    best_score = -np.inf
+    best_remap = np.arange(len(bpti_a))
+    for ls_a in ls_as: 
+        for ls_b in ls_bs: 
+            scored_remaps = score_lit_set_remaps(la_a, la_b, bpti_a, bpti_b)
+
+    print(scored_remaps)
+
+
+
+
+
+
+
+
 
 
 

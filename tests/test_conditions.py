@@ -376,8 +376,8 @@ def test_anti_unify():
     # x -> [1,1,0,0]
     # y -> [1,1,1,0]
     # z -> [0,1,1,0]
-    test_frzn_ind_arr_type()
-    raise ValueError()
+    # test_frzn_ind_arr_type()
+    # raise ValueError()
 
     lsl1 = conds_to_lit_sets(c1)
     lsl2 = conds_to_lit_sets(c2)

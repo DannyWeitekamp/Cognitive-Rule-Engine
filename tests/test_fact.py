@@ -113,7 +113,7 @@ def test_cast_fact():
         b3 = BOOP3("A",1,2,3)
         bs = BaseFact()
 
-        #Downcast
+        #upcast
         @njit
         def down_cast(b):
             return cast_fact(BOOP1Type,b)    

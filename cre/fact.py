@@ -466,7 +466,7 @@ def gen_fact_code(typ, fields, fact_num, ind='    '):
         elif(isinstance(t,types.ListType) and isinstance(t.dtype,types.StructRef)):
             fact_imports += f"{gen_fact_import_str(t.dtype)}\n"
 
-        # Downcast any facts to BaseFactType since references to undefined fact types not supported
+        # upcast any facts to BaseFactType since references to undefined fact types not supported
         if(isinstance(t,fact_types)):
             _fields.append((attr,BaseFactType))
         else:
@@ -714,7 +714,7 @@ base_list_type = ListType(BaseFactType)
 
 # @lower_cast(Fact, CREObjType)
 @lower_cast(Fact, BaseFactType)
-def downcast(context, builder, fromty, toty, val):
+def upcast(context, builder, fromty, toty, val):
     return _obj_cast_codegen(context, builder, val, fromty, toty,incref=False)
 
 

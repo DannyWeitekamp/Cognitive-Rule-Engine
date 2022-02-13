@@ -47,7 +47,7 @@ define_attributes(GenericPredType)
 
 @lower_cast(PredTypeTemplate, BaseFactType)
 @lower_cast(PredTypeTemplate, CREObjType)
-def downcast(context, builder, fromty, toty, val):
+def upcast(context, builder, fromty, toty, val):
     return _obj_cast_codegen(context, builder, val, fromty, toty,incref=False)
 
 # @njit(cache=True)
@@ -141,7 +141,8 @@ def _pred_get_chr_mbrs_infos(typingctx, pred_type):
 
 @generated_jit(cache=True)
 def pred_ctor(*members):
-    member_types = types.Tuple(tuple([_down_cast_helper(x) for x in members[0].types]))
+    
+    ember_types = types.Tuple(tuple([_down_cast_helper(x) for x in members[0].types]))
     member_info_tup_type = types.UniTuple(member_info_type,len(member_types))
     member_t_ids = tuple([_resolve_t_id_helper(x) for x in member_types])
 

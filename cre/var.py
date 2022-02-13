@@ -75,7 +75,7 @@ class VarTypeTemplate(CREObjTypeTemplate):
         return f"cre.GenericVarType"
 
 # @lower_cast(VarTypeTemplate, CREObjType)
-# def downcast(context, builder, fromty, toty, val):
+# def upcast(context, builder, fromty, toty, val):
 #     return _obj_cast_codegen(context, builder, val, fromty, toty,incref=False)
 
 

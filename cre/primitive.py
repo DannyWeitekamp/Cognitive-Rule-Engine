@@ -46,7 +46,7 @@ define_attributes(StringPrimitiveType)
 
 @lower_cast(PrimitiveTypeTemplate, BaseFactType)
 @lower_cast(PrimitiveTypeTemplate, CREObjType)
-def downcast(context, builder, fromty, toty, val):
+def upcast(context, builder, fromty, toty, val):
     return _obj_cast_codegen(context, builder, val, fromty, toty,incref=False)
 
 

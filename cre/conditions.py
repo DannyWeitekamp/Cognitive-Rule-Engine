@@ -108,7 +108,7 @@ class LiteralTypeTemplate(CREObjTypeTemplate):
 
 
 # @lower_cast(LiteralTypeTemplate, CREObjType)
-# def downcast(context, builder, fromty, toty, val):
+# def upcast(context, builder, fromty, toty, val):
 #     return _obj_cast_codegen(context, builder, val, fromty, toty,incref=False)
 
 class Literal(structref.StructRefProxy):
@@ -257,7 +257,7 @@ class ConditionsTypeTemplate(CREObjTypeTemplate):
 
 ConditionsType = ConditionsTypeTemplate(conditions_fields)
 
-# lower_cast(ConditionsTypeTemplate, CREObjType)(impl_cre_obj_downcast)
+# lower_cast(ConditionsTypeTemplate, CREObjType)(impl_cre_obj_upcast)
 
 # Manually register the type to avoid automatic getattr overloading 
 # default_manager.register(VarTypeTemplate, models.StructRefModel)

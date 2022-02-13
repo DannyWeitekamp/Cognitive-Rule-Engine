@@ -1684,9 +1684,9 @@ class MatchIteratorType(CastFriendlyMixin, types.StructRef):
 define_boxing(MatchIteratorType, MatchIterator)
 GenericMatchIteratorType = MatchIteratorType(match_iterator_fields)
 
-# Allow any specialization of MatchIteratorType to be downcast to GenericMatchIteratorType
+# Allow any specialization of MatchIteratorType to be upcast to GenericMatchIteratorType
 @lower_cast(MatchIteratorType, GenericMatchIteratorType)
-def downcast(context, builder, fromty, toty, val):
+def upcast(context, builder, fromty, toty, val):
     return _obj_cast_codegen(context, builder, val, fromty, toty)
 
 

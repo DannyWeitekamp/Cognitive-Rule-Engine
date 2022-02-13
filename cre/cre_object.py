@@ -86,7 +86,7 @@ cre_obj_fields = [(k,v) for k,v in cre_obj_field_dict.items()]
 class CREObjModel(models.StructRefModel):
     pass
 
-def impl_cre_obj_downcast(context, builder, fromty, toty, val):
+def impl_cre_obj_upcast(context, builder, fromty, toty, val):
     return _obj_cast_codegen(context, builder, val, fromty, toty,incref=False)
 
 class CREObjTypeTemplate(CastFriendlyMixin, types.StructRef):
@@ -95,8 +95,8 @@ class CREObjTypeTemplate(CastFriendlyMixin, types.StructRef):
 
     def __init_subclass__(cls, **kwargs):
         super().__init_subclass__(**kwargs)
-        # Allow numba type inferencer to downcast this type to CREObjType
-        lower_cast(cls, CREObjType)(impl_cre_obj_downcast)
+        # Allow numba type inferencer to upcast this type to CREObjType
+        lower_cast(cls, CREObjType)(impl_cre_obj_upcast)
         
 
     def __str__(self):

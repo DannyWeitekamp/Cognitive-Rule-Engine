@@ -202,7 +202,7 @@ class OpTypeTemplate(CREObjTypeTemplate):
     def __str__(self):
         return f"cre.GenericOpType"
 
-# lower_cast(OpTypeTemplate, CREObjType)(impl_cre_obj_downcast)
+# lower_cast(OpTypeTemplate, CREObjType)(impl_cre_obj_upcast)
 
 
 @register_default(OpTypeTemplate)

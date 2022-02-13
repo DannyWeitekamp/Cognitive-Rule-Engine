@@ -1065,6 +1065,11 @@ def build_distributed_dnf(c,index_map=None):
 
 @njit(cache=True)
 def conds_to_lit_sets(self):
+    ''' Convert a Conditions object to a list of dictionaries (one for each
+        conjunct) that map the unique tuple (negated, op_addr) for each Literal 
+        to a list of literals that have the same unique tuple. This reorganization
+        ensures that cases like antiunify( (a != b), (x != y) & (y != z) ) try
+        remappings where like-terms get chances to be remapped.'''
     lit_sets = List()
     for conjunct in self.dnf:
         d = Dict()#Dict.empty(i8, var_set_list_type)
@@ -1315,26 +1320,42 @@ def score_remaps(lit_set_a, lit_set_b, bpti_a, bpti_b, remap_inds=None):
         # best_remap = scored_remaps[0]
         # scored_remaps =  sorted(scored_remaps)
 
+from numba.cpython.hashing import _PyHASH_XXPRIME_5
+from cre.dynamic_exec import accum_item_hash
+
+
+
+# @njit(u8(u8,u8))
+# def accum_item_hash(acc, lane):
+#     if lane == _Py_uhash_t(-1):
+#         return _Py_uhash_t(1546275796)
+#     acc += lane * _PyHASH_XXPRIME_2
+#     acc = _PyHASH_XXROTATE(acc)
+#     acc *= _PyHASH_XXPRIME_1
+#     return acc
+
 # from collections import namedtuple
-FrozenArr, FrozenArrType = define_structref("FrozenArr", [("arr" ,i8[::1])])
+FrozenArr, FrozenArrType = define_structref("FrozenArr", [("arr" , i8[:]),])
 # FrozenArr = namedtuple("FrozenArr", ['arr'])
 # FrozenArrType_i8 = numba.types.NamedTuple([i8[::1]],FrozenArr)
 
 @overload(hash)
 @overload_method(FrozenArrType, '__hash__')
 def _impl_hash_FrozenArr(x):
-    print(x)
-    if(x is FrozenArrType):
-        print("<<", x.__dict__)
+    if("FrozenArr" in x._typename):
         def impl(x):
-            return np.sum(x.arr)
+            acc = _PyHASH_XXPRIME_5
+            for x_i in x.arr:
+                #TODO: in the future if we implement this for float arrs
+                #      then we need to cast the raw bits of x_i to ints
+                acc = accum_item_hash(acc, x_i)
+
+            return acc
         return impl
 
 @overload(operator.eq)
 def _impl_eq_FrozenArr(a, b):
-    # print(a,b, isinstance(a,CREObjTypeTemplate) and isinstance(b,CREObjTypeTemplate))
-    if(getattr(a,'instance_class') is FrozenArr and getattr(b,'instance_class') is FrozenArr):
-        print(a,b)
+    if("FrozenArr" in a._typename and "FrozenArr" in b._typename, ):
         def impl(a, b):
             return np.array_equal(a.arr, b.arr)
         return impl
@@ -1345,10 +1366,10 @@ def test_frzn_ind_arr_type():
     a1 = FrozenArr(np.arange(3,dtype=np.int64))
     a2 = FrozenArr(np.arange(3,dtype=np.int64))
     b = FrozenArr(np.arange(3,dtype=np.int64)+1)
-    # print(a1,a2,b)
-    # print(hash(a1),hash(a2),hash(b))
-    # print(a1 == a2)
-    # print(a1 == b)
+    print(a1, a2, b)
+    print(hash(a1),hash(a2),hash(b))
+    print(a1 == a2)
+    print(a1 == b)
     # d = Dict()
     # d[]
 
@@ -1366,7 +1387,7 @@ def conds_antiunify(ca, cb):
     best_remap = np.arange(len(bpti_a))
     for ls_a in ls_as: 
         for ls_b in ls_bs: 
-            scored_remaps = score_lit_set_remaps(la_a, la_b, bpti_a, bpti_b)
+            scored_remaps = score_remaps(la_a, la_b, bpti_a, bpti_b)
 
     print(scored_remaps)
 
@@ -1527,6 +1548,7 @@ def conds_antiunify(ca, cb):
 
 @njit(cache=True,locals={"i" : u2})
 def make_base_ptrs_to_inds(self):
+    ''' From a collection of vars a mapping between their base ptrs to unique indicies'''
     base_ptrs_to_inds = Dict.empty(i8,u2)
     i = u2(0)
     for v in self.vars:

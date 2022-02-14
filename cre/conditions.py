@@ -1378,6 +1378,61 @@ def test_frzn_ind_arr_type():
 
 
 f8_2darr_type = f8[:,::1]
+i8_arr = i8[::1]
+
+@njit(cache=True)
+def _buid_score_aligment_matrices(ls_as, ls_bs, bpti_a, bpti_b):
+    '''For each unique remap make a matrix that holds the remap score between 
+       conjunct_i and conjunct_j for all possible alignments of the conjuncts 
+       in A and conjuncts in B. Return a list of remap matrix pairs.'''
+    score_aligment_matrices = Dict.empty(FrozenArrTypei2, f8_2darr_type)
+    for i, ls_a in enumerate(ls_as): 
+        for j, ls_b in enumerate(ls_bs): 
+            scored_remaps = score_remaps(ls_a, ls_b, bpti_a, bpti_b)
+            for score, remap in scored_remaps:
+                f_remap = FrozenArr(remap)
+                if(f_remap not in score_aligment_matrices):
+                    rank = np.sum(remap == -1)
+                    score_matrix =  np.zeros((len(ls_as), len(ls_bs)),dtype=np.float64)
+                    score_aligment_matrices[f_remap] = score_matrix
+
+                score_aligment_matrices[f_remap][i,j] = score
+    return List(score_aligment_matrices.items())
+
+@njit(cache=True)
+def _max_remap_score_for_alignments(score_matrix):
+    num_conj = score_matrix.shape[0]
+    orders = List.empty_list(i8_arr)
+    col_assign_per_row = -np.ones(num_conj,dtype=np.int64)
+    n_assigned = 0
+    row_maxes = np.zeros(num_conj,dtype=np.float64)
+    for i in range(num_conj):
+        orders_i = np.argsort(-score_matrix[i])
+        orders.append(orders_i)
+        row_maxes[i] = score_matrix[i][orders_i[0]]
+
+    order_of_rows = np.argsort(-row_maxes)
+    score = 0
+    while(len(order_of_rows) > 0):
+        row_ind = order_of_rows[0]
+
+        c = 0 
+        col_ind = orders[row_ind][c]
+        while(col_ind in col_assign_per_row):
+            col_ind = orders[row_ind][c]; c += 1
+            if(c >= len(orders[row_ind])): break
+
+        col_assign_per_row[row_ind] = col_ind
+        score += score_matrix[row_ind,col_ind]
+        order_of_rows = order_of_rows[1:]
+    return score
+
+@njit(cache=True)
+def apply_remap(c_a, c_b, remap):
+    pass
+
+
+
         
 @njit(cache=True)
 def conds_antiunify(c_a, c_b):
@@ -1388,34 +1443,57 @@ def conds_antiunify(c_a, c_b):
     bpti_b = make_base_ptrs_to_inds(c_b)
 
     remap_size = len(bpti_a)
+    num_conj = len(ls_as)
     best_score = -np.inf
-    best_remap = np.arange(remap_size)
+    best_remap = np.arange(remap_size, dtype=np.int16)
+    
+
+    if(len(ls_as) == 1 and len(ls_bs) == 1):
+        scored_remaps = score_remaps(ls_as[0], ls_bs[0], bpti_a, bpti_b)
+        best_score, best_remap = scored_remaps[0]
+    else:
+        score_aligment_matrices = _buid_score_aligment_matrices(ls_as, ls_bs, bpti_a, bpti_b)
+        
+        score_upperbounds = np.zeros(len(score_aligment_matrices),dtype=np.float64)
+        for i, (f_remap, score_matrix) in enumerate(score_aligment_matrices):
+            for row in score_matrix:
+                score_upperbounds[i] += np.max(row)
+
+        descending_upperbound_order = np.argsort(-score_upperbounds)
+        best_score = 0
+
+        for i in descending_upperbound_order:
+            # Stop looking after couldn't possibly beat the best so far.
+            upper_bound_score = score_upperbounds[i]
+            if(upper_bound_score < best_score):
+                break
+
+            # Find the score for the best conjuct alignment for this remap 
+            f_remap, score_matrix = score_aligment_matrices[i]
+            score = _max_remap_score_for_alignments(score_matrix)
+            if(score > best_score):
+                best_remap = f_remap.arr
+                best_score = score
 
 
-    score_aligment_matrices = Dict.empty(FrozenArrTypei2, f8_2darr_type)
-    # score_matricies = List.empty_list(f8_2darr_type)
-    # accum_score_matrices = List.empty_list(f8_2darr_type)
-    remap_ranks = np.zeros(len(bpti_a))
-    for i, ls_a in enumerate(ls_as): 
-        for j, ls_b in enumerate(ls_bs): 
-            scored_remaps = score_remaps(ls_a, ls_b, bpti_a, bpti_b)
-            for score, remap in scored_remaps:
-                f_remap = FrozenArr(remap)
-                if(f_remap not in score_aligment_matrices):
-                    rank = np.sum(remap == -1)
-                    remap_ranks[len(score_aligment_matrices)] = rank
-                    score_matrix =  np.zeros((len(ls_as), len(ls_bs)),dtype=np.float64)
+        # print("col_assign_per_row", col_assign_per_row)
+        print("FINAL SCORE:", best_score, best_remap)
+        
 
-                    score_aligment_matrices[f_remap] = score_matrix
-                    # accum_score_matrices.append(score_matrix)
-                    # score_matricies.append(score_matrix.copy())
-                    
 
-                score_aligment_matrices[f_remap][i,j] = score
 
-    for f_remap, score_matrix in score_aligment_matrices.items():
-        print(f_remap.arr)
-        print(score_matrix)
+
+
+
+
+        # print(orders)
+
+        #     order = np.argsort(-score_matrix[i])
+
+
+        # argsort(-)
+
+
 
 
     # print("----")
@@ -1467,8 +1545,8 @@ def conds_antiunify(c_a, c_b):
 
     '''
 
-    print("scored_remaps")
-    print(scored_remaps)
+    # print("scored_remaps")
+    # print(scored_remaps)
     # print("scored_remaps", scored_remaps)
 
 

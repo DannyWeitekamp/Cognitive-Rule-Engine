@@ -1314,7 +1314,7 @@ def score_remaps(lit_set_a, lit_set_b, bpti_a, bpti_b, remap_inds=None):
         for i,(s,_) in enumerate(scored_remaps): scores[i] = s
         order = np.argsort(scores)[::-1]
         scored_remaps = List([scored_remaps[ind] for ind in order])
-    print(scored_remaps)
+    # print(scored_remaps)
     return scored_remaps
 
         # best_remap = scored_remaps[0]
@@ -1335,12 +1335,15 @@ from cre.dynamic_exec import accum_item_hash
 #     return acc
 
 # from collections import namedtuple
-FrozenArr, FrozenArrType = define_structref("FrozenArr", [("arr" , i8[:]),])
+FrozenArr, FrozenArrTypei8 = define_structref("FrozenArr", [("arr" , i8[:]),])
+FrozenArrTypei2 = type(FrozenArrTypei8)([("arr" , i2[::1]),])
 # FrozenArr = namedtuple("FrozenArr", ['arr'])
 # FrozenArrType_i8 = numba.types.NamedTuple([i8[::1]],FrozenArr)
 
+# print("<<",type(FrozenArrTypei8))
+
 @overload(hash)
-@overload_method(FrozenArrType, '__hash__')
+@overload_method(type(FrozenArrTypei8), '__hash__')
 def _impl_hash_FrozenArr(x):
     if("FrozenArr" in x._typename):
         def impl(x):
@@ -1374,22 +1377,99 @@ def test_frzn_ind_arr_type():
     # d[]
 
 
+f8_2darr_type = f8[:,::1]
         
 @njit(cache=True)
-def conds_antiunify(ca, cb):
-    ls_as = conds_to_lit_sets(ca)
-    ls_bs = conds_to_lit_sets(cb)
+def conds_antiunify(c_a, c_b):
+    ls_as = conds_to_lit_sets(c_a)
+    ls_bs = conds_to_lit_sets(c_b)
 
-    bpti_a = make_base_ptrs_to_inds(c1)
-    bpti_b = make_base_ptrs_to_inds(c2)
+    bpti_a = make_base_ptrs_to_inds(c_a)
+    bpti_b = make_base_ptrs_to_inds(c_b)
 
+    remap_size = len(bpti_a)
     best_score = -np.inf
-    best_remap = np.arange(len(bpti_a))
-    for ls_a in ls_as: 
-        for ls_b in ls_bs: 
-            scored_remaps = score_remaps(la_a, la_b, bpti_a, bpti_b)
+    best_remap = np.arange(remap_size)
 
+
+    score_aligment_matrices = Dict.empty(FrozenArrTypei2, f8_2darr_type)
+    # score_matricies = List.empty_list(f8_2darr_type)
+    # accum_score_matrices = List.empty_list(f8_2darr_type)
+    remap_ranks = np.zeros(len(bpti_a))
+    for i, ls_a in enumerate(ls_as): 
+        for j, ls_b in enumerate(ls_bs): 
+            scored_remaps = score_remaps(ls_a, ls_b, bpti_a, bpti_b)
+            for score, remap in scored_remaps:
+                f_remap = FrozenArr(remap)
+                if(f_remap not in score_aligment_matrices):
+                    rank = np.sum(remap == -1)
+                    remap_ranks[len(score_aligment_matrices)] = rank
+                    score_matrix =  np.zeros((len(ls_as), len(ls_bs)),dtype=np.float64)
+
+                    score_aligment_matrices[f_remap] = score_matrix
+                    # accum_score_matrices.append(score_matrix)
+                    # score_matricies.append(score_matrix.copy())
+                    
+
+                score_aligment_matrices[f_remap][i,j] = score
+
+    for f_remap, score_matrix in score_aligment_matrices.items():
+        print(f_remap.arr)
+        print(score_matrix)
+
+
+    # print("----")
+    # MERGE CODE Probably not needed
+    # for i, (remap_i, a_sm_i) in enumerate(score_aligment_matrices.items()):
+    #     sm_i = score_matricies[i]
+    #     for j, (remap_j, a_sm_j) in enumerate(score_aligment_matrices.items()):
+    #         if(i != j):
+    #             sm_j = score_matricies[j]
+    #             can_merge = True
+    #             for k in range(remap_size):
+    #                 m_i, m_j = remap_i.arr[k], remap_j.arr[k]
+    #                 if(m_i != m_j and m_i != -1 and m_j != -1):
+    #                     can_merge = False
+    #                     break
+    #             print(remap_i.arr, remap_j.arr, can_merge)
+
+    #             if(can_merge):
+    #                 a_sm_i[:] = a_sm_i + sm_j
+    #                 a_sm_j[:] = a_sm_j + sm_i
+
+
+    
+
+    # order = np.argsort(-remap_ranks)
+    # print(order)
+
+    # # for ind in order:
+
+
+    # for f_remap, score_matrix in score_aligment_matrices.items():
+    #     print(f_remap.arr)
+    #     print(score_matrix)
+
+
+                # print(score, remap)
+
+    '''Make an num_cunj_A by num_cunj_B sized array for each 
+        frozen remap array by mapping frozen arr -> 2d arr.
+        initialize on zero and fill in as it goes. 
+        Next try and merge like mappings.
+        For each of those merged 2d arrays find the best alignment.
+        Argsort each row. Argsort the maxes of the sorted arrays.
+        Assign the alignment based on the maxes. If the aligment
+        element is filled, then the filled assignment must have a higher
+        score. 
+
+
+
+    '''
+
+    print("scored_remaps")
     print(scored_remaps)
+    # print("scored_remaps", scored_remaps)
 
 
 

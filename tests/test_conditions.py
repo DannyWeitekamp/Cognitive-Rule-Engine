@@ -372,6 +372,25 @@ def test_anti_unify():
     c1 = (x < y) & (y < z) & (y < z) & (z != x) & (y != 0) 
     c2 = (a < b) & (b < c) & (b < c) & (b < c) & (c != a) & (b != 0) & (d != 0)
 
+
+    conds_antiunify(c1,c2)
+
+
+    c1 = ((x < y) & (z != x) & (y != 0) |
+          (x < y) & (z == x) & (y != 7) | 
+          (x > y) & (z != x) & (y != 0)
+         )
+
+    c2 = ((a < b) & (c == a) & (b != 7) & (d > 0) |
+          (a < b) & (c != a) & (b != 0) |
+          (a > b) & (c != a) & (b != 0) & (d != 7)
+         )
+
+    conds_antiunify(c1,c2)
+
+    
+    # score_remaps()
+
     # For ? < ?
     # x -> [1,1,0,0]
     # y -> [1,1,1,0]
@@ -379,14 +398,14 @@ def test_anti_unify():
     # test_frzn_ind_arr_type()
     # raise ValueError()
 
-    lsl1 = conds_to_lit_sets(c1)
-    lsl2 = conds_to_lit_sets(c2)
+    # lsl1 = conds_to_lit_sets(c1)
+    # lsl2 = conds_to_lit_sets(c2)
 
-    # print(lsl1[0].keys())
-    bpti1 = make_base_ptrs_to_inds(c1)
-    bpti2 = make_base_ptrs_to_inds(c2)
-    score_remaps(lsl1[0], lsl2[0], bpti1, bpti2)
-    score_remaps(lsl2[0], lsl1[0], bpti2, bpti1)
+    # # print(lsl1[0].keys())
+    # bpti1 = make_base_ptrs_to_inds(c1)
+    # bpti2 = make_base_ptrs_to_inds(c2)
+    # score_remaps(lsl1[0], lsl2[0], bpti1, bpti2)
+    # score_remaps(lsl2[0], lsl1[0], bpti2, bpti1)
 
 
 

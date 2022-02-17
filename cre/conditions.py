@@ -16,7 +16,7 @@ from cre.utils import _struct_from_meminfo, _meminfo_from_struct, _cast_structre
 from cre.utils import assign_to_alias_in_parent_frame, meminfo_type
 from cre.subscriber import base_subscriber_fields, BaseSubscriber, BaseSubscriberType, init_base_subscriber, link_downstream
 from cre.vector import VectorType
-from cre.op import GenericOpType, op_str, op_repr, Op
+from cre.op import GenericOpType, op_str, op_repr, Op, op_copy
 from cre.cre_object import CREObjType, CREObjTypeTemplate
 from cre.core import T_ID_CONDITIONS, T_ID_LITERAL
 # from cre.predicate_node import BasePredicateNode,BasePredicateNodeType, get_alpha_predicate_node_definition, \
@@ -471,6 +471,25 @@ def new_dnf(n):
     for i in range(n):
         dnf.append(List.empty_list(LiteralType))
     return dnf
+
+@njit(cache=True)
+def _conditions_ctor_dnf(dnf):
+    st = new(ConditionsType)
+    st.idrec = encode_idrec(T_ID_CONDITIONS, 0, 0)
+    st.vars = List.empty_list(GenericVarType)    
+    st.base_var_map = Dict.empty(i8,i8)
+    for conj in dnf: 
+        for lit in conj:
+            for b_ptr in lit.var_base_ptrs:
+                if(b_ptr not in st.base_var_map):
+                   st.base_var_map[b_ptr] = len(st.base_var_map)
+                   st.vars.append(_struct_from_ptr(GenericVarType, b_ptr))
+    st.dnf = dnf
+    st.has_distr_dnf = False
+    st.matcher_inst_ptr = 0
+    return st
+
+
 
 
 @njit(cache=True)
@@ -1157,8 +1176,8 @@ def get_possible_remap_inds(a_ind_set, b_ind_set, n_a, n_b):
     for n_remaps in num_remaps_per_a:
         if(n_remaps != 0): n_possibilities *= n_remaps
     
-    print("num_remaps_per_a", num_remaps_per_a)
-    print("n_possibilities", n_possibilities)
+    # print("num_remaps_per_a", num_remaps_per_a)
+    # print("n_possibilities", n_possibilities)
 
     # Find the first variable that is remappable 
     first_i = 0
@@ -1245,9 +1264,10 @@ i2_arr = i2[::1]
 f8_i2_arr_tup = Tuple((f8,i2[::1]))
 
 @njit(cache=True)
-def score_remaps(lit_set_a, lit_set_b, bpti_a, bpti_b, remap_inds=None):
+def score_remaps(lit_set_a, lit_set_b, bpti_a, bpti_b, remap_inds=None, op_key_intersection=None):
     # print(lit_set_a, lit_set_b)
-    op_key_intersection = intersect_keys(lit_set_a, lit_set_b)
+    if(op_key_intersection is None):
+        op_key_intersection = intersect_keys(lit_set_a, lit_set_b)
 
     scored_remaps = List.empty_list(f8_i2_arr_tup)
     # For every unique type of literal (e.g. (x<y) & (a<b))
@@ -1315,6 +1335,7 @@ def score_remaps(lit_set_a, lit_set_b, bpti_a, bpti_b, remap_inds=None):
         order = np.argsort(scores)[::-1]
         scored_remaps = List([scored_remaps[ind] for ind in order])
     # print(scored_remaps)
+
     return scored_remaps
 
         # best_remap = scored_remaps[0]
@@ -1425,13 +1446,38 @@ def _max_remap_score_for_alignments(score_matrix):
         col_assign_per_row[row_ind] = col_ind
         score += score_matrix[row_ind,col_ind]
         order_of_rows = order_of_rows[1:]
-    return score
+    return score, col_assign_per_row
 
 @njit(cache=True)
-def apply_remap(c_a, c_b, remap):
-    pass
+def _conj_from_litset_and_remap(ls_a,ls_b, remap, keys, bpti_a, bpti_b):
+    conj = List.empty_list(LiteralType)
+    for unq_key in keys:
+        lit_set_a = ls_a[unq_key]
+        lit_set_b = ls_b[unq_key]
+        
+        ind_set_a = lit_set_to_ind_sets(lit_set_a, bpti_a)
+        ind_set_b = lit_set_to_ind_sets(lit_set_b, bpti_b)
+        matched_mask = get_matched_mask(ind_set_a,ind_set_b,remap)
+
+        print(lit_set_a, lit_set_b, matched_mask)
+        for keep_it, lit in zip(matched_mask, lit_set_a):
+            if(keep_it):
+                new_lit = literal_ctor(lit.op)
+                new_lit.negated = lit.negated
+                conj.append(new_lit)
+    return conj
 
 
+        # for lit, inds in zip(lit_set,ind_set):
+        #     print(lit, inds)
+        # print("___")
+
+            # new_base_vars = List([_struct_from_ptr(GenericVarType,bps_b[ind]) for ind in inds])
+            # print(new_base_vars)
+            # new_op = op_copy(lit.op, new_base_vars)
+            # new_lit = literal_ctor(new_op)
+            # new_lit.negated = lit.negated
+            # conj.append(new_lit)
 
         
 @njit(cache=True)
@@ -1439,8 +1485,15 @@ def conds_antiunify(c_a, c_b):
     ls_as = conds_to_lit_sets(c_a)
     ls_bs = conds_to_lit_sets(c_b)
 
+    print(ls_as)
+    print(ls_bs)
+
     bpti_a = make_base_ptrs_to_inds(c_a)
     bpti_b = make_base_ptrs_to_inds(c_b)
+
+    # bps_b = np.empty(len(bpti_b),dtype=np.int64)    
+    # for base_ptr, ind in bpti_b.items():
+    #     bps_b[ind] = base_ptr
 
     remap_size = len(bpti_a)
     num_conj = len(ls_as)
@@ -1449,19 +1502,29 @@ def conds_antiunify(c_a, c_b):
     
 
     if(len(ls_as) == 1 and len(ls_bs) == 1):
-        scored_remaps = score_remaps(ls_as[0], ls_bs[0], bpti_a, bpti_b)
+        op_key_intersection = intersect_keys(ls_as[0], ls_bs[0])
+        scored_remaps = score_remaps(ls_as[0], ls_bs[0], bpti_a, bpti_b,
+                                    op_key_intersection=op_key_intersection)
         best_score, best_remap = scored_remaps[0]
+
+
+        conj = _conj_from_litset_and_remap(ls_as[0], ls_bs[0], best_remap, op_key_intersection, bpti_a, bpti_b)
+        dnf = List([conj])
+        conds = _conditions_ctor_dnf(dnf)
+        print(conds)
     else:
         score_aligment_matrices = _buid_score_aligment_matrices(ls_as, ls_bs, bpti_a, bpti_b)
         
+        # Find the upperbounds on each remap
         score_upperbounds = np.zeros(len(score_aligment_matrices),dtype=np.float64)
         for i, (f_remap, score_matrix) in enumerate(score_aligment_matrices):
             for row in score_matrix:
                 score_upperbounds[i] += np.max(row)
 
+        # Look for the best remap trying remaps with large upperbounds first
         descending_upperbound_order = np.argsort(-score_upperbounds)
         best_score = 0
-
+        best_alignment = np.empty(0,dtype=np.int64)
         for i in descending_upperbound_order:
             # Stop looking after couldn't possibly beat the best so far.
             upper_bound_score = score_upperbounds[i]
@@ -1470,10 +1533,25 @@ def conds_antiunify(c_a, c_b):
 
             # Find the score for the best conjuct alignment for this remap 
             f_remap, score_matrix = score_aligment_matrices[i]
-            score = _max_remap_score_for_alignments(score_matrix)
+            score, alignment = _max_remap_score_for_alignments(score_matrix)
             if(score > best_score):
                 best_remap = f_remap.arr
                 best_score = score
+                best_alignment = alignment
+
+        print("best_alignment:", best_alignment)
+
+        dnf = List()
+        for i, ls_a in enumerate(ls_as):
+            ls_b = ls_bs[alignment[i]]
+
+            op_key_intersection = intersect_keys(ls_a, ls_b)
+            conj = _conj_from_litset_and_remap(ls_a, ls_b, best_remap, op_key_intersection, bpti_a, bpti_b)
+            dnf.append(conj)
+                
+        conds = _conditions_ctor_dnf(dnf)
+        print(conds)
+
 
 
         # print("col_assign_per_row", col_assign_per_row)

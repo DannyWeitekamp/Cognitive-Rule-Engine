@@ -643,7 +643,7 @@ def new_appended_var(struct_type, base_var, attr, a_id, offset, head_type_name, 
     st = new(struct_type)
     var_memcopy(base_var,st)
     var_append_deref(st,attr, a_id, offset, fact_num, head_type_name, typ)
-    lower_setattr(st,'base_ptr_ref', _ptr_from_struct_incref(base_var))
+    lower_setattr(st, 'base_ptr_ref', _ptr_from_struct_incref(base_var))
     return st
 
 @njit(GenericVarType(GenericVarType, unicode_type, u1, i8, unicode_type, i8, i8), cache=True)
@@ -652,7 +652,7 @@ def new_appended_var_generic(base_var, attr, a_id, offset, head_type_name, fact_
     st = new(GenericVarType)
     var_memcopy(base_var,st)
     var_append_deref(st,attr, a_id, offset, fact_num, head_type_name, typ)
-    lower_setattr(st,'base_ptr_ref', _ptr_from_struct_incref(base_var))
+    lower_setattr(st, 'base_ptr_ref', _ptr_from_struct_incref(base_var))
     return st
 
 

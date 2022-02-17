@@ -16,12 +16,12 @@ from cre.structref import define_structref, define_structref_template
 from cre.memory import MemoryType, Memory, facts_for_t_id, fact_at_f_id
 # from cre.fact import define_fact, BaseFactType, cast_fact, DeferredFactRefType, Fact
 from cre.utils import (_struct_from_meminfo, _meminfo_from_struct, _cast_structref, cast_structref, decode_idrec, lower_getattr, _struct_from_ptr,  lower_setattr, lower_getattr,
-                       _raw_ptr_from_struct, _raw_ptr_from_struct_incref, _decref_ptr, _incref_ptr, _incref_structref, _ptr_from_struct_incref)
+                       _raw_ptr_from_struct, _raw_ptr_from_struct_incref, _decref_ptr, _incref_ptr, _incref_structref, _ptr_from_struct_incref, ptr_t)
 from cre.utils import encode_idrec, assign_to_alias_in_parent_frame, as_typed_list, iter_typed_list
 from cre.subscriber import base_subscriber_fields, BaseSubscriber, BaseSubscriberType, init_base_subscriber, link_downstream
 from cre.vector import VectorType
 from cre.fact import Fact, gen_fact_import_str, get_offsets_from_member_types
-from cre.var import Var
+from cre.var import Var, var_memcopy, GenericVarType
 from cre.cre_object import CREObjType, cre_obj_field_dict, CREObjTypeTemplate, CREObjProxy
 from cre.core import T_ID_OP
 # from cre.predicate_node import BasePredicateNode,BasePredicateNodeType, get_alpha_predicate_node_definition, \
@@ -41,6 +41,8 @@ from textwrap import dedent, indent
 # from itertools import combinations
 from collections.abc import Iterable
 import warnings
+
+
 
 
 import time
@@ -548,6 +550,63 @@ def op_ctor(name, return_type_name, arg_type_names, head_var_ptrs,
     st.is_ptr_op = is_ptr_op
 
     return st
+
+
+@njit(cache=True)
+def op_copy(op, new_base_vars=None):
+    
+
+    st = new(GenericOpType)
+    st.idrec = op.idrec#encode_idrec(T_ID_OP, 0, 0)
+    st.name = op.name
+    st.return_type_name = op.return_type_name
+    st.arg_type_names = op.arg_type_names
+
+    if(new_base_vars is None):
+        st.base_var_map = op.base_var_map 
+        st.inv_base_var_map = op.inv_base_var_map 
+        st.base_vars = op.base_vars
+        st.head_vars = op.head_vars
+        st.head_var_ptrs = op.head_var_ptrs
+    else:
+        assert(len(new_base_vars) == len(op.base_vars))
+
+        st.head_var_ptrs = np.empty(len(op.head_vars),dtype=np.int64)
+        st.base_var_map = Dict.empty(i8, unicode_type)
+        st.inv_base_var_map = Dict.empty(unicode_type, i8)
+        base_var_map = Dict.empty(i8,GenericVarType)
+        for i, (o_v, n_v) in enumerate(zip(op.base_vars, new_base_vars)):
+            st.head_var_ptrs[i] = n_v.base_ptr
+            st.base_var_map[n_v.base_ptr] = n_v.alias
+            st.inv_base_var_map[n_v.alias] = n_v.base_ptr
+            base_var_map[o_v.base_ptr] = n_v
+
+        st.head_vars = List.empty_list(GenericVarType)
+        for hv in op.head_vars:
+            new_hv = new(GenericVarType)
+            var_memcopy(hv, new_hv)
+            new_base_var = base_var_map[hv.base_ptr]
+            lower_setattr(new_hv, "base_ptr", new_base_var.base_ptr)
+            if(i8(new_hv.base_ptr_ref) != 0):
+                lower_setattr(new_hv, "base_ptr_ref", _ptr_from_struct_incref(new_base_var))
+
+            st.head_vars.append(new_hv)
+
+        st.base_vars = new_base_vars
+
+    st.head_ranges = op.head_ranges 
+    st.expr_template = op.expr_template
+    st.shorthand_template = op.shorthand_template
+            
+    st.call_addr = op.call_addr
+    st.call_multi_addr = op.call_multi_addr
+    st.check_addr = op.check_addr
+    st.match_head_ptrs_addr = op.match_head_ptrs_addr
+    st.is_ptr_op = op.is_ptr_op
+
+    return st
+
+
 
 @njit(cache=True)
 def op_dtor(self):

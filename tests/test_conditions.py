@@ -365,7 +365,6 @@ def test_eq():
 
 from cre.conditions import conds_to_lit_sets, best_intersection, make_base_ptrs_to_inds, score_remaps
 def test_anti_unify():
-
     x, y, z = Var(f8,'x'), Var(f8,'y'), Var(f8,'z')
     a, b, c, d = Var(f8,'a'), Var(f8,'b'), Var(f8,'c'), Var(f8,'d')
 
@@ -378,7 +377,7 @@ def test_anti_unify():
 
     c1 = ((x < y) & (z != x) & (y != 0) |
           (x < y) & (z == x) & (y != 7) | 
-          (x > y) & (z != x) & (y != 0)
+          (x > y) & (z != x) & (y != 2)
          )
 
     c2 = ((a < b) & (c == a) & (b != 7) & (d > 0) |

@@ -64,6 +64,33 @@ numpy_type_map = {
 STRING_DTYPE = np.dtype("U50")
 
 
+
+def standardize_type(typ, context, name='', attr=''):
+    '''Takes in a string or type and returns the standardized type'''
+    if(isinstance(typ, type)):
+        typ = typ.__name__
+    if(isinstance(typ,str)):
+        typ_str = typ
+        is_list = typ_str.lower().startswith("list")
+        if(is_list): typ_str = typ_str.split("(")[1][:-1]
+
+        if(typ_str.lower() in TYPE_ALIASES): 
+            typ = numba_type_map[TYPE_ALIASES[typ_str.lower()]]
+        # elif(typ_str == name):
+        #     typ = context.get_deferred_type(name)# DeferredFactRefType(name)
+        elif(typ_str in context.type_registry):
+            typ = context.type_registry[typ_str]
+        else:
+            typ = context.get_deferred_type(typ_str)
+            # raise TypeError(f"Attribute type {typ_str!r} not recognized in spec" + 
+            #     f" for attribute definition {attr!r}." if attr else ".")
+
+        if(is_list): typ = ListType(typ)
+
+    if(hasattr(typ, "_fact_type")): typ = typ._fact_type
+    return typ
+
+
 # @intrinsic
 # def _instrinstic_get_null_meminfo(typingctx):
 #   def codegen(context, builder, sig, args):

@@ -1,4 +1,5 @@
 from numba import i8
+from numba.types import unicode_type
 from cre.op import Op
 from cre.fact import BaseFactType
 from cre.ptrop import PtrOp
@@ -60,6 +61,12 @@ def Modulus(a, b):
 @Op(shorthand = '({0} < {1})')
 def FactIdrecsLessThan(a, b):
     return a.idrec < b.idrec
+
+@Op(shorthand = '({0} + {1})', 
+    signature = unicode_type(unicode_type,unicode_type),
+    commutes=False)
+def Concatenate(a, b):
+    return a + b
 
 
 @PtrOp(nargs=2, shorthand = '({0} == {1})')

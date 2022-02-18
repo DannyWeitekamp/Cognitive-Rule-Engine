@@ -647,20 +647,42 @@ def listtype_sizeof_item(lt):
 ### Array Intrinsics ###
 
 from numba.np.arrayobj import make_array
+
+def _get_array_data_ptr_codegen(context, builder, sig, args, incref=True):
+    [arr_typ] = sig.args
+    [arr] = args
+    # does create_struct_proxy plus some other stuff
+    arr_st = make_array(arr_typ)(context, builder, arr)
+    # arr_st = cgutils.create_struct_proxy(arr_typ)(context, builder, arr)
+    if context.enable_nrt and incref:
+        context.nrt.incref(builder, arr_typ, arr)
+    return builder.ptrtoint(arr_st.data, cgutils.intp_t)
+
+
 @intrinsic
-def _get_array_data_ptr(typingctx, arr_typ):
+def _get_array_data_ptr_incref(typingctx, arr_typ):
     def codegen(context, builder, sig, args):
-        [arr_typ] = sig.args
-        [arr] = args
-        # does create_struct_proxy plus some other stuff
-        arr_st = make_array(arr_typ)(context, builder, arr)
-        # arr_st = cgutils.create_struct_proxy(arr_typ)(context, builder, arr)
-        if context.enable_nrt:
-            context.nrt.incref(builder, arr_typ, arr)
-        return builder.ptrtoint(arr_st.data, cgutils.intp_t)
-        
+        return _get_array_data_ptr_codegen(context, builder, sig, args, True)
+                
+    sig = ptr_t(arr_typ)
+    return sig, codegen
+
+@intrinsic
+def _get_array_raw_data_ptr(typingctx, arr_typ):
+    def codegen(context, builder, sig, args):
+        return _get_array_data_ptr_codegen(context, builder, sig, args, False)
+
     sig = i8(arr_typ)
     return sig, codegen
+
+@intrinsic
+def _get_array_raw_data_ptr_incref(typingctx, arr_typ):
+    def codegen(context, builder, sig, args):
+        return _get_array_data_ptr_codegen(context, builder, sig, args, True)
+                
+    sig = i8(arr_typ)
+    return sig, codegen
+
 
 @intrinsic
 def _as_void(typingctx, src):

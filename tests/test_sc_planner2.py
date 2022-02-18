@@ -3,16 +3,18 @@ from numba import njit, f8, i8
 from numba.typed import List, Dict
 from numba.types import DictType, ListType, unicode_type, Tuple
 from cre.op import Op
-from cre.sc_planner2 import (gen_apply_multi_source,
+from cre.sc_planner2 import (gen_apply_multi_source, search_for_explanations,
                      apply_multi, SetChainingPlanner, insert_record,
                      join_records_of_type, forward_chain_one, extract_rec_entry,
                      retrace_goals_back_one, expl_tree_ctor,
                     build_explanation_tree, ExplanationTreeType, SC_Record, SC_RecordType,
                     gen_op_comps_from_expl_tree, planner_declare_fact)
-from cre.utils import _ptr_from_struct_incref, _list_from_ptr, _dict_from_ptr, _struct_from_ptr, _get_array_data_ptr
+from cre.utils import _ptr_from_struct_incref, _list_from_ptr, _dict_from_ptr, _struct_from_ptr
 from cre.var import Var
 from cre.context import cre_context
 from cre.fact import define_fact
+from numba.core.runtime.nrt import rtsys
+import gc
 
 import time
 class PrintElapse():
@@ -24,31 +26,37 @@ class PrintElapse():
         self.t1 = time.time_ns()/float(1e6)
         print(f'{self.name}: {self.t1-self.t0:.2f} ms')
 
+
 def get_base_ops():
-    class Add(Op):
-        signature = f8(f8,f8)        
-        short_hand = '({0}+{1})'
-        commutes = True
-        def check(a, b):
-            return a > 0
-        def call(a, b):
-            return a + b
+    from cre.default_ops import Add, Multiply, Concatenate
+    Add_f8 = Add(Var(f8),Var(f8))
+    Multiply_f8 = Multiply(Var(f8),Var(f8))
+    return Add_f8, Multiply_f8, Concatenate
+    # Concatenate_str = Add(Var(unicode_type), Var(unicode_type))
+    # class Add(Op):
+    #     signature = f8(f8,f8)        
+    #     short_hand = '({0}+{1})'
+    #     commutes = True
+    #     def check(a, b):
+    #         return a > 0
+    #     def call(a, b):
+    #         return a + b
 
-    class Multiply(Op):
-        signature = f8(f8,f8)
-        short_hand = '({0}*{1})'
-        commutes = True
-        def check(a, b):
-            return b != 0
-        def call(a, b):
-            return a * b  
+    # class Multiply(Op):
+    #     signature = f8(f8,f8)
+    #     short_hand = '({0}*{1})'
+    #     commutes = True
+    #     def check(a, b):
+    #         return b != 0
+    #     def call(a, b):
+    #         return a * b  
 
-    class Concatenate(Op):
-        signature = unicode_type(unicode_type,unicode_type)
-        short_hand = '({0}+{1})'
-        def call(a, b):
-            return a + b  
-    return Add, Multiply, Concatenate
+    # class Concatenate(Op):
+    #     signature = unicode_type(unicode_type,unicode_type)
+    #     short_hand = '({0}+{1})'
+    #     def call(a, b):
+    #         return a + b  
+
 
 i8_2x_tuple = Tuple((i8,i8))
 def setup_float(planner=None,n=5):
@@ -130,13 +138,13 @@ def test_apply_multi():
         re_rec, re_next_re_ptr, re_args = extract_rec_entry(re_ptr)
         # re = rec_entry_from_ptr()
         while(re_ptr != 0):
-            print(re.args)
+            # print(re_args)
             l.append(re_args)
             re_ptr = re_next_re_ptr
         return l
 
     assert summary_vals_map(planner) == (9,0.0,8.0)
-    print(np.array(args_for(planner,6)))
+    # print(np.array(args_for(planner,6)))
     assert np.array_equal(np.array(args_for(planner,6)),
                  np.array([[4, 2],[3, 3]]))
 
@@ -263,6 +271,55 @@ def test_build_explanation_tree():
     #     op, args = child
     #     print(op.name)
 
+def test_search_for_explanations(n=5):
+    ops = get_base_ops()
+    # print(repr(Add), repr(Multiply), repr(Concatenate))
+    planner = setup_float(n=n)
+    # planner = setup_str(planner,n=n)
+
+    expl_tree = search_for_explanations(planner, 36.0, ops=ops, search_depth=3)
+    # print(tree_str(expl_tree))
+    for op_comp in expl_tree:
+        print(op_comp)
+
+
+
+def used_bytes():
+    stats = rtsys.get_allocation_stats()
+    print(stats)
+    return stats.alloc-stats.free
+
+
+def test_mem_leaks(n=5):
+    with cre_context("test_mem_leaks"):
+        ops = get_base_ops()
+        init_used = used_bytes()
+
+        planner = setup_retrace()
+        # planner = setup_float(n=n)
+        # planner = setup_str(planner,n=n)
+
+        planner = None
+        gc.collect()
+        print(used_bytes()-init_used)
+
+        
+        raise ValueError()
+
+        expl_tree = search_for_explanations(planner, 36.0, ops=ops, search_depth=3)
+        expl_tree_iter = iter(expl_tree)
+        # print(tree_str(expl_tree))
+        for op_comp in expl_tree_iter:
+            print(op_comp)
+
+        expl_tree_iter = None
+        expl_tree = None
+        gc.collect()
+        print(used_bytes()-init_used)
+
+
+
+
 
 def _test_declare_fact():
     planner = SetChainingPlanner()
@@ -351,11 +408,22 @@ def product_of_generators(generators):
 #     print(len(l))
 #     print()
 
+
+
 if __name__ == "__main__":
+    import faulthandler; faulthandler.enable()
+    
     with PrintElapse("test_build_explanation_tree"):
         test_build_explanation_tree()
-    with PrintElapse("test_build_explanation_tree"):
-        test_build_explanation_tree()
+    # with PrintElapse("test_build_explanation_tree"):
+    #     test_build_explanation_tree()
+    # with PrintElapse("test_search_for_explanations"):
+    #     test_search_for_explanations()
+    # with PrintElapse("test_search_for_explanations"):
+    #     test_search_for_explanations()
+
+    test_mem_leaks(n=10)
+
     # pass
     # test_apply_multi()
     # test_insert_record()

@@ -17,7 +17,7 @@ from cre.var import GenericVarType
 # from cre.fact import define_fact, BaseFactType, cast_fact, DeferredFactRefType, Fact
 from cre.utils import (ptr_t, _struct_from_meminfo, _meminfo_from_struct, _cast_structref, cast_structref, decode_idrec, lower_getattr, _struct_from_ptr,  lower_setattr, lower_getattr,
                        _raw_ptr_from_struct, _decref_ptr, _incref_ptr, _incref_structref, _ptr_from_struct_incref,
-                       _dict_from_ptr, _list_from_ptr, _load_ptr, _arr_from_data_ptr, _get_array_data_ptr)
+                       _dict_from_ptr, _list_from_ptr, _load_ptr, _arr_from_data_ptr, _get_array_raw_data_ptr, _get_array_raw_data_ptr_incref)
 from cre.utils import assign_to_alias_in_parent_frame, _raw_ptr_from_struct_incref
 from cre.subscriber import base_subscriber_fields, BaseSubscriber, BaseSubscriberType, init_base_subscriber, link_downstream
 from cre.vector import VectorType
@@ -104,14 +104,29 @@ class PrintElapse():
 
 
 SC_Record_field_dict = {
+    # Holds encoded record entries. Essentially [*rec, *prev_entry, arg_ind0, arg_ind1, ...]
+    #  *rec and *prev_entry, are each distributed across two entries in this u4 array. 
     'data' : u4[::1],
+
+    # List of ranges (start,end) over which the op has been applied for each argument.
     'stride' : i8[:,::1],
+
+    # Whether the record is non-terminal---from applying a cre.Op and not from a declared value.
     'is_op' : u1,
+
+    # If non-terminal then holds the cre.Op
     'op' : GenericOpType,
-    'var' : GenericVarType,
-    'depth' : i8,
+
+    # The number of input arguments for self.op.
     'nargs' : i8,
+
+    # If terminal then holds a cre.Var as a placeholder for the declared value. 
+    'var' : GenericVarType,
+
+    # The depth at which the op was applied/inserted, or '0' for declared values
+    'depth' : i8,
 }
+
 SC_Record_fields = [(k,v) for k,v in SC_Record_field_dict.items()]
 SC_Record, SC_RecordType = \
     define_structref("SC_Record", SC_Record_fields, define_constructor=False)
@@ -144,9 +159,9 @@ SC_Record, SC_RecordType = \
 #         print('fail')
 #     return impl
     
-
 @overload(SC_Record, prefer_literal=False)
 def overload_SC_Record(op_or_var, depth=0, nargs=0, data=None, stride=None):
+    '''Implements the constructor for an SC_Record'''
     if(isinstance(op_or_var, OpTypeTemplate)):
         def impl(op_or_var, depth=0, nargs=0, data=None, stride=None):
             st = new(SC_RecordType)
@@ -162,6 +177,12 @@ def overload_SC_Record(op_or_var, depth=0, nargs=0, data=None, stride=None):
             st = new(SC_RecordType)
             st.is_op = False
             st.var = _cast_structref(GenericVarType, op_or_var) 
+
+            st.data = np.empty((2,),dtype=np.uint32)
+            self_ptr = _raw_ptr_from_struct(st)
+            st.data[0] = u4(self_ptr) # get low bits
+            st.data[1] = u4(self_ptr>>32) # get high bits
+            
             st.depth = depth
             st.nargs = 0
             return st
@@ -189,6 +210,9 @@ def overload_SC_Record(op_or_var, depth=0, nargs=0, data=None, stride=None):
 
 @njit(cache=True)
 def extract_rec_entry(d_ptr):
+    '''Decodes the record entry at a pointer to its location in the underlaying data of 
+        an SC_Record.data array and outputs the SC_Record instance, next data pointer, 
+        and argument indicies.'''
     ptrs = _arr_from_data_ptr(d_ptr, (2,),dtype=np.int64)
     rec_ptr, next_entry_ptr = ptrs[0], ptrs[1]
     # print(rec_ptr, next_entry_ptr)
@@ -214,6 +238,8 @@ SetChainingPlanner_field_dict = {
     'ops': ListType(GenericOpType),
     # List of dictionaries that map:
     #  Tuple(type_str[str],depth[int]) -> ListType[Record])
+    'declare_records' : DictType(unicode_type, ListType(SC_RecordType)),
+
     'forward_records' : ListType(DictType(unicode_type, ListType(SC_RecordType))),
 
     # List of dictionaries that map:
@@ -248,6 +274,9 @@ class SetChainingPlanner(structref.StructRefProxy):
     def declare(self,val):
         return planner_declare(self, val)
 
+    # def forward_chain_one(self,val):
+
+
 define_boxing(SetChainingPlannerTypeTemplate,SetChainingPlanner)
 SetChainingPlannerType = SetChainingPlannerTypeTemplate(SetChainingPlanner_fields)
 
@@ -255,6 +284,7 @@ SetChainingPlannerType = SetChainingPlannerTypeTemplate(SetChainingPlanner_field
 @njit(cache=True)
 def sc_planner_ctor():
     st = new(SetChainingPlannerType)
+    st.declare_records = Dict.empty(unicode_type, record_list_type)
     st.forward_records = List.empty_list(dict_str_to_record_list_type)
     st.backward_records = List.empty_list(dict_str_to_record_list_type)
     st.val_map_ptr_dict = Dict.empty(unicode_type, ptr_t)
@@ -276,10 +306,15 @@ def ensure_ptr_dicts(planner,typ,typ_name,lt,vt,ivt):
         inv_val_map = Dict.empty(i8, typ)    
         planner.inv_val_map_ptr_dict[typ_name] = _ptr_from_struct_incref(inv_val_map)
 
+    if(typ_name not in planner.declare_records):
+        planner.declare_records[typ_name] = List.empty_list(SC_RecordType)        
+
+
     flat_vals = _list_from_ptr(lt, planner.flat_vals_ptr_dict[tup])    
     val_map = _dict_from_ptr(vt, planner.val_map_ptr_dict[typ_name])    
     inv_val_map = _dict_from_ptr(ivt, planner.inv_val_map_ptr_dict[typ_name])    
-    return flat_vals, val_map, inv_val_map
+    declare_records = planner.declare_records[typ_name]
+    return flat_vals, val_map, inv_val_map, declare_records
 
     
 
@@ -296,21 +331,24 @@ def planner_declare(planner, val):
     ivm_typ = DictType(i8, val_typ)
 
     def impl(planner, val):
-        flat_vals, val_map, inv_val_map = \
+        # pass
+        flat_vals, val_map, inv_val_map, declare_records = \
             ensure_ptr_dicts(planner, val_typ,
                 val_typ_name, l_typ, vm_typ, ivm_typ)
         v = Var(val_typ)
-        var_ptr = _raw_ptr_from_struct(v)
         rec = SC_Record(v)
-        rec_entry = np.empty((1,),dtype=np.int64)
-        rec_entry[0] = _raw_ptr_from_struct_incref(rec)
-        rec_entry_ptr = _get_array_data_ptr(rec_entry)
+        var_ptr = _raw_ptr_from_struct(v)
+        declare_records.append(rec)
+        rec_entry_ptr = _get_array_raw_data_ptr(rec.data)
+        # rec.data[0] = _raw_ptr_from_struct(rec)
+        # rec_entry = np.empty((1,),dtype=np.int64)
+        # rec_entry[0] = 
+        
         flat_vals.append(val)
         val_map[val] = (0, rec_entry_ptr)
         inv_val_map[var_ptr] = val
     return impl
 
-from cre.fact import _standardize_type
 # @generated_jit(cache=True)
 def gen_declare_attr_impl(attr_typ):
     context = cre_context()
@@ -349,38 +387,52 @@ def planner_declare_fact(planner, val, attrs_as_types=None):
 
 
 
-
-def how_search(self, goal, ops=None,
+from cre.core import standardize_type
+def search_for_explanations(self, goal, ops=None,
              search_depth=1, max_solutions=10,
              min_stop_depth=-1,context=None):
-
-    context = cre_context(context)
-    if(min_stop_depth == -1): min_stop_depth = search_depth
+    
+    with PrintElapse("Start"):
+        context = cre_context(context)
+        if(min_stop_depth == -1): min_stop_depth = search_depth
+        g_typ = standardize_type(type(goal), context)
+    # g_typ_str = str(g_typ)
+    # print(g_typ,g_typ_str)
 
     # NOTE: Make sure that things exist here
-    for depth in range(1, search_depth+1):
-        if(depth < self.curr_infer_depth): continue
-        if(_query_goal(self) is None and 
-            self.curr_infer_depth > min_stop_depth):
-            self.forward_chain_one(ops)
+    with PrintElapse("Chain"):
+        for depth in range(1, search_depth+1):
+            if(depth < self.curr_infer_depth): continue
+            found_at_depth = query_goal(self, g_typ, goal)
+            print("found_at_depth:", found_at_depth, self.curr_infer_depth)
+            
+            if(found_at_depth is None or 
+                self.curr_infer_depth < min_stop_depth):
+                forward_chain_one(self,ops)
 
-    g_typ = context.type_registry[str(type(goal))]
+    with PrintElapse("Build Expl Tree"):
+        expl_tree = build_explanation_tree(self, g_typ, goal)
+    return expl_tree
 
-    expl_tree = build_explanation_tree(self, g_typ, goal)
 
 
-
-@njit(cache=True)
-def _query_goal(self, type_name, typ, goal):
-    vtd_ptr_d = self.vals_to_depth_ptr_dict
-    if(type_name in vtd_ptr_d):
-        vals_to_depth = _struct_from_ptr(typ,vtd_ptr_d)
-        if(goal in vals_to_depth):
-            return vals_to_depth[goal]
+@generated_jit(cache=True, nopython=True)
+def query_goal(self, typ, goal):
+    _typ = typ.instance_type
+    dict_typ = DictType(_typ,i8_2x_tuple)
+    typ_name = str(_typ)
+    def impl(self, typ, goal):
+        # vtd_ptr_d = self.val_map
+        if(typ_name in self.val_map_ptr_dict):
+            val_map = _dict_from_ptr(dict_typ, self.val_map_ptr_dict[typ_name])
+            if(goal in val_map):
+                depth, _ = val_map[goal]
+                return depth
+            else:
+                return None
         else:
             return None
-    else:
-        return None
+    return impl
 
 @njit(cache=True)
 def insert_record(self, rec, ret_type_name, depth):
@@ -455,6 +507,7 @@ else:
 
 
 def gen_apply_multi_source(op, ind='    '):
+    '''Generates source code for an apply_multi() implementation for a cre.Op'''
     has_check = hasattr(op,'check')
     sig = op.signature
     args = sig.args
@@ -469,7 +522,7 @@ from numba.typed import Dict
 from numba.types import ListType, DictType, Tuple
 import numpy as np
 import dill
-from cre.utils import _dict_from_ptr, _list_from_ptr, _raw_ptr_from_struct_incref, _get_array_data_ptr
+from cre.utils import _dict_from_ptr, _list_from_ptr, _raw_ptr_from_struct, _get_array_raw_data_ptr
 from cre.sc_planner2 import SC_Record
 ''' 
     imp_targets = ['call'] + (['check'] if has_check else [])
@@ -511,9 +564,9 @@ val_map =  _dict_from_ptr(ret_d_typ,
 {l_defs}
 data_len = {"*".join([f'l{i}' for i in a_cnt])}*ENTRY_WIDTH
 data = np.empty(data_len,dtype=np.uint32)
-d_ptr = _get_array_data_ptr(data)
+d_ptr = _get_array_raw_data_ptr(data)
 rec = SC_Record(op_inst, nxt_depth, N_ARGS, data, stride)
-rec_ptr = _raw_ptr_from_struct_incref(rec)
+rec_ptr = _raw_ptr_from_struct(rec)
 
 d_offset=0
 val_map_defaults = (-1,0)
@@ -596,9 +649,16 @@ def apply_multi(op, planner, depth):
 ### Explanation Tree Entry ###
 
 ExplanationTreeEntry_field_dict = {
+    # Whether the entry is non-terminal and represents the application of a cre.Op. 
     "is_op" : u1,
+
+    # If non-terminal the cre.Op applied
     "op" : GenericOpType,
+
+    # If terminal the cre.Var instance
     "var" : GenericVarType,
+
+    # If terminal the cre.Var instance
     "child_arg_ptrs" : i8[::1]
 }
 ExplanationTreeEntry_fields = [(k,v) for k,v in ExplanationTreeEntry_field_dict.items()]
@@ -665,6 +725,9 @@ class ExplanationTreeIter():
     def __init__(self, expl_tree):
         self.expl_tree = expl_tree
         self.gen = gen_op_comps_from_expl_tree(expl_tree)
+
+    def __iter__(self):
+        return self
     def __next__(self):
         op_comp = next(self.gen)
         vals = []
@@ -728,7 +791,9 @@ def _fill_arg_inds_from_rec_entries(re_ptr, new_arg_inds, expl_tree):
     '''
 
     while(re_ptr != 0):
+        # print("OKAY")
         re_rec, re_next_re_ptr, re_args = extract_rec_entry(re_ptr)
+        # print("DONE")
         if(re_rec.is_op):
             op = re_rec.op 
             child_arg_ptrs = np.empty(len(re_args), dtype=np.int64)

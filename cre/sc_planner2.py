@@ -168,33 +168,33 @@ def overload_SC_Record(op_or_var, depth=0, nargs=0, stride=None):
             st.is_op = True
             st.op = op_or_var
             st.depth = depth
+            st.nargs = nargs
+            
+            if(stride is not None): st.stride = stride
 
             ENTRY_WIDTH = 4 + nargs
             n_items = 1
             for s_i in stride:
                 s_len = s_i[1]-s_i[0]
                 n_items *= s_len
-            data_len = s_len*ENTRY_WIDTH
+            data_len = n_items*ENTRY_WIDTH
             st.data = np.empty(data_len,dtype=np.uint32)
-
-
-            st.nargs = nargs
-            if(data is not None): st.data = data
-            if(stride is not None): st.stride = stride
+            
             return st
     elif(isinstance(op_or_var, VarTypeTemplate)):
         def impl(op_or_var, depth=0, nargs=0, stride=None):
             st = new(SC_RecordType)
             st.is_op = False
             st.var = _cast_structref(GenericVarType, op_or_var) 
+            st.depth = depth
+            st.nargs = 0
 
             st.data = np.empty((2,),dtype=np.uint32)
             self_ptr = _raw_ptr_from_struct(st)
             st.data[0] = u4(self_ptr) # get low bits
             st.data[1] = u4(self_ptr>>32) # get high bits
             
-            st.depth = depth
-            st.nargs = 0
+            
             return st
     else:
         print('fail')
@@ -573,7 +573,8 @@ val_map =  _dict_from_ptr(ret_d_typ,
 {ind}planner.val_map_ptr_dict['{str(sig.return_type)}'])
 
 rec = SC_Record(op_inst, nxt_depth, N_ARGS, stride)
-d_ptr = _get_array_raw_data_ptr(rec.data)
+data = rec.data
+d_ptr = _get_array_raw_data_ptr(data)
 rec_ptr = _raw_ptr_from_struct(rec)
 
 d_offset=0

@@ -1342,7 +1342,7 @@ def score_remaps(lit_set_a, lit_set_b, bpti_a, bpti_b, remap_inds=None, op_key_i
         # scored_remaps =  sorted(scored_remaps)
 
 from numba.cpython.hashing import _PyHASH_XXPRIME_5
-from cre.dynamic_exec import accum_item_hash
+from cre.hashing import accum_item_hash
 
 
 

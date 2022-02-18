@@ -5,8 +5,8 @@ from numba.types import DictType, ListType, unicode_type, Tuple
 from cre.op import Op
 from cre.sc_planner2 import (gen_apply_multi_source,
                      apply_multi, SetChainingPlanner, insert_record,
-                     join_records_of_type, forward_chain_one, next_rec_entry,
-                    rec_entry_from_ptr, SC_Record_EntryType, retrace_goals_back_one, expl_tree_ctor,
+                     join_records_of_type, forward_chain_one, extract_rec_entry,
+                     retrace_goals_back_one, expl_tree_ctor,
                     build_explanation_tree, ExplanationTreeType, SC_Record, SC_RecordType,
                     gen_op_comps_from_expl_tree, planner_declare_fact)
 from cre.utils import _ptr_from_struct_incref, _list_from_ptr, _dict_from_ptr, _struct_from_ptr, _get_array_data_ptr
@@ -125,11 +125,14 @@ def test_apply_multi():
     def args_for(planner,target=6.0):
         d = _dict_from_ptr(d_typ, planner.val_map_ptr_dict['float64'])
         l = List()
-        re = rec_entry_from_ptr(d[target][1])
-        while(re is not None):
+
+        re_ptr = d[target][1]
+        re_rec, re_next_re_ptr, re_args = extract_rec_entry(re_ptr)
+        # re = rec_entry_from_ptr()
+        while(re_ptr != 0):
             print(re.args)
-            l.append(re.args)
-            re = next_rec_entry(re)            
+            l.append(re_args)
+            re_ptr = re_next_re_ptr
         return l
 
     assert summary_vals_map(planner) == (9,0.0,8.0)
@@ -223,11 +226,11 @@ def tree_str(root,ind=0):
     # print("START STR TREE")
     # if(len(root.children) == 0): return "?"
     s = ' '*ind
-    for child in root.children:
+    for entry in root.entries:
         pass
         # print("child.is_op", child.is_op)
-        if(child.is_op):
-            op, child_arg_ptrs = child.op, child.child_arg_ptrs
+        if(entry.is_op):
+            op, child_arg_ptrs = entry.op, entry.child_arg_ptrs
         #     # for i in range(ind): s += " "
                 
             s += op.name + "("
@@ -343,14 +346,17 @@ def product_of_generators(generators):
         yield out
         out = out[:-1]
 
-with PrintElapse("gen_iters"):
-    l = [x for x in product_of_generators([foo_gen,foo_gen,foo_gen, foo_gen])]
-    print(len(l))
-    print()
+# with PrintElapse("gen_iters"):
+#     l = [x for x in product_of_generators([foo_gen,foo_gen,foo_gen, foo_gen])]
+#     print(len(l))
+#     print()
 
 if __name__ == "__main__":
-    test_build_explanation_tree()
-    pass
+    with PrintElapse("test_build_explanation_tree"):
+        test_build_explanation_tree()
+    with PrintElapse("test_build_explanation_tree"):
+        test_build_explanation_tree()
+    # pass
     # test_apply_multi()
     # test_insert_record()
     # test_join_records_of_type()

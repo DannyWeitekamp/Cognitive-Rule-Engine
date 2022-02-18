@@ -38,8 +38,61 @@ from os import getenv
 from cre.utils import deref_type, listtype_sizeof_item
 import inspect, dill, pickle
 from textwrap import dedent, indent
-
 import time
+
+
+'''
+This file implements the SetChainingPlanner which solves planning problems
+akin to the "24 game" (given 4 numbers find a way to manipulate them to get 24)
+The set chaining planner solves these problems for a given a set of values 
+of essentially any type (number, string, object, etc...), a set of operations, 
+and a goal value of any type, the planner will find compositions of starting
+values and operations that achieve the goal state. This planner searches for
+the goal value in a forward chaining manner by exploring every combination of
+values and compositions of operations up to a fixed depth. For instance,
+(1+3) = 4 could be discovered at depth 1, and (1+2)+(3-2) = 4 could be discovered
+at a depth of 2. The planner is "set chaining" because it uses a hashmap to 
+ensure that at each depth only unique values are used to compute the values for
+the next depth. This cuts down on the combinatoric explosion of searching for the goal.
+
+This file implements:
+-SetChainingPlanner
+    The constructor for a set chaining planner instance. The set of initial values can
+    be declared to this structure. ??? can be used to solve the search problem, 
+    and outputs the root node of an ExplanationTree containing the solutions found up 
+    to a fixed depth. Every forward pass of the planner is stored in memory. After the goal
+    is produced at a particular depth an operation composition is reconstructed by 
+    filtering backwards from the goal state to the initial declared values.
+
+-SC_Record
+    An internal structure to the SetChainingPlanner representing the application
+    of an operation (a cre.Op) over a particular range of the unique values calculated for a
+    particular depth. An SC_Record is a lightweight form of bookeeping that is used
+    to reconstruct solutions (i.e. operation compositions + starting values) in a 
+    backwards fashion from the depth where the goal value was found. For every application
+    of a cre.Op the that produces value 'v', the 'data' of an SC_Record 'rec' fills in a record entry:
+        [*rec, *prev_entry, arg_ind0, arg_ind1, ...] where '*rec' is a pointer to the SC_Record
+    '*prev_entry' is the previous record entry associated with value 'v' (or zero if there wasn't one yet),
+    and arg0,arg1,arg2,... are indicies for the arguments to this application of operation. To limit
+    the memory/cache footprint of tracking each entry---there can be millions at deeper depths---these 
+    all entry information is encoded in a contigous preallocated array.  
+     
+-ExplanationTree
+    An explanation tree is a compact datastructure for holding all solutions to a SetChainingPlanner's 
+    search. An ExplanationTree can hold a large number of solutions to a search (essentially compositions of 
+    cre.Op instances) in a manner that is considerably more compact than a flat list of (possibly many thousands 
+    of) solutions. An explanation tree is not a proper tree. Each node consists of multiple entries, each of which 
+    represents the application of a cre.Op or terminal variable and has 'n' child ExplanationTrees, for each 
+    of its 'n' arguments. Thus, unlike a normal tree which has a fixed set of children per node, a ExplanationTree 
+    instance contains a set of sets of child ExplanationTrees. A fixed choice of entries starting from the root 
+    ExplanationTree down to terminal entries represents a single cre.Op composition.
+
+-ExplanationTreeEntry
+    Represents a non-terminal cre.Op ('is_op'==True) in a composition or a terminal cre.Var ('is_op'==False).
+    In the non-terminal case holds a reference to a cre.Op instance and child ExplanationTrees for each argument. 
+    In the terminal case keeps a reference to a cre.Var.
+'''
+
 class PrintElapse():
     def __init__(self, name):
         self.name = name
@@ -116,30 +169,41 @@ def overload_SC_Record(op_or_var, depth=0, nargs=0, data=None, stride=None):
         print('fail')
     return impl
 
-SC_Record_Entry_field_dict = {
-    'rec' : SC_RecordType,
-    'next_entry_ptr' : i8,
-    'args' : u4[::1],
-}
-SC_Record_Entry_fields = [(k,v) for k,v in SC_Record_Entry_field_dict.items()]
-SC_Record_Entry, SC_Record_EntryType = \
-    define_structref("SC_Record_Entry", SC_Record_Entry_fields)
+# SC_Record_Entry_field_dict = {
+#     'rec' : SC_RecordType,
+#     'next_entry_ptr' : i8,
+#     'args' : u4[::1],
+# }
+# SC_Record_Entry_fields = [(k,v) for k,v in SC_Record_Entry_field_dict.items()]
+# SC_Record_Entry, SC_Record_EntryType = \
+#     define_structref("SC_Record_Entry", SC_Record_Entry_fields)
+
+# @njit(cache=True)
+# def rec_entry_from_ptr(d_ptr):
+#     ptrs = _arr_from_data_ptr(d_ptr, (2,),dtype=np.int64)
+#     rec_ptr, next_entry_ptr = ptrs[0], ptrs[1]
+#     rec = _struct_from_ptr(SC_RecordType, rec_ptr)
+#     args = _arr_from_data_ptr(d_ptr+16,(rec.nargs,),dtype=np.uint32)
+
+#     return SC_Record_Entry(rec,next_entry_ptr,args)
 
 @njit(cache=True)
-def rec_entry_from_ptr(d_ptr):
+def extract_rec_entry(d_ptr):
     ptrs = _arr_from_data_ptr(d_ptr, (2,),dtype=np.int64)
     rec_ptr, next_entry_ptr = ptrs[0], ptrs[1]
+    # print(rec_ptr, next_entry_ptr)
+    # if(next_entry_ptr <= 4): raise ValueError()
     rec = _struct_from_ptr(SC_RecordType, rec_ptr)
     args = _arr_from_data_ptr(d_ptr+16,(rec.nargs,),dtype=np.uint32)
+    return rec, next_entry_ptr, args
 
-    return SC_Record_Entry(rec,next_entry_ptr,args)
 
-@njit(cache=True)
-def next_rec_entry(re):
-    if(re.next_entry_ptr != 0):
-        return rec_entry_from_ptr(re.next_entry_ptr)
-    else:
-        return None
+# @njit(cache=True)
+# def next_rec_entry(re):
+#     if(re.next_entry_ptr != 0):
+#         return rec_entry_from_ptr(re.next_entry_ptr)
+#     else:
+#         return None
 
 
 record_list_type = ListType(SC_RecordType)
@@ -155,10 +219,13 @@ SetChainingPlanner_field_dict = {
     # List of dictionaries that map:
     #  Tuple(type_str[str],depth[int]) -> ListType[Record])
     'backward_records' : ListType(DictType(unicode_type, ListType(SC_RecordType))),
+
     # Maps type_str[str] -> *(Dict: val[any] -> Tuple(depth[i8], *SC_Record_Entry) )
     'val_map_ptr_dict' : DictType(unicode_type, ptr_t),
+
     # Maps type_str[str] -> *(Dict: *Var -> val[any])
     'inv_val_map_ptr_dict' : DictType(unicode_type, ptr_t), 
+
     # Maps (type_str[str],depth[int]) -> *Iterator[any]
     'flat_vals_ptr_dict' : DictType(Tuple((unicode_type,i8)), ptr_t),
 
@@ -317,6 +384,7 @@ def _query_goal(self, type_name, typ, goal):
 
 @njit(cache=True)
 def insert_record(self, rec, ret_type_name, depth):
+
     '''Inserts a Record 'rec' into the list of records in  
         'self' for type 'ret_type_name' and depth 'depth' '''
     # Make sure records dictionaries up to this depth
@@ -402,7 +470,7 @@ from numba.types import ListType, DictType, Tuple
 import numpy as np
 import dill
 from cre.utils import _dict_from_ptr, _list_from_ptr, _raw_ptr_from_struct_incref, _get_array_data_ptr
-from cre.sc_planner2 import SC_Record, SC_Record_Entry, SC_Record_EntryType
+from cre.sc_planner2 import SC_Record
 ''' 
     imp_targets = ['call'] + (['check'] if has_check else [])
     src += f'''{gen_import_str(type(op).__name__,
@@ -560,7 +628,7 @@ def expl_tree_entry_ctor(op_or_var, child_arg_ptrs=None):
 ### Explanation Tree ###
 
 ExplanationTree_field_dict = {
-    'children' : ListType(ExplanationTreeEntryType), #List[(op<GenericOpType> ,*ExplanationTree[::1])]
+    'entries' : ListType(ExplanationTreeEntryType),
     'inv_val_map_ptr_dict' : DictType(unicode_type, ptr_t)
 }
 ExplanationTree_fields = [(k,v) for k,v in ExplanationTree_field_dict.items()]
@@ -612,12 +680,12 @@ define_boxing(ExplanationTreeTypeTemplate,ExplanationTree)
 ExplanationTreeType = ExplanationTreeTypeTemplate(ExplanationTree_fields)
 
 @njit(cache=True)
-def expl_tree_ctor(children=None, planner=None):
+def expl_tree_ctor(entries=None, planner=None):
     st = new(ExplanationTreeType)
-    if(children is None):
-        st.children = List.empty_list(ExplanationTreeEntryType)
+    if(entries is None):
+        st.entries = List.empty_list(ExplanationTreeEntryType)
     else:
-        st.children = children
+        st.entries = entries
     if(planner is not None):
         st.inv_val_map_ptr_dict = Dict.empty(unicode_type, ptr_t)
         for typ_name, ptr in planner.inv_val_map_ptr_dict.items():
@@ -648,21 +716,23 @@ def expl_tree_ctor(children=None, planner=None):
 i8_et_dict = DictType(i8,ExplanationTreeType)
 
 @njit(void(
-        SC_Record_EntryType,
+        i8,
         DictType(unicode_type,i8_et_dict),
         ExplanationTreeType),
      cache=True)
-def _fill_arg_inds_from_rec_entries(re, new_arg_inds, expl_tree):
+def _fill_arg_inds_from_rec_entries(re_ptr, new_arg_inds, expl_tree):
     '''Goes through linked list of record entries and
         adds the argument indicies into new_arg_inds
         with a new instance of an ExplanationTree if needed.
         Add the new ExplanationTrees to the children of 'expl_tree'
     '''
-    while(re is not None):
-        if(re.rec.is_op):
-            op = re.rec.op 
-            child_arg_ptrs = np.empty(len(re.args), dtype=np.int64)
-            for i, (arg_type_name, arg_ind) in enumerate(zip(op.arg_type_names, re.args)):
+
+    while(re_ptr != 0):
+        re_rec, re_next_re_ptr, re_args = extract_rec_entry(re_ptr)
+        if(re_rec.is_op):
+            op = re_rec.op 
+            child_arg_ptrs = np.empty(len(re_args), dtype=np.int64)
+            for i, (arg_type_name, arg_ind) in enumerate(zip(op.arg_type_names, re_args)):
                 #Make sure a set of indicies has been instantied for 'arg_type_name'
                 if(arg_type_name not in new_arg_inds):
                     new_arg_inds[arg_type_name] = Dict.empty(i8,ExplanationTreeType)
@@ -675,13 +745,16 @@ def _fill_arg_inds_from_rec_entries(re, new_arg_inds, expl_tree):
                 child_arg_ptrs[i] = _raw_ptr_from_struct_incref(uai[arg_ind])
 
             # Throw new tree entry instance into the children of 'expl_tree'
-            entry = expl_tree_entry_ctor(op,child_arg_ptrs)
-            expl_tree.children.append(entry)
-            re = next_rec_entry(re)   
+            entry = expl_tree_entry_ctor(op, child_arg_ptrs)
+            expl_tree.entries.append(entry)
+            # re = next_rec_entry(re)  
+            re_ptr = re_next_re_ptr
+            # re_rec, re_next_re, re_args = extract_rec_entry(re_next_re)
         else:
-            entry = expl_tree_entry_ctor(re.rec.var)
-            expl_tree.children.append(entry)
-            re = None
+            entry = expl_tree_entry_ctor(re_rec.var)
+            expl_tree.entries.append(entry)
+            # re = None
+            re_ptr = 0
 
 
 @generated_jit(cache=True, nopython=True) 
@@ -707,8 +780,8 @@ def retrace_arg_inds(planner, typ,  goals, new_arg_inds=None):
         for goal, expl_tree in _goals.items():
             # 're' is the head of a linked list of rec_entries
             _, entry_ptr = val_map[goal]
-            re = rec_entry_from_ptr(entry_ptr)
-            _fill_arg_inds_from_rec_entries(re,
+            # re = rec_entry_from_ptr(entry_ptr)
+            _fill_arg_inds_from_rec_entries(entry_ptr,
                 new_arg_inds, expl_tree)
         return new_arg_inds
     return impl    
@@ -826,11 +899,11 @@ def build_explanation_tree(planner, g_typ, goal):
 
 @njit(i8(ExplanationTreeType,),cache=True)
 def expl_tree_num_entries(tree):
-    return len(tree.children)
+    return len(tree.entries)
 
 @njit(ExplanationTreeEntryType(ExplanationTreeType,i8),cache=True)
 def expl_tree_ith_entry(tree, i):
-    return tree.children[i]
+    return tree.entries[i]
 
 @njit(i8(ExplanationTreeEntryType),cache=True)
 def expl_tree_entry_num_args(tree_entry):

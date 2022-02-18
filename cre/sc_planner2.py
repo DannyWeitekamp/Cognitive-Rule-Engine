@@ -160,20 +160,30 @@ SC_Record, SC_RecordType = \
 #     return impl
     
 @overload(SC_Record, prefer_literal=False)
-def overload_SC_Record(op_or_var, depth=0, nargs=0, data=None, stride=None):
+def overload_SC_Record(op_or_var, depth=0, nargs=0, stride=None):
     '''Implements the constructor for an SC_Record'''
     if(isinstance(op_or_var, OpTypeTemplate)):
-        def impl(op_or_var, depth=0, nargs=0, data=None, stride=None):
+        def impl(op_or_var, depth=0, nargs=0, stride=None):
             st = new(SC_RecordType)
             st.is_op = True
             st.op = op_or_var
             st.depth = depth
+
+            ENTRY_WIDTH = 4 + nargs
+            n_items = 1
+            for s_i in stride:
+                s_len = s_i[1]-s_i[0]
+                n_items *= s_len
+            data_len = s_len*ENTRY_WIDTH
+            st.data = np.empty(data_len,dtype=np.uint32)
+
+
             st.nargs = nargs
             if(data is not None): st.data = data
             if(stride is not None): st.stride = stride
             return st
     elif(isinstance(op_or_var, VarTypeTemplate)):
-        def impl(op_or_var, depth=0, nargs=0, data=None, stride=None):
+        def impl(op_or_var, depth=0, nargs=0, stride=None):
             st = new(SC_RecordType)
             st.is_op = False
             st.var = _cast_structref(GenericVarType, op_or_var) 
@@ -554,18 +564,16 @@ def apply_multi(op_inst, planner, depth):
 
 
     ls = ", ".join([f"l{i}" for i in a_cnt])
-    l_defs = '\n'.join([f'l{i} = stride[{i}][1]-stride[{i}][0]' for i in a_cnt])#", ".join([f"len(iter{it_inds[i]})-start{i}" for i in a_cnt])
+    # l_defs = '\n'.join([f'l{i} = stride[{i}][1]-stride[{i}][0]' for i in a_cnt])#", ".join([f"len(iter{it_inds[i]})-start{i}" for i in a_cnt])
     stride_defaults = ",".join([f'[0,len(iter{it_inds[i]})]' for i in a_cnt])
     src += indent(f'''
 nxt_depth = depth + 1
 stride = np.array([{stride_defaults}],dtype=np.int64)
 val_map =  _dict_from_ptr(ret_d_typ,
 {ind}planner.val_map_ptr_dict['{str(sig.return_type)}'])
-{l_defs}
-data_len = {"*".join([f'l{i}' for i in a_cnt])}*ENTRY_WIDTH
-data = np.empty(data_len,dtype=np.uint32)
-d_ptr = _get_array_raw_data_ptr(data)
-rec = SC_Record(op_inst, nxt_depth, N_ARGS, data, stride)
+
+rec = SC_Record(op_inst, nxt_depth, N_ARGS, stride)
+d_ptr = _get_array_raw_data_ptr(rec.data)
 rec_ptr = _raw_ptr_from_struct(rec)
 
 d_offset=0

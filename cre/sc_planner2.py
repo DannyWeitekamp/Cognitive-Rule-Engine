@@ -169,7 +169,7 @@ def overload_SC_Record(op_or_var, depth=0, nargs=0, stride=None):
             st.op = op_or_var
             st.depth = depth
             st.nargs = nargs
-            
+
             if(stride is not None): st.stride = stride
 
             ENTRY_WIDTH = 4 + nargs
@@ -419,6 +419,9 @@ def search_for_explanations(self, goal, ops=None,
             if(found_at_depth is None or 
                 self.curr_infer_depth < min_stop_depth):
                 forward_chain_one(self,ops)
+            else:
+                break
+
 
     with PrintElapse("Build Expl Tree"):
         expl_tree = build_explanation_tree(self, g_typ, goal)

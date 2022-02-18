@@ -297,17 +297,13 @@ def test_mem_leaks(n=5):
 
         # planner = setup_retrace()
         planner = setup_float(n=n)
-        planner = setup_str(planner,n=n)
-
-        
-        
-        
+        # planner = setup_str(planner,n=n)
 
         expl_tree = search_for_explanations(planner, 36.0, ops=ops, search_depth=3)
 
         planner = None
         expl_tree = None
-        gc.collect()
+        # gc.collect()
         print(used_bytes()-init_used)
         raise ValueError()
 
@@ -420,8 +416,8 @@ def product_of_generators(generators):
 if __name__ == "__main__":
     import faulthandler; faulthandler.enable()
 
-    with PrintElapse("test_build_explanation_tree"):
-        test_build_explanation_tree()
+    # with PrintElapse("test_build_explanation_tree"):
+    #     test_build_explanation_tree()
     # with PrintElapse("test_build_explanation_tree"):
     #     test_build_explanation_tree()
     # with PrintElapse("test_search_for_explanations"):

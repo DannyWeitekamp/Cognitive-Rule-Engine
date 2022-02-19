@@ -133,20 +133,18 @@ def test_apply_multi():
     def args_for(planner,target=6.0):
         d = _dict_from_ptr(d_typ, planner.val_map_ptr_dict['float64'])
         l = List()
-
         re_ptr = d[target][1]
-        re_rec, re_next_re_ptr, re_args = extract_rec_entry(re_ptr)
-        # re = rec_entry_from_ptr()
+        # re_rec, re_next_re_ptr, re_args = extract_rec_entry(re_ptr)
         while(re_ptr != 0):
-            # print(re_args)
+            re_rec, re_ptr, re_args = extract_rec_entry(re_ptr)
             l.append(re_args)
-            re_ptr = re_next_re_ptr
+            # re_ptr = re_next_re_ptr
         return l
-
     assert summary_vals_map(planner) == (9,0.0,8.0)
     # print(np.array(args_for(planner,6)))
     assert np.array_equal(np.array(args_for(planner,6)),
                  np.array([[4, 2],[3, 3]]))
+    
 
 def test_insert_record():
     Add, Multiply, Concatenate = get_base_ops()
@@ -284,41 +282,48 @@ def test_search_for_explanations(n=5):
 
 
 
-def used_bytes():
+def used_bytes(garbage_collect=True):
+    if(garbage_collect): gc.collect()
     stats = rtsys.get_allocation_stats()
     print(stats)
     return stats.alloc-stats.free
 
 
 def test_mem_leaks(n=5):
-    with cre_context("test_mem_leaks"):
+    with cre_context("test_mem_leaks") as context:
         ops = get_base_ops()
         init_used = used_bytes()
 
         # planner = setup_retrace()
-        planner = setup_float(n=n)
-        # planner = setup_str(planner,n=n)
+        for i in range(5):
+            planner = setup_float(n=n)
+            expl_tree = search_for_explanations(planner, 36.0,
+                ops=ops, search_depth=3, context=context)
+            expl_tree_iter = iter(expl_tree)
+            for op_comp in expl_tree_iter:
+                pass
 
-        expl_tree = search_for_explanations(planner, 36.0, ops=ops, search_depth=3)
+            planner = None
+            expl_tree = None
+            expl_tree_iter = None
+            if(i == 0): 
+                init_used = used_bytes()
+            else:
+                assert used_bytes() == init_used
+            # print(used_bytes()-init_used)
 
-        planner = None
-        expl_tree = None
-        gc.collect()
-        print(used_bytes()-init_used)
-        raise ValueError()
+                # print(op_comp)
 
+        # planner = None
+        # expl_tree = None
+        # expl_tree_iter = None
+        # print(used_bytes()-init_used)
+        # raise ValueError()
 
-        expl_tree_iter = iter(expl_tree)
-        # print(tree_str(expl_tree))
-        for op_comp in expl_tree_iter:
-            print(op_comp)
-
-        planner = None
-        expl_tree = None
-        expl_tree_iter = None
         
-        gc.collect()
-        print(used_bytes()-init_used)
+        
+        # gc.collect()
+        # print(used_bytes()-init_used)
 
 
 
@@ -422,17 +427,19 @@ if __name__ == "__main__":
     #     test_build_explanation_tree()
     # with PrintElapse("test_search_for_explanations"):
     #     test_search_for_explanations()
-    with PrintElapse("test_search_for_explanations"):
-        test_search_for_explanations()
-
-    test_mem_leaks(n=10)
+    # with PrintElapse("test_search_for_explanations"):
+    #     test_search_for_explanations()
+# 
+    
 
     # pass
-    # test_apply_multi()
-    # test_insert_record()
-    # test_join_records_of_type()
-    # test_forward_chain_one()
-    # test_build_explanation_tree()
+    test_apply_multi()
+    test_insert_record()
+    test_join_records_of_type()
+    test_forward_chain_one()
+    test_build_explanation_tree()
+    test_search_for_explanations()
+    test_mem_leaks(n=10)
     # benchmark_apply_multi()
     # benchmark_retrace_back_one()
         # test_apply_multi()

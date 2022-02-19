@@ -304,7 +304,7 @@ def sc_planner_ctor():
 
 
 @njit(cache=True)
-def ensure_ptr_dicts(planner,typ,typ_name,lt,vt,ivt):
+def ensure_ptr_dicts(planner, typ, typ_name, lt, vt, ivt):
     tup = (typ_name,0)
     if(tup not in planner.flat_vals_ptr_dict):
         flat_vals = List.empty_list(typ)
@@ -325,9 +325,6 @@ def ensure_ptr_dicts(planner,typ,typ_name,lt,vt,ivt):
     inv_val_map = _dict_from_ptr(ivt, planner.inv_val_map_ptr_dict[typ_name])    
     declare_records = planner.declare_records[typ_name]
     return flat_vals, val_map, inv_val_map, declare_records
-
-    
-
 
 
 @generated_jit(cache=True)
@@ -378,59 +375,34 @@ def planner_declare_fact(planner, val, attrs_as_types=None):
 
 
 
-        
-
-### Planning Planning Planning ###
-
-# When an op is applied it needs to insert the result into 
-#  a dictionary so that only unique values go into then next step.
-#  When an op broadcast applied a new Record is created and inserted into 
-#  'forward_records'. 
-#  After all ops (that will be tried) at a depth have been tried
-#  each 'vals_to_uid' is joined into 'vals_to_depth' for the next depth
-#  which is 
-
-
-#  then it could map val[any] -> depth[u1].
-#  Then a lookup to 'val' would yield rec.history and then
-#  rec.history[ind]
-
-
-
+from numba.core.runtime.nrt import rtsys
 from cre.core import standardize_type
 def search_for_explanations(self, goal, ops=None,
-             search_depth=1, max_solutions=10,
-             min_stop_depth=-1,context=None):
-    
-    with PrintElapse("Start"):
-        context = cre_context(context)
-        # if(min_stop_depth == -1): min_stop_depth = search_depth
-        g_typ = standardize_type(type(goal), context)
-    # g_typ_str = str(g_typ)
-    # print(g_typ,g_typ_str)
+             search_depth=1, min_stop_depth=-1,context=None):
+    '''For SetChainingPlanner 'self' produce an explanation tree
+        holding all cre.Op compositions of 'ops' up to depth 'search_depth'
+        that produce 'goal' from the planner's declared starting values.
+    '''
+    context = cre_context(context)
+    g_typ = standardize_type(type(goal), context)
 
-    # NOTE: Make sure that things exist here
-    with PrintElapse("Chain"):
-        found_at_depth = query_goal(self, g_typ, goal)
-        depth = 1
-        while(found_at_depth is None):
-            if(depth < self.curr_infer_depth): continue
-            
-            if(found_at_depth is None or 
-                self.curr_infer_depth < min_stop_depth):
-                forward_chain_one(self,ops)
-                found_at_depth = query_goal(self, g_typ, goal)
-            else:
-                print("found_at_depth:", found_at_depth, self.curr_infer_depth)
-                break
-            depth += 1
-            if(depth > search_depth): break
+    found_at_depth = query_goal(self, g_typ, goal)
+    depth = 1
 
-            
+    while(found_at_depth is None):
+        if(depth < self.curr_infer_depth): continue
+        
+        if(found_at_depth is None or 
+            self.curr_infer_depth < min_stop_depth):
+            forward_chain_one(self,ops)
+            found_at_depth = query_goal(self, g_typ, goal)
+        else:
+            break
+        depth += 1
+        if(depth > search_depth): break
 
+    expl_tree = build_explanation_tree(self, g_typ, goal)
 
-    with PrintElapse("Build Expl Tree"):
-        expl_tree = build_explanation_tree(self, g_typ, goal)
     return expl_tree
 
 
@@ -649,7 +621,7 @@ def apply_multi(op, planner, depth):
     # If it doesn't already exist generate and inject '_apply_multi' into 'op'
     if(not hasattr(op,'_apply_multi')):
         hash_code = unique_hash(['_apply_multi',op.long_hash])  
-        print(get_cache_path('apply_multi',hash_code))
+        # print(get_cache_path('apply_multi',hash_code))
         if(not source_in_cache('apply_multi',hash_code)):
             src = gen_apply_multi_source(op)
             source_to_cache('apply_multi',hash_code,src)
@@ -676,8 +648,8 @@ ExplanationTreeEntry_field_dict = {
     # If terminal the cre.Var instance
     "var" : GenericVarType,
 
-    # A List of 
-    "child_arg_ptrs" : i8[::1]
+    # A List of refcounted pointers to child explanation trees for each argument
+    "child_arg_ptrs" : ListType(ptr_t)#i8[::1]
 }
 ExplanationTreeEntry_fields = [(k,v) for k,v in ExplanationTreeEntry_field_dict.items()]
 ExplanationTreeEntry, ExplanationTreeEntryType = \
@@ -770,7 +742,7 @@ def expl_tree_ctor(entries=None, planner=None):
     if(planner is not None):
         st.inv_val_map_ptr_dict = Dict.empty(unicode_type, ptr_t)
         for typ_name, ptr in planner.inv_val_map_ptr_dict.items():
-            _incref_ptr(ptr) #Note might not need
+            # _incref_ptr(ptr) #Note might not need
             st.inv_val_map_ptr_dict[typ_name] = ptr
     return st
 
@@ -814,7 +786,7 @@ def _fill_arg_inds_from_rec_entries(re_ptr, new_arg_inds, expl_tree):
         # print("DONE")
         if(re_rec.is_op):
             op = re_rec.op 
-            child_arg_ptrs = np.empty(len(re_args), dtype=np.int64)
+            child_arg_ptrs = List.empty_list(ptr_t, len(re_args))#np.empty(len(re_args), dtype=np.int64)
             for i, (arg_type_name, arg_ind) in enumerate(zip(op.arg_type_names, re_args)):
                 #Make sure a set of indicies has been instantied for 'arg_type_name'
                 if(arg_type_name not in new_arg_inds):
@@ -825,7 +797,7 @@ def _fill_arg_inds_from_rec_entries(re_ptr, new_arg_inds, expl_tree):
                 if(arg_ind not in uai):
                     uai[arg_ind] = expl_tree_ctor()
 
-                child_arg_ptrs[i] = _raw_ptr_from_struct_incref(uai[arg_ind])
+                child_arg_ptrs.append(_ptr_from_struct_incref(uai[arg_ind]))
 
             # Throw new tree entry instance into the children of 'expl_tree'
             entry = expl_tree_entry_ctor(op, child_arg_ptrs)

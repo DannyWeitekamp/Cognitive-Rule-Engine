@@ -5,7 +5,7 @@ from numba.typed import List, Dict
 from numba.types import ListType, DictType, unicode_type, void, Tuple
 from numba.experimental.structref import new, define_boxing
 import numba.experimental.structref as structref
-from cre.utils import (wptr_t, ptr_t, _dict_from_ptr, _raw_ptr_from_struct, _get_array_data_ptr,
+from cre.utils import (wptr_t, ptr_t, _dict_from_ptr, _raw_ptr_from_struct, _get_array_raw_data_ptr,
          _ptr_from_struct_incref, _struct_from_ptr, decode_idrec, CastFriendlyMixin,
         encode_idrec, deref_type, DEREF_TYPE_ATTR, DEREF_TYPE_LIST, _obj_cast_codegen,
          _ptr_to_data_ptr, _list_base_from_ptr, _load_ptr, PrintElapse, meminfo_type,
@@ -379,7 +379,7 @@ def resolve_head_ptr(self, arg_ind, base_t_id, f_id, deref_offsets):
         else:
             return 0
     else:
-        return _get_array_data_ptr(facts.data) + (f_id * 8) #assuming 8 byte ptrs
+        return _get_array_raw_data_ptr(facts.data) + (f_id * 8) #assuming 8 byte ptrs
 
 # @njit(void(BaseReteNodeType, i8,u8,u1),locals={"f_id" : u8}, cache=True)
 @njit(locals={"f_id" : u8, "a_id" : u8}, cache=True)

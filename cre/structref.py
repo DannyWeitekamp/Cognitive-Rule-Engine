@@ -68,7 +68,8 @@ class {typ}(structref.StructRefProxy):
 def define_structref_template(name, fields, define_constructor=True,define_boxing=True):
     if(isinstance(fields,dict)): fields = [(k,v) for k,v in fields.items()]
     hash_code = unique_hash([name,fields])
-    # print(name, hash_code)
+    if(name == "ExplanationTreeEntry"): print(name, fields, hash_code)
+    
     if(not source_in_cache(name,hash_code)):
         source = gen_structref_code(name, fields, define_constructor=define_constructor,
              define_boxing=define_boxing)

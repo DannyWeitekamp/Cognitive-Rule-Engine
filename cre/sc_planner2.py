@@ -404,23 +404,29 @@ def search_for_explanations(self, goal, ops=None,
     
     with PrintElapse("Start"):
         context = cre_context(context)
-        if(min_stop_depth == -1): min_stop_depth = search_depth
+        # if(min_stop_depth == -1): min_stop_depth = search_depth
         g_typ = standardize_type(type(goal), context)
     # g_typ_str = str(g_typ)
     # print(g_typ,g_typ_str)
 
     # NOTE: Make sure that things exist here
     with PrintElapse("Chain"):
-        for depth in range(1, search_depth+1):
+        found_at_depth = query_goal(self, g_typ, goal)
+        depth = 1
+        while(found_at_depth is None):
             if(depth < self.curr_infer_depth): continue
-            found_at_depth = query_goal(self, g_typ, goal)
-            print("found_at_depth:", found_at_depth, self.curr_infer_depth)
             
             if(found_at_depth is None or 
                 self.curr_infer_depth < min_stop_depth):
                 forward_chain_one(self,ops)
+                found_at_depth = query_goal(self, g_typ, goal)
             else:
+                print("found_at_depth:", found_at_depth, self.curr_infer_depth)
                 break
+            depth += 1
+            if(depth > search_depth): break
+
+            
 
 
     with PrintElapse("Build Expl Tree"):
@@ -670,7 +676,7 @@ ExplanationTreeEntry_field_dict = {
     # If terminal the cre.Var instance
     "var" : GenericVarType,
 
-    # If terminal the cre.Var instance
+    # A List of 
     "child_arg_ptrs" : i8[::1]
 }
 ExplanationTreeEntry_fields = [(k,v) for k,v in ExplanationTreeEntry_field_dict.items()]

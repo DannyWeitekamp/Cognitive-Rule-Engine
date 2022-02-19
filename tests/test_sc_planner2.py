@@ -303,7 +303,7 @@ def test_mem_leaks(n=5):
 
         planner = None
         expl_tree = None
-        # gc.collect()
+        gc.collect()
         print(used_bytes()-init_used)
         raise ValueError()
 
@@ -422,8 +422,8 @@ if __name__ == "__main__":
     #     test_build_explanation_tree()
     # with PrintElapse("test_search_for_explanations"):
     #     test_search_for_explanations()
-    # with PrintElapse("test_search_for_explanations"):
-    #     test_search_for_explanations()
+    with PrintElapse("test_search_for_explanations"):
+        test_search_for_explanations()
 
     test_mem_leaks(n=10)
 

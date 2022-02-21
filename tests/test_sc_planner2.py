@@ -307,7 +307,7 @@ def test_search_for_explanations(n=5):
     planner = setup_float(n=n)
     # planner = setup_str(planner,n=n)
 
-    expl_tree = search_for_explanations(planner, 36.0, ops=ops, search_depth=3)
+    expl_tree = search_for_explanations(planner, 36.0, ops=ops, search_depth=2)
     # print(tree_str(expl_tree))
     for op_comp in expl_tree:
         print(op_comp)
@@ -330,7 +330,7 @@ def test_mem_leaks(n=5):
         for i in range(5):
             planner = setup_float(n=n)
             expl_tree = search_for_explanations(planner, 36.0,
-                ops=ops, search_depth=3, context=context)
+                ops=ops, search_depth=2, context=context)
             expl_tree_iter = iter(expl_tree)
             for op_comp in expl_tree_iter:
                 pass
@@ -376,25 +376,29 @@ def _test_declare_fact():
         #     planner_declare(planner, fact.B, v.B)
         # declare_fact = get_planner_declare_fact_impl(BOOP)
 
-        @njit(cache=True)
-        def declare_em(planner):
+        # @njit(cache=True)
+        def declare_em(planner,s="A"):
             for i in range(5):
-                b = BOOP("A",i)
+                b = BOOP(s,i)
                 planner.declare(b, visible_attrs=("A","B"))
 
         with PrintElapse("Declare 1000 Facts"):
             declare_em(planner)
 
+        with PrintElapse("Declare 1000 Facts"):
+            declare_em(planner,"B")
+
         print(summary_stats(planner, BOOPType, 0))
         print(summary_stats(planner, unicode_type, 0))
         print(summary_stats(planner, f8, 0))
 
-        expls = planner.search_for_explanations(36.0,ops=get_base_ops(),search_depth=2)
+        expls = planner.search_for_explanations(36.0, ops=get_base_ops(), search_depth=2)
         for op_comp, binding in expls:
-            print(op_comp,type(op_comp))
-            print(op_comp.head_vars)
+            # print(op_comp,type(op_comp))
+            # print(op_comp.head_vars)
             op = op_comp.flatten()
-            # print(op)
+
+            print(op, binding, op(*binding))
 
 
 

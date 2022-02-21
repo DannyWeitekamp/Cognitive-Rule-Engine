@@ -694,8 +694,10 @@ def var_getattr_impl(context, builder, typ, val, attr):
     #Otherwise return a new instance with a new 'attr' and 'offset' append 
     else:
         base_type = typ.field_dict['base_type'].instance_type 
-        head_type = typ.field_dict['head_type'].instance_type 
+        head_type = typ.field_dict['head_type'].instance_type.spec[attr]['type']
+        # head_type = typ.field_dict['head_type'].instance_type 
         head_type_name = str(head_type)
+        # print(">>", head_type_name)
         fd = base_type.field_dict
         a_id = list(fd.keys()).index(attr)
         offset = base_type._attr_offsets[list(fd.keys()).index(attr)]

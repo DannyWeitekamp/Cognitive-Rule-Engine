@@ -290,7 +290,7 @@ class SetChainingPlanner(structref.StructRefProxy):
 
     def search_for_explanations(self, goal, ops=None,
              search_depth=1, min_stop_depth=-1,context=None):
-    return search_for_explanations(self, goal, ops, search_depth, min_stop_depth, context)
+        return search_for_explanations(self, goal, ops, search_depth, min_stop_depth, context)
 
     # def forward_chain_one(self,val):
 
@@ -421,6 +421,8 @@ def search_for_explanations(self, goal, ops=None,
     context = cre_context(context)
     g_typ = standardize_type(type(goal), context)
 
+    print(goal, g_typ)
+
     found_at_depth = query_goal(self, g_typ, goal)
     depth = 1
 
@@ -435,10 +437,11 @@ def search_for_explanations(self, goal, ops=None,
             break
         depth += 1
         if(depth > search_depth): break
-
-    expl_tree = build_explanation_tree(self, g_typ, goal)
-
-    return expl_tree
+        
+    if(found_at_depth is None):
+        return None
+    else:
+        return build_explanation_tree(self, g_typ, goal)
 
 
 

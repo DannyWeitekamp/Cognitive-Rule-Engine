@@ -389,9 +389,14 @@ def _test_declare_fact():
         print(summary_stats(planner, unicode_type, 0))
         print(summary_stats(planner, f8, 0))
 
-        expls = planner.search_for_explanations(36,ops=get_base_ops())
-        for expl in expls:
-            print(expl)
+        expls = planner.search_for_explanations(36.0,ops=get_base_ops(),search_depth=2)
+        for op_comp, binding in expls:
+            print(op_comp,type(op_comp))
+            print(op_comp.head_vars)
+            op = op_comp.flatten()
+            # print(op)
+
+
 
 
 

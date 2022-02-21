@@ -174,7 +174,7 @@ class Var(CREObjProxy):
         # with PrintElapse("new"):
         if(getenv("CRE_SPECIALIZE_VAR_TYPE",default=False)):
             if(deref_type == 'attr'):
-                struct_type = get_var_definition(types.TypeRef(base_type), types.TypeRef(head_type))
+                struct_type = get_var_definition(base_type, head_type)
             else:
                 raise NotImplemented("Haven't implemented getitem() when CRE_SPECIALIZE_VAR_TYPE=true.")
             new = new_appended_var(struct_type, self, attr, a_id, offset, head_type_name, fact_num, deref_type)
@@ -702,7 +702,7 @@ def var_getattr_impl(context, builder, typ, val, attr):
         ctor = cgutils.create_struct_proxy(typ)
         st = ctor(context, builder, value=val)._getvalue()
         fact_num = getattr(head_type, "_fact_num", -1)
-        
+
         def new_var_and_append(self):
             return new_appended_var(typ, self, attr, a_id, offset, head_type_name, fact_num, DEREF_TYPE_ATTR)
             # st = new(typ)

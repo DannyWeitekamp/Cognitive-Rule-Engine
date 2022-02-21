@@ -285,8 +285,8 @@ class SetChainingPlanner(structref.StructRefProxy):
         self.max_depth = 0
         return self
 
-    def declare(self,val):
-        return planner_declare(self, val)
+    def declare(self, val, var=None, visible_attrs=(), include_vis_at_def=True):
+        return planner_declare(self, val, var, visible_attrs, include_vis_at_def)
 
     # def forward_chain_one(self,val):
 
@@ -307,52 +307,77 @@ def sc_planner_ctor():
     return st
 
 
-@njit(cache=True)
-def ensure_ptr_dicts(planner, typ, typ_name, lt, vt, ivt):
-    tup = (typ_name,0)
-    if(tup not in planner.flat_vals_ptr_dict):
-        flat_vals = List.empty_list(typ)
-        planner.flat_vals_ptr_dict[tup] = _ptr_from_struct_incref(flat_vals)
-    if(typ_name not in planner.val_map_ptr_dict):
-        val_map = Dict.empty(typ, i8_2x_tuple)    
-        planner.val_map_ptr_dict[typ_name] = _ptr_from_struct_incref(val_map)
-    if(typ_name not in planner.inv_val_map_ptr_dict):
-        inv_val_map = Dict.empty(i8, typ)    
-        planner.inv_val_map_ptr_dict[typ_name] = _ptr_from_struct_incref(inv_val_map)
+@generated_jit(cache=True)
+def ensure_ptr_dicts(planner, typ):
+    _typ = typ.instance_type
+    lt = ListType(_typ)
+    vt = DictType(_typ, i8_2x_tuple)
+    ivt = DictType(i8, _typ)
+    typ_name = str(_typ)
+    def impl(planner, typ):
+        tup = (typ_name,0)
+        if(tup not in planner.flat_vals_ptr_dict):
+            flat_vals = List.empty_list(typ)
+            planner.flat_vals_ptr_dict[tup] = _ptr_from_struct_incref(flat_vals)
+        if(typ_name not in planner.val_map_ptr_dict):
+            val_map = Dict.empty(typ, i8_2x_tuple)    
+            planner.val_map_ptr_dict[typ_name] = _ptr_from_struct_incref(val_map)
+        if(typ_name not in planner.inv_val_map_ptr_dict):
+            inv_val_map = Dict.empty(i8, typ)    
+            planner.inv_val_map_ptr_dict[typ_name] = _ptr_from_struct_incref(inv_val_map)
 
-    if(typ_name not in planner.declare_records):
-        planner.declare_records[typ_name] = List.empty_list(SC_RecordType)        
+        if(typ_name not in planner.declare_records):
+            planner.declare_records[typ_name] = List.empty_list(SC_RecordType)        
 
 
-    flat_vals = _list_from_ptr(lt, planner.flat_vals_ptr_dict[tup])    
-    val_map = _dict_from_ptr(vt, planner.val_map_ptr_dict[typ_name])    
-    inv_val_map = _dict_from_ptr(ivt, planner.inv_val_map_ptr_dict[typ_name])    
-    declare_records = planner.declare_records[typ_name]
-    return flat_vals, val_map, inv_val_map, declare_records
+        flat_vals = _list_from_ptr(lt, planner.flat_vals_ptr_dict[tup])    
+        val_map = _dict_from_ptr(vt, planner.val_map_ptr_dict[typ_name])    
+        inv_val_map = _dict_from_ptr(ivt, planner.inv_val_map_ptr_dict[typ_name])    
+        declare_records = planner.declare_records[typ_name]
+        return flat_vals, val_map, inv_val_map, declare_records
+    return impl
 
 
 @generated_jit(cache=True,nopython=True)
-def planner_declare(planner, val, var=None):
+@overload_method(SetChainingPlannerTypeTemplate, "declare")
+def planner_declare(planner, val, var=None,
+            visible_attrs=None, include_vis_at_def=True):
     '''Declares a value into the 0th depth of planner'''
     val_typ = val
-    val_typ_name = str(val_typ)
-
-    l_typ = ListType(val_typ)
-    vm_typ = DictType(val_typ, i8_2x_tuple)
-    ivm_typ = DictType(i8, val_typ)
-
-    print("<<", val_typ, val_typ_name)
-
-    def impl(planner, val, var=None):
-        # pass
-        flat_vals, val_map, inv_val_map, declare_records = \
-            ensure_ptr_dicts(planner, val_typ,
-                val_typ_name, l_typ, vm_typ, ivm_typ)
-
-        if var is None:
-            v = _cast_structref(GenericVarType,Var(val_typ))
+    
+    
+    if(isinstance(val_typ, Fact)):
+        print("WEEEEEE", include_vis_at_def)
+        if(isinstance(visible_attrs, types.Omitted)): 
+            _impl = get_planner_declare_fact_impl(val_typ)
         else:
+            _visible_attrs = [x._literal_value for x in visible_attrs]
+            print("HAS VIS", _visible_attrs)
+            _impl = get_planner_declare_fact_impl(val_typ, _visible_attrs, include_vis_at_def)
+        # print("DONEEE")
+        def impl(planner, val, var=None,
+            visible_attrs=None, include_vis_at_def=True):
+            return _impl(planner, val, var)
+    else:
+        # print("NOOOOO")
+        def impl(planner, val, var=None,
+            visible_attrs=None, include_vis_at_def=True):
+            return planner_declare_val(planner, val, var)
+            
+    return impl
+
+@generated_jit(cache=True,nopython=True)
+def planner_declare_val(planner, val, var=None):
+    val_typ = val
+    # print("AQUI", val_typ)
+    def impl(planner, val, var=None):
+        flat_vals, val_map, inv_val_map, declare_records = \
+            ensure_ptr_dicts(planner, val_typ)
+
+        if var is not None:
             v = _cast_structref(GenericVarType,var)
+        else:
+            v = _cast_structref(GenericVarType,Var(val_typ))
         rec = SC_Record(v)
         var_ptr = _raw_ptr_from_struct(v)
         declare_records.append(rec)
@@ -363,17 +388,21 @@ def planner_declare(planner, val, var=None):
         inv_val_map[var_ptr] = val
     return impl
 
+
+# @generated_jit(cache=True,nopython=True)
+# def planner_declare_(planner, val, var=None,
+
 # @generated_jit(cache=True)
-def gen_declare_attr_impl(attr_typ):
-    context = cre_context()
-    pass
+# def gen_declare_attr_impl(attr_typ):
+#     context = cre_context()
+#     pass
 
 
-def planner_declare_fact(planner, val, attrs_as_types=None):
-    print(attrs_as_types)
-    def impl(planner, val, attrs_as_types=None):
-        pass
-    return impl
+# def planner_declare_fact(planner, val, attrs_as_types=None):
+#     print(attrs_as_types)
+#     def impl(planner, val, attrs_as_types=None):
+#         pass
+#     return impl
 
 
 
@@ -1054,42 +1083,59 @@ def gen_op_comps_from_expl_tree(tree):
             v = expl_tree_entry_get_var(tree_entry)
             yield v
 
-from cre.fact import gen_fact_import_str
-def gen_src_declare_fact(fact_def, visible_attrs=[],
-         include_vis_at_def=True, ind='    '):
-    name, spec = fact_def._fact_name, fact_def.spec
+def assert_visible_attrs(fact_def, visible_attrs=[],
+         include_vis_at_def=True):
+    spec = fact_def.spec
     # fact_type = fact_def._fact_type if not isinstance(fact_def,numba.types.Type) else fact_def
     if(include_vis_at_def):
         for attr, attr_spec in spec.items():
             if(attr_spec.get("visible_to_planner",False)):
                 visible_attrs.append(attr)
-
-    visible_fields = []
+    # visible_fields = []
     for attr in visible_attrs:
         assert attr in spec, f"Attribute {attr} not an attribute of {fact_def}." 
-        visible_fields.append( (attr, spec[attr].get("type")) )
+    return visible_attrs
 
 
-    
-    print(name)
-    print(spec)
 
-    
+from cre.fact import gen_fact_import_str
+def gen_src_planner_declare_fact(fact_def, visible_attrs=[], ind='    '):
+    name = fact_def._fact_name
     src = \
 f'''
+from numba import njit, types
+from cre.var import Var, get_var_definition
+from cre.sc_planner2 import planner_declare_val, SetChainingPlannerType
 {gen_fact_import_str(fact_def)}
-@njit(cache=True)
-def declare_fact(planner, fact):
-    v = Var({f"{name}Type"})
-    planner_declare(planner,fact,v)
+var_type = get_var_definition({name}Type,{name}Type)
+@njit(types.void(SetChainingPlannerType, {name}Type, types.Optional(var_type)),cache=True)
+def declare_fact(planner, fact, var=None):
+    v = Var({name}Type) if var is None else var
+    planner_declare_val(planner,fact,v)
 '''
-    src += indent("\n".join([f"planner_declare(planner, fact.{attr}, v.{attr})" for attr in visible_attrs]),prefix=ind)
-    print(src)
+    src += indent("\n".join([f"planner_declare_val(planner, fact.{attr}, v.{attr})" for attr in visible_attrs]),prefix=ind)
     return src
 
+def get_planner_declare_fact_impl(fact_def, visible_attrs=[],
+         include_vis_at_def=True):
+    ''' '''
+    visible_attrs = assert_visible_attrs(fact_def, visible_attrs, include_vis_at_def)
+    hash_code = unique_hash([fact_def._hash_code, visible_attrs])  
+    # print(get_cache_path('sc_planner_declare_fact',hash_code, unique_hash([fact_def._hash_code, visible_attrs])  ))
+    if(not source_in_cache('sc_planner_declare_fact', hash_code)):
+        src = gen_src_planner_declare_fact(fact_def, visible_attrs)
+        source_to_cache('sc_planner_declare_fact',hash_code,src)
+    l = import_from_cached('sc_planner_declare_fact',hash_code,['declare_fact'])
+    return l['declare_fact']
+        
 
 
-    print(src)
+    # typ = op.signature.return_type
+    # typ_name = str(typ)
+    # _assert_prepared(planner, typ, typ_name, depth)
+
+    # am = getattr(op,'_apply_multi')
+    # return am(op,planner,depth)
 
 
     # while()

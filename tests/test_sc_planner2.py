@@ -8,7 +8,7 @@ from cre.sc_planner2 import (gen_apply_multi_source, search_for_explanations,
                      join_records_of_type, forward_chain_one, extract_rec_entry,
                      retrace_goals_back_one, expl_tree_ctor, planner_declare,
                     build_explanation_tree, ExplanationTreeType, SC_Record, SC_RecordType,
-                    gen_op_comps_from_expl_tree, planner_declare_fact, gen_src_declare_fact)
+                    gen_op_comps_from_expl_tree)
 from cre.utils import _ptr_from_struct_incref, _list_from_ptr, _dict_from_ptr, _struct_from_ptr
 from cre.var import Var
 from cre.context import cre_context
@@ -360,7 +360,7 @@ def test_mem_leaks(n=5):
 
 # def 
 
-
+from cre.sc_planner2 import get_planner_declare_fact_impl
 def _test_declare_fact():
     planner = SetChainingPlanner()
 
@@ -368,18 +368,22 @@ def _test_declare_fact():
         spec = {"A" : "string", "B" : "number"}
         BOOP, BOOPType = define_fact("BOOP", spec)
 
-        @njit(cache=True)
-        def declare_fact(planner, fact):
-            v = Var(BOOPType)
-            planner_declare(planner,fact,v)
-            planner_declare(planner, fact.A, v.A)
-            planner_declare(planner, fact.B, v.B)
+        # @njit(cache=True)
+        # def declare_fact(planner, fact):
+        #     v = Var(BOOPType)
+        #     planner_declare(planner,fact,v)
+        #     planner_declare(planner, fact.A, v.A)
+        #     planner_declare(planner, fact.B, v.B)
+        # declare_fact = get_planner_declare_fact_impl(BOOP)
 
         @njit(cache=True)
         def declare_em(planner):
             for i in range(1000):
                 b = BOOP("A",i)
-                planner_declare(planner, b)
+                planner.declare(b, visible_attrs=("A","B"))
+
+        
+
 
         # @njit(cache=True)
         # def hash_it(x,y):
@@ -390,14 +394,16 @@ def _test_declare_fact():
         # b = BOOP("A",1)
         # declare_fact(planner, b)
 
-        # print(summary_stats(planner, BOOPType, 0))
-        # print(summary_stats(planner, unicode_type, 0))
-        # print(summary_stats(planner, f8, 0))
+        
         with PrintElapse("Declare 1000 Facts"):
             declare_em(planner)
 
         with PrintElapse("Declare 1000 Facts"):
             declare_em(planner)
+
+        print(summary_stats(planner, BOOPType, 0))
+        print(summary_stats(planner, unicode_type, 0))
+        print(summary_stats(planner, f8, 0))
 
 
 

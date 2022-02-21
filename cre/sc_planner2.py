@@ -288,6 +288,10 @@ class SetChainingPlanner(structref.StructRefProxy):
     def declare(self, val, var=None, visible_attrs=(), include_vis_at_def=True):
         return planner_declare(self, val, var, visible_attrs, include_vis_at_def)
 
+    def search_for_explanations(self, goal, ops=None,
+             search_depth=1, min_stop_depth=-1,context=None):
+    return search_for_explanations(self, goal, ops, search_depth, min_stop_depth, context)
+
     # def forward_chain_one(self,val):
 
 

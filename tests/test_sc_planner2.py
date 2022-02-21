@@ -378,25 +378,9 @@ def _test_declare_fact():
 
         @njit(cache=True)
         def declare_em(planner):
-            for i in range(1000):
+            for i in range(5):
                 b = BOOP("A",i)
                 planner.declare(b, visible_attrs=("A","B"))
-
-        
-
-
-        # @njit(cache=True)
-        # def hash_it(x,y):
-        #     print(x==y)
-        #     print(hash(x))
-        #     # print(hash(x))
-        #     # x.__hash__(x)
-        # b = BOOP("A",1)
-        # declare_fact(planner, b)
-
-        
-        with PrintElapse("Declare 1000 Facts"):
-            declare_em(planner)
 
         with PrintElapse("Declare 1000 Facts"):
             declare_em(planner)
@@ -404,6 +388,10 @@ def _test_declare_fact():
         print(summary_stats(planner, BOOPType, 0))
         print(summary_stats(planner, unicode_type, 0))
         print(summary_stats(planner, f8, 0))
+
+        expls = planner.search_for_explanations(36,ops=get_base_ops())
+        for expl in expls:
+            print(expl)
 
 
 

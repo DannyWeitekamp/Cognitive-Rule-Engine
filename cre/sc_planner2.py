@@ -39,6 +39,8 @@ from cre.utils import deref_type, listtype_sizeof_item
 import inspect, dill, pickle
 from textwrap import dedent, indent
 import time
+# Ensure that dynamic hash/eq set
+import cre.dynamic_exec
 
 
 '''
@@ -270,6 +272,8 @@ SetChainingPlanner_fields = [(k,v) for k,v in SetChainingPlanner_field_dict.item
 
 @structref.register
 class SetChainingPlannerTypeTemplate(types.StructRef):
+    def __str__(self):
+        return f"cre.SetChainingPlannerType"
     def preprocess_fields(self, fields):
         return tuple((name, types.unliteral(typ)) for name, typ in fields)
 
@@ -327,8 +331,8 @@ def ensure_ptr_dicts(planner, typ, typ_name, lt, vt, ivt):
     return flat_vals, val_map, inv_val_map, declare_records
 
 
-@generated_jit(cache=True)
-def planner_declare(planner, val):
+@generated_jit(cache=True,nopython=True)
+def planner_declare(planner, val, var=None):
     '''Declares a value into the 0th depth of planner'''
     val_typ = val
     val_typ_name = str(val_typ)
@@ -337,19 +341,22 @@ def planner_declare(planner, val):
     vm_typ = DictType(val_typ, i8_2x_tuple)
     ivm_typ = DictType(i8, val_typ)
 
-    def impl(planner, val):
+    print("<<", val_typ, val_typ_name)
+
+    def impl(planner, val, var=None):
         # pass
         flat_vals, val_map, inv_val_map, declare_records = \
             ensure_ptr_dicts(planner, val_typ,
                 val_typ_name, l_typ, vm_typ, ivm_typ)
-        v = Var(val_typ)
+
+        if var is None:
+            v = _cast_structref(GenericVarType,Var(val_typ))
+        else:
+            v = _cast_structref(GenericVarType,var)
         rec = SC_Record(v)
         var_ptr = _raw_ptr_from_struct(v)
         declare_records.append(rec)
         rec_entry_ptr = _get_array_raw_data_ptr(rec.data)
-        # rec.data[0] = _raw_ptr_from_struct(rec)
-        # rec_entry = np.empty((1,),dtype=np.int64)
-        # rec_entry[0] = 
         
         flat_vals.append(val)
         val_map[val] = (0, rec_entry_ptr)
@@ -360,11 +367,6 @@ def planner_declare(planner, val):
 def gen_declare_attr_impl(attr_typ):
     context = cre_context()
     pass
-
-    # def impl(planner, val)
-
-
-
 
 
 def planner_declare_fact(planner, val, attrs_as_types=None):
@@ -1051,6 +1053,43 @@ def gen_op_comps_from_expl_tree(tree):
         else:
             v = expl_tree_entry_get_var(tree_entry)
             yield v
+
+from cre.fact import gen_fact_import_str
+def gen_src_declare_fact(fact_def, visible_attrs=[],
+         include_vis_at_def=True, ind='    '):
+    name, spec = fact_def._fact_name, fact_def.spec
+    # fact_type = fact_def._fact_type if not isinstance(fact_def,numba.types.Type) else fact_def
+    if(include_vis_at_def):
+        for attr, attr_spec in spec.items():
+            if(attr_spec.get("visible_to_planner",False)):
+                visible_attrs.append(attr)
+
+    visible_fields = []
+    for attr in visible_attrs:
+        assert attr in spec, f"Attribute {attr} not an attribute of {fact_def}." 
+        visible_fields.append( (attr, spec[attr].get("type")) )
+
+
+    
+    print(name)
+    print(spec)
+
+    
+    src = \
+f'''
+{gen_fact_import_str(fact_def)}
+@njit(cache=True)
+def declare_fact(planner, fact):
+    v = Var({f"{name}Type"})
+    planner_declare(planner,fact,v)
+'''
+    src += indent("\n".join([f"planner_declare(planner, fact.{attr}, v.{attr})" for attr in visible_attrs]),prefix=ind)
+    print(src)
+    return src
+
+
+
+    print(src)
 
 
     # while()

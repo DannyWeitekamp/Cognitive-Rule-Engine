@@ -1,14 +1,14 @@
 import numpy as np
-from numba import njit, f8, i8
+from numba import njit, f8, i8, generated_jit
 from numba.typed import List, Dict
 from numba.types import DictType, ListType, unicode_type, Tuple
 from cre.op import Op
 from cre.sc_planner2 import (gen_apply_multi_source, search_for_explanations,
                      apply_multi, SetChainingPlanner, insert_record,
                      join_records_of_type, forward_chain_one, extract_rec_entry,
-                     retrace_goals_back_one, expl_tree_ctor,
+                     retrace_goals_back_one, expl_tree_ctor, planner_declare,
                     build_explanation_tree, ExplanationTreeType, SC_Record, SC_RecordType,
-                    gen_op_comps_from_expl_tree, planner_declare_fact)
+                    gen_op_comps_from_expl_tree, planner_declare_fact, gen_src_declare_fact)
 from cre.utils import _ptr_from_struct_incref, _list_from_ptr, _dict_from_ptr, _struct_from_ptr
 from cre.var import Var
 from cre.context import cre_context
@@ -157,6 +157,45 @@ def test_insert_record():
 
     assert len_f_recs(planner,'float64',1) == 1
 
+@generated_jit(cache=True)
+def summary_stats(planner, typ, depth):
+    from cre.fact import Fact
+    _typ = typ.instance_type
+    typ_name = str(_typ)
+    l_typ = ListType(_typ)
+    d_typ = DictType(_typ, i8)
+    if(isinstance(_typ, Fact)):
+        def impl(planner, typ, depth): 
+            print("----",typ_name, depth,"-----")
+            l = _list_from_ptr(l_typ, planner.flat_vals_ptr_dict[(typ_name,depth)])
+            d = _dict_from_ptr(d_typ, planner.val_map_ptr_dict[typ_name])
+            first_l, last_l = None, None
+            for i,x in enumerate(l):
+                if(i == 0):
+                    first_l = x
+                if(i == len(l)-1):
+                    last_l = x
+
+            first_d, last_d = None, None
+            for i,x in enumerate(d):
+                if(i == 0):
+                    first_d = x
+                if(i == len(d)-1):
+                    last_d = x
+
+
+            return len(l), first_l, last_l, len(d), first_d, last_d
+    else:
+        def impl(planner, typ, depth): 
+
+            print("----",typ_name, depth,"-----")
+            l = _list_from_ptr(l_typ, planner.flat_vals_ptr_dict[(typ_name,depth)])
+            d = _dict_from_ptr(d_typ, planner.val_map_ptr_dict[typ_name])
+            # print(l)
+            # print(d)
+            return len(l), min(l),max(l),len(d), min(d),max(d)
+    return impl
+
 def test_join_records_of_type():
     Add, Multiply, Concatenate = get_base_ops()
     planner = setup_float()
@@ -165,55 +204,48 @@ def test_join_records_of_type():
     rec = apply_multi(Multiply, planner, 0)
     insert_record(planner, rec, 'float64', 1)
 
-    d_typ = DictType(f8, i8)
-    l_typ = ListType(f8)
+    # d_typ = DictType(f8, i8)
+    # l_typ = ListType(f8)
     join_records_of_type(planner,1,f8)
 
-    @njit(cache=True)
-    def summary_stats(planner, typ_name, depth):
-        l = _list_from_ptr(l_typ, planner.flat_vals_ptr_dict[(typ_name,depth)])
-        d = _dict_from_ptr(d_typ, planner.val_map_ptr_dict[typ_name])
-        return len(l), min(l),max(l),len(d), min(d),max(d)
+    # @njit(cache=True)
+    # def summary_stats(planner, typ_name, depth):
+    #     l = _list_from_ptr(l_typ, planner.flat_vals_ptr_dict[(typ_name,depth)])
+    #     d = _dict_from_ptr(d_typ, planner.val_map_ptr_dict[typ_name])
+    #     return len(l), min(l),max(l),len(d), min(d),max(d)
 
-    assert summary_stats(planner,'float64', 1) == (12, 0.0, 16.0, 12, 0.0, 16.0)
+    assert summary_stats(planner,f8, 1) == (12, 0.0, 16.0, 12, 0.0, 16.0)
 
 
-@njit(cache=True)
-def summary_stats(planner, typ_name, depth, d_typ, l_typ):
-    print("----",typ_name, depth,"-----")
-    l = _list_from_ptr(l_typ, planner.flat_vals_ptr_dict[(typ_name,depth)])
-    d = _dict_from_ptr(d_typ, planner.val_map_ptr_dict[typ_name])
-    # print(l)
-    # print(d)
-    return len(l), min(l),max(l),len(d), min(d),max(d)
+
 
 def test_forward_chain_one():
     Add, Multiply, Concatenate = get_base_ops()
-    fd_typ = DictType(f8, i8)
-    fl_typ = ListType(f8)
-    sd_typ = DictType(unicode_type, i8)
-    sl_typ = ListType(unicode_type)
+    # fd_typ = DictType(f8, i8)
+    # fl_typ = ListType(f8)
+    # sd_typ = DictType(unicode_type, i8)
+    # sl_typ = ListType(unicode_type)
     
     planner = setup_float()
     planner = setup_str(planner)
     forward_chain_one(planner, [Add,Multiply,Concatenate])
 
-    assert summary_stats(planner,'float64',1,fd_typ,fl_typ) == \
+    assert summary_stats(planner,f8,1) == \
         (12, 0.0, 16.0, 12, 0.0, 16.0)
 
-    assert summary_stats(planner,'unicode_type',1,sd_typ,sl_typ) == \
+    assert summary_stats(planner,unicode_type,1) == \
         (30, 'A', 'EE', 30, 'A', 'EE')
 
 
     forward_chain_one(planner, [Add,Multiply,Concatenate])
 
 
-    print(summary_stats(planner,'float64',1,fd_typ,fl_typ))
-    assert summary_stats(planner,'float64',2,fd_typ,fl_typ) == \
+    print(summary_stats(planner,f8,1))
+    assert summary_stats(planner,f8,2) == \
         (53, 0.0, 256.0, 53, 0.0, 256.0)
 
-    print(summary_stats(planner,'unicode_type',1,sd_typ,sl_typ))
-    assert summary_stats(planner,'unicode_type',2,sd_typ,sl_typ) == \
+    print(summary_stats(planner,unicode_type,1))
+    assert summary_stats(planner,unicode_type,2) == \
         (780, 'A', 'EEEE', 780, 'A', 'EEEE')
 
 
@@ -326,7 +358,7 @@ def test_mem_leaks(n=5):
         # print(used_bytes()-init_used)
 
 
-
+# def 
 
 
 def _test_declare_fact():
@@ -336,9 +368,55 @@ def _test_declare_fact():
         spec = {"A" : "string", "B" : "number"}
         BOOP, BOOPType = define_fact("BOOP", spec)
 
-        planner = SetChainingPlanner()
-        b = BOOP("A",1.0)
-        planner_declare_fact(planner,b,[("B","unicode_type"), ("B", 'float')])
+        # @njit(cache=True)
+        def declare_fact(planner, fact):
+            v = Var(BOOPType)
+            planner_declare(planner,fact,v)
+            planner_declare(planner, fact.A, v.A)
+            planner_declare(planner, fact.B, v.B)
+
+        # @njit(cache=True)
+        # def declare_em(planner):
+        #     for i in range(1000):
+        #         b = BOOP("A",i)
+        #         planner_declare(planner, b)
+
+        # @njit(cache=True)
+        # def hash_it(x,y):
+        #     print(x==y)
+        #     print(hash(x))
+        #     # print(hash(x))
+        #     # x.__hash__(x)
+        b = BOOP("A",1)
+        declare_fact(planner, b)
+
+        print(summary_stats(planner, BOOPType, 0))
+        print(summary_stats(planner, unicode_type, 0))
+        print(summary_stats(planner, f8, 0))
+        # with PrintElapse("Declare 1000 Facts"):
+        #     declare_em(planner)
+
+        # with PrintElapse("Declare 1000 Facts"):
+        #     declare_em(planner)
+
+
+
+
+
+
+
+        # print()
+
+
+
+
+
+        # gen_src_declare_fact(BOOP, ["A","B"])
+        # gen_src_declare_fact(BOOPType, ["A","B"])
+
+        # planner = SetChainingPlanner()
+        # b = BOOP("A",1.0)
+        # planner_declare_fact(planner,b,[("B","unicode_type"), ("B", 'float')])
 
 
     # goals = Dict.empty(f8,ExplanationTreeType)
@@ -418,7 +496,10 @@ def product_of_generators(generators):
 
 
 
+
+
 if __name__ == "__main__":
+    # Makes it easier to track down segfaults
     import faulthandler; faulthandler.enable()
 
     # with PrintElapse("test_build_explanation_tree"):
@@ -430,16 +511,16 @@ if __name__ == "__main__":
     # with PrintElapse("test_search_for_explanations"):
     #     test_search_for_explanations()
 # 
-    
+    _test_declare_fact()
 
     # pass
-    test_apply_multi()
-    test_insert_record()
-    test_join_records_of_type()
-    test_forward_chain_one()
-    test_build_explanation_tree()
-    test_search_for_explanations()
-    test_mem_leaks(n=10)
+    # test_apply_multi()
+    # test_insert_record()
+    # test_join_records_of_type()
+    # test_forward_chain_one()
+    # test_build_explanation_tree()
+    # test_search_for_explanations()
+    # test_mem_leaks(n=10)
     # benchmark_apply_multi()
     # benchmark_retrace_back_one()
         # test_apply_multi()

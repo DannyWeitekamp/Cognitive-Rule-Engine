@@ -241,9 +241,14 @@ class FactProxy:
         return self._fact_type
 
     def __eq__(self, other):
+        from cre.dynamic_exec import fact_eq
         if(isinstance(other, FactProxy)):
             return fact_eq(self,other)
         return False
+
+    # def __hash__(self):
+    #     from cre.dynamic_exec import fact_hash
+    #     return fact_hash(self)
 
     def get_ptr(self):
         return fact_to_ptr(self)
@@ -635,7 +640,7 @@ def _fact_from_fields(name, fields, context=None):
         source_to_cache(name, hash_code, source)
         add_to_fact_registry(name, hash_code)
 
-    print(get_cache_path(name,hash_code))
+    # print(get_cache_path(name,hash_code))
         
     fact_ctor, fact_type = import_from_cached(name, hash_code,[name,name+"Type"]).values()
     fact_ctor._hash_code = hash_code
@@ -731,14 +736,14 @@ def fact_to_basefact(fact):
 def fact_to_ptr_incref(fact):
     return _ptr_from_struct_incref(fact)
 
-def _fact_eq(a,b):
-    if(isinstance(a,Fact) and isinstance(b,Fact)):
-        def impl(a,b):
-            return _raw_ptr_from_struct(a) ==_raw_ptr_from_struct(b)
-        return impl
+# def _fact_eq(a,b):
+#     if(isinstance(a,Fact) and isinstance(b,Fact)):
+#         def impl(a,b):
+#             return _raw_ptr_from_struct(a) ==_raw_ptr_from_struct(b)
+#         return impl
 
-fact_eq = generated_jit(cache=True)(_fact_eq)
-overload(operator.eq)(_fact_eq)
+# fact_eq = generated_jit(cache=True)(_fact_eq)
+# overload(operator.eq)(_fact_eq)
 
 
 ###### Fact Casting #######

@@ -14,7 +14,7 @@ from cre.structref import define_structref, define_structref_template, CastFrien
 from cre.memory import MemoryType, Memory, facts_for_t_id, fact_at_f_id
 from cre.fact import define_fact, BaseFactType, cast_fact, DeferredFactRefType, Fact, _standardize_type
 from cre.utils import PrintElapse, ptr_t, _struct_from_meminfo, _meminfo_from_struct, _cast_structref, cast_structref, decode_idrec, lower_getattr, _struct_from_ptr,  lower_setattr, lower_getattr, _raw_ptr_from_struct, _decref_ptr, _incref_ptr, _incref_structref, _ptr_from_struct_incref
-from cre.utils import assign_to_alias_in_parent_frame, encode_idrec
+from cre.utils import assign_to_alias_in_parent_frame, encode_idrec, _obj_cast_codegen
 from cre.subscriber import base_subscriber_fields, BaseSubscriber, BaseSubscriberType, init_base_subscriber, link_downstream
 from cre.vector import VectorType
 from cre.cre_object import cre_obj_field_dict,CREObjType, CREObjTypeTemplate, CREObjProxy, set_chr_mbrs
@@ -71,8 +71,20 @@ var_fields_dict = {
 var_fields =  [(k,v) for k,v, in var_fields_dict.items()]
 
 class VarTypeTemplate(CREObjTypeTemplate):
+    def preprocess_fields(self, fields):
+        f_dict = {k:v for k,v in fields}
+        if(f_dict["head_type"] != types.Any):
+            self._head_type = f_dict.get("head_type",None)
+            self._base_type = f_dict.get("base_type",None)
+
+        return fields
     def __str__(self):
-        return f"cre.GenericVarType"
+        base_type = getattr(self,"_base_type",None)
+        head_type = getattr(self,"_head_type",None)
+        if(base_type is None and head_type is None):
+            return f"cre.GenericVarType"
+        else:
+            return f"cre.Var[base_type={base_type.instance_type}, head_type={head_type.instance_type}])"
 
 # @lower_cast(VarTypeTemplate, CREObjType)
 # def upcast(context, builder, fromty, toty, val):
@@ -84,6 +96,11 @@ class VarTypeTemplate(CREObjTypeTemplate):
 default_manager.register(VarTypeTemplate, models.StructRefModel)
 
 GenericVarType = VarTypeTemplate([(k,v) for k,v in var_fields_dict.items()])
+
+# Allow typed Var instances to be upcast to GenericVarType
+@lower_cast(VarTypeTemplate, GenericVarType)
+def upcast(context, builder, fromty, toty, val):
+    return _obj_cast_codegen(context, builder, val, fromty, toty,incref=False)
 
 class Var(CREObjProxy):
     def __new__(cls, typ, alias=None, skip_assign_alias=False):
@@ -478,7 +495,7 @@ var_type_cache = {}
 def get_var_definition(base_type, head_type):
     t = (base_type, head_type)
     if(t not in var_type_cache):
-        d = {**var_fields_dict,**{'base_type':base_type, 'head_type':head_type}}
+        d = {**var_fields_dict,**{'base_type':types.TypeRef(base_type), 'head_type':types.TypeRef(head_type)}}
         struct_type = VarTypeTemplate([(k,v) for k,v, in d.items()])
         var_type_cache[t] = struct_type
         return struct_type
@@ -574,6 +591,7 @@ class StructAttribute(AttributeTemplate):
         if attr in typ.field_dict:
             attrty = typ.field_dict[attr]
             return attrty
+        # print("AAAAA", typ.field_dict)
         head_type = typ.field_dict['head_type'].instance_type 
         #TODO Should check that all subtype references are valid
         if(not hasattr(head_type,'field_dict')):
@@ -676,13 +694,17 @@ def var_getattr_impl(context, builder, typ, val, attr):
     #Otherwise return a new instance with a new 'attr' and 'offset' append 
     else:
         base_type = typ.field_dict['base_type'].instance_type 
+        head_type = typ.field_dict['head_type'].instance_type 
+        head_type_name = str(head_type)
         fd = base_type.field_dict
+        a_id = list(fd.keys()).index(attr)
         offset = base_type._attr_offsets[list(fd.keys()).index(attr)]
         ctor = cgutils.create_struct_proxy(typ)
         st = ctor(context, builder, value=val)._getvalue()
-
+        fact_num = getattr(head_type, "_fact_num", -1)
+        
         def new_var_and_append(self):
-            return new_appended_var(typ, self, attr, a_id, offset, DEREF_TYPE_ATTR)
+            return new_appended_var(typ, self, attr, a_id, offset, head_type_name, fact_num, DEREF_TYPE_ATTR)
             # st = new(typ)
             # var_memcopy(self,st)
             # var_append_deref(st,attr,offset)

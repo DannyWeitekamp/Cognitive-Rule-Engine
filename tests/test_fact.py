@@ -162,27 +162,27 @@ def test_cast_fact():
         _b1 = base_up_cast.py_func(_bs)    
         assert type(b1) == type(_b1)    
 
-def test_fact_eq():
-    with cre_context("test_fact_eq") as context:
-        spec1 = {"A" : "string", "B" : "number"}
-        BOOP1, BOOP1Type = define_fact("BOOP1", spec1)
+# def test_fact_eq():
+#     with cre_context("test_fact_eq") as context:
+#         spec1 = {"A" : "string", "B" : "number"}
+#         BOOP1, BOOP1Type = define_fact("BOOP1", spec1)
 
-        b1 = BOOP1("A",7)
-        b2 = BOOP1("A",7)
+#         b1 = BOOP1("A",7)
+#         b2 = BOOP1("A",7)
 
-        @njit
-        def do_eq(a,b):
-            return a == b
+#         @njit
+#         def do_eq(a,b):
+#             return a == b
 
-        assert do_eq(b1,b2) == False
-        assert do_eq(b1,b1) == True
-        assert do_eq(b2,b2) == True
-        assert do_eq.py_func(b1,b2) == False
-        assert do_eq.py_func(b1,b1) == True
-        assert do_eq.py_func(b2,b2) == True
+#         assert do_eq(b1,b2) == False
+#         assert do_eq(b1,b1) == True
+#         assert do_eq(b2,b2) == True
+#         assert do_eq.py_func(b1,b2) == False
+#         assert do_eq.py_func(b1,b1) == True
+#         assert do_eq.py_func(b2,b2) == True
 
-        assert do_eq(b1,None) == False
-        assert do_eq.py_func(b1,None) == False
+#         assert do_eq(b1,None) == False
+#         assert do_eq.py_func(b1,None) == False
         
 
 
@@ -404,6 +404,17 @@ def test_eq():
     with cre_context("test_list_type"):
         spec = {"A" : "string", "B" : "number"}
         BOOP, BOOPType = define_fact("BOOP", spec)
+
+        a1 = BOOP("HI",2)
+        a2 = BOOP("HI",2)
+        b1 = BOOP("HI",3)
+        b2 = BOOP("HO",2)
+
+    # print(eq(a1, a2))
+        assert eq(a1, a2)
+        assert not eq(a1, b1)
+        assert not eq(a1, b2)
+
         a1 = as_cre_obj(BOOP("HI",2))
         a2 = as_cre_obj(BOOP("HI",2))
         b1 = as_cre_obj(BOOP("HI",3))
@@ -414,15 +425,35 @@ def test_eq():
         assert not eq(a1, b1)
         assert not eq(a1, b2)
 
+        
+
 @njit(cache=True)
 def hsh(x):
     return hash(x)
 
 
 def test_hash():
-    with cre_context("test_list_type"):
+    with cre_context("test_hash"):
         spec = {"A" : "string", "B" : "number"}
         BOOP, BOOPType = define_fact("BOOP", spec)
+
+        a1 = BOOP("HI",2)
+        a2 = BOOP("HI",2)
+        b1 = BOOP("HI",3)
+        b2 = BOOP("HO",2)
+
+        assert hsh(a1) == hsh(a2)
+        assert hsh(a1) != hsh(b1)
+        assert hsh(a1) != hsh(b2)
+
+        a3_boop = BOOP("HI",2)
+        a3 = as_cre_obj(a3_boop)
+        assert hsh(a3) == hsh(a1)
+
+        # check that mutation causes rehash
+        a3_boop.B = 7
+        assert hsh(a3) != hsh(a1)
+
 
         a1 = as_cre_obj(BOOP("HI",2))
         a2 = as_cre_obj(BOOP("HI",2))
@@ -484,8 +515,8 @@ if __name__ == "__main__":
     # test_as_conditions()
 
     # _test_reference_type()
-    # test_hash()
-    # test_eq()
+    test_hash()
+    test_eq()
 
 
 

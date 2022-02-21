@@ -368,18 +368,18 @@ def _test_declare_fact():
         spec = {"A" : "string", "B" : "number"}
         BOOP, BOOPType = define_fact("BOOP", spec)
 
-        # @njit(cache=True)
+        @njit(cache=True)
         def declare_fact(planner, fact):
             v = Var(BOOPType)
             planner_declare(planner,fact,v)
             planner_declare(planner, fact.A, v.A)
             planner_declare(planner, fact.B, v.B)
 
-        # @njit(cache=True)
-        # def declare_em(planner):
-        #     for i in range(1000):
-        #         b = BOOP("A",i)
-        #         planner_declare(planner, b)
+        @njit(cache=True)
+        def declare_em(planner):
+            for i in range(1000):
+                b = BOOP("A",i)
+                planner_declare(planner, b)
 
         # @njit(cache=True)
         # def hash_it(x,y):
@@ -387,17 +387,17 @@ def _test_declare_fact():
         #     print(hash(x))
         #     # print(hash(x))
         #     # x.__hash__(x)
-        b = BOOP("A",1)
-        declare_fact(planner, b)
+        # b = BOOP("A",1)
+        # declare_fact(planner, b)
 
-        print(summary_stats(planner, BOOPType, 0))
-        print(summary_stats(planner, unicode_type, 0))
-        print(summary_stats(planner, f8, 0))
-        # with PrintElapse("Declare 1000 Facts"):
-        #     declare_em(planner)
+        # print(summary_stats(planner, BOOPType, 0))
+        # print(summary_stats(planner, unicode_type, 0))
+        # print(summary_stats(planner, f8, 0))
+        with PrintElapse("Declare 1000 Facts"):
+            declare_em(planner)
 
-        # with PrintElapse("Declare 1000 Facts"):
-        #     declare_em(planner)
+        with PrintElapse("Declare 1000 Facts"):
+            declare_em(planner)
 
 
 

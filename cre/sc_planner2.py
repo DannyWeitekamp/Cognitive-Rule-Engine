@@ -55,14 +55,15 @@ values and compositions of operations up to a fixed depth. For instance,
 (1+3) = 4 could be discovered at depth 1, and (1+2)+(3-2) = 4 could be discovered
 at a depth of 2. The planner is "set chaining" because it uses a hashmap to 
 ensure that at each depth only unique values are used to compute the values for
-the next depth. This cuts down on the combinatoric explosion of searching for the goal.
+the next depth. This can significantly cut down on the combinatorics explosion 
+of searching for the goal.
 
 This file implements:
 -SetChainingPlanner
-    The constructor for a set chaining planner instance. The set of initial values can
-    be declared to this structure. ??? can be used to solve the search problem, 
-    and outputs the root node of an ExplanationTree containing the solutions found up 
-    to a fixed depth. Every forward pass of the planner is stored in memory. After the goal
+    The constructor for a set chaining planner instance. The set of initial values can 
+    be declared to this structure. The method self.search_for_explanations() can be used to solve 
+    the search problem, and outputs the root node of an ExplanationTree containing the solutions found 
+    up to a fixed depth. Every forward pass of the planner is stored in memory. After the goal
     is produced at a particular depth an operation composition is reconstructed by 
     filtering backwards from the goal state to the initial declared values.
 
@@ -74,10 +75,12 @@ This file implements:
     backwards fashion from the depth where the goal value was found. For every application
     of a cre.Op the that produces value 'v', the 'data' of an SC_Record 'rec' fills in a record entry:
         [*rec, *prev_entry, arg_ind0, arg_ind1, ...] where '*rec' is a pointer to the SC_Record
-    '*prev_entry' is the previous record entry associated with value 'v' (or zero if there wasn't one yet),
-    and arg0,arg1,arg2,... are indicies for the arguments to this application of operation. To limit
-    the memory/cache footprint of tracking each entry---there can be millions at deeper depths---these 
-    all entry information is encoded in a contigous preallocated array.  
+    '*prev_entry' is the previous record entry associated with value 'v' or zero if there wasn't one yet,
+    and arg0,arg1,arg2,... are indicies for the arguments to this application of operation. Note that,
+    we keep around *prev_entry in order to essentially build a linked list of entries associated with each 
+    unique value. To limit the memory/cache footprint of tracking each entry---there can be millions at deeper 
+    depths---all entry information is encoded in a contigous preallocated array. Consequently *rec, *prev_entry,
+    are weak (i.e. not refcounted pointers). 
      
 -ExplanationTree
     An explanation tree is a compact datastructure for holding all solutions to a SetChainingPlanner's 
@@ -381,21 +384,15 @@ def planner_declare_val(planner, val, var=None):
             ensure_ptr_dicts(planner, val_typ)
 
         # if(val not in val_map):
-        print("Added", val)
         if var is not None:
-            v = _cast_structref(GenericVarType,var)
+            v = _cast_structref(GenericVarType, var)
         else:
-            v = _cast_structref(GenericVarType,Var(val_typ))
+            v = _cast_structref(GenericVarType, Var(val_typ))
 
-        _, prev_ptr = val_map.get(val,(0,0))
-        is_prev = False
-        if(prev_ptr != 0):
-            is_prev = True
-            # ptrs = _arr_from_data_ptr(prev_ptr, (2,),dtype=np.int64)
-            # prev_rec = _struct_from_ptr(SC_RecordType, prev_ptr)
-            # prev_ptr = _get_array_raw_data_ptr(prev_rec.data)
+        _, prev_entry_ptr = val_map.get(val,(0,0))
+        is_prev = prev_entry_ptr != 0
 
-        rec = SC_Record(v,prev_entry_ptr=prev_ptr)
+        rec = SC_Record(v, prev_entry_ptr=prev_entry_ptr)
         var_ptr = _raw_ptr_from_struct(v)
         declare_records.append(rec)
         rec_entry_ptr = _get_array_raw_data_ptr(rec.data)
@@ -434,7 +431,7 @@ def search_for_explanations(self, goal, ops=None,
     context = cre_context(context)
     g_typ = standardize_type(type(goal), context)
 
-    print(goal, g_typ)
+    # print(goal, g_typ)
 
     found_at_depth = query_goal(self, g_typ, goal)
     depth = 1
@@ -450,7 +447,7 @@ def search_for_explanations(self, goal, ops=None,
             break
         depth += 1
         if(depth > search_depth): break
-    print(found_at_depth)
+    # print(found_at_depth)
     if(found_at_depth is None):
         return None
     else:
@@ -952,12 +949,10 @@ def _init_subgoal_expltree_maps():
     return Dict.empty(unicode_type, ptr_t)
 
 def build_explanation_tree(planner, g_typ, goal):
-    
     root, goal_expltree_maps = _init_root_goal_expltree_maps(planner, g_typ, goal)
     subgoal_expltree_maps = retrace_goals_back_one(planner, goal_expltree_maps)    
     retrace_depth = planner.curr_infer_depth-1
     while(subgoal_expltree_maps is not None):
-        print(subgoal_expltree_maps)
         if(retrace_depth < 0):
             raise RecursionError("Retrace exceeded current inference depth.")
         subgoal_expltree_maps = retrace_goals_back_one(planner, subgoal_expltree_maps)   

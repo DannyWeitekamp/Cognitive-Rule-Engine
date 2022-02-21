@@ -158,7 +158,11 @@ def test_insert_record():
     assert len_f_recs(planner,'float64',1) == 1
 
 @generated_jit(cache=True)
-def summary_stats(planner, typ, depth):
+def summarize_depth_vals(planner, typ, depth):
+    ''' Returns a summary of unique values of type 'typ' at 'depth':
+        (len(flat_vals), min(flat_vals), max(flat_vals),
+            len(val_map), min(val_map), max(val_map))
+     '''
     from cre.fact import Fact
     _typ = typ.instance_type
     typ_name = str(_typ)
@@ -209,12 +213,12 @@ def test_join_records_of_type():
     join_records_of_type(planner,1,f8)
 
     # @njit(cache=True)
-    # def summary_stats(planner, typ_name, depth):
+    # def summarize_depth_vals(planner, typ_name, depth):
     #     l = _list_from_ptr(l_typ, planner.flat_vals_ptr_dict[(typ_name,depth)])
     #     d = _dict_from_ptr(d_typ, planner.val_map_ptr_dict[typ_name])
     #     return len(l), min(l),max(l),len(d), min(d),max(d)
 
-    assert summary_stats(planner,f8, 1) == (12, 0.0, 16.0, 12, 0.0, 16.0)
+    assert summarize_depth_vals(planner,f8, 1) == (12, 0.0, 16.0, 12, 0.0, 16.0)
 
 
 
@@ -230,22 +234,22 @@ def test_forward_chain_one():
     planner = setup_str(planner)
     forward_chain_one(planner, [Add,Multiply,Concatenate])
 
-    assert summary_stats(planner,f8,1) == \
+    assert summarize_depth_vals(planner,f8,1) == \
         (12, 0.0, 16.0, 12, 0.0, 16.0)
 
-    assert summary_stats(planner,unicode_type,1) == \
+    assert summarize_depth_vals(planner,unicode_type,1) == \
         (30, 'A', 'EE', 30, 'A', 'EE')
 
 
     forward_chain_one(planner, [Add,Multiply,Concatenate])
 
 
-    print(summary_stats(planner,f8,1))
-    assert summary_stats(planner,f8,2) == \
+    print(summarize_depth_vals(planner,f8,1))
+    assert summarize_depth_vals(planner,f8,2) == \
         (53, 0.0, 256.0, 53, 0.0, 256.0)
 
-    print(summary_stats(planner,unicode_type,1))
-    assert summary_stats(planner,unicode_type,2) == \
+    print(summarize_depth_vals(planner,unicode_type,1))
+    assert summarize_depth_vals(planner,unicode_type,2) == \
         (780, 'A', 'EEEE', 780, 'A', 'EEEE')
 
 
@@ -317,7 +321,7 @@ def test_search_for_explanations(n=5):
 def used_bytes(garbage_collect=True):
     if(garbage_collect): gc.collect()
     stats = rtsys.get_allocation_stats()
-    print(stats)
+    # print(stats)
     return stats.alloc-stats.free
 
 
@@ -326,13 +330,12 @@ def test_mem_leaks(n=5):
         ops = get_base_ops()
         init_used = used_bytes()
 
-        # planner = setup_retrace()
         for i in range(5):
             planner = setup_float(n=n)
             expl_tree = search_for_explanations(planner, 36.0,
                 ops=ops, search_depth=2, context=context)
             expl_tree_iter = iter(expl_tree)
-            for op_comp in expl_tree_iter:
+            for op_comp,binding in expl_tree_iter:
                 pass
 
             planner = None
@@ -341,64 +344,51 @@ def test_mem_leaks(n=5):
             if(i == 0): 
                 init_used = used_bytes()
             else:
+                # print(used_bytes() - init_used)
                 assert used_bytes() == init_used
-            # print(used_bytes()-init_used)
 
-                # print(op_comp)
-
-        # planner = None
-        # expl_tree = None
-        # expl_tree_iter = None
-        # print(used_bytes()-init_used)
-        # raise ValueError()
-
-        
-        
-        # gc.collect()
-        # print(used_bytes()-init_used)
-
-
-# def 
 
 from cre.sc_planner2 import get_planner_declare_fact_impl
-def _test_declare_fact():
-    planner = SetChainingPlanner()
-
+def test_declare_fact():
     with cre_context("test_declare_fact"):
         spec = {"A" : "string", "B" : "number"}
         BOOP, BOOPType = define_fact("BOOP", spec)
-
-        # @njit(cache=True)
-        # def declare_fact(planner, fact):
-        #     v = Var(BOOPType)
-        #     planner_declare(planner,fact,v)
-        #     planner_declare(planner, fact.A, v.A)
-        #     planner_declare(planner, fact.B, v.B)
-        # declare_fact = get_planner_declare_fact_impl(BOOP)
-
-        # @njit(cache=True)
+        
         def declare_em(planner,s="A"):
             for i in range(5):
                 b = BOOP(s,i)
                 planner.declare(b, visible_attrs=("A","B"))
 
-        with PrintElapse("Declare 1000 Facts"):
-            declare_em(planner)
+        planner = SetChainingPlanner()
+        declare_em(planner,"A")
 
-        with PrintElapse("Declare 1000 Facts"):
-            declare_em(planner,"B")
-
-        print(summary_stats(planner, BOOPType, 0))
-        print(summary_stats(planner, unicode_type, 0))
-        print(summary_stats(planner, f8, 0))
+        assert summarize_depth_vals(planner, BOOPType, 0)[0] == 5
+        assert summarize_depth_vals(planner, unicode_type, 0)[0] == 1
+        assert summarize_depth_vals(planner, f8, 0)[0] == 5
 
         expls = planner.search_for_explanations(36.0, ops=get_base_ops(), search_depth=2)
-        for op_comp, binding in expls:
-            # print(op_comp,type(op_comp))
-            # print(op_comp.head_vars)
-            op = op_comp.flatten()
+        A_op_comp_binding_pairs = list(iter(expls))
 
-            print(op, binding, op(*binding))
+        planner = SetChainingPlanner()
+        declare_em(planner,"A")
+        declare_em(planner,"B")
+        
+        assert summarize_depth_vals(planner, BOOPType, 0)[0] == 10
+        assert summarize_depth_vals(planner, unicode_type, 0)[0] == 2
+        assert summarize_depth_vals(planner, f8, 0)[0] == 5
+
+        expls = planner.search_for_explanations(36.0, ops=get_base_ops(), search_depth=2)
+        AB_op_comp_binding_pairs = list(iter(expls))
+
+
+        assert len(AB_op_comp_binding_pairs) >= 4 * len(A_op_comp_binding_pairs)
+
+        for op_comp, binding in A_op_comp_binding_pairs:
+            op = op_comp.flatten()
+            assert(op(*binding)==36.0)
+            # print(op)
+
+            # print(op, binding, op(*binding))
 
 
 
@@ -514,7 +504,7 @@ if __name__ == "__main__":
     # with PrintElapse("test_search_for_explanations"):
     #     test_search_for_explanations()
 # 
-    _test_declare_fact()
+    # _test_declare_fact()
 
     # pass
     # test_apply_multi()
@@ -523,7 +513,8 @@ if __name__ == "__main__":
     # test_forward_chain_one()
     # test_build_explanation_tree()
     # test_search_for_explanations()
-    # test_mem_leaks(n=10)
+    # test_declare_fact()
+    test_mem_leaks(n=10)
     # benchmark_apply_multi()
     # benchmark_retrace_back_one()
         # test_apply_multi()

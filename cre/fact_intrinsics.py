@@ -264,6 +264,7 @@ def define_attributes(struct_typeclass):
 
         if(isinstance(ret_type, (ListType,Fact))):
             # if(isinstance(ret_type, (Fact,))):
+            print("<<", ret_type, field_type)
             def cast_obj(x):
                 if(_raw_ptr_from_struct(x) != 0):
                     return _cast_structref(ret_type, x)

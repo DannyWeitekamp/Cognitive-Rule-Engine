@@ -317,7 +317,7 @@ def sc_planner_ctor():
     return st
 
 
-@generated_jit(cache=True)
+@generated_jit(cache=True,nopython=True)
 def ensure_ptr_dicts(planner, typ):
     _typ = typ.instance_type
     lt = ListType(_typ)

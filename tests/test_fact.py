@@ -1,5 +1,7 @@
-from cre.fact import _fact_from_spec, _standardize_spec, _merge_spec_inheritance, \
-     define_fact, cast_fact, _cast_structref, BaseFact, BaseFactType, DeferredFactRefType
+import numpy as np
+from cre.fact import (_fact_from_spec, _standardize_spec, _merge_spec_inheritance, 
+     define_fact, cast_fact, _cast_structref, BaseFact, BaseFactType, DeferredFactRefType, isa,
+      uint_to_inheritance_bytes, get_inheritance_bytes_len_ptr)
 from cre.context import cre_context
 from cre.memory import Memory
 from cre.cre_object import CREObjType
@@ -73,6 +75,15 @@ def test_define_fact():
         ctor, typ2 = define_fact("BOOP", spec2)
 
 
+def test_inheritence_bytes():
+    assert np.array_equal(uint_to_inheritance_bytes(0xFF),[255])
+    assert np.array_equal(uint_to_inheritance_bytes(0xFF00+1),[255,1])
+    assert np.array_equal(uint_to_inheritance_bytes(0xFF00+0xF),[255,15])
+    assert np.array_equal(uint_to_inheritance_bytes(0xFF00+0xFF),[255,255])
+    assert np.array_equal(uint_to_inheritance_bytes(0xFF00+0xFF+1),[1,0,0])
+
+    
+
 def test_inheritence():
     with cre_context("test_inheritence") as context:
         spec1 = {"A" : "string", "B" : "number"}
@@ -96,6 +107,67 @@ def test_inheritence():
 
         assert check_has_base(b1) == u8(-1)
         assert check_has_base.py_func(b1) == u8(-1)
+
+        b2 = BOOP2("A",7, 6)
+        b3 = BOOP3("A",7, 6)
+
+        l,p = get_inheritance_bytes_len_ptr(b1)
+        print(l,p)
+        l,p = get_inheritance_bytes_len_ptr(b2)
+        print(l,p)
+        l,p = get_inheritance_bytes_len_ptr(b3)
+        print(l,p)
+
+        @njit(cache=True)
+        def check_isa(b1,b2,b3):
+            okay = np.empty((9,),dtype=np.uint)
+            okay[0] = (b1.isa(BOOP1Type) == 1)
+            okay[1] = (b2.isa(BOOP1Type) == 1)
+            okay[2] = (b3.isa(BOOP1Type) == 1)
+
+            okay[3] = (b1.isa(BOOP2Type) == 0)
+            okay[4] = (b2.isa(BOOP2Type) == 1)
+            okay[5] = (b3.isa(BOOP2Type) == 1)
+
+            okay[6] = (b1.isa(BOOP3Type) == 0)
+            okay[7] = (b2.isa(BOOP3Type) == 0)
+            okay[8] = (b3.isa(BOOP3Type) == 1)
+
+            # okay[0] = (b1.isa(BOOP1) == 1)
+            # okay[1] = (b2.isa(BOOP1) == 1)
+            # okay[2] = (b3.isa(BOOP1) == 1)
+
+            # okay[3] = (b1.isa(BOOP2) == 0)
+            # okay[4] = (b2.isa(BOOP2) == 1)
+            # okay[5] = (b3.isa(BOOP2) == 1)
+
+            # okay[6] = (b1.isa(BOOP3) == 0)
+            # okay[7] = (b2.isa(BOOP3) == 0)
+            # okay[8] = (b3.isa(BOOP3) == 1)
+            return okay
+
+        py_okay = check_isa.py_func(b1,b2,b3)
+        assert all(py_okay), str(py_okay)
+
+        nb_okay = check_isa(b1,b2,b3)
+        assert all(nb_okay), str(nb_okay)
+        
+            
+        
+
+
+        # print(BOOP1Type._isa(b1))
+        # print(BOOP1Type._isa(b2))
+        # print(BOOP1Type._isa(b3))
+        # print(BOOP2Type._isa(b1))
+        # print(BOOP2Type._isa(b2))
+        # print(BOOP2Type._isa(b3))
+        # print(BOOP3Type._isa(b1))
+        # print(BOOP3Type._isa(b2))
+        # print(BOOP3Type._isa(b3))
+        
+
+        
 
 
 
@@ -515,8 +587,10 @@ if __name__ == "__main__":
     # test_as_conditions()
 
     # _test_reference_type()
-    test_hash()
-    test_eq()
+    # test_hash()
+    # test_eq()
+    test_inheritence()
+    # test_inheritence_bytes()
 
 
 

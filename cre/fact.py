@@ -3,7 +3,7 @@ from numba.experimental import jitclass, structref
 from numba import deferred_type, optional
 from numba import void,b1,u1,u2,u4,u8,i1,i2,i4,i8,f4,f8,c8,c16
 from numba.typed import List, Dict
-from numba.core.types import DictType, ListType, unicode_type, float64, NamedTuple, NamedUniTuple, UniTuple, Array
+from numba.core.types import (DictType, ListType, unicode_type, float64, NamedTuple, NamedUniTuple, UniTuple, Array, Tuple)
 from numba.core.extending import (
     infer_getattr,
     lower_getattr_generic,
@@ -26,7 +26,8 @@ from cre.caching import unique_hash, source_to_cache, import_from_cached, source
 from cre.structref import gen_structref_code, define_structref
 from cre.context import cre_context
 from cre.utils import (_struct_from_ptr, _cast_structref, struct_get_attr_offset, _obj_cast_codegen,
-                       _ptr_from_struct_codegen, _raw_ptr_from_struct, CastFriendlyMixin, _obj_cast_codegen, PrintElapse)
+                       _ptr_from_struct_codegen, _raw_ptr_from_struct, CastFriendlyMixin, _obj_cast_codegen,
+                        PrintElapse, _struct_get_data_ptr)
 from cre.cre_object import CREObjTypeTemplate, cre_obj_field_dict, CREObjModel, CREObjType, member_info_type
 
 from numba.core.typeconv import Conversion
@@ -97,7 +98,11 @@ class DeferredFactRefType():
         self._define = x
 
     def get(self):
+        if(not hasattr(self,"_define")): raise TypeError(f"Attempt to use {str(self)} without definition")
         return self._define
+
+    def __hash__(self):
+        return hash(self._fact_name)
 
     def __setstate__(self,state):
         # print("UNSERIALIZE",state)
@@ -122,6 +127,8 @@ def _standardize_type(typ, context, name='', attr=''):
         is_list = typ_str.lower().startswith("list")
         if(is_list): typ_str = typ_str.split("(")[1][:-1]
 
+
+        is_deferred = False
         if(typ_str.lower() in TYPE_ALIASES): 
             typ = numba_type_map[TYPE_ALIASES[typ_str.lower()]]
         # elif(typ_str == name):
@@ -130,6 +137,7 @@ def _standardize_type(typ, context, name='', attr=''):
             typ = context.type_registry[typ_str]
         else:
             typ = context.get_deferred_type(typ_str)
+            is_deferred = True
             # raise TypeError(f"Attribute type {typ_str!r} not recognized in spec" + 
             #     f" for attribute definition {attr!r}." if attr else ".")
 
@@ -319,6 +327,9 @@ class FactProxy:
 
         return conds
 
+    def isa(self, typ):
+        return isa(self,typ)
+
 
 
         
@@ -333,6 +344,9 @@ class FactProxy:
 
 def gen_fact_import_str(t):
     return f"from cre_cache.{t._fact_name}._{t._hash_code} import {t._fact_name + 'Type'}"
+
+def gen_inherit_import_str(t):
+    return f"from cre_cache.{t._fact_name}._{t._hash_code} import inheritance_bytes as parent_inh_bytes"
 
 def _gen_getter_jit(f_typ,typ,attr):
     if(isinstance(typ,(Fact,DeferredFactRefType))):
@@ -458,11 +472,31 @@ def gen_repr_attr_code(a,t,typ_name):
 
 #     return f"st.{a} = " + s
 
+@njit(u1[::1](u8),cache=True)
+def uint_to_inheritance_bytes(n):
+    buffer = np.empty((8,), dtype=np.uint8)
+    i = 0
+    while(n != 0):
+        buffer[8-(i+1)] = n & 0xFF
+        i += 1
+        n = n >> 8
+    return buffer[-i:]
+
+from cre.cre_object import member_info_type
+from cre.utils import _sizeof_type, _load_ptr
 
 
-def gen_fact_code(typ, fields, fact_num, ind='    '):
+
+
+
+def gen_fact_src(typ, fields, fact_num, inherit_from=None, ind='    '):
     '''Generate the source code for a new fact '''
+    # print(typ.spec)
+
     fact_imports = ""
+
+    if(inherit_from is not None):
+        fact_imports += f"{gen_inherit_import_str(inherit_from)}\n"
 
     _fields = []
     for attr,t in fields:
@@ -480,6 +514,7 @@ def gen_fact_code(typ, fields, fact_num, ind='    '):
 
     _base_fact_field_dict = {**base_fact_field_dict}
     all_fields = [(k,v) for k,v in _base_fact_field_dict.items()] + fields
+    # print(all_fields)
     # all_fields = [(k,v) for (k,v) in all_fields]
 
     # all_fields = base_fact_fields+fields
@@ -511,26 +546,26 @@ def gen_fact_code(typ, fields, fact_num, ind='    '):
 # The source code template for a user defined fact. Written to the
 #  system cache so it can be its own module. Doing so helps njit(cache=True)
 #  work when using user defined facts.
-# {typ}Type = {typ}TypeTemplate(list(zip([{base_list},{field_list}], [{base_type_list},{field_type_list}])))
     code = \
 f'''
 import numpy as np
 from numba.core import types
-from numba import njit, literally
+from numba import njit, literally, literal_unroll
 from numba.core.types import *
-from numba.core.types import unicode_type, ListType, UniTuple
+from numba.core.types import unicode_type, ListType, UniTuple, Tuple
 from numba.experimental import structref
 from numba.experimental.structref import new#, define_boxing
 from numba.core.extending import overload
 from cre.fact_intrinsics import define_boxing, get_fact_attr_ptr, _register_fact_structref, fact_mutability_protected_setattr, fact_lower_setattr, _fact_get_chr_mbrs_infos
-from cre.fact import repr_list_attr, repr_fact_attr,  FactProxy, Fact{", BaseFactType, base_list_type, fact_to_ptr" if typ != "BaseFact" else ""}
-from cre.utils import _raw_ptr_from_struct, ptr_t, _get_member_offset, _cast_structref
+from cre.fact import repr_list_attr, repr_fact_attr,  FactProxy, Fact{", BaseFactType, base_list_type, fact_to_ptr, get_inheritance_bytes_len_ptr" if typ != "BaseFact" else ""}, uint_to_inheritance_bytes
+from cre.utils import _raw_ptr_from_struct, ptr_t, _get_member_offset, _cast_structref, _load_ptr
 import cloudpickle
 from cre.cre_object import member_info_type, set_chr_mbrs
 {fact_imports}
 
 attr_offsets = np.array({attr_offsets!r},dtype=np.int16)
-
+inheritance_bytes = tuple({"list(parent_inh_bytes) + " if inherit_from else ""}list(uint_to_inheritance_bytes({fact_num}))) 
+num_inh_bytes = len(inheritance_bytes)
 
 @_register_fact_structref
 class {typ}TypeTemplate(Fact):
@@ -545,7 +580,10 @@ class {typ}TypeTemplate(Fact):
 
 field_list = cloudpickle.loads({cloudpickle.dumps(all_fields)})
 {typ}Type = {typ}TypeTemplate(field_list)
-{typ}Type_w_mbr_infos = {typ}TypeTemplate(field_list+[("chr_mbrs_infos", UniTuple(member_info_type,{len(_fields)}))])
+{typ}Type_w_mbr_infos = {typ}TypeTemplate(field_list+
+[("chr_mbrs_infos", UniTuple(member_info_type,{len(_fields)})),
+ ("num_inh_bytes", u1),
+ ("inh_bytes", UniTuple(u1, num_inh_bytes))])
 
 
 @njit(cache=True)
@@ -556,6 +594,27 @@ def get_chr_mbrs_infos():
 chr_mbrs_infos = get_chr_mbrs_infos()
 {typ}TypeTemplate._chr_mbrs_infos = chr_mbrs_infos
 
+{(f"""#locals={{'inheritance_bytes':Tuple((u1,num_inh_bytes))}}
+@njit(u1(BaseFactType), cache=True)
+def isa_{typ}(fact):
+    l, p = get_inheritance_bytes_len_ptr(fact)
+    if(l >= num_inh_bytes):
+        for i,b in enumerate(literal_unroll(inheritance_bytes)):
+            f_b = _load_ptr(u1, p+i)
+            if(b != f_b):
+                return False
+        return True
+    else:
+        return False
+""") if typ != "BaseFact" else (
+f"""@njit(u1(BaseFactType), cache=True)
+def isa_{typ}(fact):
+    return True
+"""
+)
+}
+{typ}TypeTemplate._isa = isa_{typ}
+
 @njit(cache=True)
 def ctor({param_defaults_seq}):
     st = new({typ}Type_w_mbr_infos)
@@ -563,8 +622,11 @@ def ctor({param_defaults_seq}):
     fact_lower_setattr(st,'hash_val',0)
     fact_lower_setattr(st,'fact_num',{fact_num})
     set_chr_mbrs(st, {attr_tup!r})
+    fact_lower_setattr(st,'num_inh_bytes', num_inh_bytes)
+    fact_lower_setattr(st,'inh_bytes', inheritance_bytes)
     {init_fields}
     return _cast_structref({typ}Type,st)
+
 
 {getter_jits}
 
@@ -580,6 +642,8 @@ class {typ}(FactProxy):
     _fact_num = {fact_num}
     _attr_offsets = attr_offsets
     _chr_mbrs_infos = chr_mbrs_infos
+    _isa = isa_{typ}
+    _code = {typ}Type._code
 
     def __new__(cls, *args,**kwargs):
         return ctor(*args,**kwargs)
@@ -588,7 +652,9 @@ class {typ}(FactProxy):
         return f'{typ}({str_temp})'
 
     def __repr__(self):
-        return str(self)    
+        return str(self)
+
+
 
 {properties}
 
@@ -631,12 +697,12 @@ def add_to_fact_registry(name,hash_code):
 
 
 
-def _fact_from_fields(name, fields, context=None):
+def _fact_from_fields(name, fields, context=None, inherit_from=None):
     context = cre_context(context)
     hash_code = unique_hash([name,fields])
     if(not source_in_cache(name,hash_code)):
         fact_num = lines_in_fact_registry()
-        source = gen_fact_code(name,fields,fact_num)
+        source = gen_fact_src(name,fields,fact_num, inherit_from)
         source_to_cache(name, hash_code, source)
         add_to_fact_registry(name, hash_code)
 
@@ -650,10 +716,11 @@ def _fact_from_fields(name, fields, context=None):
 
     return fact_ctor, fact_type
 
-def _fact_from_spec(name, spec, context=None):
+def _fact_from_spec(name, spec, context=None, inherit_from=None):
     # assert parent_fact_type
     fields = [(k,v['type']) for k, v in spec.items()]
-    return _fact_from_fields(name,fields,context=context)
+    return _fact_from_fields(name,fields,context=context,
+             inherit_from=inherit_from)
 
     
 
@@ -674,7 +741,7 @@ def define_fact(name : str, spec : dict, context=None):
         return context.fact_ctors[name], context.type_registry[name]
 
 
-    fact_ctor, fact_type = _fact_from_spec(name, spec, context=context)
+    fact_ctor, fact_type = _fact_from_spec(name, spec, context=context, inherit_from=inherit_from)
 
     # Define the deferred type for this
     dt = context.get_deferred_type(name)
@@ -772,11 +839,24 @@ def cast_fact(typ, val):
     return impl
 
 
+@njit(Tuple((u1,i8))(BaseFactType), cache=True)
+def get_inheritance_bytes_len_ptr(st):
+    ptr = _struct_get_data_ptr(st) + st.chr_mbrs_infos_offset + \
+             (st.num_chr_mbrs * _sizeof_type(member_info_type))
+    num_inh_bytes = _load_ptr(u1, ptr)
+    return num_inh_bytes, ptr+1
 
 
-    
 
+@generated_jit(cache=True,nopython=True)
+@overload_method(Fact, "isa")
+def isa(self, typ):
+    # print("<<", typ)
+    _isa = typ.instance_type._isa
 
+    def impl(self, typ):
+        return _isa(self)
+    return impl
 
 #### Hashing ####
 

@@ -19,7 +19,7 @@ def _gen_getter(typ,attr):
     def {attr}(self):
         return {typ}_get_{attr}(self)
     '''
-
+    
 def gen_structref_code(typ,fields,
     extra_imports="from numba.experimental import structref",
     register_decorator="@structref.register",

@@ -235,12 +235,13 @@ class Memory(structref.StructRefProxy):
         return get_backtrack_flag(self)
     
 
-    def __del__(self):
-        # print("DECONSTRUCTOR")
-        # mem_dtor(self)
+    def __del__(self):        
         try:
             mem_data_dtor(self.mem_data)
         except Exception as e:
+            # If the process is ending then global variables can be sporatically None
+            #   thus skip any TypeError of this sort.
+            if(isinstance(e, TypeError) and "not callable" in str(e)): return
             print("An error occured when trying to clean a cre.Memory object:\n",e)
 
 @njit(cache=True)

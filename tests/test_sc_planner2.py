@@ -351,8 +351,8 @@ def test_mem_leaks(n=5):
 from cre.sc_planner2 import get_planner_declare_fact_impl
 def test_declare_fact():
     with cre_context("test_declare_fact"):
-        spec = {"A" : "string", "B" : "number"}
-        BOOP, BOOPType = define_fact("BOOP", spec)
+        BOOP, BOOPType = define_fact("BOOP", {"A" : "string", "B" : {"type": "number", "visible_to_planner" : True,
+         "planner_declare_translations" : (unicode_type, impl_op) }})
         
         def declare_em(planner,s="A"):
             for i in range(5):
@@ -386,7 +386,7 @@ def test_declare_fact():
         for op_comp, binding in A_op_comp_binding_pairs:
             op = op_comp.flatten()
             assert(op(*binding)==36.0)
-            # print(op)
+            print(op, binding)
 
             # print(op, binding, op(*binding))
 
@@ -514,14 +514,14 @@ if __name__ == "__main__":
     # test_build_explanation_tree()
     # test_search_for_explanations()
     # test_declare_fact()
-    test_mem_leaks(n=10)
+    # test_mem_leaks(n=10)
     # benchmark_apply_multi()
     # benchmark_retrace_back_one()
         # test_apply_multi()
     # gen = foo_gen()
     # for i in gen:
     #     print(i)
-    # _test_declare_fact()
+    test_declare_fact()
 # from numba import njit, i8
 # from numba.typed import Dict
 # from numba.types import ListType

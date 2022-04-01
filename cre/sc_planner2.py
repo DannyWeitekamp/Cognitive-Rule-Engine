@@ -315,8 +315,7 @@ def sc_planner_ctor():
     st.inv_val_map_ptr_dict = Dict.empty(unicode_type, ptr_t)
     st.flat_vals_ptr_dict = Dict.empty(str_int_tuple, ptr_t)
     return st
-
-
+    
 @generated_jit(cache=True,nopython=True)
 def ensure_ptr_dicts(planner, typ):
     _typ = typ.instance_type

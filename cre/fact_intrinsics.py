@@ -21,7 +21,7 @@ from numba.core import cgutils, utils as numba_utils
 from numba.experimental.structref import _Utils, imputils
 from numba.typed.typedobjectutils import _nonoptional
 
-from cre.utils import _raw_ptr_from_struct, _struct_from_ptr, _cast_structref, _ptr_from_struct_codegen
+from cre.utils import _raw_ptr_from_struct, _struct_from_ptr, _cast_structref, _ptr_from_struct_codegen, _list_from_ptr, _cast_list
 from cre.cre_object import _resolve_t_id_helper, member_info_type
 
 
@@ -90,19 +90,17 @@ def resolve_fact_getattr_type(typ, attr):
     from cre.fact import DeferredFactRefType, Fact
     if (hasattr(typ,'spec') and attr in typ.spec):
         attrty = typ.spec[attr]['type']
+
         if(isinstance(attrty,DeferredFactRefType)):
-            # attrty = cre_context().fact_types[attrty._fact_name]
             attrty = attrty.get()
+
         if(isinstance(attrty,Fact)):
             attrty = types.optional(attrty)
-
         if(isinstance(attrty, ListType)):
             if(isinstance(attrty.dtype,DeferredFactRefType)):
                 attrty = ListType(attrty.dtype.get())
             attrty = types.optional(attrty)
              
-        # print(">>",attr, attrty)
-
         return attrty
     if attr in typ.field_dict:
         attrty = typ.field_dict[attr]
@@ -162,8 +160,26 @@ def fact_setattr_codegen(context, builder, sig, args, attr, mutability_protected
 
     
     field_type = inst_type.field_dict[attr]
-    if(isinstance(field_type, (ListType,Fact))):
+
+    # print("&&", attr, field_type)
+    if(isinstance(field_type, (ListType,))):
+        dtype = field_type.dtype
         # if(isinstance(field_type, Fact)):
+        if(isinstance(val_type, types.Optional)):
+            # If list member assigned to none just instantiate an empty list
+            def cast_obj(x):
+                if(x is None):
+                    return List.empty_list(dtype)
+                return _cast_list(field_type, _nonoptional(x))
+        else:
+            def cast_obj(x):
+                if(x is None):
+                    return List.empty_list(dtype)
+                return _cast_list(field_type, x)
+        casted = context.compile_internal(builder, cast_obj, field_type(val_type,), (val,))
+
+    elif(isinstance(field_type, (Fact,))):
+        # If fact member assigned to none just assign to NULL pointer
         if(isinstance(val_type, types.Optional)):
             def cast_obj(x):
                 if(x is None):
@@ -174,9 +190,6 @@ def fact_setattr_codegen(context, builder, sig, args, attr, mutability_protected
                 if(x is None):
                     return _struct_from_ptr(field_type,0)
                 return _cast_structref(field_type, x)
-        # else:
-        #     def cast_obj(x):
-        #         return _cast_structref(field_type,x) 
 
         casted = context.compile_internal(builder, cast_obj, field_type(val_type,), (val,))
     else:
@@ -243,41 +256,41 @@ def define_attributes(struct_typeclass):
     class StructAttribute(AttributeTemplate):
         key = struct_typeclass
 
-        def generic_resolve(self, typ, attr):
-            return resolve_fact_getattr_type(typ, attr)
+        def generic_resolve(self, _typ, attr):
+            typ = resolve_fact_getattr_type(_typ, attr)
+            # print(attr, _typ,"!>>", typ)
+            return typ
 
     @lower_getattr_generic(struct_typeclass)
     def struct_getattr_impl(context, builder, typ, val, attr):
         field_type = typ.field_dict[attr]
         ret_type = resolve_fact_getattr_type(typ,attr)
 
+        # Extract unoptional part of type
+        if(isinstance(ret_type, types.Optional)):
+            ret_type = ret_type.type
+
         utils = _Utils(context, builder, typ)
         dataval = utils.get_data_struct(val)
         ret = getattr(dataval, attr)
 
-        # print("&&", ret_type)
-
-        if(isinstance(ret_type, types.Optional)):
-            ret_type = ret_type.type
-
-        # print(">>", ret_type)
-
-        if(isinstance(ret_type, (ListType,Fact))):
-            # if(isinstance(ret_type, (Fact,))):
-            print("<<", ret_type, field_type)
+        option_ret_type = types.optional(ret_type)
+        if(isinstance(ret_type, (Fact,))):
+            # If a fact member is Null then return None
             def cast_obj(x):
                 if(_raw_ptr_from_struct(x) != 0):
                     return _cast_structref(ret_type, x)
                 return None
-            ret = context.compile_internal(builder, cast_obj, types.optional(ret_type)(field_type,), (ret,))
-            ret_type = types.optional(ret_type)
-            # else:
-            #     def cast_obj(x):
-            #         return _cast_structref(ret_type,x)
-            #     ret = context.compile_internal(builder, cast_obj, ret_type(field_type,), (ret,))
-
+            ret = context.compile_internal(builder, cast_obj, option_ret_type(field_type,), (ret,))
+            ret_type = option_ret_type
             
-
+        elif(isinstance(ret_type, (ListType,))):
+            # List members should always be non-null
+            def cast_obj(x):
+                return _cast_list(ret_type, x)
+            ret = context.compile_internal(builder, cast_obj, option_ret_type(field_type,), (ret,))
+            ret_type = option_ret_type
+            
         return imputils.impl_ret_borrowed(context, builder, ret_type, ret)
 
     @lower_setattr_generic(struct_typeclass)

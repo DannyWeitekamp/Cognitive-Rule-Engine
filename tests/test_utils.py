@@ -121,6 +121,7 @@ def load_offset(typ, b ,offset):
     return _load_ptr(typ,_struct_get_data_ptr(b)+offset)
 
 
+
 BEEP1, BEEP1Type = define_structref("BEEP1", [("A", i8), ("B", i8),("C", i8)])
 BEEP2, BEEP2Type = define_structref("BEEP2", [("A", unicode_type), ("B", i8),("C", i8)])
 

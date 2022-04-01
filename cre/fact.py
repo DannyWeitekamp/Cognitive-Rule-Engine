@@ -404,21 +404,21 @@ def get_offsets_from_member_types(fields):
 
     return [struct_get_attr_offset(TempType,attr) for attr, _ in fields]
 
-def repr_type(typ):
-    '''Helper function for turning a type into code that reproduces it'''
-    if(isinstance(typ,fact_types)):
-        # To avoid various typing issues fact refs are just i8 (i.e. raw pointers)
-        return 'BaseFactType'
-    elif(isinstance(typ, ListType)):
-        # To avoid various typing issues lists of facts are stored with dtype BaseFactType
-        dt = typ.dtype
-        dtype_repr = f'BaseFactType' if(isinstance(dt,fact_types)) else repr(dt)
-        return f'ListType({dtype_repr})'
-    elif(isinstance(typ, UniTuple)):
-        typ.type 
+# def repr_type(typ):
+#     '''Helper function for turning a type into code that reproduces it'''
+#     if(isinstance(typ,fact_types)):
+#         # To avoid various typing issues fact refs are just i8 (i.e. raw pointers)
+#         return 'BaseFactType'
+#     elif(isinstance(typ, ListType)):
+#         # To avoid various typing issues lists of facts are stored with dtype BaseFactType
+#         dt = typ.dtype
+#         dtype_repr = f'BaseFactType' if(isinstance(dt,fact_types)) else repr(dt)
+#         return f'ListType({dtype_repr})'
+#     elif(isinstance(typ, UniTuple)):
+#         typ.type 
 
-    else:
-        return repr(typ)
+#     else:
+#         return repr(typ)
 
 def repr_fact_attr(inst,fact_name,get_ptr=None):
     # if(isinstance(val,Fact)):
@@ -487,30 +487,39 @@ from cre.utils import _sizeof_type, _load_ptr
 
 
 
+def _prep_field(attr, t, imports_set):
+    
+    # elif(isinstance(t,types.ListType) and isinstance(t.dtype,types.StructRef)):
+    #     imports_set.add(f"{gen_fact_import_str(t.dtype)}")
 
+    # upcast any facts to BaseFactType since references to undefined fact types not supported
+    if(isinstance(t,fact_types)):
+        if(isinstance(t,Fact)):
+            imports_set.add(f"{gen_fact_import_str(t)}")
+        return attr, BaseFactType
+    elif(isinstance(t,ListType)):
+        if(isinstance(t.dtype,fact_types)):
+            _, dtype = _prep_field(attr, t.dtype, imports_set)
+            # if(isinstance(dtype, types.Optional)): dtype = dtype.type
+
+            return (attr, ListType(dtype))
+        return attr, t
+    else:
+        return attr, t
+
+
+def _prep_fields_populate_imports(fields, inherit_from=None):
+    imports_set = set()
+    if(inherit_from is not None):
+        imports_set.add(f"{gen_inherit_import_str(inherit_from)}")
+    fields = [_prep_field(attr,t,imports_set) for attr, t in fields]
+        
+    return fields, "\n".join(list(imports_set))
 
 def gen_fact_src(typ, fields, fact_num, inherit_from=None, ind='    '):
     '''Generate the source code for a new fact '''
     # print(typ.spec)
-
-    fact_imports = ""
-
-    if(inherit_from is not None):
-        fact_imports += f"{gen_inherit_import_str(inherit_from)}\n"
-
-    _fields = []
-    for attr,t in fields:
-        if(isinstance(t,Fact)):
-            fact_imports += f"{gen_fact_import_str(t)}\n"
-        elif(isinstance(t,types.ListType) and isinstance(t.dtype,types.StructRef)):
-            fact_imports += f"{gen_fact_import_str(t.dtype)}\n"
-
-        # upcast any facts to BaseFactType since references to undefined fact types not supported
-        if(isinstance(t,fact_types)):
-            _fields.append((attr,BaseFactType))
-        else:
-            _fields.append((attr,t))
-    fields = _fields
+    fields, fact_imports = _prep_fields_populate_imports(fields, inherit_from)
 
     _base_fact_field_dict = {**base_fact_field_dict}
     all_fields = [(k,v) for k,v in _base_fact_field_dict.items()] + fields
@@ -581,7 +590,7 @@ class {typ}TypeTemplate(Fact):
 field_list = cloudpickle.loads({cloudpickle.dumps(all_fields)})
 {typ}Type = {typ}TypeTemplate(field_list)
 {typ}Type_w_mbr_infos = {typ}TypeTemplate(field_list+
-[("chr_mbrs_infos", UniTuple(member_info_type,{len(_fields)})),
+[("chr_mbrs_infos", UniTuple(member_info_type,{len(fields)})),
  ("num_inh_bytes", u1),
  ("inh_bytes", UniTuple(u1, num_inh_bytes))])
 

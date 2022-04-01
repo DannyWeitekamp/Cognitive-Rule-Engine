@@ -7,6 +7,7 @@ from cre.memory import Memory
 from cre.cre_object import CREObjType
 from numba import njit, u8
 from numba.typed import List
+from numba.types import ListType
 import cre.dynamic_exec
 import pytest
 
@@ -395,6 +396,12 @@ def test_as_conditions():
 #     fact_lower_setattr(self,literally(attr),other)
     # self.other = other
 
+from cre.utils import _list_base_from_ptr, _list_base, _cast_list
+
+
+@njit(cache=True)
+def get_base(x):
+    return _list_base(x)
 
 def _test_list_type():
     with cre_context("test_list_type"):
@@ -404,23 +411,93 @@ def _test_list_type():
         spec = {"name":"string","items" : "ListType(BOOP)","other" : "BOOP"}
         BOOPList, BOOPListType = define_fact("BOOPList", spec)
 
+        blst_t = ListType(BaseFactType)
+
+        @njit(cache=True)
+        def get_items(srl):
+            items = srl.items
+            if(items is not None):
+                print(_cast_list(blst_t, items))
+                # print("base1",_list_base(items))    
+                return srl.items
+            return None
+
+        @njit(cache=True)
+        def len_items(srl):
+            if(srl.items is not None):
+                # no = srl.items
+                # print("base2",_list_base(no))    
+                return len(srl.items)
+            return None
+
+        @njit(cache=True)
+        def iter_items(srl):
+            if(srl.items is not None):
+                # no = srl.items
+                # print("base3",_list_base(no))    
+                i = 0
+                for p in srl.items:
+                    i += 1
+                return i
+            return None
+
+
         a = BOOP("A",0)
         b = BOOP("B",1)
         c = BOOP("C",2)
 
-        bl = BOOPList("L",List([a,b]),c)
+        the_list = List([a,b])
+        print("BASE!", get_base(the_list))
+        bl = BOOPList("L",the_list,c)
+
+        print("BASE!", get_base(bl.items))
+
+
         # assert str(bl) == "BOOPList(items=List([BOOP(A='A', B=0.0), BOOP(A='B', B=1.0)]))"
-        bl.other = a
-        bl.name = "BOB"
+        # bl.other = a
+        # bl.name = "BOB"
+        # `
+        # bl.name = "BOB"
         # set_it(bl,"other",a)
         # set_it(bl,"name","BOB")
+
         print(bl.idrec)
         print(bl.other)
-        print(bl)
         print(bl.items)
+        print("BASE!", get_base(bl.items))
+
+        print("START!")
+
+        print(get_items(bl))
+        print(len_items(bl))
+        print(iter_items(bl))
+
+        print("END")
+
+        # raise ValueError()
+        # print(bl.items)
 
         spec = {"items" : "ListType(SelfRefList)"}
         SelfRefList, SelfRefListType = define_fact("SelfRefList", spec)
+
+        # i =0
+        # for i in range(10000):
+        #     str(i)
+        #     i+=1
+        a = SelfRefList()
+        b = SelfRefList()
+        c = SelfRefList()
+        p1 = SelfRefList(List([a,b,c]))
+        print(p1.items)
+
+        p1 = SelfRefList()
+        p1.items = List([a,b,c])
+        print(p1.items)
+
+        
+        print(get_items(p1))
+        print(len_items(p1))
+        print(iter_items(p1))
 
 
 
@@ -570,8 +647,10 @@ def test_b_py_dict_boop_10000(benchmark):
 
 
 
+
+
 if __name__ == "__main__":
-    pass
+    import faulthandler; faulthandler.enable()
     # test_list_type()
     
     # _test_list_type()
@@ -584,13 +663,14 @@ if __name__ == "__main__":
     # test_protected_mutability()
     # test_fact_eq()
 
-    # test_as_conditions()
+    test_as_conditions()
 
     # _test_reference_type()
     # test_hash()
     # test_eq()
-    test_inheritence()
+    # test_inheritence()
     # test_inheritence_bytes()
+    # _test_list_type()
 
 
 

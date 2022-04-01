@@ -22,7 +22,7 @@ Container, ContainerType = define_fact("Container", {
 })
 
 
-raise ValueError()
+# raise ValueError()
 
 
 # print(mem)
@@ -117,9 +117,12 @@ def nextAdjacentComponents_IndsWeights(bf, c):
     if(c.to_right is not None): k = _try_append_nxt(bf, adj_comps, adj_inds, c.to_right, k, bf.lateral_w)
     if(c.below is not None): k = _try_append_nxt(bf, adj_comps, adj_inds, c.below, k, bf.lateral_w)
     if(c.above is not None): k = _try_append_nxt(bf, adj_comps, adj_inds, c.above, k, bf.lateral_w)
-    print("zC")
+    print("zC", c.parents)
     if(c.parents is not None):
-        # print(c.parents)
+        _parents = c.parents
+        print("zC'", c.parents, len(c.parents))
+        # for _ in _parents:
+        #     print(_)
         for parent in c.parents:
             print(parent)
             k = _try_append_nxt(bf, adj_comps, adj_inds, parent, k, bf.lateral_w)

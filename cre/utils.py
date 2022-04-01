@@ -240,24 +240,52 @@ def _cast_structref(typingctx, cast_type_ref, inst_type):
     def codegen(context, builder, sig, args):
         _,d = args
 
-
-            
-
-        # ctor = cgutils.create_struct_proxy(inst_type)
-        # dstruct = ctor(context, builder, value=d)
-        # meminfo = dstruct.meminfo
-        # context.nrt.incref(builder, types.MemInfoPointer(types.voidptr), meminfo)
-
-        # st = cgutils.create_struct_proxy(cast_type)(context, builder)
-        # st.meminfo = meminfo
-        
-        # return st._getvalue()
         return _obj_cast_codegen(context, builder, d, inst_type, cast_type)
     sig = cast_type(cast_type_ref, inst_type)
     return sig, codegen
 
+
+def _list_cast_codegen(context, builder, val, frmty, toty, incref=True):
+    ctor = cgutils.create_struct_proxy(frmty)
+    frm_st = ctor(context, builder, value=val)
+    
+    to_st = cgutils.create_struct_proxy(toty)(context, builder)
+    meminfo, data = frm_st.meminfo, frm_st.data
+    if(incref and context.enable_nrt):
+        context.nrt.incref(builder, types.MemInfoPointer(types.voidptr), meminfo)
+
+    to_st.meminfo = meminfo
+    to_st.data = data
+
+    return to_st._getvalue()
+
+
+
+@intrinsic
+def _cast_list(typingctx, cast_type_ref, frmty):
+    toty = cast_type_ref.instance_type
+    if(isinstance(frmty, types.Optional)):
+        frmty = frmty.type
+    def codegen(context, builder, sig, args):
+        _,val = args
+        return _list_cast_codegen(context, builder, val, frmty, toty)
+
+        
+
+        # return _obj_cast_codegen(context, builder, d, inst_type, cast_type)
+    sig = toty(cast_type_ref, frmty)
+    return sig, codegen
+
+
+    
+    
+
+
+
+
+
 #Seems to also work for lists
-_cast_list = _cast_structref
+# _cast_list = _cast_structref
 
 @njit(cache=True)
 def cast_structref(typ,inst):
@@ -310,6 +338,8 @@ def _list_from_ptr(typingctx, listtyperef, raw_ptr_ty):
 
         ctor = cgutils.create_struct_proxy(list_type)
         dstruct = ctor(context, builder)
+
+        print("dstruct", dstruct)
 
         data_pointer = context.nrt.meminfo_data(builder, mi)
         data_pointer = builder.bitcast(data_pointer, cgutils.voidptr_t.as_pointer())
@@ -611,7 +641,7 @@ def _list_base(typingctx, l_ty):#, w_ty, index_ty):
     return sig, codegen
 
 @intrinsic
-def _list_base_from_ptr(typingctx, ptr_ty):#, w_ty, index_ty):
+def _list_base_from_ptr(typingctx, ptr_ty):#, w_ty, index`_ty):
     # is_none = isinstance(l_ty.item_type, types.NoneType)
     sig = i8(ptr_ty,)
     def codegen(context, builder, sig, args):

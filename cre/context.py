@@ -10,6 +10,7 @@ from cre.gensource import assert_gen_source
 from cre.caching import unique_hash, source_to_cache, import_from_cached, source_in_cache
 # from cre.struct_gen import gen_struct_code
 from cre.structref import define_structref
+from numba.experimental.structref import new
 from collections import namedtuple
 import numpy as np
 import timeit
@@ -41,9 +42,11 @@ context_data_fields = [
     ("spec_flags" , DictType(unicode_type,Dict_Unicode_to_Flags)),
     ("fact_to_t_id" , DictType(unicode_type,i8)),
     ("fact_num_to_t_id" , i8[::1]),#DictType(i8,i8)),
+    ("parent_t_ids", ListType(i8[::1])),
+    ("child_t_ids", ListType(i8[::1]))
 ]
 
-CREContextData, CREContextDataType = define_structref("CREContextData",context_data_fields)
+CREContextData, CREContextDataType = define_structref("CREContextData",context_data_fields, define_constructor=False)
 
 # if(not source_in_cache("CREContextData",'CREContextData')):
 #     source = gen_struct_code("CREContextData",context_data_fields)
@@ -53,24 +56,31 @@ CREContextData, CREContextDataType = define_structref("CREContextData",context_d
 #     "CREContextData",["CREContextData","CREContextDataTypeTemplate"]).values()
 
 # CREContextDataType = CREContextDataTypeTemplate(fields=context_data_fields)
-
-
+i8_arr_type = i8[::1]
 @njit(cache=True)
 def new_cre_context():
-    string_enums = Dict.empty(unicode_type,i8)
-    number_enums = Dict.empty(f8,i8)
-    string_backmap = Dict.empty(i8,unicode_type)
-    number_backmap = Dict.empty(i8,f8)
-    enum_counter = np.array(0)
-    attr_inds_by_type = Dict.empty(unicode_type,Dict_Unicode_to_i8)
+    st = new(CREContextDataType)
+    st.string_enums = Dict.empty(unicode_type,i8)
+    st.number_enums = Dict.empty(f8,i8)
+    st.string_backmap = Dict.empty(i8,unicode_type)
+    st.number_backmap = Dict.empty(i8,f8)
+    st.enum_counter = np.array(0)
+    st.attr_inds_by_type = Dict.empty(unicode_type,Dict_Unicode_to_i8)
     # nominal_maps = Dict.empty(unicode_type,u1[:])
-    spec_flags = Dict.empty(unicode_type,Dict_Unicode_to_Flags)
-    fact_to_t_id = Dict.empty(unicode_type,i8)
-    fact_num_to_t_id = np.empty(2,dtype=np.int64)#Dict.empty(i8,i8)
-    return CREContextData(string_enums, number_enums,
-        string_backmap, number_backmap,
-        enum_counter, attr_inds_by_type, spec_flags, fact_to_t_id,
-        fact_num_to_t_id)
+    st.spec_flags = Dict.empty(unicode_type,Dict_Unicode_to_Flags)
+    st.fact_to_t_id = Dict.empty(unicode_type,i8)
+    st.fact_num_to_t_id = np.empty(2,dtype=np.int64)#Dict.empty(i8,i8)
+    st.parent_t_ids = List.empty_list(i8_arr_type)
+    st.child_t_ids = List.empty_list(i8_arr_type)
+    return st 
+    #CREContextData(string_enums, number_enums,
+        # string_backmap, number_backmap,
+        # enum_counter, attr_inds_by_type, spec_flags, fact_to_t_id,
+        # fact_num_to_t_id)
+
+# @overload(Conditions,strict=False)
+# def context_data_ctor():
+
 
 @njit(cache=True)
 def grow_fact_num_to_t_id(cd, new_size):
@@ -80,11 +90,37 @@ def grow_fact_num_to_t_id(cd, new_size):
     return new_fact_num_to_t_id
 
 @njit(cache=True)
-def assign_name_num_to_t_id(context_data, name, fact_num, t_id):
-    context_data.fact_to_t_id[name] = t_id 
-    if(fact_num >= len(context_data.fact_num_to_t_id)):
-        context_data.fact_num_to_t_id = grow_fact_num_to_t_id(context_data, fact_num*2)
-    context_data.fact_num_to_t_id[fact_num] = t_id 
+def assign_name_num_to_t_id(cd, name, fact_num, inh_fact_num=-1):
+    t_id = len(cd.parent_t_ids)
+
+    # Assign the new t_id to the given name and fact_num
+    cd.fact_to_t_id[name] = t_id 
+    if(fact_num >= len(cd.fact_num_to_t_id)):
+        cd.fact_num_to_t_id = grow_fact_num_to_t_id(cd, fact_num*2)
+    cd.fact_num_to_t_id[fact_num] = t_id 
+
+    # Use inh_fact_num to fill in the parents 
+    if(inh_fact_num != -1):
+        inh_t_id = cd.fact_num_to_t_id[inh_fact_num]
+        old_arr = cd.parent_t_ids[inh_t_id]
+        new_arr = np.empty((len(old_arr)+1,),dtype=np.int64)
+        new_arr[:len(old_arr)] = old_arr
+        new_arr[-1] = inh_t_id
+        cd.parent_t_ids.append(new_arr)
+    else:
+        cd.parent_t_ids.append(np.empty((0,),dtype=np.int64))
+
+
+    # Use the updated parents to update child relations (facts count as their own child) 
+    for p_t_id in cd.parent_t_ids[t_id]:
+        old_arr = cd.child_t_ids[p_t_id]
+        new_arr = np.empty((len(old_arr)+1,),dtype=np.int64)
+        new_arr[:len(old_arr)] = old_arr
+        new_arr[-1] = t_id
+        cd.child_t_ids[p_t_id] = new_arr
+    cd.child_t_ids.append(np.array((t_id,),dtype=np.int64))
+
+    return t_id
 
 class CREContext(object):
     _contexts = {}
@@ -160,8 +196,9 @@ class CREContext(object):
         self.type_registry[name] = fact_type
 
         #Map to t_ids
-        t_id = len(self.type_registry)
-        assign_name_num_to_t_id(self.context_data,name,fact_type._fact_num, t_id)
+        # t_id = len(self.type_registry)
+        inh_fact_num = inherit_from._fact_num if inherit_from is not None else -1
+        t_id = assign_name_num_to_t_id(self.context_data,name,fact_type._fact_num, inh_fact_num)
         
         # fact_type._t_id = t_id
 
@@ -180,7 +217,7 @@ class CREContext(object):
         # tm.safe(fact_type, BaseFactType)
 
 
-        #Track in heritence structure
+        #Track inheritence structure
         i_name = inherit_from._fact_name if inherit_from else None
         self.parents_of[name] = self.parents_of.get(i_name,[]) + [i_name] if i_name else []
         if(i_name):

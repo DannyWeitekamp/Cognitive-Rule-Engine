@@ -9,7 +9,7 @@ from numba.core.types import DictType, ListType, unicode_type, float64, NamedTup
 from numba.cpython.unicode import  _set_code_point
 from numba.experimental import structref
 from numba.experimental.structref import new, define_boxing
-from numba.extending import overload_method, intrinsic, overload
+from numba.extending import overload_method, intrinsic, overload, lower_cast, lower_builtin
 from cre.core import TYPE_ALIASES, JITSTRUCTS, py_type_map, numba_type_map, numpy_type_map
 from numba.core import types, cgutils
 from numba.core.errors import TypingError
@@ -34,7 +34,7 @@ from cre.structref import define_structref
 from cre.fact import BaseFact,BaseFactType, cast_fact
 from cre.fact_intrinsics import fact_lower_setattr
 from cre.utils import CastFriendlyMixin, lower_setattr, _cast_structref, _meminfo_from_struct, decode_idrec, encode_idrec, \
- _raw_ptr_from_struct, _ptr_from_struct_incref,  _struct_from_ptr, _decref_ptr, _decref_structref, _raw_ptr_from_struct_incref
+ _raw_ptr_from_struct, _ptr_from_struct_incref,  _struct_from_ptr, _decref_ptr, _decref_structref, _raw_ptr_from_struct_incref, _obj_cast_codegen
 from cre.vector import new_vector, VectorType
 from cre.caching import import_from_cached, source_in_cache, source_to_cache
 
@@ -214,14 +214,14 @@ class Memory(structref.StructRefProxy):
     def retract(self,identifier):
         return retract(self,identifier)
 
-    def iter_facts_of_type(self,typ):
+    def iter_facts(self,typ):
         if(isinstance(typ,str)):
             typ = self.context.type_registry[typ]
-        name = str(typ)
-        t_id = self.context.context_data.fact_num_to_t_id[typ._fact_num]
-        t_ids = np.empty((1,), dtype=np.uint16)
-        t_ids[0] = t_id
-        return FactIterator(self, typ, t_ids)#all_facts_of_t_id(self, t_id)
+        # name = str(typ)
+        # t_id = self.context.context_data.fact_num_to_t_id[typ._fact_num]
+        # t_ids = np.empty((1,), dtype=np.uint16)
+        # t_ids[0] = t_id
+        return iter_facts(self, typ)#all_facts_of_t_id(self, t_id)
 
     def modify(self, fact, attr, val):
         return modify(self,fact, literally(attr), val)
@@ -616,7 +616,7 @@ def mem_modify(self, fact, attr, val):
 
 fact_iterator_field_dict = {
     "mem" : MemoryType,
-    "t_ids": u2[::1],
+    "t_ids": i8[::1],
     "curr_ind": i8 ,
     "curr_t_id_ind": i8,
     "fact_type": types.Any
@@ -636,52 +636,55 @@ f_iter_type = FactIteratorType([(k,v) for k,v in {{**fact_iterator_field_dict ,"
 f_iter_type._fact_type = fact_type
 
 
-@njit(f_iter_type(MemoryType,u2[::1]),cache=True)
-def fact_iterator_ctor(mem, t_ids):
-    st = new(f_iter_type)
-    st.mem = mem
-    st.t_ids = t_ids
-    st.curr_ind = 0
-    st.curr_t_id_ind = 0
-    return st
+# @njit(fact_type(GenericFactIteratorType),cache=True)
+# def fact_iterator_next(it):
+#     return _struct_from_ptr(fact_type, fact_iter_next_raw_ptr(it))
+# '''
 
-@njit(fact_type(f_iter_type),cache=True)
-def fact_iterator_next(it):
-    return _struct_from_ptr(fact_type, fact_iter_next_raw_ptr(_cast_structref(GenericFactIteratorType,it)))
-'''
+
+
 
 class FactIterator(structref.StructRefProxy):
     ''' '''
     f_iter_type_cache = {}
-    def __new__(cls, mem, fact_type, t_ids):
-        if(not isinstance(fact_type, types.StructRef)): fact_type = fact_type.fact_type
-        if(fact_type not in cls.f_iter_type_cache):
-            hash_code = unique_hash([fact_type])
-            if(not source_in_cache('FactIterator', hash_code)):
-                source = gen_fact_iter_source(fact_type)
-                source_to_cache('FactIterator', hash_code, source)
-            l = import_from_cached('FactIterator', hash_code, ['fact_iterator_ctor', 'fact_iterator_next'])
+    def __new__(cls, mem, fact_type):
+        # if(not isinstance(fact_type, types.StructRef)): fact_type = fact_type.fact_type
+        # if(fact_type not in cls.f_iter_type_cache):
+        #     hash_code = unique_hash([fact_type])
+        #     if(not source_in_cache('FactIterator', hash_code)):
+        #         source = gen_fact_iter_source(fact_type)
+        #         source_to_cache('FactIterator', hash_code, source)
+        #     l = import_from_cached('FactIterator', hash_code, ['fact_iterator_ctor', 'fact_iterator_next'])
 
-            fact_iterator_ctor, fact_iterator_next = cls.f_iter_type_cache[fact_type] = l['fact_iterator_ctor'], l['fact_iterator_next']
-        else:
-            fact_iterator_ctor, fact_iterator_next  = cls.f_iter_type_cache[fact_type]
+        #     fact_iterator_next = cls.f_iter_type_cache[fact_type] = l['fact_iterator_next']
+        # else:
+        #     fact_iterator_next  = cls.f_iter_type_cache[fact_type]
         
-        self = fact_iterator_ctor(mem, t_ids)
-        self._fact_type = fact_type
-        self.fact_iterator_next = fact_iterator_next
-        return self
+        # self = fact_iterator_ctor(mem, t_ids)
+        # self._fact_type = fact_type
+        # self.fact_iterator_next = fact_iterator_next
+        return iter_facts(mem, fact_type)
         
     def __next__(self):
-        return self.fact_iterator_next(self)
+        return fact_iter_next(self)#self.fact_iterator_next(self)
 
     def __iter__(self):
         return self
 
+# @generated_jit(cache=True)
+# def fact_iter_ctor()
+
+
+from numba.types import (SimpleIteratorType,)
 
 @structref.register
 class FactIteratorType(CastFriendlyMixin, types.StructRef):
     def __str__(self):
         return f"cre.FactIterator[{self._fact_type}]"
+
+    @property
+    def iterator_type(self):
+        return self
     # def preprocess_fields(self, fields):
     #     return tuple((name, types.unliteral(typ)) for name, typ in fields)
 
@@ -690,22 +693,94 @@ define_boxing(FactIteratorType, FactIterator)
 GenericFactIteratorType = FactIteratorType(fact_iterator_fields)
 GenericFactIteratorType._fact_type = BaseFactType
 
+@lower_cast(FactIteratorType, GenericFactIteratorType)
+def upcast(context, builder, fromty, toty, val):
+    return _obj_cast_codegen(context, builder, val, fromty, toty, incref=False)
+
+@njit(GenericFactIteratorType(MemoryType,i8[::1]),cache=True)
+def generic_fact_iterator_ctor(mem, t_ids):
+    st = new(GenericFactIteratorType)
+    st.mem = mem
+    st.t_ids = t_ids
+    st.curr_ind = 0
+    st.curr_t_id_ind = 0
+    return st
+
+# @generated_jit(cache=True)
+# def fact_iterator_ctor(mem, typ):
+
+@lower_builtin('getiter', FactIteratorType)
+def getiter_fact_iter(context, builder, sig, args):
+    print("<<", args[0])
+    return args[0].value
+
+# @overload_method(FactIteratorType,'__iter__')
+# def getiter(self):
+#     def impl(self):
+#         return self
+#     return impl
+
+# @overload(FactIterator)
+@generated_jit(cache=True)
+@overload_method(MemoryTypeTemplate,'iter_facts')
+def iter_facts(mem, fact_type, no_subtypes=False):
+    assert isinstance(fact_type, types.TypeRef)
+
+    fact_type = fact_type.instance_type
+    fact_num = fact_type._fact_num
+    # print("BEF")
+    # it_type = FactIteratorType([(k,v) for k,v in {{**fact_iterator_field_dict ,"fact_type": types.TypeRef(typ)}}.items()])
+    # print("<<", it_type)
+
+    hash_code = unique_hash([fact_type])
+    if(not source_in_cache('FactIterator', hash_code)):
+        source = gen_fact_iter_source(fact_type)
+        source_to_cache('FactIterator', hash_code, source)
+    it_type = import_from_cached('FactIterator', hash_code, ['f_iter_type'])['f_iter_type']
+    # print("<<", it_type)
+    def impl(mem, fact_type, no_subtypes=False):
+        cd = mem.context_data
+        # print(cd.fact_num_to_t_id, fact_num)
+        if(no_subtypes):
+            t_ids = np.array((cd.fact_num_to_t_id[fact_num],),dtype=np.int64)
+        else:
+            t_ids = cd.child_t_ids[cd.fact_num_to_t_id[fact_num]]
+        _it = generic_fact_iterator_ctor(mem,t_ids)
+        return _cast_structref(it_type, _it)
+    return impl
+    # context = mem.context
+
+
 
 @njit(i8(GenericFactIteratorType),cache=True)
 def fact_iter_next_raw_ptr(it):
     while(True):
         if(it.curr_t_id_ind >= len(it.t_ids)): raise StopIteration()
         t_id = it.t_ids[it.curr_t_id_ind]
-        facts = _struct_from_ptr(VectorType, it.mem.mem_data.facts[i8(t_id)])
-        if(it.curr_ind < len(facts)):
-            ptr = facts[it.curr_ind]
-            it.curr_ind +=1
-            if(ptr != 0): return ptr
+        facts_ptr = it.mem.mem_data.facts[i8(t_id)]
+        if(facts_ptr != 0):
+            facts = _struct_from_ptr(VectorType, facts_ptr)
+            if(it.curr_ind < len(facts)):
+                ptr = facts[it.curr_ind]
+                it.curr_ind +=1
+                if(ptr != 0): return ptr
+            else:
+                it.curr_ind = 0
+                it.curr_t_id_ind +=1
         else:
-            it.curr_t_id_ind +=1
+            it.curr_ind = 0
+            it.curr_t_id_ind += 1
+        
 
-
-
+@generated_jit(cache=True)
+def fact_iter_next(it):
+    # it_type = it.instance_type
+    fact_type = it._fact_type
+    print(fact_type)
+    def impl(it):
+        ptr = fact_iter_next_raw_ptr(it)
+        return _struct_from_ptr(fact_type, ptr)
+    return impl
 
 
 # @overload_method(MemoryTypeTemplate, "all_facts_of_type")

@@ -9,8 +9,14 @@ from numba.experimental.structref import new
 from cre.memory import Memory,MemoryType
 from cre.utils import _cast_structref
 
+
+
+import numpy as np
+np.set_printoptions(edgeitems=30, linewidth=100, 
+    formatter=dict(float=lambda x: "%.3g" % x))
+
 Component, ComponentType = define_fact("Component", {
-    "value" : str,
+    "name" : str,
     "above" : "Component", "below" : "Component",
     "to_left": "Component", "to_right" : "Component",
     "parents" : "List(Component)"
@@ -28,7 +34,7 @@ Container, ContainerType = define_fact("Container", {
 # print(mem)
 
 ###########
-_ind_fltval_pair = np.dtype([("ind", np.int32),("val", np.float32)])
+_ind_fltval_pair = np.dtype([("ind", np.int32), ('a_id', np.uint8), ("val", np.float32)])
 ind_fltval_pair = numba.from_dtype(_ind_fltval_pair)
 
 
@@ -36,24 +42,38 @@ bfpm_fields = {
     "wm" : MemoryType,
     "dist_matrix" : ind_fltval_pair[:, ::1],
     "idrec_to_ind" : DictType(i8, i4),
-    "covered_inds" : DictType(i4, u1),
-    "covered_comps" : ListType(ComponentType),
+    "visited_inds" : DictType(i4, u1),
+    # "covered_inds" : DictType(i4, u1),
+    "comps" : ListType(ComponentType),
     "lateral_w" : f8
 }
 
 BellmanFordPathMap, BellmanFordPathMapType = define_structref("BellmanFordPathMap", bfpm_fields, define_constructor=False) 
 
 
+component_fields = list(ComponentType.field_dict.keys())
+TO_LEFT_A_ID = component_fields.index("to_left")
+TO_RIGHT_A_ID = component_fields.index("to_right")
+ABOVE_A_ID = component_fields.index("above")
+BELOW_A_ID = component_fields.index("below")
+PARENTS_A_ID = component_fields.index("parents")
+
+container_fields = list(ContainerType.field_dict.keys())
+CHILDREN_A_ID = container_fields.index("children")
+
+
 @njit(cache=True)
-def new_dist_matrix(n,old_dist_matrix=None):
+def new_dist_matrix(n, old_dist_matrix=None):
     dist_matrix = np.empty((n,n),dtype=ind_fltval_pair)
     for i in range(n):
         for j in range(n):
             if(i == j):
                 dist_matrix[i,j].ind = 0
+                dist_matrix[i,j].a_id = 0
                 dist_matrix[i,j].val = 0
             else:
                 dist_matrix[i,j].ind = -1
+                dist_matrix[i,j].a_id = 0
                 dist_matrix[i,j].val = np.inf
     if(old_dist_matrix is not None):
         o_n, o_m = old_dist_matrix.shape
@@ -67,11 +87,12 @@ print("A")
 def BellmanFordPathMap_ctor(wm):
     st = new(BellmanFordPathMapType)
     st.wm = wm
-    st.dist_matrix = new_dist_matrix(32)    
-    print(st.dist_matrix)
+    st.dist_matrix = new_dist_matrix(32)
+    # print(st.dist_matrix)
     st.idrec_to_ind = Dict.empty(i8,i4)
-    st.covered_inds = Dict.empty(i4,u1)
-    st.covered_comps = List.empty_list(ComponentType)
+    st.visited_inds = Dict.empty(i4,u1)
+    # st.covered_inds = Dict.empty(i4,u1)
+    st.comps = List.empty_list(ComponentType)
     st.lateral_w = 1.0
     return st
 
@@ -85,54 +106,55 @@ print("B")
 
 
 @njit(inline='always')
-def _try_append_nxt(bf, comps, inds_ws, obj, k, w):
+def _try_append_nxt(bf, comps, inds_ws, obj, a_id, k, w):
     if(obj.idrec not in bf.idrec_to_ind):
         bf.idrec_to_ind[obj.idrec] = len(bf.idrec_to_ind)
-        bf.covered_comps.append(obj)
+        bf.comps.append(obj)
     ind = bf.idrec_to_ind[obj.idrec]
-    if(ind not in bf.covered_inds):
-        comps.append(obj)
-        inds_ws[k].val = w
-        inds_ws[k].ind = ind
-        
-        return k+1
-    return k
+    # if(ind not in bf.covered_inds):
+    comps.append(obj)
+    inds_ws[k].val = w
+    inds_ws[k].a_id = a_id
+    inds_ws[k].ind = ind
+    
+    return k+1
+    # return k
 
 print("C")
 
 @njit(cache=True)
 def nextAdjacentComponents_IndsWeights(bf, c):
     # Extract indicies for adjacent elements 
-    print("zA")
+    # print("zA")
     if(c.isa(ContainerType)):
         cont = _cast_structref(ContainerType,c)
         adj_inds = np.empty(4+len(cont.parents)+len(cont.children),dtype=ind_fltval_pair)
     else:   
         adj_inds = np.empty(4,dtype=ind_fltval_pair)
-    print("zB")
+    # print("zB")
     adj_comps = List.empty_list(ComponentType)
 
     k = 0
-    if(c.to_left is not None): k = _try_append_nxt(bf, adj_comps, adj_inds, c.to_left, k, bf.lateral_w)
-    if(c.to_right is not None): k = _try_append_nxt(bf, adj_comps, adj_inds, c.to_right, k, bf.lateral_w)
-    if(c.below is not None): k = _try_append_nxt(bf, adj_comps, adj_inds, c.below, k, bf.lateral_w)
-    if(c.above is not None): k = _try_append_nxt(bf, adj_comps, adj_inds, c.above, k, bf.lateral_w)
-    print("zC", c.parents)
+    if(c.to_left is not None): k = _try_append_nxt(bf, adj_comps, adj_inds, c.to_left, TO_LEFT_A_ID, k, bf.lateral_w)
+    if(c.to_right is not None): k = _try_append_nxt(bf, adj_comps, adj_inds, c.to_right, TO_RIGHT_A_ID, k, bf.lateral_w)
+    if(c.below is not None): k = _try_append_nxt(bf, adj_comps, adj_inds, c.below, k, BELOW_A_ID, bf.lateral_w)
+    if(c.above is not None): k = _try_append_nxt(bf, adj_comps, adj_inds, c.above, k, ABOVE_A_ID, bf.lateral_w)
+    # print("zC", c.parents)
     if(c.parents is not None):
         _parents = c.parents
-        print("zC'", c.parents, len(c.parents))
+        # print("zC'", c.parents, len(c.parents))
         # for _ in _parents:
         #     print(_)
         for parent in c.parents:
-            print(parent)
-            k = _try_append_nxt(bf, adj_comps, adj_inds, parent, k, bf.lateral_w)
+            # print(parent)
+            k = _try_append_nxt(bf, adj_comps, adj_inds, parent, PARENTS_A_ID, k, bf.lateral_w)
 
     if(c.isa(ContainerType)):
         c_cont = _cast_structref(ContainerType,c)
         if(c_cont.children is not None):
             for child in c_cont.children:
-                k = _try_append_nxt(bf, adj_comps, adj_inds, child, k, bf.lateral_w)            
-    print("zD")
+                k = _try_append_nxt(bf, adj_comps, adj_inds, child, CHILDREN_A_ID, k, bf.lateral_w)            
+    # print("zD")
     return adj_comps, adj_inds[:len(adj_comps)]
 
 
@@ -141,96 +163,80 @@ def updateBFRelativeTo(bf , src):
     dist_matrix = bf.dist_matrix
     if(src.idrec not in bf.idrec_to_ind):
         bf.idrec_to_ind[src.idrec] = len(bf.idrec_to_ind)
-        bf.covered_comps.append(src)
+        bf.comps.append(src)
     s_ind = bf.idrec_to_ind[src.idrec]
 
+    frontier_inds = Dict.empty(i8,u1)
+    frontier_inds[i8(s_ind)] = u1(1)
+    next_frontier_inds = Dict.empty(i8,u1)
 
-    head_comp_inds = List([i8(s_ind)])
-    # covered_inds = Dict.empty(i8,u1)
-    # covered_inds[0] = u1(1)
-
-    next_comp_inds = List.empty_list(i8)
-
-    n_iter = 0 
-    # print("A")
-    while(len(head_comp_inds) > 0 and n_iter < 10):
-        n_iter += 1
-        print("--Start head--")
-        for a_ind in head_comp_inds:
-            # print("B")
-            a = bf.covered_comps[a_ind]
-            print(a.value)
-
-            print("covered",bf.covered_inds)
-            adj_comps, adj_indweights = nextAdjacentComponents_IndsWeights(bf, a)
-            for i, (b, b_ind_w_pair) in enumerate(zip(adj_comps, adj_indweights)):
-                print("a, b:", a.value, b.value)
-                b_ind = i8(b_ind_w_pair.ind)
+    while(len(frontier_inds) > 0):
+        print(": -----")
+        print("visited",List(bf.visited_inds.keys()))
+        print("frontier",List(frontier_inds.keys()))
+        for b_ind in frontier_inds:
+            b = bf.comps[b_ind]
+            adj_comps, adj_indweights = nextAdjacentComponents_IndsWeights(bf, b)
+            for i, (c, c_ind_w_pair) in enumerate(zip(adj_comps, adj_indweights)):
+                c_ind = i8(c_ind_w_pair.ind)
 
                 # Skip if does not exist
-                if(b_ind == -1): 
-                    print("SKIP")
-                    continue
-
-                did_update = False
-
-                # item_ind = bf.idrec_to_ind[item.idrec]
-                
-                # If the dist_matrix doesn't have a->b then fill it in
-                if(dist_matrix[a_ind, b_ind].ind == -1):
-                    print("Yep", a_ind, b_ind)
+                if(c_ind == -1): continue
+                    
+                # If the dist_matrix doesn't have b->c then fill it in
+                if(dist_matrix[b_ind, c_ind].ind == -1):
                     #Assign new heading and weights
-                    dist_matrix[a_ind, b_ind].ind = b_ind
-                    dist_matrix[a_ind, b_ind].val = b_ind_w_pair.val 
-                    dist_matrix[b_ind, a_ind].ind = a_ind
-                    dist_matrix[b_ind, a_ind].val = b_ind_w_pair.val
-                else:
-                    print("NOPE", a_ind, b_ind)
-                
-                for c_ind in bf.covered_inds:
-                    ca_dist  = dist_matrix[c_ind, a_ind].val 
-                    ca_heading = dist_matrix[c_ind, a_ind].ind 
-                    new_dist = ca_dist + b_ind_w_pair.val
-                    print("CONNECT:", c_ind, "to", b_ind, "via", a_ind, ":", new_dist, "<", ca_dist)
-                    if(new_dist < dist_matrix[c_ind, b_ind].val):
-                        dist_matrix[c_ind, b_ind].ind = ca_heading
-                        dist_matrix[c_ind, b_ind].val = new_dist 
-                        dist_matrix[b_ind, c_ind].ind = a_ind
-                        dist_matrix[b_ind, c_ind].val = new_dist
-                
-                next_comp_inds.append(b_ind)
-                # if(b.idrec not in bf.idrec_to_ind):
-                #     bf.idrec_to_ind[b.idrec] = len(bf.idrec_to_ind)
-                #     bf.covered_comps.append(b)
-            print("next_comp_inds",next_comp_inds)
-            bf.covered_inds[a_ind] = u1(1)
+                    dist_matrix[b_ind, c_ind].ind = c_ind
+                    dist_matrix[b_ind, c_ind].a_id = c_ind_w_pair.a_id
+                    dist_matrix[b_ind, c_ind].val = c_ind_w_pair.val 
 
+                    next_frontier_inds[c_ind] = u1(1)
 
+                    print("CONNECT:", f'{b.name}', "->", f'{c.name}', c_ind_w_pair.val)
+
+                for a_ind in bf.visited_inds:
+                    if( a_ind == b_ind or a_ind == c_ind): continue
+
+                    ab_dist  = dist_matrix[a_ind, b_ind].val 
+                    ab_a_id = dist_matrix[a_ind, b_ind].a_id
+                    ab_heading = dist_matrix[a_ind, b_ind].ind 
+                    new_dist = ab_dist + dist_matrix[b_ind, c_ind].val 
+                    if(new_dist < dist_matrix[a_ind, c_ind].val):
+                        print("CONNECT:", f'{bf.comps[a_ind].name}', "->", f'{c.name},', "via", f'{b.name}', ":", new_dist, "<", dist_matrix[a_ind, c_ind].val)
+                        dist_matrix[a_ind, c_ind].ind = ab_heading
+                        dist_matrix[a_ind, c_ind].a_id = ab_a_id
+                        dist_matrix[a_ind, c_ind].val = new_dist 
+                        next_frontier_inds[c_ind] = u1(1)
+                
+            bf.visited_inds[b_ind] = u1(1)
             
-                
-        head_comp_inds = next_comp_inds
-        next_comp_inds = List.empty_list(i8)
+        frontier_inds = next_frontier_inds
+        next_frontier_inds = Dict.empty(i8,u1)
+
 
     print(dist_matrix[:len(bf.idrec_to_ind),:len(bf.idrec_to_ind)])
 
                     
 
-a = Component(value="A")
-b = Component(value="B")
-c = Component(value="C")
+a = Component(name="A")
+b = Component(name="B")
+c = Component(name="C")
 a.to_right = b
 b.to_right = c
 b.to_left = a
 c.to_left = b
 
-p1 = Container(children=List([a,b,c]))
+p1 = Container(name="P1", children=List([a,b,c]))
 a.parents = List([p1])
 b.parents = List([p1])
 c.parents = List([p1])
 print("<<",*[p for p in a.parents])
 
-p2 = Container(children=List([p1]))
+p2 = Container(name="P2", children=List([p1]))
 p1.parents = List([p2])
+
+p3 = Container(name="P3", children=List([p2]))
+p2.parents = List([p3])
 
 print(a,b,c)
 print(p1)
@@ -242,8 +248,13 @@ mem.declare(b)
 mem.declare(c)
 mem.declare(p1)
 mem.declare(p2)
+mem.declare(p3)
 bf = BellmanFordPathMap_ctor(mem)
 updateBFRelativeTo(bf, a)
+
+
+# d = 
+# mem.declare(p3)
 # print(p1)
 # print(p2)
 
@@ -440,34 +451,34 @@ UpdateBFRelativeTo(bf : BellmanFordObj, src : Component):
 
     next_components = List.empty_list(ComponentType)
     while(len(head_components) > 0):
-        for a_ind in head_components:
+        for b_ind in head_components:
             adj_comps, adj_indweights = GetAdjacentInds(bf,c)
-            for i, b_ind_w_pair in enumerate(adj_indweights):
-                b_ind = b_ind_w_pair.ind
+            for i, c_ind_w_pair in enumerate(adj_indweights):
+                c_ind = c_ind_w_pair.ind
 
                 //Skip if does not exist
-                if(b_ind == -1): continue
+                if(c_ind == -1): continue
 
                 did_update = False
 
                 item_ind = bf.idrec_to_ind[item.idrec]
                 
-                ab_dist, ab_heading = dist_matrix[a_ind][b_ind]
+                ab_dist, ab_heading = dist_matrix[b_ind][c_ind]
 
                 if(ab_heading == -1):
-                    dist_matrix[a_ind, b_ind] = (b_ind_w_pair.weight, b_ind)
-                    dist_matrix[b_ind, a_ind] = (b_ind_w_pair.weight, a_ind)
+                    dist_matrix[b_ind, c_ind] = (c_ind_w_pair.weight, c_ind)
+                    dist_matrix[c_ind, b_ind] = (c_ind_w_pair.weight, b_ind)
     
-                for c_ind in covered_inds:
-                    ca_dist, ca_heading = dist_matrix[c_ind][a_ind]
-                    n_dist = ca_dist + b_ind_w_pair.weight
+                for a_ind in covered_inds:
+                    ca_dist, ca_heading = dist_matrix[a_ind][b_ind]
+                    n_dist = ca_dist + c_ind_w_pair.weight
                     if(n_dist < ca_dist):
-                        dist_matrix[c_ind, b_ind] = (n_dist, ca_heading)
-                        dist_matrix[b_ind, c_ind] = (n_dist, a_ind)
+                        dist_matrix[a_ind, c_ind] = (n_dist, ca_heading)
+                        dist_matrix[c_ind, a_ind] = (n_dist, b_ind)
                 
-                next_components.append(b_ind)
+                next_components.append(c_ind)
 
-            covered_inds[a_ind] = u1(1)
+            covered_inds[b_ind] = u1(1)
 
 
             

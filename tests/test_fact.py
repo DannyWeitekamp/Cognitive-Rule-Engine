@@ -101,6 +101,19 @@ def test_inheritence():
         assert context.parents_of["BOOP1"] == []
         assert context.children_of["BOOP1"] == ["BOOP2","BOOP3"]
 
+        # Context should keep track of parent and child t_ids
+        cd = context.context_data
+        b1_t_id = cd.fact_num_to_t_id[BOOP1Type._fact_num]
+        b2_t_id = cd.fact_num_to_t_id[BOOP2Type._fact_num]
+        b3_t_id = cd.fact_num_to_t_id[BOOP3Type._fact_num]
+
+        assert np.array_equal(cd.parent_t_ids[b1_t_id],[])
+        assert np.array_equal(cd.parent_t_ids[b2_t_id],[b1_t_id])
+        assert np.array_equal(cd.parent_t_ids[b3_t_id],[b1_t_id,b2_t_id])
+        assert np.array_equal(cd.child_t_ids[b1_t_id],[b1_t_id,b2_t_id,b3_t_id])
+        assert np.array_equal(cd.child_t_ids[b2_t_id],[b2_t_id,b3_t_id])
+        assert np.array_equal(cd.child_t_ids[b3_t_id],[b3_t_id])
+
         b1 = BOOP1("A",7)
         @njit
         def check_has_base(b):
@@ -658,12 +671,12 @@ if __name__ == "__main__":
     # test__standardize_spec()
     # test__merge_spec_inheritance()
     # test_define_fact()
-    # test_inheritence()
+    test_inheritence()
     # test_cast_fact()
     # test_protected_mutability()
     # test_fact_eq()
 
-    test_as_conditions()
+    # test_as_conditions()
 
     # _test_reference_type()
     # test_hash()

@@ -377,7 +377,7 @@ def _delcare_10000(mem):
         out[i] = mem.declare(BOOP("?",i))
     return out
 
-def test_b_declare10000(benchmark):
+def test_b_declare_10000(benchmark):
     benchmark.pedantic(_delcare_10000,setup=_benchmark_setup, warmup_rounds=1)
 
 #### retract_10000 ####
@@ -392,7 +392,7 @@ def _retract_10000(mem,idrecs):
     for idrec in idrecs:
         mem.retract(idrec)
 
-def test_b_retract10000(benchmark):
+def test_b_retract_10000(benchmark):
     benchmark.pedantic(_retract_10000,setup=_retract_setup, warmup_rounds=1)
 
 
@@ -409,7 +409,7 @@ def _get_facts_10000(mem):
     for x in mem.get_facts(BOOPType):
         pass
 
-def test_b_get_fact10000(benchmark):
+def test_b_get_facts_10000(benchmark):
     benchmark.pedantic(_get_facts_10000,setup=get_facts_setup, warmup_rounds=1)
 
 

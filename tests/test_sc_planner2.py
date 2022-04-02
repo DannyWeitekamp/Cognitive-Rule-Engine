@@ -351,8 +351,7 @@ def test_mem_leaks(n=5):
 from cre.sc_planner2 import get_planner_declare_fact_impl
 def test_declare_fact():
     with cre_context("test_declare_fact"):
-        BOOP, BOOPType = define_fact("BOOP", {"A" : "string", "B" : {"type": "number", "visible_to_planner" : True,
-         "planner_declare_translations" : (unicode_type, impl_op) }})
+        BOOP, BOOPType = define_fact("BOOP", {"A" : "string", "B" : {"type": "number", "visible_to_planner" : True}})
         
         def declare_em(planner,s="A"):
             for i in range(5):

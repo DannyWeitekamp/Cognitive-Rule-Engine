@@ -550,7 +550,7 @@ if(__name__ == "__main__"):
     # test_multiple_deref()
     # test_list()
     # test_list()
-    # test_multiple_types()
+    test_multiple_types()
     # test_ref_matching()
     # import pytest.__main__.benchmark
     # matching_1_t_4_lit_setup()

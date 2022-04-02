@@ -90,14 +90,21 @@ def grow_fact_num_to_t_id(cd, new_size):
     return new_fact_num_to_t_id
 
 @njit(cache=True)
-def assign_name_num_to_t_id(cd, name, fact_num, inh_fact_num=-1):
-    t_id = len(cd.parent_t_ids)
-
+def assign_name_num_to_t_id(cd, t_id, name, fact_num, inh_fact_num=-1):
     # Assign the new t_id to the given name and fact_num
     cd.fact_to_t_id[name] = t_id 
     if(fact_num >= len(cd.fact_num_to_t_id)):
         cd.fact_num_to_t_id = grow_fact_num_to_t_id(cd, fact_num*2)
     cd.fact_num_to_t_id[fact_num] = t_id 
+
+
+    # Ensure that parent_t_ids and child_t_ids are big enough
+    for i in range(len(cd.parent_t_ids),t_id+1):
+        cd.parent_t_ids.append(np.empty((0,),dtype=np.int64))
+
+    for i in range(len(cd.child_t_ids),t_id+1):
+        cd.child_t_ids.append(np.empty((0,),dtype=np.int64))
+
 
     # Use inh_fact_num to fill in the parents 
     if(inh_fact_num != -1):
@@ -106,9 +113,9 @@ def assign_name_num_to_t_id(cd, name, fact_num, inh_fact_num=-1):
         new_arr = np.empty((len(old_arr)+1,),dtype=np.int64)
         new_arr[:len(old_arr)] = old_arr
         new_arr[-1] = inh_t_id
-        cd.parent_t_ids.append(new_arr)
-    else:
-        cd.parent_t_ids.append(np.empty((0,),dtype=np.int64))
+        cd.parent_t_ids[t_id] = new_arr
+    # else:
+    #     cd.parent_t_ids.append(np.empty((0,),dtype=np.int64))
 
 
     # Use the updated parents to update child relations (facts count as their own child) 
@@ -118,7 +125,7 @@ def assign_name_num_to_t_id(cd, name, fact_num, inh_fact_num=-1):
         new_arr[:len(old_arr)] = old_arr
         new_arr[-1] = t_id
         cd.child_t_ids[p_t_id] = new_arr
-    cd.child_t_ids.append(np.array((t_id,),dtype=np.int64))
+    cd.child_t_ids[t_id] = np.array((t_id,),dtype=np.int64)
 
     return t_id
 
@@ -194,12 +201,12 @@ class CREContext(object):
         
         self.fact_ctors[name] = fact_ctor
         self.type_registry[name] = fact_type
-
+        print("REGISTER", name, self.name)
         #Map to t_ids
-        # t_id = len(self.type_registry)
+        t_id = len(self.type_registry)
         inh_fact_num = inherit_from._fact_num if inherit_from is not None else -1
-        t_id = assign_name_num_to_t_id(self.context_data,name,fact_type._fact_num, inh_fact_num)
-        
+        assign_name_num_to_t_id(self.context_data, t_id, name,fact_type._fact_num, inh_fact_num)
+        assert t_id == len(self.type_registry), f'{t_id}, {len(self.type_registry)}'
         # fact_type._t_id = t_id
 
         # self.fact_to_t_id[fact_ctor] = t_id 

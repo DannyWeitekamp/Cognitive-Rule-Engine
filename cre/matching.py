@@ -255,7 +255,7 @@ def _get_ptr_matches(conds):
                     return np.zeros((0,n_vars),dtype=np.int64)
                 matching_fact_ptrs[i][j] = fact_vectors[k][ind]
                 j +=1
-    print("D", matching_fact_ptrs)
+    # print("D", matching_fact_ptrs)
     return matching_fact_ptrs
 
 

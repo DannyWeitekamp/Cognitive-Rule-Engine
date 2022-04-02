@@ -157,15 +157,15 @@ def test_retract_keyerror():
 
 ##### test_all_facts_of_type #####
 
-with cre_context("test_iter_facts"):
+with cre_context("test_get_facts"):
     TextField, TextFieldType = define_fact("TextField",tf_spec)
 
 # @njit(cache=True)
 # def all_of_type(mem):
 #     return mem.all_facts_of_type(TextFieldType)
-
-def test_iter_facts():
-    with cre_context("test_iter_facts"):
+from itertools import product
+def test_get_facts():
+    with cre_context("test_get_facts"):
         spec1 = {"A" : "string", "B" : "number"}
         BOOP1, BOOP1Type = define_fact("BOOP1", spec1)
         spec2 = {"inherit_from" : BOOP1, "C" : "number"}
@@ -181,22 +181,45 @@ def test_iter_facts():
         @njit(cache=True)
         def iter_b1(mem):
             l = List()
-            for x in mem.iter_facts(BOOP1Type):
+            for x in mem.get_facts(BOOP1Type):
                 l.append(x)
             return l
 
-
-        for i in range(2):
-            all_tf = iter_b1.py_func(mem)
+        for t,i in product(['py','nb'],[0,1]):
+            all_tf = iter_b1.py_func(mem) if t else iter_b1(mem)
             assert isinstance(all_tf[0], BOOP1)
             assert len(all_tf) == 3
+        
+        # mem = Memory()
+        mem.declare(BOOP2("D",4))
+        mem.declare(BOOP2("E",5))
+        mem.declare(BOOP2("F",6))        
 
-        for i in range(2):
-            all_tf = iter_b1(mem)
+        for t,i in product(['py','nb'],[0,1]):
+            all_tf = iter_b1.py_func(mem) if t else iter_b1(mem)
+            print(all_tf)
             assert isinstance(all_tf[0], BOOP1)
-            assert len(all_tf) == 3
+            assert len(all_tf) == 6
 
-        # all_tf = list(mem.iter_facts(BOOP1Type))
+
+        # mem = Memory()
+        mem.declare(BOOP3("G",7))
+        mem.declare(BOOP3("H",8))
+        mem.declare(BOOP3("I",9))  
+
+        for t,i in product(['py','nb'],[0,1]):
+            all_tf = iter_b1.py_func(mem) if t else iter_b1(mem)
+            print(all_tf)
+            assert isinstance(all_tf[0], BOOP1)
+            assert len(all_tf) == 9
+
+        # for i in range(2):
+        #     all_tf = iter_b1(mem)
+        #     print(all_tf)
+        #     assert isinstance(all_tf[0], BOOP1)
+        #     assert len(all_tf) == 3
+
+        # all_tf = list(mem.get_facts(BOOP1Type))
         # assert isinstance(all_tf[0], BOOP1)
         # assert len(all_tf) == 3
 
@@ -373,8 +396,21 @@ def test_b_retract10000(benchmark):
     benchmark.pedantic(_retract_10000,setup=_retract_setup, warmup_rounds=1)
 
 
+#### get_facts_10000 ####
 
+def get_facts_setup():
+    with cre_context("test_mem"):
+        mem = Memory()
+        _delcare_10000(mem)
+    return (mem,), {}
 
+@njit(cache=True)
+def _get_facts_10000(mem):
+    for x in mem.get_facts(BOOPType):
+        pass
+
+def test_b_get_fact10000(benchmark):
+    benchmark.pedantic(_get_facts_10000,setup=get_facts_setup, warmup_rounds=1)
 
 
 
@@ -384,6 +420,6 @@ if __name__ == "__main__":
     # test_declare_retract()
     # test_retract_keyerror()
     # test_subscriber()
-    # test_iter_facts()
+    # test_get_facts()
     # test_mem_leaks()
-    test_iter_facts()
+    test_get_facts()

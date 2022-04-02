@@ -214,14 +214,15 @@ class Memory(structref.StructRefProxy):
     def retract(self,identifier):
         return retract(self,identifier)
 
-    def iter_facts(self,typ):
+    def get_facts(self,typ):
         if(isinstance(typ,str)):
             typ = self.context.type_registry[typ]
         # name = str(typ)
         # t_id = self.context.context_data.fact_num_to_t_id[typ._fact_num]
         # t_ids = np.empty((1,), dtype=np.uint16)
         # t_ids[0] = t_id
-        return iter_facts(self, typ)#all_facts_of_t_id(self, t_id)
+        return get_facts(self, typ)
+        # return iter_facts(self, typ)#all_facts_of_t_id(self, t_id)
 
     def modify(self, fact, attr, val):
         return modify(self,fact, literally(attr), val)
@@ -685,6 +686,10 @@ class FactIteratorType(CastFriendlyMixin, types.StructRef):
     @property
     def iterator_type(self):
         return self
+
+    @property
+    def yield_type(self):
+        return self._fact_type
     # def preprocess_fields(self, fields):
     #     return tuple((name, types.unliteral(typ)) for name, typ in fields)
 
@@ -714,15 +719,15 @@ def getiter_fact_iter(context, builder, sig, args):
     print("<<", args[0])
     return args[0].value
 
-# @overload_method(FactIteratorType,'__iter__')
-# def getiter(self):
-#     def impl(self):
-#         return self
-#     return impl
+@overload_method(FactIteratorType,'__iter__')
+def getiter(self):
+    def impl(self):
+        return self
+    return impl
 
 # @overload(FactIterator)
 @generated_jit(cache=True)
-@overload_method(MemoryTypeTemplate,'iter_facts')
+# @overload_method(MemoryTypeTemplate,'iter_facts')
 def iter_facts(mem, fact_type, no_subtypes=False):
     assert isinstance(fact_type, types.TypeRef)
 
@@ -770,6 +775,56 @@ def fact_iter_next_raw_ptr(it):
         else:
             it.curr_ind = 0
             it.curr_t_id_ind += 1
+
+@generated_jit(cache=True)
+@overload_method(MemoryTypeTemplate,'get_facts')
+def get_facts(mem, fact_type, no_subtypes=False):
+    assert isinstance(fact_type, types.TypeRef)
+
+    fact_type = fact_type.instance_type
+    fact_num = fact_type._fact_num
+    # print("BEF")
+    # it_type = FactIteratorType([(k,v) for k,v in {{**fact_iterator_field_dict ,"fact_type": types.TypeRef(typ)}}.items()])
+    # print("<<", it_type)
+
+    # hash_code = unique_hash([fact_type])
+    # if(not source_in_cache('FactIterator', hash_code)):
+    #     source = gen_fact_iter_source(fact_type)
+    #     source_to_cache('FactIterator', hash_code, source)
+    # it_type = import_from_cached('FactIterator', hash_code, ['f_iter_type'])['f_iter_type']
+    # print("<<", it_type)
+    def impl(mem, fact_type, no_subtypes=False):
+        cd = mem.context_data
+        # print(cd.fact_num_to_t_id, fact_num)
+        if(no_subtypes):
+            t_ids = np.array((cd.fact_num_to_t_id[fact_num],),dtype=np.int64)
+        else:
+            t_ids = cd.child_t_ids[cd.fact_num_to_t_id[fact_num]]
+
+        out = List.empty_list(fact_type)
+        curr_t_id_ind = 0
+        curr_ind = 0
+        while(True):
+            if(curr_t_id_ind >= len(t_ids)): break
+            t_id = t_ids[curr_t_id_ind]
+            facts_ptr = mem.mem_data.facts[i8(t_id)]
+            if(facts_ptr != 0):
+                facts = _struct_from_ptr(VectorType, facts_ptr)
+                if(curr_ind < len(facts)):
+                    ptr = facts[curr_ind]
+                    curr_ind +=1
+                    if(ptr != 0): out.append(_struct_from_ptr(fact_type, ptr))
+                else:
+                    curr_ind = 0
+                    curr_t_id_ind +=1
+            else:
+                curr_ind = 0
+                curr_t_id_ind += 1
+        return out
+        # _it = generic_fact_iterator_ctor(mem,t_ids)
+        # return _cast_structref(it_type, _it)
+    return impl
+
         
 
 @generated_jit(cache=True)

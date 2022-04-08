@@ -594,7 +594,12 @@ def mem_get_fact(self, identifier, typ=None):
             return _struct_from_ptr(return_typ, fact_ptr)
 
     elif(isinstance(identifier, unicode_type)):
-        raise NotImplemented()
+        def impl(self, identifier, typ=None):
+            idrec = self.mem_data.names_to_idrecs[identifier]
+            t_id, f_id, _ =  decode_idrec(idrec)
+            facts = facts_for_t_id(self.mem_data, t_id) #negligible
+            fact_ptr = facts.data[f_id]
+            return _struct_from_ptr(return_typ, fact_ptr)
 
     return impl
 

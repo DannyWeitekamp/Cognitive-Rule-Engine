@@ -6,7 +6,7 @@ from numba.types import ListType, DictType
 from cre.fact import define_fact
 from cre.structref import define_structref, define_structref_template
 from numba.experimental.structref import new, define_attributes
-from numba.extending import lower_cast, overload_method
+from numba.extending import lower_cast, overload, overload_method
 from cre.memory import Memory,MemoryType
 from cre.utils import _cast_structref, _obj_cast_codegen
 from cre.vector import VectorType
@@ -36,7 +36,7 @@ _ind_fltval_pair = np.dtype([("ind", np.int32), ('a_id', np.uint8), ("val", np.f
 ind_fltval_pair = numba.from_dtype(_ind_fltval_pair)
 
 
-bfpm_fields = {
+spp_fields = {
     **incr_processor_fields,
     "dist_matrix" : ind_fltval_pair[:, ::1],
     "idrec_to_ind" : DictType(i8, i4),
@@ -45,24 +45,24 @@ bfpm_fields = {
     "lateral_w" : f8
 }
 
-BellmanFordPathMap, BellmanFordPathMapType, BellmanFordPathMapTypeTemplate = \
-    define_structref("BellmanFordPathMap", bfpm_fields, define_constructor=False, return_template=True) 
-BellmanFordPathMapTypeTemplate.__str__ = lambda x : "cre.BellmanFordPathMap"    
+ShortestPathProcessor, ShortestPathProcessorType, ShortestPathProcessorTypeTemplate = \
+    define_structref("ShortestPathProcessor", spp_fields, define_constructor=False, return_template=True) 
+ShortestPathProcessorTypeTemplate.__str__ = lambda x : "cre.ShortestPathProcessor"    
 
-@lower_cast(BellmanFordPathMapType, IncrProcessorType)
+@lower_cast(ShortestPathProcessorType, IncrProcessorType)
 def upcast(context, builder, fromty, toty, val):
     return _obj_cast_codegen(context, builder, val, fromty, toty, incref=False)
 
 
-component_fields = list(ComponentType.field_dict.keys())
-TO_LEFT_A_ID = component_fields.index("to_left")
-TO_RIGHT_A_ID = component_fields.index("to_right")
-ABOVE_A_ID = component_fields.index("above")
-BELOW_A_ID = component_fields.index("below")
-PARENTS_A_ID = component_fields.index("parents")
+# component_fields = list(ComponentType.field_dict.keys())
+TO_LEFT_A_ID = ComponentType.get_attr_a_id("to_left")#component_fields.index("to_left")
+TO_RIGHT_A_ID = ComponentType.get_attr_a_id("to_right")#component_fields.index("to_right")
+ABOVE_A_ID = ComponentType.get_attr_a_id("above")#component_fields.index("above")
+BELOW_A_ID = ComponentType.get_attr_a_id("below")#component_fields.index("below")
+PARENTS_A_ID = ComponentType.get_attr_a_id("parents")#component_fields.index("parents")
 
-container_fields = list(ContainerType.field_dict.keys())
-CHILDREN_A_ID = container_fields.index("children")
+# container_fields = list(ContainerType.field_dict.keys())
+CHILDREN_A_ID = ContainerType.get_attr_a_id("children")#container_fields.index("children")
 
 
 @njit(cache=True)
@@ -85,11 +85,10 @@ def new_dist_matrix(n, old_dist_matrix=None):
 
 
 
-print("A")
-@njit(BellmanFordPathMapType(MemoryType),cache=True)
-def BellmanFordPathMap_ctor(mem):
-    st = new(BellmanFordPathMapType)
-    print(st)
+# print("A")
+@njit(ShortestPathProcessorType(MemoryType),cache=True)
+def ShortestPathProcessor_ctor(mem):
+    st = new(ShortestPathProcessorType)
     init_incr_processor(st, mem)
     st.dist_matrix = new_dist_matrix(32)
     st.idrec_to_ind = Dict.empty(i8,i4)
@@ -99,7 +98,7 @@ def BellmanFordPathMap_ctor(mem):
     return st
 
 
-print("B")
+# print("B")
 
 
 
@@ -108,12 +107,12 @@ print("B")
 
 
 @njit(inline='always')
-def _try_append_nxt(bf, comps, inds_ws, obj, a_id, k, w):
-    if(obj.idrec not in bf.idrec_to_ind):
-        bf.idrec_to_ind[obj.idrec] = len(bf.idrec_to_ind)
-        bf.comps.append(obj)
-    ind = bf.idrec_to_ind[obj.idrec]
-    # if(ind not in bf.covered_inds):
+def _try_append_nxt(spp, comps, inds_ws, obj, a_id, k, w):
+    if(obj.idrec not in spp.idrec_to_ind):
+        spp.idrec_to_ind[obj.idrec] = len(spp.idrec_to_ind)
+        spp.comps.append(obj)
+    ind = spp.idrec_to_ind[obj.idrec]
+    # if(ind not in spp.covered_inds):
     comps.append(obj)
     inds_ws[k].val = w
     inds_ws[k].a_id = a_id
@@ -125,7 +124,7 @@ def _try_append_nxt(bf, comps, inds_ws, obj, a_id, k, w):
 print("C")
 
 @njit(cache=True)
-def nextAdjacentComponents_IndsWeights(bf, c):
+def next_adj_comps_inds_weights(spp, c):
     # Extract indicies for adjacent elements 
     # print("zA")
     if(c.isa(ContainerType)):
@@ -137,10 +136,10 @@ def nextAdjacentComponents_IndsWeights(bf, c):
     adj_comps = List.empty_list(ComponentType)
 
     k = 0
-    if(c.to_left is not None): k = _try_append_nxt(bf, adj_comps, adj_inds, c.to_left, TO_LEFT_A_ID, k, bf.lateral_w)
-    if(c.to_right is not None): k = _try_append_nxt(bf, adj_comps, adj_inds, c.to_right, TO_RIGHT_A_ID, k, bf.lateral_w)
-    if(c.below is not None): k = _try_append_nxt(bf, adj_comps, adj_inds, c.below, k, BELOW_A_ID, bf.lateral_w)
-    if(c.above is not None): k = _try_append_nxt(bf, adj_comps, adj_inds, c.above, k, ABOVE_A_ID, bf.lateral_w)
+    if(c.to_left is not None): k = _try_append_nxt(spp, adj_comps, adj_inds, c.to_left, TO_LEFT_A_ID, k, spp.lateral_w)
+    if(c.to_right is not None): k = _try_append_nxt(spp, adj_comps, adj_inds, c.to_right, TO_RIGHT_A_ID, k, spp.lateral_w)
+    if(c.below is not None): k = _try_append_nxt(spp, adj_comps, adj_inds, c.below, k, BELOW_A_ID, spp.lateral_w)
+    if(c.above is not None): k = _try_append_nxt(spp, adj_comps, adj_inds, c.above, k, ABOVE_A_ID, spp.lateral_w)
     # print("zC", c.parents)
     if(c.parents is not None):
         _parents = c.parents
@@ -149,38 +148,38 @@ def nextAdjacentComponents_IndsWeights(bf, c):
         #     print(_)
         for parent in c.parents:
             # print(parent)
-            k = _try_append_nxt(bf, adj_comps, adj_inds, parent, PARENTS_A_ID, k, bf.lateral_w)
+            k = _try_append_nxt(spp, adj_comps, adj_inds, parent, PARENTS_A_ID, k, spp.lateral_w)
 
     if(c.isa(ContainerType)):
         c_cont = _cast_structref(ContainerType,c)
         if(c_cont.children is not None):
             for child in c_cont.children:
-                k = _try_append_nxt(bf, adj_comps, adj_inds, child, CHILDREN_A_ID, k, bf.lateral_w)            
+                k = _try_append_nxt(spp, adj_comps, adj_inds, child, CHILDREN_A_ID, k, spp.lateral_w)            
     # print("zD")
     return adj_comps, adj_inds[:len(adj_comps)]
 
 
 @njit(cache=True)
-def updateBFRelativeTo(bf , sources):
-    dist_matrix = bf.dist_matrix
+def update_SPP_relative_to(spp , sources):
+    dist_matrix = spp.dist_matrix
     frontier_inds = Dict.empty(i8,u1)
     next_frontier_inds = Dict.empty(i8,u1)
 
     for src in sources:
-        if(src.idrec not in bf.idrec_to_ind):
-            bf.idrec_to_ind[src.idrec] = len(bf.idrec_to_ind)
-            bf.comps.append(src)
-        s_ind = bf.idrec_to_ind[src.idrec]
+        if(src.idrec not in spp.idrec_to_ind):
+            spp.idrec_to_ind[src.idrec] = len(spp.idrec_to_ind)
+            spp.comps.append(src)
+        s_ind = spp.idrec_to_ind[src.idrec]
         frontier_inds[i8(s_ind)] = u1(1)
 
 
     while(len(frontier_inds) > 0):
         print(": -----")
-        print("visited",List(bf.visited_inds.keys()))
+        print("visited",List(spp.visited_inds.keys()))
         print("frontier",List(frontier_inds.keys()))
         for b_ind in frontier_inds:
-            b = bf.comps[b_ind]
-            adj_comps, adj_indweights = nextAdjacentComponents_IndsWeights(bf, b)
+            b = spp.comps[b_ind]
+            adj_comps, adj_indweights = next_adj_comps_inds_weights(spp, b)
             for i, (c, c_ind_w_pair) in enumerate(zip(adj_comps, adj_indweights)):
                 c_ind = i8(c_ind_w_pair.ind)
 
@@ -198,7 +197,7 @@ def updateBFRelativeTo(bf , sources):
 
                     print("CONNECT:", f'{b.name}', "->", f'{c.name}', c_ind_w_pair.val)
 
-                for a_ind in bf.visited_inds:
+                for a_ind in spp.visited_inds:
                     if( a_ind == b_ind or a_ind == c_ind): continue
 
                     ab_dist  = dist_matrix[a_ind, b_ind].val 
@@ -206,23 +205,23 @@ def updateBFRelativeTo(bf , sources):
                     ab_heading = dist_matrix[a_ind, b_ind].ind 
                     new_dist = ab_dist + dist_matrix[b_ind, c_ind].val 
                     if(new_dist < dist_matrix[a_ind, c_ind].val):
-                        print("CONNECT:", f'{bf.comps[a_ind].name}', "->", f'{c.name},', "via", f'{b.name}', ":", new_dist, "<", dist_matrix[a_ind, c_ind].val)
+                        print("CONNECT:", f'{spp.comps[a_ind].name}', "->", f'{c.name},', "via", f'{b.name}', ":", new_dist, "<", dist_matrix[a_ind, c_ind].val)
                         dist_matrix[a_ind, c_ind].ind = ab_heading
                         dist_matrix[a_ind, c_ind].a_id = ab_a_id
                         dist_matrix[a_ind, c_ind].val = new_dist 
                         next_frontier_inds[c_ind] = u1(1)
                 
-            bf.visited_inds[b_ind] = u1(1)
+            spp.visited_inds[b_ind] = u1(1)
             
         frontier_inds = next_frontier_inds
         next_frontier_inds = Dict.empty(i8,u1)
 
 
-    print(dist_matrix[:len(bf.idrec_to_ind),:len(bf.idrec_to_ind)])
+    print(dist_matrix[:len(spp.idrec_to_ind),:len(spp.idrec_to_ind)])
 
 
 @generated_jit(cache=True)
-@overload_method(BellmanFordPathMapTypeTemplate,'get_changes')
+@overload_method(ShortestPathProcessorTypeTemplate,'get_changes')
 def incr_pr_accumulate_change_events(self, end=-1, exhaust_changes=True):
     def impl(self, end=-1, exhaust_changes=True):
         incr_pr = _cast_structref(IncrProcessorType, self)
@@ -231,17 +230,17 @@ def incr_pr_accumulate_change_events(self, end=-1, exhaust_changes=True):
 
 
 @njit(cache=True)
-def updateBF(bf):
-    # cq = bf.mem.mem_data.change_queue
-    # incr_pr = _cast_structref(IncrProcessorType, bf)
+def updateBF(spp):
+    # cq = spp.mem.mem_data.change_queue
+    # incr_pr = _cast_structref(IncrProcessorType, spp)
     # changes = incr_pr.get_changes()
     # changes = incr_pr_accumulate_change_events(incr_pr)
     sources = List.empty_list(ComponentType)
-    for change_event in bf.get_changes():
+    for change_event in spp.get_changes():
         print("CHANGE",change_event)
-        comp = bf.mem.get_fact(change_event.idrec, ComponentType)
+        comp = spp.mem.get_fact(change_event.idrec, ComponentType)
         sources.append(comp)
-    updateBFRelativeTo(bf, sources)    
+    update_SPP_relative_to(spp, sources)    
 
 
 
@@ -284,11 +283,11 @@ mem.declare(c)
 mem.declare(p1)
 mem.declare(p2)
 mem.declare(p3)
-bf = BellmanFordPathMap_ctor(mem)
-l = List([a,b,c,p1,p2,p3])
+spp = ShortestPathProcessor_ctor(mem)
+# l = List([a,b,c,p1,p2,p3])
 # print(l._lsttype)
-updateBF(bf)
-updateBFRelativeTo(bf, l)
+updateBF(spp)
+# update_SPP_relative_to(spp, l)
 
 p4 = Container(name="P4", children=List([p3]))
 p4.parents = List([p3])
@@ -298,16 +297,48 @@ print()
 print("-------------------------")
 print()
 
-updateBF(bf)
-updateBFRelativeTo(bf, List([p4]))
+updateBF(spp)
+
+print()
+print("-------------------------")
+print()
+# update_SPP_relative_to(spp, List([p4]))
 
 # d = 
 # mem.declare(p3)
 # print(p1)
 # print(p2)
 
+from numba.extending import lower_builtin, type_callable
+from numba import types
+from numba.core.imputils import numba_typeref_ctor
+
+# @lower_builtin(ShortestPathProcessorType, types.VarArg(types.Any))
+# def foo(context, builder, sig, args):
+#     print(args)
+
+@type_callable(ShortestPathProcessorType)
+def ssp_call(context):
+    print("T_CALLABLE")
+    def typer(mem):
+        return ShortestPathProcessorType
+    return typer
+
+@overload(numba_typeref_ctor)
+def foo(self, mem):
+    if(self.instance_type is not ShortestPathProcessorType): return #not isinstance(self,types.TypeRef) or 
+    print(self, mem)
+    def impl(self, mem):
+        print(self)
+        return ShortestPathProcessor_ctor(mem)
+    return impl
+
+@njit(cache=True)
+def poop(mem):
+    return ShortestPathProcessorType(mem)
 
 
+print(poop(mem))
 
 '''PLANNING PLANNING PLANNING
 
@@ -454,16 +485,16 @@ BFClass_fields = {
 
 dist_ind_pair = ...
 
-_try_append_nxt(bf, comps, inds_ws, obj, k, w):
-    ind = bf.idrec_to_ind[obj.idrec]
-    if(ind not in bf.covered_inds):
+_try_append_nxt(spp, comps, inds_ws, obj, k, w):
+    ind = spp.idrec_to_ind[obj.idrec]
+    if(ind not in spp.covered_inds):
         adj_comps.append(obj)
         adj_inds[k].ind = ind
         adj_inds[k].weight = w
         return k+1
     return k
 
-NextAdjacentComponents_IndsWeights(bf : BellmanFordObj, c : Component):
+NextAdjacentComponents_IndsWeights(spp : BellmanFordObj, c : Component):
     //Extract indicies for adjacent elements 
     if(c.isa(ContainerType)):
         cont = _cast_structref(ContainerType,c)
@@ -474,24 +505,24 @@ NextAdjacentComponents_IndsWeights(bf : BellmanFordObj, c : Component):
     adj_comps = List.empt_list(ComponentType)
 
     k = 0
-    if(c.to_left): k = _try_append_nxt(bf, adj_comps, adj_inds, c.to_left, k, bf.lateral_w)
-    if(c.to_right): k = _try_append_nxt(bf, adj_comps, adj_inds, c.to_right, k, bf.lateral_w)
-    if(c.below): k = _try_append_nxt(bf, adj_comps, adj_inds, c.below, k, bf.lateral_w)
-    if(c.above): k = _try_append_nxt(bf, adj_comps, adj_inds, c.above, k, bf.lateral_w)
+    if(c.to_left): k = _try_append_nxt(spp, adj_comps, adj_inds, c.to_left, k, spp.lateral_w)
+    if(c.to_right): k = _try_append_nxt(spp, adj_comps, adj_inds, c.to_right, k, spp.lateral_w)
+    if(c.below): k = _try_append_nxt(spp, adj_comps, adj_inds, c.below, k, spp.lateral_w)
+    if(c.above): k = _try_append_nxt(spp, adj_comps, adj_inds, c.above, k, spp.lateral_w)
         
     for parent in c.parents:
-        k = _try_append_nxt(bf, adj_comps, adj_inds, parent, k, bf.lateral_w)
+        k = _try_append_nxt(spp, adj_comps, adj_inds, parent, k, spp.lateral_w)
 
     if(c.isa(Container)):
         for child in _cast_structref(ContainerType,c).children:
-            k = _try_append_nxt(bf, adj_comps, adj_inds, child, k, bf.lateral_w)            
+            k = _try_append_nxt(spp, adj_comps, adj_inds, child, k, spp.lateral_w)            
     return adj_comps, adj_inds[:len(adj_comps)]
 
 
 //Need to define
-UpdateBFRelativeTo(bf : BellmanFordObj, src : Component):
-    dist_matrix = bf.dist_matrix
-    s_ind = bf.idrec_to_ind[src.idrec]
+UpdateBFRelativeTo(spp : BellmanFordObj, src : Component):
+    dist_matrix = spp.dist_matrix
+    s_ind = spp.idrec_to_ind[src.idrec]
 
     head_components = List([src])
     covered_inds = Dict.empty(i8,u1)
@@ -500,7 +531,7 @@ UpdateBFRelativeTo(bf : BellmanFordObj, src : Component):
     next_components = List.empty_list(ComponentType)
     while(len(head_components) > 0):
         for b_ind in head_components:
-            adj_comps, adj_indweights = GetAdjacentInds(bf,c)
+            adj_comps, adj_indweights = GetAdjacentInds(spp,c)
             for i, c_ind_w_pair in enumerate(adj_indweights):
                 c_ind = c_ind_w_pair.ind
 
@@ -509,7 +540,7 @@ UpdateBFRelativeTo(bf : BellmanFordObj, src : Component):
 
                 did_update = False
 
-                item_ind = bf.idrec_to_ind[item.idrec]
+                item_ind = spp.idrec_to_ind[item.idrec]
                 
                 ab_dist, ab_heading = dist_matrix[b_ind][c_ind]
 

@@ -217,7 +217,7 @@ def test_get_facts():
 # from itertools import product
 
 # NOTE: Something funny going on here, getting errors like:
-#    Invalid use of getiter with parameters (cre.FactIterator[BOOP1])
+#    "Invalid use of getiter with parameters (cre.FactIterator[BOOP1])"
 def _test_iter_facts():
     with cre_context("test_iter_facts"):
         spec1 = {"A" : "string", "B" : "number"}
@@ -300,6 +300,11 @@ def test_grow_change_queues():
 
         idrec = mem.declare(TextField("A","B","C","D","E"))
 
+        ch_q = mem.mem_data.change_queue
+        assert ch_q.data[ch_q.head-1] == idrec
+
+        t_id, f_id, _ = decode_idrec(idrec)
+
         # assert mem.mem_data.subscribers[0].grow_queue.data[0] == idrec
         # gr_q = mem.mem_data.grow_queue
         # assert gr_q.data[gr_q.head-1] == idrec
@@ -307,8 +312,8 @@ def test_grow_change_queues():
         mem.retract(idrec)
 
         # assert mem.mem_data.subscribers[0].change_queue.data[0] == idrec
-        ch_q = mem.mem_data.change_queue
-        assert ch_q.data[ch_q.head-1] == idrec
+        # ch_q = mem.mem_data.change_queue
+        assert ch_q.data[ch_q.head-1] == encode_idrec(t_id, f_id, 0xFF)
 
 with cre_context("test_mem_leaks"):
     TextField, TextFieldType = define_fact("TextField",tf_spec)
@@ -321,6 +326,8 @@ def used_bytes():
 
 
 def test_mem_leaks():
+    ''' Test for memory leaks in mem. This test might fail if other tests fail
+        even if there is nothing wrong '''
     with cre_context("test_mem_leaks"):
         init_used = used_bytes()
 
@@ -480,4 +487,4 @@ if __name__ == "__main__":
     # test_get_facts()
     # test_mem_leaks()
     # test_get_facts()
-    _test_iter_facts()
+    # _test_iter_facts()

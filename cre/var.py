@@ -146,12 +146,12 @@ class Var(CREObjProxy):
             # ATTR case
             curr_head_type = self._head_type
             attr = attr_or_ind
-            fd = curr_head_type.field_dict
+            # fd = curr_head_type.field_dict
             head_type = curr_head_type.spec[attr]['type']
             if(isinstance(head_type, DeferredFactRefType)):
                 head_type = cre_context().type_registry[head_type._fact_name]
-            a_id = list(fd.keys()).index(attr)
-            offset = curr_head_type._attr_offsets[a_id]
+            a_id = curr_head_type.get_attr_a_id(attr) #list(fd.keys()).index(attr)
+            offset = curr_head_type.get_attr_offset(attr)#curr_head_type._attr_offsets[a_id]
             deref_type = DEREF_TYPE_ATTR
             _derefs_str += f".{attr}"
         else:
@@ -699,8 +699,8 @@ def var_getattr_impl(context, builder, typ, val, attr):
         head_type_name = str(head_type)
         # print(">>", head_type_name)
         fd = base_type.field_dict
-        a_id = list(fd.keys()).index(attr)
-        offset = base_type._attr_offsets[list(fd.keys()).index(attr)]
+        a_id = base_type.get_attr_a_id(attr)#list(fd.keys()).index(attr)
+        offset = base_type.get_attr_offset(attr)#base_type._attr_offsets[list(fd.keys()).index(attr)]
         ctor = cgutils.create_struct_proxy(typ)
         st = ctor(context, builder, value=val)._getvalue()
         fact_num = getattr(head_type, "_fact_num", -1)

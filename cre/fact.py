@@ -46,9 +46,20 @@ class Fact(CREObjTypeTemplate):
     def __str__(self):
         return self._fact_name if hasattr(self, '_fact_name') else "Fact"
 
+    @property
+    def field_dict_keys(self):
+        if(not hasattr(self, "_field_dict_keys")):
+            self._field_dict_keys = list(self.field_dict.keys())
+        return self._field_dict_keys
+
     def get_attr_offset(self,attr):
-        fd = self.field_dict
-        return self._attr_offsets[list(fd.keys()).index(attr)]
+        return self._attr_offsets[self.get_attr_a_id(self,attr)]
+
+    def get_attr_a_id(self, attr):
+        return self.field_dict_keys.index(attr)
+
+    def get_attr_from_a_id(self, a_id):
+        return self.field_dict_keys[a_id]
 
     
 

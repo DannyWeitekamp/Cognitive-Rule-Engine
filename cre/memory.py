@@ -9,7 +9,8 @@ from numba.core.types import DictType, ListType, unicode_type, float64, NamedTup
 from numba.cpython.unicode import  _set_code_point
 from numba.experimental import structref
 from numba.experimental.structref import new, define_boxing
-from numba.extending import overload_method, intrinsic, overload, lower_cast, lower_builtin
+from numba.extending import overload_method, intrinsic, overload, lower_cast, lower_builtin, SentryLiteralArgs
+from numba.core.errors import RequireLiteralValue
 from cre.core import TYPE_ALIASES, JITSTRUCTS, py_type_map, numba_type_map, numpy_type_map
 from numba.core import types, cgutils
 from numba.core.errors import TypingError
@@ -212,7 +213,7 @@ class Memory(structref.StructRefProxy):
 
 
     def retract(self,identifier):
-        return retract(self,identifier)
+        return mem_retract(self,identifier)
 
     def get_facts(self,typ):
         if(isinstance(typ,str)):
@@ -222,10 +223,23 @@ class Memory(structref.StructRefProxy):
         # t_ids = np.empty((1,), dtype=np.uint16)
         # t_ids[0] = t_id
         return get_facts(self, typ)
+
+    def iter_facts(self,typ):
+        if(isinstance(typ,str)):
+            typ = self.context.type_registry[typ]
+        # name = str(typ)
+        # t_id = self.context.context_data.fact_num_to_t_id[typ._fact_num]
+        # t_ids = np.empty((1,), dtype=np.uint16)
+        # t_ids[0] = t_id
+        return iter_facts(self, typ)
+
+
+    def get_fact(self,idrec):
+        return get_fact(self, idrec)
         # return iter_facts(self, typ)#all_facts_of_t_id(self, t_id)
 
     def modify(self, fact, attr, val):
-        return modify(self,fact, literally(attr), val)
+        return mem_modify(self,fact, attr, val)#modify(self,fact, attr, val)
 
     @property
     def halt_flag(self):
@@ -242,7 +256,9 @@ class Memory(structref.StructRefProxy):
         except Exception as e:
             # If the process is ending then global variables can be sporatically None
             #   thus skip any TypeError of this sort.
+            if(isinstance(e, ImportError)): return
             if(isinstance(e, TypeError) and "not callable" in str(e)): return
+            
             print("An error occured when trying to clean a cre.Memory object:\n",e)
 
 @njit(cache=True)
@@ -501,9 +517,9 @@ def declare_fact_name(mem,fact,name):
 
 @njit(cache=True)
 def retract_by_idrec(mem,idrec):
-    t_id, f_id, a_id = decode_idrec(idrec) #negligible
+    t_id, f_id, _ = decode_idrec(idrec) #negligible
     make_f_id_empty(mem.mem_data,i8(t_id), i8(f_id)) #3.6ms
-    mem.mem_data.change_queue.add(idrec)
+    mem.mem_data.change_queue.add(encode_idrec(t_id, f_id, u1(0xFF)))
     # signal_subscribers_change(mem, idrec) #.8ms
 
 @njit(cache=True)
@@ -512,18 +528,16 @@ def retract_by_name(mem,name):
     retract_by_idrec(mem,idrec)
     del mem.mem_data.names_to_idrecs[name]
 
-@njit(cache=True)
-def retract(mem,identifier):
-    return mem.retract(identifier)
+# @njit(cache=True)
+# def retract(mem,identifier):
+#     return mem.retract(identifier)
 
 ##### modify #####
 
-@njit(cache=True)
-def modify_by_fact(mem,fact,attr,val):
-    fact_lower_setattr(fact,literally(attr),val)
-    #TODO signal_subscribers w/ idrec w/ attr_ind
-    # signal_subscribers_change(mem, fact.idrec)
-    mem.mem_data.change_queue.add(fact.idrec)
+# @generated_jit(cache=True)
+# def modify_by_fact(mem,fact,attr,val):
+    
+#     return impl
 
 @njit(cache=True)
 def modify_by_idrec(mem,fact,attr,val):
@@ -564,8 +578,28 @@ def mem_backtrack(self):
         self.backtrack_flag = u1(1)
     return impl
 
+@generated_jit(cache=True)
+@overload_method(MemoryTypeTemplate, "get_fact")
+def mem_get_fact(self, identifier, typ=None):
+    if(typ is None):
+        return_typ = BaseFactType    
+    else:
+        return_typ = typ.instance_type
+    print(return_typ)
+    if(isinstance(identifier, types.Integer)):
+        def impl(self, identifier, typ=None):
+            t_id, f_id, _ =  decode_idrec(identifier)
+            facts = facts_for_t_id(self.mem_data, t_id) #negligible
+            fact_ptr = facts.data[f_id]
+            return _struct_from_ptr(return_typ, fact_ptr)
+
+    elif(isinstance(identifier, unicode_type)):
+        raise NotImplemented()
+
+    return impl
+
 @overload_method(MemoryTypeTemplate, "add_subscriber")
-def mem_declare(self, subscriber):
+def mem_add_subscriber(self, subscriber):
     if(not isinstance(subscriber,types.StructRef)): 
         raise TypingError(f"Cannot add subscriber of type '{type(fact)}'.")
     def impl(self, subscriber):
@@ -585,6 +619,7 @@ def mem_declare(self, fact, name=None):
             return declare_fact_name(self,fact,name)
     return impl
 
+@generated_jit(cache=True)
 @overload_method(MemoryTypeTemplate, "retract")
 def mem_retract(self, identifier):
     if(identifier in (str,unicode_type)):
@@ -601,17 +636,36 @@ def mem_retract(self, identifier):
                         "mem.retract() accepts a valid fact idrec, name, or fact instance.")
     return impl
 
-@overload_method(MemoryTypeTemplate, "modify", prefer_literal=True)
+@generated_jit(cache=True)
+@overload_method(MemoryTypeTemplate, "modify")
 def mem_modify(self, fact, attr, val):
     if(not isinstance(fact,types.StructRef)): 
         raise TypingError(f"Modify requires a fact instance, got instance of'{type(fact)}'.")
-    print("&&", attr)
-    # if(isinstance(attr, types.Literal)):
+
+    SentryLiteralArgs(['attr']).for_function(mem_modify).bind(self, fact, attr, val) 
+    a_id = u1(list(fact.field_dict.keys()).index(attr._literal_value))
+    print("a_id", a_id, type(a_id))
+    # print(attr.__dict__)
+    # print(fact.spec[attr._literal_value])
+
     def impl(self, fact, attr, val):
-        modify_by_fact(self, fact, attr, val)
-        # fact_lower_setattr(fact, attr, val)
+        fact_lower_setattr(fact, attr, val)
+        #TODO signal_subscribers w/ idrec w/ attr_ind
+        # signal_subscribers_change(mem, fact.idrec)
+        t_id, f_id, _ = decode_idrec(fact.idrec)
+        self.mem_data.change_queue.add(encode_idrec(t_id, f_id, a_id))
+    # if(isinstance(attr, types.Literal)):
+    # def impl(self, fact, attr, val):
+    #     modify_by_fact(self, fact, attr, val)
+    #     # fact_lower_setattr(fact, attr, val)
 
     return impl
+
+
+
+
+
+
 
 
 
@@ -727,7 +781,7 @@ def getiter(self):
 
 # @overload(FactIterator)
 @generated_jit(cache=True)
-# @overload_method(MemoryTypeTemplate,'iter_facts')
+@overload_method(MemoryTypeTemplate,'iter_facts')
 def iter_facts(mem, fact_type, no_subtypes=False):
     assert isinstance(fact_type, types.TypeRef)
 

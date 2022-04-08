@@ -346,7 +346,7 @@ def gen_fact_import_str(t):
     return f"from cre_cache.{t._fact_name}._{t._hash_code} import {t._fact_name + 'Type'}"
 
 def gen_inherit_import_str(t):
-    return f"from cre_cache.{t._fact_name}._{t._hash_code} import inheritance_bytes as parent_inh_bytes"
+    return f"from cre_cache.{t._fact_name}._{t._hash_code} import {t._fact_name}Type, inheritance_bytes as parent_inh_bytes"
 
 def _gen_getter_jit(f_typ,typ,attr):
     if(isinstance(typ,(Fact,DeferredFactRefType))):
@@ -564,13 +564,15 @@ from numba.core.types import *
 from numba.core.types import unicode_type, ListType, UniTuple, Tuple
 from numba.experimental import structref
 from numba.experimental.structref import new#, define_boxing
-from numba.core.extending import overload
+from numba.core.extending import overload, lower_cast
 from cre.fact_intrinsics import define_boxing, get_fact_attr_ptr, _register_fact_structref, fact_mutability_protected_setattr, fact_lower_setattr, _fact_get_chr_mbrs_infos
 from cre.fact import repr_list_attr, repr_fact_attr,  FactProxy, Fact{", BaseFactType, base_list_type, fact_to_ptr, get_inheritance_bytes_len_ptr" if typ != "BaseFact" else ""}, uint_to_inheritance_bytes
-from cre.utils import _raw_ptr_from_struct, ptr_t, _get_member_offset, _cast_structref, _load_ptr
+from cre.utils import _raw_ptr_from_struct, ptr_t, _get_member_offset, _cast_structref, _load_ptr, _obj_cast_codegen
 import cloudpickle
 from cre.cre_object import member_info_type, set_chr_mbrs
 {fact_imports}
+
+
 
 attr_offsets = np.array({attr_offsets!r},dtype=np.int16)
 inheritance_bytes = tuple({"list(parent_inh_bytes) + " if inherit_from else ""}list(uint_to_inheritance_bytes({fact_num}))) 
@@ -594,6 +596,11 @@ field_list = cloudpickle.loads({cloudpickle.dumps(all_fields)})
  ("num_inh_bytes", u1),
  ("inh_bytes", UniTuple(u1, num_inh_bytes))])
 
+{(f"""@lower_cast({typ}Type, {inherit_from._fact_name}Type)
+def upcast(context, builder, fromty, toty, val):
+    return _obj_cast_codegen(context, builder, val, fromty, toty,incref=False)                        
+""") if inherit_from is not None else ""
+}
 
 @njit(cache=True)
 def get_chr_mbrs_infos():
@@ -662,8 +669,6 @@ class {typ}(FactProxy):
 
     def __repr__(self):
         return str(self)
-
-
 
 {properties}
 
@@ -865,6 +870,16 @@ def isa(self, typ):
 
     def impl(self, typ):
         return _isa(self)
+    return impl
+
+@generated_jit(cache=True,nopython=True)
+@overload_method(Fact, "asa")
+def asa(self, typ):
+    # print("<<", typ)
+    _isa = typ.instance_type._isa
+
+    def impl(self, typ):
+        return _cast_structref(typ, self)
     return impl
 
 #### Hashing ####

@@ -235,6 +235,7 @@ def _obj_cast_codegen(context, builder, val, frmty, toty, incref=True):
 @intrinsic
 def _cast_structref(typingctx, cast_type_ref, inst_type):
     cast_type = cast_type_ref.instance_type
+    print("**", cast_type, inst_type)
     if(isinstance(inst_type, types.Optional)):
             inst_type = inst_type.type
     def codegen(context, builder, sig, args):
@@ -780,7 +781,7 @@ def getitem_typed_list(l,i):
     return l[i]
 
 def iter_typed_list(lst):
-    if(isinstance(lst, (List))):
+    if(isinstance(lst, (List,))):
         for i in range(len_typed_list(lst)):
             yield getitem_typed_list(lst,i)
     else:

@@ -157,8 +157,8 @@ def test_retract_keyerror():
 
 ##### test_all_facts_of_type #####
 
-with cre_context("test_get_facts"):
-    TextField, TextFieldType = define_fact("TextField",tf_spec)
+# with cre_context("test_get_facts"):
+#     TextField, TextFieldType = define_fact("TextField",tf_spec)
 
 # @njit(cache=True)
 # def all_of_type(mem):
@@ -184,6 +184,63 @@ def test_get_facts():
             for x in mem.get_facts(BOOP1Type):
                 l.append(x)
             return l
+
+        for t,i in product(['py','nb'],[0,1]):
+            all_tf = iter_b1.py_func(mem) if t else iter_b1(mem)
+            assert isinstance(all_tf[0], BOOP1)
+            assert len(all_tf) == 3
+        
+        # mem = Memory()
+        mem.declare(BOOP2("D",4))
+        mem.declare(BOOP2("E",5))
+        mem.declare(BOOP2("F",6))        
+
+        for t,i in product(['py','nb'],[0,1]):
+            all_tf = iter_b1.py_func(mem) if t else iter_b1(mem)
+            print(all_tf)
+            assert isinstance(all_tf[0], BOOP1)
+            assert len(all_tf) == 6
+
+
+        # mem = Memory()
+        mem.declare(BOOP3("G",7))
+        mem.declare(BOOP3("H",8))
+        mem.declare(BOOP3("I",9))  
+
+        for t,i in product(['py','nb'],[0,1]):
+            all_tf = iter_b1.py_func(mem) if t else iter_b1(mem)
+            print(all_tf)
+            assert isinstance(all_tf[0], BOOP1)
+            assert len(all_tf) == 9
+
+
+# from itertools import product
+
+# NOTE: Something funny going on here, getting errors like:
+#    Invalid use of getiter with parameters (cre.FactIterator[BOOP1])
+def _test_iter_facts():
+    with cre_context("test_iter_facts"):
+        spec1 = {"A" : "string", "B" : "number"}
+        BOOP1, BOOP1Type = define_fact("BOOP1", spec1)
+        spec2 = {"inherit_from" : BOOP1, "C" : "number"}
+        BOOP2, BOOP2Type = define_fact("BOOP2", spec2)
+        spec3 = {"inherit_from" : BOOP2, "D" : "number"}
+        BOOP3, BOOP3Type = define_fact("BOOP3", spec3)
+
+        mem = Memory()
+        mem.declare(BOOP1("A",1))
+        mem.declare(BOOP1("B",2))
+        mem.declare(BOOP1("C",3))
+
+        @njit(cache=True)
+        def iter_b1(mem):
+            l = List()
+            for x in mem.iter_facts(BOOP1Type):
+                l.append(x)
+            return l
+
+        iter_b1(mem)
+        raise ValueError()
 
         for t,i in product(['py','nb'],[0,1]):
             all_tf = iter_b1.py_func(mem) if t else iter_b1(mem)
@@ -422,4 +479,5 @@ if __name__ == "__main__":
     # test_subscriber()
     # test_get_facts()
     # test_mem_leaks()
-    test_get_facts()
+    # test_get_facts()
+    _test_iter_facts()

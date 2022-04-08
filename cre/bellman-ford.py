@@ -1,13 +1,16 @@
 import numpy as np
 import numba
-from numba import njit, i8,i4,u1, f8, f4
+from numba import njit, i8,i4,u1, f8, f4, generated_jit
 from numba.typed import List, Dict
 from numba.types import ListType, DictType
 from cre.fact import define_fact
-from cre.structref import define_structref
-from numba.experimental.structref import new
+from cre.structref import define_structref, define_structref_template
+from numba.experimental.structref import new, define_attributes
+from numba.extending import lower_cast, overload_method
 from cre.memory import Memory,MemoryType
-from cre.utils import _cast_structref
+from cre.utils import _cast_structref, _obj_cast_codegen
+from cre.vector import VectorType
+from cre.incr_processor import IncrProcessorType, ChangeEventType, incr_processor_fields, init_incr_processor
 
 
 
@@ -27,28 +30,28 @@ Container, ContainerType = define_fact("Container", {
     "children" : "List(Component)"
 })
 
+########### BF ############
 
-# raise ValueError()
-
-
-# print(mem)
-
-###########
 _ind_fltval_pair = np.dtype([("ind", np.int32), ('a_id', np.uint8), ("val", np.float32)])
 ind_fltval_pair = numba.from_dtype(_ind_fltval_pair)
 
 
 bfpm_fields = {
-    "wm" : MemoryType,
+    **incr_processor_fields,
     "dist_matrix" : ind_fltval_pair[:, ::1],
     "idrec_to_ind" : DictType(i8, i4),
     "visited_inds" : DictType(i4, u1),
-    # "covered_inds" : DictType(i4, u1),
     "comps" : ListType(ComponentType),
     "lateral_w" : f8
 }
 
-BellmanFordPathMap, BellmanFordPathMapType = define_structref("BellmanFordPathMap", bfpm_fields, define_constructor=False) 
+BellmanFordPathMap, BellmanFordPathMapType, BellmanFordPathMapTypeTemplate = \
+    define_structref("BellmanFordPathMap", bfpm_fields, define_constructor=False, return_template=True) 
+BellmanFordPathMapTypeTemplate.__str__ = lambda x : "cre.BellmanFordPathMap"    
+
+@lower_cast(BellmanFordPathMapType, IncrProcessorType)
+def upcast(context, builder, fromty, toty, val):
+    return _obj_cast_codegen(context, builder, val, fromty, toty, incref=False)
 
 
 component_fields = list(ComponentType.field_dict.keys())
@@ -68,7 +71,7 @@ def new_dist_matrix(n, old_dist_matrix=None):
     for i in range(n):
         for j in range(n):
             if(i == j):
-                dist_matrix[i,j].ind = 0
+                dist_matrix[i,j].ind = -1
                 dist_matrix[i,j].a_id = 0
                 dist_matrix[i,j].val = 0
             else:
@@ -83,17 +86,16 @@ def new_dist_matrix(n, old_dist_matrix=None):
 
 
 print("A")
-@njit(cache=True)
-def BellmanFordPathMap_ctor(wm):
+@njit(BellmanFordPathMapType(MemoryType),cache=True)
+def BellmanFordPathMap_ctor(mem):
     st = new(BellmanFordPathMapType)
-    st.wm = wm
+    print(st)
+    init_incr_processor(st, mem)
     st.dist_matrix = new_dist_matrix(32)
-    # print(st.dist_matrix)
     st.idrec_to_ind = Dict.empty(i8,i4)
     st.visited_inds = Dict.empty(i4,u1)
-    # st.covered_inds = Dict.empty(i4,u1)
     st.comps = List.empty_list(ComponentType)
-    st.lateral_w = 1.0
+    st.lateral_w = f8(1.0)
     return st
 
 
@@ -159,16 +161,18 @@ def nextAdjacentComponents_IndsWeights(bf, c):
 
 
 @njit(cache=True)
-def updateBFRelativeTo(bf , src):
+def updateBFRelativeTo(bf , sources):
     dist_matrix = bf.dist_matrix
-    if(src.idrec not in bf.idrec_to_ind):
-        bf.idrec_to_ind[src.idrec] = len(bf.idrec_to_ind)
-        bf.comps.append(src)
-    s_ind = bf.idrec_to_ind[src.idrec]
-
     frontier_inds = Dict.empty(i8,u1)
-    frontier_inds[i8(s_ind)] = u1(1)
     next_frontier_inds = Dict.empty(i8,u1)
+
+    for src in sources:
+        if(src.idrec not in bf.idrec_to_ind):
+            bf.idrec_to_ind[src.idrec] = len(bf.idrec_to_ind)
+            bf.comps.append(src)
+        s_ind = bf.idrec_to_ind[src.idrec]
+        frontier_inds[i8(s_ind)] = u1(1)
+
 
     while(len(frontier_inds) > 0):
         print(": -----")
@@ -216,7 +220,38 @@ def updateBFRelativeTo(bf , src):
 
     print(dist_matrix[:len(bf.idrec_to_ind),:len(bf.idrec_to_ind)])
 
-                    
+
+@generated_jit(cache=True)
+@overload_method(BellmanFordPathMapTypeTemplate,'get_changes')
+def incr_pr_accumulate_change_events(self, end=-1, exhaust_changes=True):
+    def impl(self, end=-1, exhaust_changes=True):
+        incr_pr = _cast_structref(IncrProcessorType, self)
+        return incr_pr.get_changes(end=end, exhaust_changes=exhaust_changes)
+    return impl
+
+
+@njit(cache=True)
+def updateBF(bf):
+    # cq = bf.mem.mem_data.change_queue
+    # incr_pr = _cast_structref(IncrProcessorType, bf)
+    # changes = incr_pr.get_changes()
+    # changes = incr_pr_accumulate_change_events(incr_pr)
+    sources = List.empty_list(ComponentType)
+    for change_event in bf.get_changes():
+        print("CHANGE",change_event)
+        comp = bf.mem.get_fact(change_event.idrec, ComponentType)
+        sources.append(comp)
+    updateBFRelativeTo(bf, sources)    
+
+
+
+    # print("<<HEAD:",cq.head)
+
+# import logging
+# logging.basicConfig(level=logging.DEBUG)
+# numba_logger = logging.getLogger('numba')
+# numba_logger.setLevel(logging.INFO)
+
 
 a = Component(name="A")
 b = Component(name="B")
@@ -250,8 +285,21 @@ mem.declare(p1)
 mem.declare(p2)
 mem.declare(p3)
 bf = BellmanFordPathMap_ctor(mem)
-updateBFRelativeTo(bf, a)
+l = List([a,b,c,p1,p2,p3])
+# print(l._lsttype)
+updateBF(bf)
+updateBFRelativeTo(bf, l)
 
+p4 = Container(name="P4", children=List([p3]))
+p4.parents = List([p3])
+mem.declare(p4)
+mem.modify(p3,'parents', List([p4]))
+print()
+print("-------------------------")
+print()
+
+updateBF(bf)
+updateBFRelativeTo(bf, List([p4]))
 
 # d = 
 # mem.declare(p3)
@@ -487,7 +535,15 @@ UpdateBFRelativeTo(bf : BellmanFordObj, src : Component):
         next_components = List.empty_list(ComponentType)
 
 
-                    
+######## PLANNING PLANNING PLANNING 4/7 ####### 
+
+What is an incremental processor? Why do we need one when we have rules?
+
+An incremental processor allows us to do incremental processing in a more imperative manner
+than rules. We can directly force an incremental processor to update from python, keep/update datastructures
+within it that are cumbersome or impossible to distribute across facts stored in a working memory.
+For instance datastructures like hash maps, queues etc. aren't currently supported in CRE facts. An imperative
+incremental processor that lives outside of a ruleset also alleviates the complexity of fitting 
 
 
 

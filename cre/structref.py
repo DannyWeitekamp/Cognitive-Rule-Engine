@@ -67,7 +67,7 @@ class {typ}(structref.StructRefProxy):
 
 def define_structref_template(name, fields, define_constructor=True,define_boxing=True):
     if(isinstance(fields,dict)): fields = [(k,v) for k,v in fields.items()]
-    hash_code = unique_hash([name,fields])
+    hash_code = unique_hash([name,fields, define_constructor, define_boxing])
     # if(name == "ExplanationTreeEntry"): print(name, fields, hash_code)
     
     if(not source_in_cache(name,hash_code)):
@@ -79,12 +79,15 @@ def define_structref_template(name, fields, define_constructor=True,define_boxin
     ctor._hash_code = hash_code
     return ctor,template
 
-def define_structref(name, fields, define_constructor=True,define_boxing=True):
+def define_structref(name, fields, define_constructor=True, define_boxing=True, return_template=False):
     if(isinstance(fields,dict)): fields = [(k,v) for k,v in fields.items()]
     ctor, template = define_structref_template(name,fields, define_constructor=define_constructor,define_boxing=define_boxing)
     struct_type = template(fields=fields)
     struct_type._hash_code = ctor._hash_code
-    return ctor, struct_type
+    if(return_template):
+        return ctor, struct_type, template
+    else:
+        return ctor, struct_type
 
 
 
@@ -95,7 +98,6 @@ class CastFriendlyStructref(types.StructRef):
         This method only implements width subtyping for records.
         """
         from numba.core.errors import NumbaExperimentalFeatureWarning
-        # print(other.__dict__)
         if isinstance(other, CastFriendlyStructref):
             if len(other._fields) > len(self._fields):
                 return

@@ -25,7 +25,7 @@ from cre.caching import gen_import_str, unique_hash,import_from_cached, source_t
 from cre.context import cre_context
 from cre.structref import define_structref, define_structref_template
 from cre.memory import MemoryType, Memory, facts_for_t_id, fact_at_f_id
-from cre.fact import define_fact, BaseFactType, cast_fact
+from cre.fact import define_fact, BaseFact, cast_fact
 from cre.utils import _struct_from_meminfo, _meminfo_from_struct, _cast_structref, \
  decode_idrec, lower_getattr, _struct_from_ptr, struct_get_attr_offset, _struct_get_data_pointer, \
  _load_ptr, _pointer_to_data_pointer, _list_base_from_ptr
@@ -205,7 +205,7 @@ alpha_predicate_node_field_dict = {
 
     #### Attributes filled in at definition time ###
     "filter_func" : alpha_filter_func_type,
-    "left_type" : types.TypeRef(BaseFactType), #<- Filled in at definition
+    "left_type" : types.TypeRef(BaseFact), #<- Filled in at definition
     "right_val" : types.float64, #<- Can be specialized to something else
     
 }
@@ -224,8 +224,8 @@ beta_predicate_node_field_dict = {
     #### Attributes filled in at definition time ###
     "filter_func" : beta_filter_func_type,
     "right_attr_offsets" : deref_type[::1],
-    "left_type" : types.TypeRef(BaseFactType), #<- Filled in at definition
-    "right_type" : types.TypeRef(BaseFactType),
+    "left_type" : types.TypeRef(BaseFact), #<- Filled in at definition
+    "right_type" : types.TypeRef(BaseFact),
     
     
     #### Attributes filled in at link time ###

@@ -9,7 +9,7 @@ from cre.memory import Memory
 
 def test_get_changes():
     with cre_context("test_get_changes"):
-        BOOP, BOOPType = define_fact("BOOP",{"A": "string", "B" : "number"})
+        BOOP = define_fact("BOOP",{"A": "string", "B" : "number"})
 
         mem = Memory()
         ip = IncrProcessor(mem,0)

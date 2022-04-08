@@ -8,7 +8,7 @@ from cre.utils import  _raw_ptr_from_struct, _cast_structref
 
 import  cre.dynamic_exec
 
-BOOP, BOOPType = define_fact("BOOP",{"A": "string", "B" : "number"})
+BOOP = define_fact("BOOP",{"A": "string", "B" : "number"})
 
 def test_aliasing():
     pass
@@ -23,8 +23,8 @@ def test_aliasing():
 
 # def test_literal():
 #     with cre_context("test_literal"):
-#         # BOOP, BOOPType = define_fact("BOOP",{"A": "string", "B" : "number"})
-#         l1, l2 = Var(BOOPType,"l1"), Var(BOOPType,"l2")
+#         # BOOP = define_fact("BOOP",{"A": "string", "B" : "number"})
+#         l1, l2 = Var(BOOP,"l1"), Var(BOOP,"l2")
 #         c1 = l1.B < 1
 #         print(first_alpha(c1))
 #         # print(c1.dnf[0][0][0].is_alpha)
@@ -38,10 +38,10 @@ def test_aliasing():
 # @njit(cache=True)
 def test_build_conditions():
     with cre_context("test_build_conditions"):
-        # BOOP, BOOPType = define_fact("BOOP",{"A": "string", "B" : "number"})
+        # BOOP = define_fact("BOOP",{"A": "string", "B" : "number"})
 
-        l1, l2 = Var(BOOPType,"l1"), Var(BOOPType,"l2")
-        r1, r2 = Var(BOOPType,"r1"), Var(BOOPType,"r2")
+        l1, l2 = Var(BOOP,"l1"), Var(BOOP,"l2")
+        r1, r2 = Var(BOOP,"r1"), Var(BOOP,"r2")
 
 
         c1 = l1.B < 1
@@ -110,7 +110,7 @@ def test_build_conditions():
 (l1.B == 5) & (l1.B == 5) & (l1.B == l2.B) & ~(l1.B == l2.B)'''
         assert str(c3 | c4) == c3_or_c4_str
 
-    # l1, l2 = Var(BOOPType,"l1"), Var(BOOPType,"l2")
+    # l1, l2 = Var(BOOP,"l1"), Var(BOOP,"l2")
 
 
 list_i8 = ListType(i8)
@@ -137,10 +137,10 @@ def cond_get_vars(cond):
 
 # def test_initialize():
 #     with cre_context("test_initialize"):
-#         # BOOP, BOOPType = define_fact("BOOP",{"A": "string", "B" : "number"})
+#         # BOOP = define_fact("BOOP",{"A": "string", "B" : "number"})
 
-#         l1, l2 = Var(BOOPType,"l1"), Var(BOOPType,"l2")
-#         r1, r2 = Var(BOOPType,"r1"), Var(BOOPType,"r2")
+#         l1, l2 = Var(BOOP,"l1"), Var(BOOP,"l2")
+#         r1, r2 = Var(BOOP,"r1"), Var(BOOP,"r2")
 
 #         c = (l1.B < 1) & (l1.B > 7) & (l2.B < r1.B) & (r2.B < l1.B)# |\
 #              # (l2.B < 1) & (l2.B > 7) & (l2.B < r1.B) & (r1.B < r2.B) |\
@@ -167,10 +167,10 @@ def _test_link():
     '''TODO: REWRITE'''
     print("START TEST LINK")
     with cre_context() as context:
-        # BOOP, BOOPType = define_fact("BOOP",{"A": "string", "B" : "number"})
+        # BOOP = define_fact("BOOP",{"A": "string", "B" : "number"})
         
-        l1, l2 = Var(BOOPType,"l1"), Var(BOOPType,"l2")
-        r1, r2 = Var(BOOPType,"r1"), Var(BOOPType,"r2")
+        l1, l2 = Var(BOOP,"l1"), Var(BOOP,"l2")
+        r1, r2 = Var(BOOP,"r1"), Var(BOOP,"r2")
 
         c = (l1.B < 1) & (l1.B > 7) & (l2.B < r1.B) & (r2.B < l1.B) |\
              (l2.B < 1) & (l2.B > 7) & (l2.B < r1.B) & (r1.B < r2.B) |\
@@ -189,7 +189,7 @@ def _test_link():
         
 
 def test_unconditioned():
-    l1, l2 = Var(BOOPType,"l1"), Var(BOOPType,"l2")
+    l1, l2 = Var(BOOP,"l1"), Var(BOOP,"l2")
 
     # c = var_and(l1,l2)
 
@@ -199,7 +199,7 @@ def test_unconditioned():
     
 def test_multiple_deref():
     with cre_context("test_ref_matching"):
-        TestLL, TestLLType = define_fact("TestLL",{"name": "string", "B" :'number', "nxt" : "TestLL"})
+        TestLL = define_fact("TestLL",{"name": "string", "B" :'number', "nxt" : "TestLL"})
 
         v1 = Var(TestLL,'v1')
         v2 = Var(TestLL,'v2')
@@ -207,7 +207,7 @@ def test_multiple_deref():
         print(c)
 
 def _test_existential_not():
-    l1, l2 = Var(BOOPType,"l1"), Var(BOOPType,"l2")
+    l1, l2 = Var(BOOP,"l1"), Var(BOOP,"l2")
     # print(l1.B)
     # print(~l1)
     # print(NOT(l1).B)
@@ -229,7 +229,7 @@ def _test_existential_not():
 
 def test_list_operations():
     with cre_context("test_list_operations"):
-        TList, TListType = define_fact("TList",{"name" : "string", "items" : "ListType(string)"})
+        TList = define_fact("TList",{"name" : "string", "items" : "ListType(string)"})
         v = Var(TList,"v")
         print(v.items[0])
         print(v.items[0] != v.items[1])
@@ -248,19 +248,19 @@ def hsh(x):
 def test_hash():
     ''' Tests hashing for Var, Literal, and Conditions '''
     with cre_context("test_hash"):
-        TestLL, TestLLType = define_fact("TestLL",{"name": "string", "B" :'number', "nxt" : "TestLL"})
+        TestLL = define_fact("TestLL",{"name": "string", "B" :'number', "nxt" : "TestLL"})
 
         ### VAR ### 
-        a1 = Var(TestLLType)
+        a1 = Var(TestLL)
         a2 = a1
-        b1 = Var(TestLLType)
+        b1 = Var(TestLL)
 
         assert hsh(a1) == hsh(a2)
         assert hsh(a1) != hsh(b1)
 
-        a1 = Var(TestLLType)
-        b1 = Var(TestLLType).nxt
-        b2 = Var(TestLLType).nxt.nxt.B
+        a1 = Var(TestLL)
+        b1 = Var(TestLL).nxt
+        b2 = Var(TestLL).nxt.nxt.B
 
         assert hsh(a1) != hsh(b1)
         assert hsh(a1) != hsh(b2)
@@ -281,14 +281,14 @@ def test_hash():
         assert hsh(a1) != hsh(b3)
 
         ### CONDITIONS ### 
-        X,Y = Var(TestLLType,"X"), Var(TestLLType,"Y")
+        X,Y = Var(TestLL,"X"), Var(TestLL,"Y")
         a1 = ( (X.B == 0) &
                ((X.nxt.B == Y.B) | (X.nxt.name == Y.name)) )
         a2 = ( (X.B == 0) &
                ((X.nxt.B == Y.B) | (X.nxt.name == Y.name)) )
 
-        b1 = ( (A:=Var(TestLLType)) & (A.B == 0) &
-               (B:=Var(TestLLType)) & ((A.nxt.B == B.B) | (A.nxt.name == B.name)) )
+        b1 = ( (A:=Var(TestLL)) & (A.B == 0) &
+               (B:=Var(TestLL)) & ((A.nxt.B == B.B) | (A.nxt.name == B.name)) )
         b2 = ( (X.B < 0) &
                ((X.nxt.B == Y.B) | (X.nxt.name == Y.name)) )
         b3 = ( (X.B == 0) &
@@ -312,19 +312,19 @@ def eq(a,b):
     return _cast_structref(CREObjType, a)==_cast_structref(CREObjType, b)
 
 def test_eq():
-        TestLL, TestLLType = define_fact("TestLL",{"name": "string", "B" :'number', "nxt" : "TestLL"})
+        TestLL = define_fact("TestLL",{"name": "string", "B" :'number', "nxt" : "TestLL"})
 
         ### VAR ### 
-        a1 = Var(TestLLType)
+        a1 = Var(TestLL)
         a2 = a1
-        b1 = Var(TestLLType)
+        b1 = Var(TestLL)
 
         assert eq(a1,a2)
         assert not eq(a1,b1)
 
-        a1 = Var(TestLLType)
-        b1 = Var(TestLLType).nxt
-        b2 = Var(TestLLType).nxt.nxt.B
+        a1 = Var(TestLL)
+        b1 = Var(TestLL).nxt
+        b2 = Var(TestLL).nxt.nxt.B
 
         assert not eq(a1,b1)
         assert not eq(a1,b2)
@@ -345,14 +345,14 @@ def test_eq():
         assert not eq(a1,b3)
 
         ### CONDITIONS ### 
-        X,Y = Var(TestLLType,"X"), Var(TestLLType,"Y")
+        X,Y = Var(TestLL,"X"), Var(TestLL,"Y")
         a1 = ( (X.B == 0) &
                ((X.nxt.B == Y.B) | (X.nxt.name == Y.name)) )
         a2 = ( (X.B == 0) &
                ((X.nxt.B == Y.B) | (X.nxt.name == Y.name)) )
 
-        b1 = ( (A:=Var(TestLLType)) & (A.B == 0) &
-               (B:=Var(TestLLType)) & ((A.nxt.B == B.B) | (A.nxt.name == B.name)) )
+        b1 = ( (A:=Var(TestLL)) & (A.B == 0) &
+               (B:=Var(TestLL)) & ((A.nxt.B == B.B) | (A.nxt.name == B.name)) )
         b2 = ( (X.B < 0) &
                ((X.nxt.B == Y.B) | (X.nxt.name == Y.name)) )
         b3 = ( (X.B == 0) &
@@ -414,10 +414,10 @@ def test_anti_unify():
 
 
 
-import logging
-print([name for name in logging.root.manager.loggerDict])
-logger = logging.getLogger()
-logger.setLevel(logging.DEBUG)
+# import logging
+# print([name for name in logging.root.manager.loggerDict])
+# logger = logging.getLogger()
+# logger.setLevel(logging.DEBUG)
 
 if(__name__ == "__main__"):
     test_anti_unify()

@@ -141,7 +141,7 @@ def get_fact_attr_ptr(typingctx, inst_type, attr_type):
     return u8(inst_type,attr_type), codegen
 
 def fact_setattr_codegen(context, builder, sig, args, attr, mutability_protected=False):
-    from cre.fact import Fact, BaseFactType
+    from cre.fact import Fact, BaseFact
     if(len(args) == 2):
         [inst_type, val_type] = sig.args
         [instance, val] = args
@@ -309,8 +309,8 @@ def define_attributes(struct_typeclass):
         #     if(isinstance(field_type, Fact)):
         #         def cast_obj(x):
         #             if(x is None):
-        #                 return _struct_from_ptr(BaseFactType,0)
-        #             return _cast_structref(BaseFactType, _nonoptional(x))
+        #                 return _struct_from_ptr(BaseFact,0)
+        #             return _cast_structref(BaseFact, _nonoptional(x))
         #     else:
         #         def cast_obj(x):
         #             return _cast_structref(field_type,x) 

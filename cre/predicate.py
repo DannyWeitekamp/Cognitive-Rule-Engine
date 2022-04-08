@@ -1,7 +1,7 @@
 from numba import njit, u1,u2, i4, i8, u8, types, literal_unroll, generated_jit
 from numba.typed import List
 from numba.types import ListType, unicode_type
-from cre.fact import base_fact_field_dict, BaseFactType, FactProxy, Fact
+from cre.fact import base_fact_field_dict, BaseFact, FactProxy, Fact
 from cre.fact_intrinsics import fact_lower_setattr, _register_fact_structref
 from cre.cre_object import CREObjType, CREObjProxy, CREObjTypeTemplate, member_info_type
 from cre.utils import _struct_get_attr_offset, _sizeof_type, _struct_get_data_ptr, _load_ptr, _struct_get_attr_offset, _struct_from_ptr, _cast_structref, _obj_cast_codegen, encode_idrec, decode_idrec, _incref_structref, _get_member_offset
@@ -33,7 +33,7 @@ predicate_fields = [(k,v) for k,v in predicate_field_dict.items()]
 class PredTypeTemplate(Fact):
     def __init__(self,*args,**kwargs):
         super().__init__(*args,**kwargs)
-        # self._fact_name = "cre.PredType2"
+        self._fact_name = "PredType"
 
     def preprocess_fields(self, fields):
         return tuple((name, types.unliteral(typ)) for name, typ in fields)
@@ -45,7 +45,7 @@ GenericPredType = PredTypeTemplate(predicate_fields)
 # print("<<", PredType, repr(PredType), type(PredType))
 define_attributes(GenericPredType)
 
-@lower_cast(PredTypeTemplate, BaseFactType)
+@lower_cast(PredTypeTemplate, BaseFact)
 @lower_cast(PredTypeTemplate, CREObjType)
 def upcast(context, builder, fromty, toty, val):
     return _obj_cast_codegen(context, builder, val, fromty, toty,incref=False)

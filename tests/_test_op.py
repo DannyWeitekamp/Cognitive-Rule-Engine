@@ -16,7 +16,7 @@ class PrintElapse():
         self.t1 = time.time_ns()/float(1e6)
         print(f'{self.name}: {self.t1-self.t0:.2f} ms')
 
-BOOP, BOOPType = define_fact("BOOP", {"A" : f8, "B": f8})
+BOOP = define_fact("BOOP", {"A" : f8, "B": f8})
 
 # time1 = time.time_ns()/float(1e6)
 # print(f8(f8,f8))
@@ -49,7 +49,7 @@ with PrintElapse("--Def AddOne"):
 # time1 = time.time_ns()/float(1e6)
 with PrintElapse("--Def SumBOOPs"):
     class SumBOOPs(Op):
-        signature = BOOPType(BOOPType,BOOPType)
+        signature = BOOP(BOOP,BOOP)
         def check(a,b):
             return a.A > 0
         def call(a,b):

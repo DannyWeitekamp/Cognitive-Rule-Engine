@@ -1,7 +1,7 @@
 from numba import i8
 from numba.types import unicode_type
 from cre.op import Op
-from cre.fact import BaseFactType
+from cre.fact import BaseFact
 from cre.ptrop import PtrOp
 from cre.utils import _load_ptr, _struct_from_ptr, decode_idrec
 
@@ -72,23 +72,23 @@ def Concatenate(a, b):
 @PtrOp(nargs=2, shorthand = '({0} == {1})')
 def ObjEquals(ptrs):
     '''From two head_ptrs see if the underlying pointers to objects are the same'''
-    # objptr0 = _struct_from_ptr(BaseFactType,_load_ptr(i8,ptrs[0]))
-    # objptr1 = _struct_from_ptr(BaseFactType,_load_ptr(i8,ptrs[1]))
+    # objptr0 = _struct_from_ptr(BaseFact,_load_ptr(i8,ptrs[0]))
+    # objptr1 = _struct_from_ptr(BaseFact,_load_ptr(i8,ptrs[1]))
     objptr0 = _load_ptr(i8,ptrs[0])
     objptr1 = _load_ptr(i8,ptrs[1])
-    # print("OJBS", decode_idrec(_struct_from_ptr(BaseFactType,objptr0).idrec)[1] if objptr0 else -1,
-    #  decode_idrec(_struct_from_ptr(BaseFactType,objptr1).idrec)[1] if objptr1 else -1, objptr0 == objptr1)
+    # print("OJBS", decode_idrec(_struct_from_ptr(BaseFact,objptr0).idrec)[1] if objptr0 else -1,
+    #  decode_idrec(_struct_from_ptr(BaseFact,objptr1).idrec)[1] if objptr1 else -1, objptr0 == objptr1)
     return objptr0 == objptr1
 
 # PtrOp(nargs=2, shorthand = '({0} == {1})')
 # def FactIdrecsLessThan(ptrs):
 #     '''From two head_ptrs see if the left pointers to objects are the same'''
-#     # objptr0 = _struct_from_ptr(BaseFactType,_load_ptr(i8,ptrs[0]))
-#     # objptr1 = _struct_from_ptr(BaseFactType,_load_ptr(i8,ptrs[1]))
+#     # objptr0 = _struct_from_ptr(BaseFact,_load_ptr(i8,ptrs[0]))
+#     # objptr1 = _struct_from_ptr(BaseFact,_load_ptr(i8,ptrs[1]))
 #     objptr0 = _load_ptr(i8,ptrs[0])
 #     objptr1 = _load_ptr(i8,ptrs[1])
-#     # print("OJBS", decode_idrec(_struct_from_ptr(BaseFactType,objptr0).idrec)[1] if objptr0 else -1,
-#     #  decode_idrec(_struct_from_ptr(BaseFactType,objptr1).idrec)[1] if objptr1 else -1, objptr0 == objptr1)
+#     # print("OJBS", decode_idrec(_struct_from_ptr(BaseFact,objptr0).idrec)[1] if objptr0 else -1,
+#     #  decode_idrec(_struct_from_ptr(BaseFact,objptr1).idrec)[1] if objptr1 else -1, objptr0 == objptr1)
 #     return objptr0 < objptr1
 
 @PtrOp(nargs=1, shorthand = '({0} == None)')

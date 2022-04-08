@@ -2,7 +2,7 @@ from numba import njit, types, u8, i8, f8, generated_jit, cfunc
 from numba.typed import List
 from numba.types import unicode_type
 from numba.types import CompileResultWAP
-from cre.fact import base_fact_field_dict, BaseFactType, FactProxy, Fact
+from cre.fact import base_fact_field_dict, BaseFact, FactProxy, Fact
 from cre.fact_intrinsics import fact_lower_setattr, _register_fact_structref
 from cre.cre_object import CREObjType, CREObjProxy, CREObjTypeTemplate
 from cre.utils import encode_idrec, _struct_from_ptr, _obj_cast_codegen, _cast_structref, _ptr_from_struct_incref
@@ -44,7 +44,7 @@ define_attributes(IntegerPrimitiveType)
 define_attributes(FloatPrimitiveType)
 define_attributes(StringPrimitiveType)
 
-@lower_cast(PrimitiveTypeTemplate, BaseFactType)
+@lower_cast(PrimitiveTypeTemplate, BaseFact)
 @lower_cast(PrimitiveTypeTemplate, CREObjType)
 def upcast(context, builder, fromty, toty, val):
     return _obj_cast_codegen(context, builder, val, fromty, toty,incref=False)

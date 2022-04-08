@@ -15,7 +15,7 @@ print("Import time:",(t1-t0)/1e6)
 
 # raise ValueError()
 
-StopLight, StopLightType = define_fact("StopLight",{"color": "string"})
+StopLight = define_fact("StopLight",{"color": "string"})
 
 t2 = time.time_ns()
 print("Define Fact time:",(t2-t1)/1e6)
@@ -25,7 +25,7 @@ global_value = 11
 class GreenToYellow(Rule):
     # cache_then = False
     def when():
-        s = Var(StopLightType,"l1")
+        s = Var(StopLight,"l1")
         c = (s.color == "green")
         return c
 
@@ -40,7 +40,7 @@ class GreenToYellow(Rule):
 
 class YellowToRed(Rule):
     def when():
-        s = Var(StopLightType,"l1")
+        s = Var(StopLight,"l1")
         c = (s.color == "yellow")
         return c
 

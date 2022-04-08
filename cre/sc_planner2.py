@@ -14,7 +14,7 @@ from cre.context import cre_context
 from cre.structref import define_structref, define_structref_template
 from cre.memory import MemoryType, Memory, facts_for_t_id, fact_at_f_id
 from cre.var import GenericVarType
-# from cre.fact import define_fact, BaseFactType, cast_fact, DeferredFactRefType, Fact
+# from cre.fact import define_fact, BaseFact, cast_fact, DeferredFactRefType, Fact
 from cre.utils import (ptr_t, _struct_from_meminfo, _meminfo_from_struct, _cast_structref, cast_structref, decode_idrec, lower_getattr, _struct_from_ptr,  lower_setattr, lower_getattr,
                        _raw_ptr_from_struct, _decref_ptr, _incref_ptr, _incref_structref, _ptr_from_struct_incref,
                        _dict_from_ptr, _list_from_ptr, _load_ptr, _arr_from_data_ptr, _get_array_raw_data_ptr, _get_array_raw_data_ptr_incref)
@@ -315,7 +315,7 @@ def sc_planner_ctor():
     st.inv_val_map_ptr_dict = Dict.empty(unicode_type, ptr_t)
     st.flat_vals_ptr_dict = Dict.empty(str_int_tuple, ptr_t)
     return st
-    
+
 @generated_jit(cache=True,nopython=True)
 def ensure_ptr_dicts(planner, typ):
     _typ = typ.instance_type
@@ -1124,10 +1124,10 @@ from numba import njit, types
 from cre.var import Var, get_var_definition
 from cre.sc_planner2 import planner_declare_val, SetChainingPlannerType
 {gen_fact_import_str(fact_def)}
-var_type = get_var_definition({name}Type,{name}Type)
-@njit(types.void(SetChainingPlannerType, {name}Type, types.Optional(var_type)),cache=True)
+var_type = get_var_definition({name},{name})
+@njit(types.void(SetChainingPlannerType, {name}, types.Optional(var_type)),cache=True)
 def declare_fact(planner, fact, var=None):
-    v = Var({name}Type) if var is None else var
+    v = Var({name}) if var is None else var
     planner_declare_val(planner,fact,v)
 '''
     src += indent("\n".join([f"planner_declare_val(planner, fact.{attr}, v.{attr})" for attr in visible_attrs]),prefix=ind)

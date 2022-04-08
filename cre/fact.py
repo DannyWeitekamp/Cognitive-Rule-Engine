@@ -18,6 +18,8 @@ from numba.core.extending import (
 from numba.core.datamodel import default_manager, models
 from numba.core import types, cgutils
 from numba.types import ListType
+from numba.core.typing import signature
+
 # from numba.core.extending import overload
 
 from cre.core import TYPE_ALIASES, JITSTRUCTS, py_type_map, numba_type_map, numpy_type_map
@@ -53,13 +55,33 @@ class Fact(CREObjTypeTemplate):
         return self._field_dict_keys
 
     def get_attr_offset(self,attr):
-        return self._attr_offsets[self.get_attr_a_id(self,attr)]
+        return self._attr_offsets[self.get_attr_a_id(attr)]
 
     def get_attr_a_id(self, attr):
         return self.field_dict_keys.index(attr)
 
     def get_attr_from_a_id(self, a_id):
         return self.field_dict_keys[a_id]
+
+    def __call__(self, *args, **kwargs):
+        ''' If a fact_type is called with types return a signature 
+            otherwise use it's ctor to return a new instance'''
+        if len(args) > 0 and isinstance(args[0], types.Type):
+            return signature(self, *args)
+        # print("!!", self._ctor.__module__)
+        # print(args,kwargs)
+        # print(self._ctor)
+        return self._ctor[0](*args, **kwargs)
+
+    # @property
+    # def key(self):
+    #     """
+    #     A property used for __eq__, __ne__ and __hash__.  Can be overridden
+    #     in subclasses.
+    #     """
+    #     # if(hasattr(self,'name'))
+    #     return self.name
+    #     # return (self._fact_name, getattr(self,"_hash_code",None), getattr())
 
     
 
@@ -247,7 +269,7 @@ class FactProxy:
              a FactProxy instance.
         """
         instance = super().__new__(cls)
-        # instance._type = BaseFactType
+        # instance._type = BaseFact
         instance._meminfo = mi
         return instance
 
@@ -354,10 +376,10 @@ class FactProxy:
 
 
 def gen_fact_import_str(t):
-    return f"from cre_cache.{t._fact_name}._{t._hash_code} import {t._fact_name + 'Type'}"
+    return f"from cre_cache.{t._fact_name}._{t._hash_code} import {t._fact_name}"
 
 def gen_inherit_import_str(t):
-    return f"from cre_cache.{t._fact_name}._{t._hash_code} import {t._fact_name}Type, inheritance_bytes as parent_inh_bytes"
+    return f"from cre_cache.{t._fact_name}._{t._hash_code} import {t._fact_name}, inheritance_bytes as parent_inh_bytes"
 
 def _gen_getter_jit(f_typ,typ,attr):
     if(isinstance(typ,(Fact,DeferredFactRefType))):
@@ -400,11 +422,11 @@ fact_types = (Fact, DeferredFactRefType)
 #### Resolving Byte Offsets of Struct Members ####
 
 def get_offsets_from_member_types(fields):
-    # from cre.fact import fact_types, FactModel, BaseFactType
+    # from cre.fact import fact_types, FactModel, BaseFact
     if(isinstance(fields, dict)): fields = [(k,v) for k,v in fields.items()]
-    #Replace fact references with BaseFactType
+    #Replace fact references with BaseFact
     # fact_types = (types.StructRef, DeferredFactRefType)
-    fields = [(a,BaseFactType if isinstance(t,fact_types) else t) for a,t in fields]
+    fields = [(a,BaseFact if isinstance(t,fact_types) else t) for a,t in fields]
 
     class TempTypeTemplate(types.StructRef):
         pass
@@ -419,11 +441,11 @@ def get_offsets_from_member_types(fields):
 #     '''Helper function for turning a type into code that reproduces it'''
 #     if(isinstance(typ,fact_types)):
 #         # To avoid various typing issues fact refs are just i8 (i.e. raw pointers)
-#         return 'BaseFactType'
+#         return 'BaseFact'
 #     elif(isinstance(typ, ListType)):
-#         # To avoid various typing issues lists of facts are stored with dtype BaseFactType
+#         # To avoid various typing issues lists of facts are stored with dtype BaseFact
 #         dt = typ.dtype
-#         dtype_repr = f'BaseFactType' if(isinstance(dt,fact_types)) else repr(dt)
+#         dtype_repr = f'BaseFact' if(isinstance(dt,fact_types)) else repr(dt)
 #         return f'ListType({dtype_repr})'
 #     elif(isinstance(typ, UniTuple)):
 #         typ.type 
@@ -503,11 +525,11 @@ def _prep_field(attr, t, imports_set):
     # elif(isinstance(t,types.ListType) and isinstance(t.dtype,types.StructRef)):
     #     imports_set.add(f"{gen_fact_import_str(t.dtype)}")
 
-    # upcast any facts to BaseFactType since references to undefined fact types not supported
+    # upcast any facts to BaseFact since references to undefined fact types not supported
     if(isinstance(t,fact_types)):
         if(isinstance(t,Fact)):
             imports_set.add(f"{gen_fact_import_str(t)}")
-        return attr, BaseFactType
+        return attr, BaseFact
     elif(isinstance(t,ListType)):
         if(isinstance(t.dtype,fact_types)):
             _, dtype = _prep_field(attr, t.dtype, imports_set)
@@ -527,7 +549,7 @@ def _prep_fields_populate_imports(fields, inherit_from=None):
         
     return fields, "\n".join(list(imports_set))
 
-def gen_fact_src(typ, fields, fact_num, inherit_from=None, ind='    '):
+def gen_fact_src(typ, fields, fact_num, inherit_from=None, hash_code="", ind='    '):
     '''Generate the source code for a new fact '''
     # print(typ.spec)
     fields, fact_imports = _prep_fields_populate_imports(fields, inherit_from)
@@ -575,9 +597,10 @@ from numba.core.types import *
 from numba.core.types import unicode_type, ListType, UniTuple, Tuple
 from numba.experimental import structref
 from numba.experimental.structref import new#, define_boxing
-from numba.core.extending import overload, lower_cast
+from numba.core.extending import overload, lower_cast, type_callable
+from numba.core.imputils import numba_typeref_ctor
 from cre.fact_intrinsics import define_boxing, get_fact_attr_ptr, _register_fact_structref, fact_mutability_protected_setattr, fact_lower_setattr, _fact_get_chr_mbrs_infos
-from cre.fact import repr_list_attr, repr_fact_attr,  FactProxy, Fact{", BaseFactType, base_list_type, fact_to_ptr, get_inheritance_bytes_len_ptr" if typ != "BaseFact" else ""}, uint_to_inheritance_bytes
+from cre.fact import repr_list_attr, repr_fact_attr,  FactProxy, Fact{", BaseFact, base_list_type, fact_to_ptr, get_inheritance_bytes_len_ptr" if typ != "BaseFact" else ""}, uint_to_inheritance_bytes
 from cre.utils import _raw_ptr_from_struct, ptr_t, _get_member_offset, _cast_structref, _load_ptr, _obj_cast_codegen
 import cloudpickle
 from cre.cre_object import member_info_type, set_chr_mbrs
@@ -590,24 +613,25 @@ inheritance_bytes = tuple({"list(parent_inh_bytes) + " if inherit_from else ""}l
 num_inh_bytes = len(inheritance_bytes)
 
 @_register_fact_structref
-class {typ}TypeTemplate(Fact):
+class {typ}Class(Fact):
     def __init__(self,*args,**kwargs):
         super().__init__(*args,**kwargs)
         self._fact_name = '{typ}'
         self._fact_num = {fact_num}
         self._attr_offsets = attr_offsets
+        # self._hash_code = '{hash_code}'
 
     def preprocess_fields(self, fields):
         return tuple((name, types.unliteral(typ)) for name, typ in fields)
 
 field_list = cloudpickle.loads({cloudpickle.dumps(all_fields)})
-{typ}Type = {typ}TypeTemplate(field_list)
-{typ}Type_w_mbr_infos = {typ}TypeTemplate(field_list+
+{typ} = {typ}Class(field_list)
+{typ}_w_mbr_infos = {typ}Class(field_list+
 [("chr_mbrs_infos", UniTuple(member_info_type,{len(fields)})),
  ("num_inh_bytes", u1),
  ("inh_bytes", UniTuple(u1, num_inh_bytes))])
 
-{(f"""@lower_cast({typ}Type, {inherit_from._fact_name}Type)
+{(f"""@lower_cast({typ}, {inherit_from._fact_name})
 def upcast(context, builder, fromty, toty, val):
     return _obj_cast_codegen(context, builder, val, fromty, toty,incref=False)                        
 """) if inherit_from is not None else ""
@@ -615,14 +639,14 @@ def upcast(context, builder, fromty, toty, val):
 
 @njit(cache=True)
 def get_chr_mbrs_infos():
-    st = new({typ}Type)
+    st = new({typ})
     return _fact_get_chr_mbrs_infos(st)
 
 chr_mbrs_infos = get_chr_mbrs_infos()
-{typ}TypeTemplate._chr_mbrs_infos = chr_mbrs_infos
+{typ}Class._chr_mbrs_infos = chr_mbrs_infos
 
 {(f"""#locals={{'inheritance_bytes':Tuple((u1,num_inh_bytes))}}
-@njit(u1(BaseFactType), cache=True)
+@njit(u1(BaseFact), cache=True)
 def isa_{typ}(fact):
     l, p = get_inheritance_bytes_len_ptr(fact)
     if(l >= num_inh_bytes):
@@ -634,17 +658,17 @@ def isa_{typ}(fact):
     else:
         return False
 """) if typ != "BaseFact" else (
-f"""@njit(u1(BaseFactType), cache=True)
+f"""@njit(u1(BaseFact), cache=True)
 def isa_{typ}(fact):
     return True
 """
 )
 }
-{typ}TypeTemplate._isa = isa_{typ}
+{typ}Class._isa = isa_{typ}
 
 @njit(cache=True)
 def ctor({param_defaults_seq}):
-    st = new({typ}Type_w_mbr_infos)
+    st = new({typ}_w_mbr_infos)
     fact_lower_setattr(st,'idrec',u8(-1))
     fact_lower_setattr(st,'hash_val',0)
     fact_lower_setattr(st,'fact_num',{fact_num})
@@ -652,8 +676,10 @@ def ctor({param_defaults_seq}):
     fact_lower_setattr(st,'num_inh_bytes', num_inh_bytes)
     fact_lower_setattr(st,'inh_bytes', inheritance_bytes)
     {init_fields}
-    return _cast_structref({typ}Type,st)
+    return _cast_structref({typ},st)
 
+# Put in a tuple so it doesn't get wrapped in a method
+{typ}Class._ctor = (ctor,)
 
 {getter_jits}
 
@@ -662,15 +688,16 @@ def lower_setattr(self,attr,val):
     fact_mutability_protected_setattr(self,literally(attr),val)
 
         
-class {typ}(FactProxy):
+class {typ}Proxy(FactProxy):
     __numba_ctor = ctor
-    _fact_type = {typ}Type
+    _fact_type = {typ}
+    _fact_type_class = {typ}Class
     _fact_name = '{typ}'
     _fact_num = {fact_num}
     _attr_offsets = attr_offsets
     _chr_mbrs_infos = chr_mbrs_infos
     _isa = isa_{typ}
-    _code = {typ}Type._code
+    _code = {typ}._code
 
     def __new__(cls, *args,**kwargs):
         return ctor(*args,**kwargs)
@@ -683,13 +710,34 @@ class {typ}(FactProxy):
 
 {properties}
 
-@overload({typ})
-def _ctor({param_defaults_seq}):
-    def impl({param_defaults_seq}):
+# Overload '{typ}' as its own constructor
+@type_callable({typ})
+def ssp_call(context):
+    def typer({param_seq}):
+        return {typ}
+    return typer
+
+@overload(numba_typeref_ctor)
+def overload_{typ}(self, {param_defaults_seq}):
+    if(self.instance_type is not {typ}): return
+    def impl(self, {param_defaults_seq}):
         return ctor({param_seq})
     return impl
 
-define_boxing({typ}TypeTemplate,{typ})
+{typ}Class._fact_type = {typ}
+{typ}Class._fact_proxy = {typ}Proxy
+
+{typ}._fact_type_class = {typ}Class
+{typ}._fact_proxy = {typ}Proxy
+
+
+# @overload({typ}Proxy)
+# def _ctor({param_defaults_seq}):
+#     def impl({param_defaults_seq}):
+#         return ctor({param_seq})
+#     return impl
+
+define_boxing({typ}Class,{typ}Proxy)
 '''
     return code
 
@@ -722,34 +770,35 @@ def add_to_fact_registry(name,hash_code):
 
 
 
-def _fact_from_fields(name, fields, context=None, inherit_from=None):
+def _fact_from_fields(name, fields, context=None, inherit_from=None, return_proxy=False, return_type_class=False):
     context = cre_context(context)
     hash_code = unique_hash([name,fields])
     if(not source_in_cache(name,hash_code)):
         fact_num = lines_in_fact_registry()
-        source = gen_fact_src(name,fields,fact_num, inherit_from)
+        source = gen_fact_src(name, fields, fact_num, inherit_from, hash_code)
         source_to_cache(name, hash_code, source)
         add_to_fact_registry(name, hash_code)
 
     # print(get_cache_path(name,hash_code))
+    to_get = [name]
+    if(return_proxy): to_get.append(name+"Proxy")
+    if(return_type_class): to_get.append(name+"Class")
         
-    fact_ctor, fact_type = import_from_cached(name, hash_code,[name,name+"Type"]).values()
-    fact_ctor._hash_code = hash_code
-    fact_type._hash_code = hash_code
-    # fact_type = fact_type_template(fields=fields)
-    # print("fact_type",fact_type)
+    out = tuple(import_from_cached(name, hash_code, to_get).values())
+    for x in out: x._hash_code = hash_code
+        
+    return tuple(out) if len(out) > 1 else out[0]
 
-    return fact_ctor, fact_type
-
-def _fact_from_spec(name, spec, context=None, inherit_from=None):
+def _fact_from_spec(name, spec, context=None, inherit_from=None, return_proxy=False, return_type_class=False):
     # assert parent_fact_type
     fields = [(k,v['type']) for k, v in spec.items()]
     return _fact_from_fields(name,fields,context=context,
-             inherit_from=inherit_from)
+             inherit_from=inherit_from, return_proxy=return_proxy,
+            return_type_class=return_type_class)
 
     
 
-def define_fact(name : str, spec : dict, context=None):
+def define_fact(name : str, spec : dict, context=None, return_proxy=False, return_type_class=False):
     '''Defines a new fact.'''
     context = cre_context(context)
 
@@ -757,37 +806,25 @@ def define_fact(name : str, spec : dict, context=None):
     spec, inherit_from = _merge_spec_inheritance(spec,context)
 
     if(name in context.type_registry):
-        # print(str(context.type_registry[name].spec))
-        # print(str(spec))
         assert str(context.type_registry[name].spec) == str(spec), \
         f"Redefinition of fact '{name}' in context '{context.name}' not permitted"
+        fact_type = context.type_registry[name]        
+    else:
+        fact_type = _fact_from_spec(name, spec, context=context,
+         inherit_from=inherit_from, return_proxy=False, return_type_class=False)
+        dt = context.get_deferred_type(name)
+        dt.define(fact_type)
+        context._assert_flags(name, spec)
+        context._register_fact_type(name, spec, fact_type, inherit_from=inherit_from)
+        fact_type.spec = spec
+        fact_type._fact_proxy.spec = spec
+        fact_type._fact_type_class._spec = spec
 
-        # print(f"FACT REDEFINITION: '{name}' in context '{context.name}' ")
-        return context.fact_ctors[name], context.type_registry[name]
-
-
-    fact_ctor, fact_type = _fact_from_spec(name, spec, context=context, inherit_from=inherit_from)
-
-    # Define the deferred type for this
-    dt = context.get_deferred_type(name)
-    dt.define(fact_type)
-
-    # If a deffered type was used on specialization then define it
-    # for attr,d in spec.items():
-    #     dt = d.get('type',None)
-    #     if(isinstance(dt,ListType)): dt = dt.dtype
-        # if(isinstance(dt,DeferredFactRefType) and dt._fact_name == name):
-        #     dt.define(fact_type)
-    # for k,v in spec.items():
-    #     if(isinstance(v['type'],DeferredFactRefType)): spec[k]['type'] = fact_type
-    context._assert_flags(name,spec)
-    # print("PASSING IN", inherit_from)
-    context._register_fact_type(name,spec,fact_ctor,fact_type,inherit_from=inherit_from)
-
-    # fact_ctor.name = fact_type.name = name
-    fact_ctor.spec = fact_type.spec = spec
-
-    return fact_ctor, fact_type
+    out = [fact_type]
+    if(return_proxy): out.append(fact_type._fact_proxy)
+    if(return_type_class): out.append(fact_type._fact_type_class)
+    return tuple(out) if len(out) > 1 else out[0]
+    # return fact_ctor, fact_type
 
 
 def define_facts(specs, #: list[dict[str,dict]],
@@ -806,11 +843,12 @@ base_fact_field_dict = {
 
 base_fact_fields  = [(k,v) for k,v in base_fact_field_dict.items()]
 
-BaseFact, BaseFactType = _fact_from_fields("BaseFact", [])
-base_list_type = ListType(BaseFactType)
+BaseFact = _fact_from_fields("BaseFact", [])
+print("BaseFact", BaseFact, type(BaseFact))
+base_list_type = ListType(BaseFact)
 
 # @lower_cast(Fact, CREObjType)
-@lower_cast(Fact, BaseFactType)
+@lower_cast(Fact, BaseFact)
 def upcast(context, builder, fromty, toty, val):
     return _obj_cast_codegen(context, builder, val, fromty, toty,incref=False)
 
@@ -821,8 +859,8 @@ def fact_to_ptr(fact):
 
 @njit(cache=True)
 def fact_to_basefact(fact):
-    return _struct_from_ptr(BaseFactType,_raw_ptr_from_struct(fact)) 
-    # return _cast_structref(BaseFactType, fact)
+    return _struct_from_ptr(BaseFact,_raw_ptr_from_struct(fact)) 
+    # return _cast_structref(BaseFact, fact)
 
 @njit(cache=True)
 def fact_to_ptr_incref(fact):
@@ -844,7 +882,7 @@ def cast_fact(typ, val):
     '''Casts a fact to a new type of fact if possible'''
     context = cre_context()    
     inst_type = typ.instance_type
-    # print("CAST", val._fact_name, "to", inst_type._fact_name)
+    print("CAST", val._fact_name, "to", inst_type._fact_name)
 
     #Check if the fact_type can be casted 
     if(inst_type._fact_name != "BaseFact" and val._fact_name != "BaseFact" and
@@ -864,7 +902,7 @@ def cast_fact(typ, val):
     return impl
 
 
-@njit(Tuple((u1,i8))(BaseFactType), cache=True)
+@njit(Tuple((u1,i8))(BaseFact), cache=True)
 def get_inheritance_bytes_len_ptr(st):
     ptr = _struct_get_data_ptr(st) + st.chr_mbrs_infos_offset + \
              (st.num_chr_mbrs * _sizeof_type(member_info_type))

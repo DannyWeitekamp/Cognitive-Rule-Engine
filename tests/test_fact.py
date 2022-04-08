@@ -1,6 +1,6 @@
 import numpy as np
 from cre.fact import (_fact_from_spec, _standardize_spec, _merge_spec_inheritance, 
-     define_fact, cast_fact, _cast_structref, BaseFact, BaseFactType, DeferredFactRefType, isa,
+     define_fact, cast_fact, _cast_structref, BaseFact, DeferredFactRefType, isa,
       uint_to_inheritance_bytes, get_inheritance_bytes_len_ptr)
 from cre.context import cre_context
 from cre.memory import Memory
@@ -28,7 +28,7 @@ def test__standardize_spec():
 def test__merge_spec_inheritance():
     with cre_context("test__merge_spec_inheritance") as context:
         spec1 = {"A" : "string", "B" : "number"}
-        BOOP, BOOPType = define_fact("BOOP", spec1, context="test__merge_spec_inheritance")
+        BOOP = define_fact("BOOP", spec1, context="test__merge_spec_inheritance")
 
         #Should be able to inherit from ctor, type or type string
         spec2 = {"inherit_from" : BOOP, "C" : "number"}
@@ -36,7 +36,7 @@ def test__merge_spec_inheritance():
         assert inherit_from._fact_name == "BOOP"
         assert "inherit_from" not in spec_out
 
-        spec2 = {"inherit_from" : BOOPType, "C" : "number"}
+        spec2 = {"inherit_from" : BOOP, "C" : "number"}
         spec_out, inherit_from = _merge_spec_inheritance(spec2,context)
         assert inherit_from._fact_name == "BOOP"
         assert "inherit_from" not in spec_out
@@ -66,14 +66,14 @@ def test_define_fact():
     spec2 = {"A" : "string", "B" : "string"}
     with cre_context("test_define_fact") as context:
         
-        ctor, typ1 = define_fact("BOOP", spec)
+        typ1 = define_fact("BOOP", spec)
         #Redefinition illegal with new types
         with pytest.raises(AssertionError):
             define_fact("BOOP", spec2)
 
     with cre_context("test_define_fact2") as context:
         #But is okay if defined under a different context
-        ctor, typ2 = define_fact("BOOP", spec2)
+        typ2 = define_fact("BOOP", spec2)
 
 
 def test_inheritence_bytes():
@@ -88,11 +88,11 @@ def test_inheritence_bytes():
 def test_inheritence():
     with cre_context("test_inheritence") as context:
         spec1 = {"A" : "string", "B" : "number"}
-        BOOP1, BOOP1Type = define_fact("BOOP1", spec1, context="test_inheritence")
+        BOOP1 = define_fact("BOOP1", spec1, context="test_inheritence")
         spec2 = {"inherit_from" : BOOP1, "C" : "number"}
-        BOOP2, BOOP2Type = define_fact("BOOP2", spec2, context="test_inheritence")
+        BOOP2 = define_fact("BOOP2", spec2, context="test_inheritence")
         spec3 = {"inherit_from" : BOOP2, "D" : "number"}
-        BOOP3, BOOP3Type = define_fact("BOOP3", spec3, context="test_inheritence")
+        BOOP3 = define_fact("BOOP3", spec3, context="test_inheritence")
 
         assert context.parents_of["BOOP3"] == ["BOOP1","BOOP2"]
         assert context.children_of["BOOP3"] == []
@@ -103,9 +103,9 @@ def test_inheritence():
 
         # Context should keep track of parent and child t_ids
         cd = context.context_data
-        b1_t_id = cd.fact_num_to_t_id[BOOP1Type._fact_num]
-        b2_t_id = cd.fact_num_to_t_id[BOOP2Type._fact_num]
-        b3_t_id = cd.fact_num_to_t_id[BOOP3Type._fact_num]
+        b1_t_id = cd.fact_num_to_t_id[BOOP1._fact_num]
+        b2_t_id = cd.fact_num_to_t_id[BOOP2._fact_num]
+        b3_t_id = cd.fact_num_to_t_id[BOOP3._fact_num]
 
         assert np.array_equal(cd.parent_t_ids[b1_t_id],[])
         assert np.array_equal(cd.parent_t_ids[b2_t_id],[b1_t_id])
@@ -135,17 +135,17 @@ def test_inheritence():
         @njit(cache=True)
         def check_isa(b1,b2,b3):
             okay = np.empty((9,),dtype=np.uint)
-            okay[0] = (b1.isa(BOOP1Type) == 1)
-            okay[1] = (b2.isa(BOOP1Type) == 1)
-            okay[2] = (b3.isa(BOOP1Type) == 1)
+            okay[0] = (b1.isa(BOOP1) == 1)
+            okay[1] = (b2.isa(BOOP1) == 1)
+            okay[2] = (b3.isa(BOOP1) == 1)
 
-            okay[3] = (b1.isa(BOOP2Type) == 0)
-            okay[4] = (b2.isa(BOOP2Type) == 1)
-            okay[5] = (b3.isa(BOOP2Type) == 1)
+            okay[3] = (b1.isa(BOOP2) == 0)
+            okay[4] = (b2.isa(BOOP2) == 1)
+            okay[5] = (b3.isa(BOOP2) == 1)
 
-            okay[6] = (b1.isa(BOOP3Type) == 0)
-            okay[7] = (b2.isa(BOOP3Type) == 0)
-            okay[8] = (b3.isa(BOOP3Type) == 1)
+            okay[6] = (b1.isa(BOOP3) == 0)
+            okay[7] = (b2.isa(BOOP3) == 0)
+            okay[8] = (b3.isa(BOOP3) == 1)
 
             # okay[0] = (b1.isa(BOOP1) == 1)
             # okay[1] = (b2.isa(BOOP1) == 1)
@@ -170,15 +170,15 @@ def test_inheritence():
         
 
 
-        # print(BOOP1Type._isa(b1))
-        # print(BOOP1Type._isa(b2))
-        # print(BOOP1Type._isa(b3))
-        # print(BOOP2Type._isa(b1))
-        # print(BOOP2Type._isa(b2))
-        # print(BOOP2Type._isa(b3))
-        # print(BOOP3Type._isa(b1))
-        # print(BOOP3Type._isa(b2))
-        # print(BOOP3Type._isa(b3))
+        # print(BOOP1._isa(b1))
+        # print(BOOP1._isa(b2))
+        # print(BOOP1._isa(b3))
+        # print(BOOP2._isa(b1))
+        # print(BOOP2._isa(b2))
+        # print(BOOP2._isa(b3))
+        # print(BOOP3._isa(b1))
+        # print(BOOP3._isa(b2))
+        # print(BOOP3._isa(b3))
         
 
         
@@ -188,21 +188,27 @@ def test_inheritence():
 def test_cast_fact():
     with cre_context("test_cast_fact") as context:
         spec1 = {"A" : "string", "B" : "number"}
-        BOOP1, BOOP1Type = define_fact("BOOP1", spec1, context="test_cast_fact")
+        BOOP1 = define_fact("BOOP1", spec1)
         spec2 = {"inherit_from" : BOOP1, "C" : "number"}
-        BOOP2, BOOP2Type = define_fact("BOOP2", spec2, context="test_cast_fact")
+        BOOP2 = define_fact("BOOP2", spec2)
         spec3 = {"inherit_from" : BOOP2, "D" : "number"}
-        BOOP3, BOOP3Type = define_fact("BOOP3", spec3, context="test_cast_fact")
+        BOOP3 = define_fact("BOOP3", spec3)
+
+        print(BOOP1, type(BOOP1))
+        print(BOOP2, type(BOOP2))
+        print(BOOP3, type(BOOP3))
 
 
         b1 = BOOP1("A",7)
         b3 = BOOP3("A",1,2,3)
         bs = BaseFact()
 
+        print(b1, type(b1))
+
         #upcast
         @njit
         def down_cast(b):
-            return cast_fact(BOOP1Type,b)    
+            return cast_fact(BOOP1,b)    
 
         _b1 = down_cast(b3)
         assert type(b1) == type(_b1)
@@ -212,18 +218,18 @@ def test_cast_fact():
         #Upcast back
         @njit
         def up_cast(b):
-            return cast_fact(BOOP3Type,b)    
+            return cast_fact(BOOP3,b)    
         _b3 = up_cast(_b1)
         assert type(b3) == type(_b3)
         _b3 = up_cast.py_func(_b1)    
         assert type(b3) == type(_b3)    
 
-        FLOOP, FLOOPType = define_fact("FLOOP", spec3, context="test_cast_fact")
+        FLOOP = define_fact("FLOOP", spec3)
 
         #Bad cast
         @njit
         def bad_cast(b):
-            return cast_fact(FLOOPType,b) 
+            return cast_fact(FLOOP,b) 
 
         with pytest.raises(TypeError):
             bad_cast(b3)
@@ -234,7 +240,7 @@ def test_cast_fact():
         #Always allow casting to and from BaseFact
         @njit
         def base_down_cast(b):
-            return cast_fact(BaseFactType,b)    
+            return cast_fact(BaseFact,b)    
         _bs = base_down_cast(_b1)
         assert type(bs) == type(_bs)
         _bs = base_down_cast.py_func(_b1)    
@@ -242,16 +248,16 @@ def test_cast_fact():
 
         @njit
         def base_up_cast(b):
-            return cast_fact(BOOP1Type,b)    
+            return cast_fact(BOOP1,b)    
         _b1 = base_up_cast(_bs)
         assert type(b1) == type(_b1)
         _b1 = base_up_cast.py_func(_bs)    
-        assert type(b1) == type(_b1)    
+        assert type(b1) == type(_b1)     
 
 # def test_fact_eq():
 #     with cre_context("test_fact_eq") as context:
 #         spec1 = {"A" : "string", "B" : "number"}
-#         BOOP1, BOOP1Type = define_fact("BOOP1", spec1)
+#         BOOP1 = define_fact("BOOP1", spec1)
 
 #         b1 = BOOP1("A",7)
 #         b2 = BOOP1("A",7)
@@ -281,7 +287,7 @@ def test_protected_mutability():
     with cre_context("test_protected_mutability") as context:
         print("RUNTIME1.2")
         spec = {"A" : "string", "B" : "number"}
-        BOOP, BOOPType = define_fact("BOOP", spec,context="test_protected_mutability")
+        BOOP = define_fact("BOOP", spec,context="test_protected_mutability")
         print("RUNTIME1.3")
         mem = Memory(context="test_protected_mutability")
         print("RUNTIME1")
@@ -334,7 +340,7 @@ from cre.var import Var
 def test_as_conditions():
     with cre_context("test_as_conditions"):
         spec = {"name" : "string", "prev" : "TestDLL", "next" : "TestDLL"}
-        TestDLL, TestDLLType = define_fact("TestDLL", spec)
+        TestDLL = define_fact("TestDLL", spec)
         a = TestDLL(name="A")
         b = TestDLL(name="B")
         c = TestDLL(name="C")
@@ -352,13 +358,13 @@ def test_as_conditions():
 
 
         spec = {"name" : "string", "parent" : "TestContainer"}
-        TestChild, TestChildType = define_fact("TestChild", spec)
+        TestChild = define_fact("TestChild", spec)
 
         c1 = TestChild(name="c1")
         c2 = TestChild(name="c2")
 
         spec = {"name" : "string", "children" : "ListType(TestChild)"}
-        TestContainer, TestContainerType = define_fact("TestContainer", spec)
+        TestContainer = define_fact("TestContainer", spec)
 
         c1 = TestChild(name="c1")
         c2 = TestChild(name="c2")
@@ -384,25 +390,6 @@ def test_as_conditions():
         print(str(conds))
         assert str(conds) == "(sel.name == 'c1') & (sel == sel.parent.children[0])"
 
-        
-
-        # print(conds)
-
-
-
-
-# def test_get_member_infos():
-#     with cre_context("test_get_member_infos"):
-#         spec = {"A" : "string", "B" : "number"}
-#         BOOP, BOOPType = define_fact("BOOP", spec)
-#         b = BOOP("A",0)
-#         # b.
-
-
-
-
-
-
 
 # @njit
 # def set_it(self,attr,other):
@@ -419,12 +406,12 @@ def get_base(x):
 def _test_list_type():
     with cre_context("test_list_type"):
         spec = {"A" : "string", "B" : "number"}
-        BOOP, BOOPType = define_fact("BOOP", spec)
+        BOOP = define_fact("BOOP", spec)
 
         spec = {"name":"string","items" : "ListType(BOOP)","other" : "BOOP"}
-        BOOPList, BOOPListType = define_fact("BOOPList", spec)
+        BOOPList = define_fact("BOOPList", spec)
 
-        blst_t = ListType(BaseFactType)
+        blst_t = ListType(BaseFact)
 
         @njit(cache=True)
         def get_items(srl):
@@ -491,7 +478,7 @@ def _test_list_type():
         # print(bl.items)
 
         spec = {"items" : "ListType(SelfRefList)"}
-        SelfRefList, SelfRefListType = define_fact("SelfRefList", spec)
+        SelfRefList = define_fact("SelfRefList", spec)
 
         # i =0
         # for i in range(10000):
@@ -523,10 +510,10 @@ def _test_list_type():
 def _test_reference_type():
     with cre_context("test_reference_type"):
         spec = {"A" : "string", "B" : "number"}
-        BOOP, BOOPType = define_fact("BOOP", spec)
+        BOOP = define_fact("BOOP", spec)
 
         spec = {"name" : "string", "other" : "BOOP"}
-        TestRef, TestRefType = define_fact("TestRef", spec)
+        TestRef = define_fact("TestRef", spec)
 
         a = BOOP("A", 1)
         b = TestRef("B", a)
@@ -539,7 +526,7 @@ def _test_reference_type():
 
 
         spec = {"name" : "string", "next" : "TestLL"}
-        TestLL, TestLLType = define_fact("TestLL", spec)
+        TestLL = define_fact("TestLL", spec)
 
         # print(TestLLType.name)
 
@@ -565,7 +552,7 @@ def eq(a,b):
 def test_eq():
     with cre_context("test_list_type"):
         spec = {"A" : "string", "B" : "number"}
-        BOOP, BOOPType = define_fact("BOOP", spec)
+        BOOP = define_fact("BOOP", spec)
 
         a1 = BOOP("HI",2)
         a2 = BOOP("HI",2)
@@ -597,7 +584,7 @@ def hsh(x):
 def test_hash():
     with cre_context("test_hash"):
         spec = {"A" : "string", "B" : "number"}
-        BOOP, BOOPType = define_fact("BOOP", spec)
+        BOOP = define_fact("BOOP", spec)
 
         a1 = BOOP("HI",2)
         a2 = BOOP("HI",2)
@@ -638,7 +625,7 @@ with cre_context("_b_boop_ctor_1000"):
     # def _define_boop():
     #     with cre_context("_b_boop_ctor_1000"):
     spec = {"A" : "string", "B" : "number"}
-    BOOP, BOOPType = define_fact("BOOP", spec)
+    BOOP = define_fact("BOOP", spec)
             # return (BOOP,), {}
 
     @njit(cache=True)
@@ -671,9 +658,9 @@ if __name__ == "__main__":
     # test__standardize_spec()
     # test__merge_spec_inheritance()
     # test_define_fact()
-    test_inheritence()
+    # test_inheritence()
     # test_cast_fact()
-    # test_protected_mutability()
+    test_protected_mutability()
     # test_fact_eq()
 
     # test_as_conditions()

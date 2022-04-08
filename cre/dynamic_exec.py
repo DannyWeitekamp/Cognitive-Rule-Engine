@@ -14,7 +14,7 @@ from cre.core import T_ID_CONDITIONS, T_ID_LITERAL, T_ID_OP, T_ID_FACT, T_ID_VAR
 from cre.predicate import GenericPredType
 from cre.var import GenericVarType
 from cre.op import GenericOpType
-from cre.fact import BaseFactType
+from cre.fact import BaseFact
 from cre.conditions import LiteralType, ConditionsType
 
 cast = _cast_structref

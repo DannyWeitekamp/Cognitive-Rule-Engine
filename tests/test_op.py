@@ -229,7 +229,7 @@ def test_fact_args():
 
     with cre_context('test_fact_args'):
         spec = {"A" : "string", "B" : "number"}
-        BOOP, BOOPType = define_fact("BOOP", spec)
+        BOOP = define_fact("BOOP", spec)
 
         op = Add(Var(BOOP,'x').B, Var(BOOP,'y').B)
         assert str(op) == "Add(x.B,y.B)"
@@ -283,10 +283,10 @@ def not_jit_compilable():
 
     with cre_context('test_fact_args'):
         spec = {"A" : "string", "B" : "number"}
-        BOOP, BOOPType = define_fact("BOOP", spec)
+        BOOP = define_fact("BOOP", spec)
 
         class BOOPMap(Op):
-            signature = BOOPType(BOOPType)
+            signature = BOOP(BOOP)
             def call(a):
                 l = []
                 d = {1.0: 10.0, 2.0: 20.0}
@@ -472,7 +472,7 @@ def test_op_arith_overloads ():
 def test_ptr_ops():
     from cre.default_ops import ObjIsNone, ObjEquals
     with cre_context("test_ptr_ops"):
-        BOOP, BOOPType = define_fact("BOOP",{"nxt" : "BOOP", "val" : f8})
+        BOOP = define_fact("BOOP",{"nxt" : "BOOP", "val" : f8})
 
         a,b,c = Var(BOOP,"a"), Var(BOOP,"b"), Var(BOOP,"c")    
 
@@ -524,7 +524,7 @@ def test_boxing():
 
 def test_head_ptrs_ranges():
     with cre_context("_test_head_map"):
-        BOOP, BOOPType = define_fact("BOOP",{"nxt" : "BOOP", "val" : f8})
+        BOOP = define_fact("BOOP",{"nxt" : "BOOP", "val" : f8})
 
         x, y, z = Var(BOOP,"x"), Var(BOOP,"y"), Var(BOOP,"z")
 

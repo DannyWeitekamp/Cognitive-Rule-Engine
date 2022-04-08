@@ -351,7 +351,7 @@ def test_mem_leaks(n=5):
 from cre.sc_planner2 import get_planner_declare_fact_impl
 def test_declare_fact():
     with cre_context("test_declare_fact"):
-        BOOP, BOOPType = define_fact("BOOP", {"A" : "string", "B" : {"type": "number", "visible_to_planner" : True}})
+        BOOP = define_fact("BOOP", {"A" : "string", "B" : {"type": "number", "visible_to_planner" : True}})
         
         def declare_em(planner,s="A"):
             for i in range(5):
@@ -361,7 +361,7 @@ def test_declare_fact():
         planner = SetChainingPlanner()
         declare_em(planner,"A")
 
-        assert summarize_depth_vals(planner, BOOPType, 0)[0] == 5
+        assert summarize_depth_vals(planner, BOOP, 0)[0] == 5
         assert summarize_depth_vals(planner, unicode_type, 0)[0] == 1
         assert summarize_depth_vals(planner, f8, 0)[0] == 5
 
@@ -372,7 +372,7 @@ def test_declare_fact():
         declare_em(planner,"A")
         declare_em(planner,"B")
         
-        assert summarize_depth_vals(planner, BOOPType, 0)[0] == 10
+        assert summarize_depth_vals(planner, BOOP, 0)[0] == 10
         assert summarize_depth_vals(planner, unicode_type, 0)[0] == 2
         assert summarize_depth_vals(planner, f8, 0)[0] == 5
 
@@ -404,7 +404,7 @@ def test_declare_fact():
 
 
         # gen_src_declare_fact(BOOP, ["A","B"])
-        # gen_src_declare_fact(BOOPType, ["A","B"])
+        # gen_src_declare_fact(BOOP, ["A","B"])
 
         # planner = SetChainingPlanner()
         # b = BOOP("A",1.0)

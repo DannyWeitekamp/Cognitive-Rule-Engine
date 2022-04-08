@@ -32,7 +32,7 @@ from cre.transform import infer_type
 
 from cre.subscriber import BaseSubscriberType
 from cre.structref import define_structref
-from cre.fact import BaseFact,BaseFactType, cast_fact
+from cre.fact import BaseFact,BaseFact, cast_fact
 from cre.fact_intrinsics import fact_lower_setattr
 from cre.utils import CastFriendlyMixin, lower_setattr, _cast_structref, _meminfo_from_struct, decode_idrec, encode_idrec, \
  _raw_ptr_from_struct, _ptr_from_struct_incref,  _struct_from_ptr, _decref_ptr, _decref_structref, _raw_ptr_from_struct_incref, _obj_cast_codegen
@@ -53,7 +53,7 @@ two_str = UniTuple(unicode_type,2)
 two_str_set = DictType(two_str,u1)
 
 meminfo_type = types.MemInfoPointer(types.voidptr)
-basefact_list = ListType(BaseFactType)
+basefact_list = ListType(BaseFact)
 i8_arr = i8[:]
 
 
@@ -73,7 +73,7 @@ mem_data_fields = [
     ("change_queue" , VectorType), 
     # ("grow_queue" , VectorType), 
 
-    ("NULL_FACT", BaseFactType)
+    ("NULL_FACT", BaseFact)
 ]
 
 MemoryData, MemoryDataType = define_structref("MemoryData",mem_data_fields)
@@ -95,7 +95,7 @@ def expand_mem_data_types(mem_data,n):
         v_ptr = _raw_ptr_from_struct_incref(v)
         mem_data.facts.add(v_ptr)
         
-        # mem_data.facts.append(List.empty_list(BaseFactType))
+        # mem_data.facts.append(List.empty_list(BaseFact))
 
     # print("EXPAND!",mem_data.empty_f_id_heads,mem_data.empty_f_id_stacks)
     # return v
@@ -472,7 +472,7 @@ def signal_subscribers_change(mem, idrec):
     
 
 
-@njit(u8(MemoryType,BaseFactType),cache=True)
+@njit(u8(MemoryType,BaseFact),cache=True)
 def declare_fact(mem, fact):
     #Incref so that the fact is not freed if this is the only reference
     fact_ptr = i8(_raw_ptr_from_struct_incref(fact)) #.4ms / 10000
@@ -509,7 +509,7 @@ def declare_fact_name(mem,fact,name):
     declare_name(mem,name,idrec)
     return idrec
 
-# @njit(u8(MemoryType,BaseFactTypeunicode_type,),cache=True)
+# @njit(u8(MemoryType,BaseFactunicode_type,),cache=True)
 # def declare(mem,fact,name):
 #     return declare_fact_name(#mem.declare(fact,name)
 
@@ -582,10 +582,9 @@ def mem_backtrack(self):
 @overload_method(MemoryTypeTemplate, "get_fact")
 def mem_get_fact(self, identifier, typ=None):
     if(typ is None):
-        return_typ = BaseFactType    
+        return_typ = BaseFact    
     else:
         return_typ = typ.instance_type
-    print(return_typ)
     if(isinstance(identifier, types.Integer)):
         def impl(self, identifier, typ=None):
             t_id, f_id, _ =  decode_idrec(identifier)
@@ -755,7 +754,7 @@ class FactIteratorType(CastFriendlyMixin, types.StructRef):
 
 define_boxing(FactIteratorType, FactIterator)
 GenericFactIteratorType = FactIteratorType(fact_iterator_fields)
-GenericFactIteratorType._fact_type = BaseFactType
+GenericFactIteratorType._fact_type = BaseFact
 
 @lower_cast(FactIteratorType, GenericFactIteratorType)
 def upcast(context, builder, fromty, toty, val):

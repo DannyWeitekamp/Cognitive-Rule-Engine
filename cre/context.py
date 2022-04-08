@@ -158,7 +158,7 @@ class CREContext(object):
 
     def __init__(self,name):
         self.name = name
-        self.fact_ctors = {}
+        # self.fact_ctors = {}
         self.type_registry = {**DEFAULT_REGISTERED_TYPES}
         self.op_instances = {}
         self.deferred_types = {}
@@ -191,15 +191,14 @@ class CREContext(object):
 
 
 
-    def _register_fact_type(self, name, spec,
-                            fact_ctor, fact_type, inherit_from=None):
+    def _register_fact_type(self, name, spec, fact_type, inherit_from=None):
         #Add attributes to the ctor and type objects
-        fact_ctor.fact_type = fact_type
-        fact_type.fact_ctor = fact_ctor
+        # fact_ctor.fact_type = fact_type
+        # fact_type.fact_ctor = fact_ctor
         # fact_ctor.fact_name = name
         # fact_type.fact_name = name
         
-        self.fact_ctors[name] = fact_ctor
+        # self.fact_ctors[name] = fact_ctor
         self.type_registry[name] = fact_type
         print("REGISTER", name, self.name)
         #Map to t_ids
@@ -213,15 +212,15 @@ class CREContext(object):
         # self.fact_to_t_id[fact_type] = t_id 
         from numba.core.typeconv.rules import TypeCastingRules, default_type_manager as tm
         # from numba.core.typeconv.rules import 
-        from cre.fact import BaseFactType
+        from cre.fact import BaseFact
         # tcr = TypeCastingRules(tm)
 
         ft_str = str(fact_type)
         if_str = str(inherit_from)
         if(inherit_from): tm.set_safe_convert(fact_type, inherit_from)
         
-        tm.set_safe_convert(fact_type, BaseFactType)
-        # tm.safe(fact_type, BaseFactType)
+        tm.set_safe_convert(fact_type, BaseFact)
+        # tm.safe(fact_type, BaseFact)
 
 
         #Track inheritence structure

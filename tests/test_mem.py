@@ -27,7 +27,7 @@ tf_spec = {"value" : "string",
 ##### test_declare_retract #####
 
 with cre_context("test_declare_retract"):
-    TextField, TextFieldType = define_fact("TextField",tf_spec)
+    TextField = define_fact("TextField",tf_spec)
 
 @njit(cache=True)
 def declare_retract(mem):
@@ -99,7 +99,7 @@ def bad_modify_type(mem):
 
 def test_modify():
     with cre_context("test_modify"):
-        TextField, TextFieldType = define_fact("TextField",tf_spec)
+        TextField = define_fact("TextField",tf_spec)
         mem = Memory()
         fact = TextField("A","B","C","D","E")
 
@@ -119,7 +119,7 @@ def test_modify():
 ##### test_declare_overloading #####
 
 with cre_context("test_declare_overloading"):
-    TextField, TextFieldType = define_fact("TextField",tf_spec)
+    TextField = define_fact("TextField",tf_spec)
 
 @njit(cache=True)
 def declare_unnamed(mem):
@@ -135,7 +135,7 @@ def test_declare_overloading():
 
 ##### test_retract_keyerror #####
 with cre_context("test_retract_keyerror"):
-    TextField, TextFieldType = define_fact("TextField",tf_spec)
+    TextField = define_fact("TextField",tf_spec)
 
 @njit(cache=True)
 def retract_keyerror(mem):
@@ -155,23 +155,20 @@ def test_retract_keyerror():
         with pytest.raises(KeyError):
             retract_keyerror.py_func(mem)
 
-##### test_all_facts_of_type #####
-
-# with cre_context("test_get_facts"):
-#     TextField, TextFieldType = define_fact("TextField",tf_spec)
+##### test_get_facts #####
 
 # @njit(cache=True)
 # def all_of_type(mem):
-#     return mem.all_facts_of_type(TextFieldType)
+#     return mem.all_facts_of_type(TextField)
 from itertools import product
 def test_get_facts():
     with cre_context("test_get_facts"):
         spec1 = {"A" : "string", "B" : "number"}
-        BOOP1, BOOP1Type = define_fact("BOOP1", spec1)
+        BOOP1 = define_fact("BOOP1", spec1)
         spec2 = {"inherit_from" : BOOP1, "C" : "number"}
-        BOOP2, BOOP2Type = define_fact("BOOP2", spec2)
+        BOOP2 = define_fact("BOOP2", spec2)
         spec3 = {"inherit_from" : BOOP2, "D" : "number"}
-        BOOP3, BOOP3Type = define_fact("BOOP3", spec3)
+        BOOP3 = define_fact("BOOP3", spec3)
 
         mem = Memory()
         mem.declare(BOOP1("A",1))
@@ -181,13 +178,13 @@ def test_get_facts():
         @njit(cache=True)
         def iter_b1(mem):
             l = List()
-            for x in mem.get_facts(BOOP1Type):
+            for x in mem.get_facts(BOOP1):
                 l.append(x)
             return l
 
         for t,i in product(['py','nb'],[0,1]):
             all_tf = iter_b1.py_func(mem) if t else iter_b1(mem)
-            assert isinstance(all_tf[0], BOOP1)
+            assert isinstance(all_tf[0], BOOP1._fact_proxy)
             assert len(all_tf) == 3
         
         # mem = Memory()
@@ -198,7 +195,7 @@ def test_get_facts():
         for t,i in product(['py','nb'],[0,1]):
             all_tf = iter_b1.py_func(mem) if t else iter_b1(mem)
             print(all_tf)
-            assert isinstance(all_tf[0], BOOP1)
+            assert isinstance(all_tf[0], BOOP1._fact_proxy)
             assert len(all_tf) == 6
 
 
@@ -210,7 +207,7 @@ def test_get_facts():
         for t,i in product(['py','nb'],[0,1]):
             all_tf = iter_b1.py_func(mem) if t else iter_b1(mem)
             print(all_tf)
-            assert isinstance(all_tf[0], BOOP1)
+            assert isinstance(all_tf[0], BOOP1._fact_proxy)
             assert len(all_tf) == 9
 
 
@@ -221,11 +218,11 @@ def test_get_facts():
 def _test_iter_facts():
     with cre_context("test_iter_facts"):
         spec1 = {"A" : "string", "B" : "number"}
-        BOOP1, BOOP1Type = define_fact("BOOP1", spec1)
+        BOOP1 = define_fact("BOOP1", spec1)
         spec2 = {"inherit_from" : BOOP1, "C" : "number"}
-        BOOP2, BOOP2Type = define_fact("BOOP2", spec2)
+        BOOP2 = define_fact("BOOP2", spec2)
         spec3 = {"inherit_from" : BOOP2, "D" : "number"}
-        BOOP3, BOOP3Type = define_fact("BOOP3", spec3)
+        BOOP3 = define_fact("BOOP3", spec3)
 
         mem = Memory()
         mem.declare(BOOP1("A",1))
@@ -235,7 +232,7 @@ def _test_iter_facts():
         @njit(cache=True)
         def iter_b1(mem):
             l = List()
-            for x in mem.iter_facts(BOOP1Type):
+            for x in mem.iter_facts(BOOP1):
                 l.append(x)
             return l
 
@@ -276,7 +273,7 @@ def _test_iter_facts():
         #     assert isinstance(all_tf[0], BOOP1)
         #     assert len(all_tf) == 3
 
-        # all_tf = list(mem.get_facts(BOOP1Type))
+        # all_tf = list(mem.get_facts(BOOP1))
         # assert isinstance(all_tf[0], BOOP1)
         # assert len(all_tf) == 3
 
@@ -292,7 +289,7 @@ def dummy_subscriber_ctor():
 
 def test_grow_change_queues():
     with cre_context("test_grow_change_queues"):
-        TextField, TextFieldType = define_fact("TextField",tf_spec)
+        TextField = define_fact("TextField",tf_spec)
         #NRT version
         mem = Memory()
         dummy_subscriber = dummy_subscriber_ctor() 
@@ -316,8 +313,8 @@ def test_grow_change_queues():
         assert ch_q.data[ch_q.head-1] == encode_idrec(t_id, f_id, 0xFF)
 
 with cre_context("test_mem_leaks"):
-    TextField, TextFieldType = define_fact("TextField",tf_spec)
-    BOOP, BOOPType = define_fact("BOOP",{"A": "string", "B" : "number"})
+    TextField = define_fact("TextField",tf_spec)
+    BOOP = define_fact("BOOP",{"A": "string", "B" : "number"})
 
 def used_bytes():
     stats = rtsys.get_allocation_stats()
@@ -422,7 +419,7 @@ def test_b_decode_idrec(benchmark):
 #### helper funcs #####
 
 with cre_context("test_mem"):
-    BOOP, BOOPType = define_fact("BOOP",{"A": "string", "B" : "number"})
+    BOOP = define_fact("BOOP",{"A": "string", "B" : "number"})
 
 
 def _benchmark_setup():
@@ -470,7 +467,7 @@ def get_facts_setup():
 
 @njit(cache=True)
 def _get_facts_10000(mem):
-    for x in mem.get_facts(BOOPType):
+    for x in mem.get_facts(BOOP):
         pass
 
 def test_b_get_facts_10000(benchmark):
@@ -479,6 +476,7 @@ def test_b_get_facts_10000(benchmark):
 
 
 if __name__ == "__main__":
+    import faulthandler; faulthandler.enable()
     # test_declare_overloading()
     # test_modify()
     # test_declare_retract()

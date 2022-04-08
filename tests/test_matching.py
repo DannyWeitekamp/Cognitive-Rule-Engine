@@ -32,8 +32,8 @@ def boop_Bs_from_ptrs(ptr_matches):
     out = np.empty(ptr_matches.shape,dtype=np.float64)
     for i, match in enumerate(ptr_matches):
         for j, ptr in enumerate(match):
-            boop = _struct_from_ptr(BOOPType, ptr)
-            out[i,j] = _struct_from_ptr(BOOPType, ptr).B
+            boop = _struct_from_ptr(BOOP, ptr)
+            out[i,j] = _struct_from_ptr(BOOP, ptr).B
     return out
 
 @njit(cache=True)
@@ -51,14 +51,14 @@ def mem_w_n_boops(n,BOOP):
 
 # def test_matching():
 #     with cre_context("test_matching_unconditioned"):
-#         BOOP, BOOPType = define_fact("BOOP",{"name": "string", "B" : "number"})
+#         BOOP = define_fact("BOOP",{"name": "string", "B" : "number"})
 #         # with cre_context("test_link"):
-#         # BOOP, BOOPType = define_fact("BOOP",{"A": "string", "B" : "number"})
+#         # BOOP = define_fact("BOOP",{"A": "string", "B" : "number"})
 #         mem = mem_w_n_boops(5)
 
 
-#         l1, l2 = Var(BOOPType,"l1"), Var(BOOPType,"l2")
-#         r1, r2 = Var(BOOPType,"r1"), Var(BOOPType,"r2")
+#         l1, l2 = Var(BOOP,"l1"), Var(BOOP,"l2")
+#         r1, r2 = Var(BOOP,"r1"), Var(BOOP,"r2")
 
 #         c = (l1.B > 0) & (l1.B != 3) & (l1.B < 4) & (l2.B != 3) | \
 #             (l1.B == 3) 
@@ -82,11 +82,11 @@ def mem_w_n_boops(n,BOOP):
 
 # def test_matching_unconditioned():
 #     with cre_context("test_matching_unconditioned"):
-#         BOOP, BOOPType = define_fact("BOOP",{"name": "string", "B" : "number"})
+#         BOOP = define_fact("BOOP",{"name": "string", "B" : "number"})
 #         mem = mem_w_n_boops(5)
 
 
-#         l1, l2 = Var(BOOPType,"l1"), Var(BOOPType,"l2")
+#         l1, l2 = Var(BOOP,"l1"), Var(BOOP,"l2")
 #         c = l1 & l2
 
 #         cl = get_linked_conditions_instance(c, mem)
@@ -94,7 +94,7 @@ def mem_w_n_boops(n,BOOP):
 #         print("Bs", Bs)
 
 
-#         l1, l2 = Var(BOOPType,"l1"), Var(BOOPType,"l2")
+#         l1, l2 = Var(BOOP,"l1"), Var(BOOP,"l2")
 #         c = l1 & (l2.B < 3)
 
 #         cl = get_linked_conditions_instance(c, mem)
@@ -104,7 +104,7 @@ def mem_w_n_boops(n,BOOP):
 def test_ref_matching():
     ''' This mostly tests PtrOps '''
     with cre_context("test_ref_matching"):
-        TestDLL, TestDLLType = define_fact("TestDLL",{"name": "string", "prev" : "TestDLL", "next" : "TestDLL"})
+        TestDLL = define_fact("TestDLL",{"name": "string", "prev" : "TestDLL", "next" : "TestDLL"})
         mem = Memory()
 
         #a -> b -> c
@@ -161,7 +161,7 @@ def test_ref_matching():
 
 def test_multiple_deref():
     with cre_context("test_multiple_deref"):
-        TestLL, TestLLType = define_fact("TestLL",{"name": "string", "B" :'number', "nxt" : "TestLL"})
+        TestLL = define_fact("TestLL",{"name": "string", "B" :'number', "nxt" : "TestLL"})
         mem = Memory()
 
         #    c1   c2
@@ -221,7 +221,7 @@ def test_multiple_deref():
 def _test_NOT():
     '''TODO: FIXME'''
     with cre_context("test_NOT"):
-        BOOP, BOOPType = define_fact("BOOP",{"name": "string", "B" : "number"})
+        BOOP = define_fact("BOOP",{"name": "string", "B" : "number"})
 
         mem = mem_w_n_boops(3,BOOP)
 
@@ -243,7 +243,7 @@ def _test_NOT():
 
 def test_list():
     with cre_context("test_list"):
-        TList, TListType = define_fact("TList",{"name" : "string", "items" : "ListType(string)"})
+        TList = define_fact("TList",{"name" : "string", "items" : "ListType(string)"})
         v1 = Var(TList,"v1")
         v2 = Var(TList,"v2")
 
@@ -269,8 +269,8 @@ def test_list():
 
 def test_multiple_types():
     with cre_context("test_multiple_types"):
-        BOOP, BOOPType = define_fact("BOOP",{"name": "string", "B" : "number"})
-        TList, TListType = define_fact("TList",{"name" : "string", "items" : "ListType(string)"})
+        BOOP = define_fact("BOOP",{"name": "string", "B" : "number"})
+        TList = define_fact("TList",{"name" : "string", "items" : "ListType(string)"})
 
         b = Var(BOOP,"b")
         t = Var(TList,"t")
@@ -306,7 +306,7 @@ def used_bytes():
 
 
 with cre_context("test_matching_benchmarks"):
-    BOOP, BOOPType = define_fact("BOOP",{"name": "string", "B" : "number"})
+    BOOP = define_fact("BOOP",{"name": "string", "B" : "number"})
 
 
 from weakref import WeakValueDictionary
@@ -323,7 +323,7 @@ def test_mem_leaks():
 
     # Vars    
     for i in range(2):
-        l1, l2 = Var(BOOPType,"l1"), Var(BOOPType,"l2")
+        l1, l2 = Var(BOOP,"l1"), Var(BOOP,"l2")
         l1, l2 = None,None; gc.collect()
         # print(used_bytes()-init_used)
         assert used_bytes()==init_used
@@ -331,7 +331,7 @@ def test_mem_leaks():
     # print()
     # Explicit op 1 literal
     for i in range(2):
-        l1, l2 = Var(BOOPType,"l1"), Var(BOOPType,"l2")
+        l1, l2 = Var(BOOP,"l1"), Var(BOOP,"l2")
         op = LessThan(l1.B, l1.B)
         op, l1, l2 = None, None,None; gc.collect()
         if(i==0): init_used = used_bytes()
@@ -341,7 +341,7 @@ def test_mem_leaks():
     # print()
     # Explicit ptrop 1 literal
     for i in range(2):
-        l1, l2 = Var(BOOPType,"l1"), Var(BOOPType,"l2")
+        l1, l2 = Var(BOOP,"l1"), Var(BOOP,"l2")
         op = ObjEquals(l1, l2)
         op, l1, l2 = None, None,None; gc.collect()
         if(i==0): init_used = used_bytes()
@@ -351,7 +351,7 @@ def test_mem_leaks():
 
     # Shorthand 1 literal
     for i in range(2):
-        l1, l2 = Var(BOOPType,"l1"), Var(BOOPType,"l2")
+        l1, l2 = Var(BOOP,"l1"), Var(BOOP,"l2")
         c = (l1.B > 0)
         c = None; gc.collect()
         # print(type(c),l1._meminfo.refcount,l2._meminfo.refcount)
@@ -363,7 +363,7 @@ def test_mem_leaks():
 
     # AND
     for i in range(2):
-        l1, l2 = Var(BOOPType,"l1"), Var(BOOPType,"l2")
+        l1, l2 = Var(BOOP,"l1"), Var(BOOP,"l2")
         c = (l1.B > 0) & (l2.B != 3) 
         c, l1, l2 = None, None,None; gc.collect()
         if(i==0): init_used = used_bytes()
@@ -420,30 +420,30 @@ def apply_it(mem,l1,l2,r1):
 #     cl = get_linked_conditions_instance(c, mem)
 #     ptr_matches = get_ptr_matches(cl)
 #     for match in ptr_matches:
-#         arg0 = _struct_from_ptr(BOOPType,match[0]) 
-#         arg1 = _struct_from_ptr(BOOPType,match[1]) 
-#         arg2 = _struct_from_ptr(BOOPType,match[2]) 
+#         arg0 = _struct_from_ptr(BOOP,match[0]) 
+#         arg1 = _struct_from_ptr(BOOP,match[1]) 
+#         arg2 = _struct_from_ptr(BOOP,match[2]) 
 #         f(mem,arg0,arg1,arg2)
 
 
 # def test_applying():
 #     with cre_context("test_matching_benchmarks"):
 #         mem = mem_w_n_boops(5)
-#         l1, l2 = Var(BOOPType,"l1"), Var(BOOPType,"l2")
-#         r1, r2 = Var(BOOPType,"r1"), Var(BOOPType,"r2")
+#         l1, l2 = Var(BOOP,"l1"), Var(BOOP,"l2")
+#         r1, r2 = Var(BOOP,"r1"), Var(BOOP,"r2")
 #         c = (l1.B <= 1) & (l1.B < l2.B) & (l2.B <= r1.B)
 #         apply_all_matches(c,apply_it,mem)
 #         apply_all_matches(c,apply_it,mem)
 
 # with cre_context("test_matching_benchmarks") as ctxt:
-#     BOOP, BOOPType = define_fact("BOOP",{"name": "string", "B" : "number"})
+#     BOOP = define_fact("BOOP",{"name": "string", "B" : "number"})
 
 def matching_alphas_setup():
     with cre_context("test_matching_benchmarks") as ctxt:
         mem = mem_w_n_boops(500,BOOP)
 
-        l1, l2 = Var(BOOPType,"l1"), Var(BOOPType,"l2")
-        r1, r2 = Var(BOOPType,"r1"), Var(BOOPType,"r2")
+        l1, l2 = Var(BOOP,"l1"), Var(BOOP,"l2")
+        r1, r2 = Var(BOOP,"r1"), Var(BOOP,"r2")
 
         c = (l1.B > 0) & (l2.B != 3) 
 
@@ -453,8 +453,8 @@ def matching_betas_setup():
     with cre_context("test_matching_benchmarks") as ctxt:
         mem = mem_w_n_boops(500,BOOP)
 
-        l1, l2 = Var(BOOPType,"l1"), Var(BOOPType,"l2")
-        r1, r2 = Var(BOOPType,"r1"), Var(BOOPType,"r2")
+        l1, l2 = Var(BOOP,"l1"), Var(BOOP,"l2")
+        r1, r2 = Var(BOOP,"r1"), Var(BOOP,"r2")
 
         c = l1 & l2 & (l1.B > l2.B) #& ((l1.B % 2) == (l2.B + 1) % 2)
 
@@ -513,7 +513,7 @@ def test_b_matching_betas_lit(benchmark):
 # def diff_increases()
 
 if(__name__ == "__main__"):
-    pass
+    import faulthandler; faulthandler.enable()
     test_mem_leaks()
     # dat = matching_alphas_setup()[0]
     # dat = matching_betas_setup()[0]

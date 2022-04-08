@@ -15,7 +15,7 @@ from cre.vector import VectorType
 
 from numba import u1,u2,u8, types
 from numba.types import Tuple, Set
-from cre.fact import BaseFactType
+from cre.fact import BaseFact
 from cre.utils import decode_idrec, encode_idrec
 
 incr_processor_fields = {
@@ -89,7 +89,7 @@ def change_event_ctor(idrec):
     return st    
 
 # change_event_ctor(0)
-u1_opBaseFact_Tuple_type = Tuple((u8,u1[::1],types.optional(BaseFactType)))
+u1_opBaseFact_Tuple_type = Tuple((u8,u1[::1],types.optional(BaseFact)))
 @njit(ListType(ChangeEventType)(VectorType,i8,i8), cache=True, locals={"a_id" : u1})
 def accumulate_change_events(cq, start, end=-1):
     ''' Takes in a change queue (i.e. Vector<i8>) and a start and end position

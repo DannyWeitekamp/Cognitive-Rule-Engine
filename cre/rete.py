@@ -18,7 +18,7 @@ from cre.var import GenericVarType
 from cre.op import GenericOpType
 from cre.conditions import LiteralType, build_distributed_dnf, ConditionsType
 from cre.vector import VectorType, new_vector
-from cre.fact import BaseFactType 
+from cre.fact import BaseFact 
 import cloudpickle
 
 from numba.core.imputils import (lower_cast)

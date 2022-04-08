@@ -27,7 +27,7 @@ class PrintElapse():
 
 def setup_deref_tests(ctx=None):
     with cre_context(ctx):
-        BOOP, BOOPType = define_fact("BOOP",{"nxt" : "BOOP", "val" : f8})
+        BOOP = define_fact("BOOP",{"nxt" : "BOOP", "val" : f8})
         mem = Memory()
 
         a5 = BOOP(nxt=None, val=5)
@@ -40,14 +40,14 @@ def setup_deref_tests(ctx=None):
         mem.declare(a3)
         mem.declare(a4)
         mem.declare(a5)
-        return (mem, BOOP, BOOPType), (a1,a2,a3,a4,a5)
+        return (mem, BOOP, BOOP), (a1,a2,a3,a4,a5)
 
 
 
 def test_deref_to_head_and_gen_relevant_idrecs():
     f = deref_head_and_relevant_idrecs
     
-    (mem, BOOP, BOOPType), (a1,a2,a3,a4,a5) = setup_deref_tests()
+    (mem, BOOP, BOOP), (a1,a2,a3,a4,a5) = setup_deref_tests()
     a1_ptr = pointer_from_struct(a1)
     a3_ptr = pointer_from_struct(a3)
 
@@ -62,7 +62,7 @@ def test_deref_to_head_and_gen_relevant_idrecs():
     f_a5 = decode_idrec(a5.idrec)[1]
     
 
-    # print(BOOPType.field_dict)
+    # print(BOOP.field_dict)
     v = Var(BOOP,"a").nxt.val
     head_ptr, rel_idrecs = f(a1_ptr, v.deref_offsets)
     assert head_ptr > 0
@@ -89,7 +89,7 @@ def test_deref_to_head_and_gen_relevant_idrecs():
     assert len(rel_idrecs) == 5
 
 def test_deref_record_parent():
-    (mem, BOOP, BOOPType), (a1,a2,a3,a4,a5) = setup_deref_tests()
+    (mem, BOOP, BOOP), (a1,a2,a3,a4,a5) = setup_deref_tests()
 
     #Make deref_depends
     deref_depends = Dict.empty(i8, DictType(i8,u1))
@@ -136,7 +136,7 @@ def _test_validate_deref():
     from cre.conditions import Literal
     from cre.rete import node_ctor
     from cre.var import GenericVarType
-    (mem, BOOP, BOOPType), (a1,a2,a3,a4,a5) = setup_deref_tests()
+    (mem, BOOP, BOOP), (a1,a2,a3,a4,a5) = setup_deref_tests()
 
 
     v = Var(BOOP,"a").nxt.val
@@ -180,7 +180,7 @@ def _test_validate_head_or_retract():
     from cre.conditions import Literal
     from cre.var import GenericVarType
     from cre.rete import node_ctor
-    (mem, BOOP, BOOPType), (a1,a2,a3,a4,a5) = setup_deref_tests()
+    (mem, BOOP, BOOP), (a1,a2,a3,a4,a5) = setup_deref_tests()
 
 
     v = Var(BOOP,"a").nxt.val
@@ -245,7 +245,7 @@ def test_distr_dnf_and():
     from cre.var import GenericVarType
     from cre.conditions import as_distr_dnf_list
     with cre_context("test_distr_dnf_and"):
-        BOOP, BOOPType = define_fact("BOOP",{"nxt" : "BOOP", "val" : f8})
+        BOOP = define_fact("BOOP",{"nxt" : "BOOP", "val" : f8})
     
         a,b,c = Var(BOOP,"a"), Var(BOOP,"b"), Var(BOOP,"c")
 
@@ -341,7 +341,7 @@ def test_build_rete_graph():
     from cre.var import GenericVarType
     from cre.conditions import as_distr_dnf_list
     with cre_context("test_distr_dnf_and"):
-        BOOP, BOOPType = define_fact("BOOP",{"nxt" : "BOOP", "val" : f8})
+        BOOP = define_fact("BOOP",{"nxt" : "BOOP", "val" : f8})
     
         a,b,c = Var(BOOP,"a"), Var(BOOP,"b"), Var(BOOP,"c")    
 
@@ -422,7 +422,7 @@ def test_build_rete_graph():
 from cre.rete import update_graph
 def test_blaa():
     with cre_context("test_blaa"):
-        BOOP, BOOPType = define_fact("BOOP",{"nxt" : "BOOP", "val" : f8})
+        BOOP = define_fact("BOOP",{"nxt" : "BOOP", "val" : f8})
     
         a,b,c = Var(BOOP,"a"), Var(BOOP,"b"), Var(BOOP,"c")    
 

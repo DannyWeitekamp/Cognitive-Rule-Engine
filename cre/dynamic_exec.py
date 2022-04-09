@@ -9,9 +9,9 @@ from cre.cre_object import CREObjTypeTemplate, CREObjType, member_info_type
 from numba.core.datamodel import default_manager, models
 from numba.experimental.structref import define_attributes, StructRefProxy, new, define_boxing
 import operator
-from cre.core import T_ID_CONDITIONS, T_ID_LITERAL, T_ID_OP, T_ID_FACT, T_ID_VAR, T_ID_UNRESOLVED, T_ID_BOOL_PRIMITIVE, T_ID_INTEGER_PRIMITIVE, T_ID_FLOAT_PRIMITIVE, T_ID_STRING_PRIMITIVE, T_ID_PREDICATE
+from cre.core import T_ID_CONDITIONS, T_ID_LITERAL, T_ID_OP, T_ID_FACT, T_ID_VAR, T_ID_UNRESOLVED, T_ID_BOOL_PRIMITIVE, T_ID_INTEGER_PRIMITIVE, T_ID_FLOAT_PRIMITIVE, T_ID_STRING_PRIMITIVE, T_ID_TUPLE_FACT
 # from cre.primitive import BooleanPrimitiveType, IntegerPrimitiveType, FloatPrimitiveType, StringPrimitiveType
-from cre.predicate import GenericPredType
+from cre.tuple_fact import GenericTupleFact
 from cre.var import GenericVarType
 from cre.op import GenericOpType
 from cre.fact import BaseFact
@@ -22,7 +22,7 @@ cast = _cast_structref
 
 @njit(cache=True)
 def cre_obj_iter_t_id_item_ptrs(_x):
-    x = _cast_structref(GenericPredType,_x)
+    x = _cast_structref(GenericTupleFact,_x)
     data_ptr = _struct_get_data_ptr(x)
     # member_info_ptr = _struct_get_data_ptr(x.chr_mbrs_infos) + _struct_get_attr_offset(x.chr_mbrs_infos,"data")
     member_info_ptr = data_ptr + x.chr_mbrs_infos_offset
@@ -50,14 +50,14 @@ def eq_from_t_id_ptr(t_id, data_ptr_a, data_ptr_b):
 
 
 @njit(boolean(CREObjType, CREObjType),cache=True)
-def pred_eq(a, b):
+def tuple_fact_eq(a, b):
     ''' based roughly on _tuple_hash from numba.cpython.hashing'''
     t_id_b,_, _ = decode_idrec(b.idrec)
-    if(t_id_b != T_ID_PREDICATE): return False
+    if(t_id_b != T_ID_TUPLE_FACT): return False
 
     stack_buffer = None
-    pa = _cast_structref(GenericPredType, a)
-    pb = _cast_structref(GenericPredType, b)
+    pa = _cast_structref(GenericTupleFact, a)
+    pb = _cast_structref(GenericTupleFact, b)
     stack_head = -1
     is_done = False
 
@@ -79,7 +79,7 @@ def pred_eq(a, b):
 
             if(t_id_a != t_id_b): return False
 
-            if(t_id_a == T_ID_PREDICATE):
+            if(t_id_a == T_ID_TUPLE_FACT):
                 # print("IS PRED")
                 # Use an inline stack instead of recrusion because numba breaks on recursion
                 stack_head += 1
@@ -95,8 +95,8 @@ def pred_eq(a, b):
                 if(not eq_from_t_id_ptr(t_id_a, data_ptr_a, data_ptr_b)): return False
 
         if(stack_head > -1):
-            pa = _struct_from_ptr(GenericPredType, stack_buffer[stack_head,0]);
-            pb = _struct_from_ptr(GenericPredType, stack_buffer[stack_head,1]);
+            pa = _struct_from_ptr(GenericTupleFact, stack_buffer[stack_head,0]);
+            pb = _struct_from_ptr(GenericTupleFact, stack_buffer[stack_head,1]);
             stack_head -=1;
         else:
             is_done = True
@@ -120,7 +120,7 @@ def fact_eq(a, b):
 
         if(t_id_a != t_id_b): return False
 
-        if(t_id_a == T_ID_PREDICATE):
+        if(t_id_a == T_ID_TUPLE_FACT):
             raise Exception()
         elif(t_id_a == T_ID_FACT):
             if(not _load_ptr(i8, data_ptr_a) == _load_ptr(i8, data_ptr_b)): return False
@@ -192,16 +192,16 @@ def conds_eq(a,b):
     return True
 
 # @njit()
-# def pred_eq(a,b):
-#     pa, pb = cast(GenericPredType, a), cast(GenericPredType, b)
+# def tuple_fact_eq(a,b):
+#     pa, pb = cast(GenericTupleFact, a), cast(GenericTupleFact, b)
 
-#     if(not non_pred_eq(pa.header, pb.header)): return False
+#     if(not non_tuple_fact_eq(pa.header, pb.header)): return False
 
 #     if(len(pa.members) != len(pb.members)): return False
 
 #     for i in range(len(pa.members)):
 #         ma, mb = pa.members[i], pb.members[i]
-#         if(not non_pred_eq(ma, mb)): return False
+#         if(not non_tuple_fact_eq(ma, mb)): return False
 
 #     return True
 
@@ -212,9 +212,9 @@ def conds_eq(a,b):
 #     if(t_id_a != t_id_b): return False
 
 #     if(t_id_a <= T_ID_STRING_PRIMITIVE):
-#         return non_pred_eq(a,b)    
-#     elif(t_id_a == T_ID_PREDICATE):
-#         return pred_eq(a,b)
+#         return non_tuple_fact_eq(a,b)    
+#     elif(t_id_a == T_ID_TUPLE_FACT):
+#         return tuple_fact_eq(a,b)
         
 #     return False
 
@@ -224,8 +224,8 @@ def _cre_obj_eq(a,b):
     if(isinstance(a,CREObjTypeTemplate) and isinstance(b,CREObjTypeTemplate)):
         def impl(a, b):
             t_id,_, _ = decode_idrec(a.idrec)
-            if(t_id==T_ID_PREDICATE):
-                return pred_eq(a,b)
+            if(t_id==T_ID_TUPLE_FACT):
+                return tuple_fact_eq(a,b)
             elif(t_id==T_ID_VAR):
                 return var_eq(a,b)
             elif(t_id==T_ID_OP):
@@ -263,11 +263,11 @@ def hash_from_t_id_ptr(t_id, data_ptr):
 
 
 @njit(_Py_hash_t(CREObjType),cache=True)
-def pred_hash(x):
+def tuple_fact_hash(x):
     ''' based roughly on _tuple_hash from numba.cpython.hashing'''
     if(x.hash_val == 0):
         stack_buffer = None
-        p = _cast_structref(GenericPredType, x)
+        p = _cast_structref(GenericTupleFact, x)
         stack_head = -1
         is_done = False
 
@@ -278,7 +278,7 @@ def pred_hash(x):
                 # print("t_id", t_id)
                 if(t_id == T_ID_UNRESOLVED): 
                     t_id,_, _ = decode_idrec(_struct_from_ptr(CREObjType,_load_ptr(i8, data_ptr)).idrec)
-                if(t_id == T_ID_PREDICATE):
+                if(t_id == T_ID_TUPLE_FACT):
                     # print("IS PRED")
                     # Use an inline stack instead of recrusion because numba can't cache recursion
                     stack_head += 1
@@ -297,7 +297,7 @@ def pred_hash(x):
             acc = accum_item_hash(acc,tl)
 
             if(stack_head > -1):
-                p = _struct_from_ptr(GenericPredType, stack_buffer[stack_head]);
+                p = _struct_from_ptr(GenericTupleFact, stack_buffer[stack_head]);
                 stack_head -=1;
             else:
                 is_done = True
@@ -317,9 +317,9 @@ def fact_hash(x):
         for t_id, data_ptr in cre_obj_iter_t_id_item_ptrs(x):
             if(t_id == T_ID_UNRESOLVED): 
                 t_id,_, _ = decode_idrec(_struct_from_ptr(CREObjType,_load_ptr(i8, data_ptr)).idrec)
-            if(t_id == T_ID_PREDICATE):
+            if(t_id == T_ID_TUPLE_FACT):
                 raise Exception()
-                # acc = accum_item_hash(acc, pred_hash(x))
+                # acc = accum_item_hash(acc, tuple_fact_hash(x))
             elif(t_id == T_ID_FACT):
                 # hash on the pointer 
                 ptr = _load_ptr(i8, data_ptr)
@@ -406,9 +406,9 @@ def conds_hash(x):
 #     t_id,_,_ = decode_idrec(x.idrec)
 
 #     # if(t_id <= T_ID_STRING_PRIMITIVE):
-#     #     hsh = non_pred_hash(x)
-#     # elif(t_id == T_ID_PREDICATE):
-#     hsh = pred_hash(x)
+#     #     hsh = non_tuple_fact_hash(x)
+#     # elif(t_id == T_ID_TUPLE_FACT):
+#     hsh = tuple_fact_hash(x)
 
 #     # return i8()
 #     if hsh == _Py_uhash_t(-1):
@@ -422,8 +422,8 @@ def _cre_obj_hash(x):
     if(isinstance(x,CREObjTypeTemplate)):
         def impl(x):
             t_id,_, _ = decode_idrec(x.idrec)
-            if(t_id==T_ID_PREDICATE):
-                return pred_hash(x) 
+            if(t_id==T_ID_TUPLE_FACT):
+                return tuple_fact_hash(x) 
             elif(t_id==T_ID_VAR):
                 return var_hash(x) 
             elif(t_id==T_ID_OP):

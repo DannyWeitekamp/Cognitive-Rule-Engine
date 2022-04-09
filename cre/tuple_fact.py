@@ -6,17 +6,14 @@ from cre.fact_intrinsics import fact_lower_setattr, _register_fact_structref
 from cre.cre_object import CREObjType, CREObjProxy, CREObjTypeTemplate, member_info_type
 from cre.utils import _struct_get_attr_offset, _sizeof_type, _struct_get_data_ptr, _load_ptr, _struct_get_attr_offset, _struct_from_ptr, _cast_structref, _obj_cast_codegen, encode_idrec, decode_idrec, _incref_structref, _get_member_offset
 from cre.primitive import Primitive
-from numba.core.imputils import (lower_cast)
+from numba.core.imputils import (lower_cast, numba_typeref_ctor)
 from numba.experimental.structref import new, define_boxing, define_attributes, StructRefProxy
-from numba.core.extending import overload, intrinsic
-
-
-#CHANGE THIS
-PRED_T_ID = 0XFF
+from numba.core.extending import overload, intrinsic, lower_builtin, type_callable
+from cre.core import T_ID_TUPLE_FACT 
 
 
 
-predicate_field_dict = {
+tup_fact_field_dict = {
     **base_fact_field_dict,
     # "header": CREObjType,
     # "num_members": u1,
@@ -27,28 +24,43 @@ predicate_field_dict = {
     "chr_mbrs_infos" : types.UniTuple(member_info_type,1),
 }
 
-predicate_fields = [(k,v) for k,v in predicate_field_dict.items()]
+tup_fact_fields = [(k,v) for k,v in tup_fact_field_dict.items()]
 
 @_register_fact_structref
-class PredTypeTemplate(Fact):
-    def __init__(self,*args,**kwargs):
-        super().__init__(*args,**kwargs)
-        self._fact_name = "PredType"
+class TupleFact(Fact):
+    def __init__(self, fields):
+        super().__init__(fields)
+        members = self.field_dict["members"]
+        if(members is types.Any):
+            self._fact_name = f"GenericTupleFact"
+        else:
+            print(members.types)
+            self._fact_name = f"TupleFact{str(members.types)}"
+
+    def __new__(cls, *args):
+        if(len(args)==1 and isinstance(args[0],(list,tuple))):
+            print("DID THIS")
+            return super().__new__(cls)
+        else:
+            return tup_fact_ctor(*args)
+
 
     def preprocess_fields(self, fields):
         return tuple((name, types.unliteral(typ)) for name, typ in fields)
 
     def __str__(self):
-        return "cre.PredType"
+        # print("<<", self.field_dict)
+        return f"cre.{self._fact_name}"#f"cre.TupleFact({",".join(self.field_dict.)})"#self.name#"cre.PredType"
 
-GenericPredType = PredTypeTemplate(predicate_fields)
+
+GenericTupleFact = TupleFact(tup_fact_fields)
 # print("<<", PredType, repr(PredType), type(PredType))
-define_attributes(GenericPredType)
+define_attributes(GenericTupleFact)
 
-@lower_cast(PredTypeTemplate, BaseFact)
-@lower_cast(PredTypeTemplate, CREObjType)
+@lower_cast(TupleFact, BaseFact)
+@lower_cast(TupleFact, CREObjType)
 def upcast(context, builder, fromty, toty, val):
-    return _obj_cast_codegen(context, builder, val, fromty, toty,incref=False)
+    return _obj_cast_codegen(context, builder, val, fromty, toty, incref=False)
 
 # @njit(cache=True)
 # def init_members():
@@ -65,17 +77,16 @@ def upcast(context, builder, fromty, toty, val):
 # Not sure why giving signatures produces wrong type
 # @njit(PredType(CREObjType, ListType(CREObjType)),cache=False)
 
-from cre.core import T_ID_PREDICATE
-default_idrec  = encode_idrec(T_ID_PREDICATE,0,0xFF)
+
 # print("<<", decode_idrec(default_idrec))
 
-def _down_cast_helper(x):
+def _up_cast_helper(x):
     if(isinstance(x, CREObjTypeTemplate)):
         return CREObjType
     else:
         return x
 
-from cre.core import T_ID_UNRESOLVED, T_ID_BOOL_PRIMITIVE, T_ID_INTEGER_PRIMITIVE, T_ID_FLOAT_PRIMITIVE, T_ID_STRING_PRIMITIVE, T_ID_PREDICATE 
+
 
 from cre.cre_object import _resolve_t_id_helper
 # def _resolve_t_id_helper(x):
@@ -94,27 +105,21 @@ from numba.experimental.structref import _Utils, imputils
 from numba.core import cgutils, utils as numba_utils
 
 @intrinsic
-def _pred_get_chr_mbrs_infos(typingctx, pred_type):
-    '''get the base address of the struct pointed to by structref 'inst' '''
-    
-    # ind = ind_type.literal_value
-    # print(ind)
-    members_type = [v for k,v in pred_type._fields if k == 'members'][0]
+def _tup_fact_get_chr_mbrs_infos(typingctx, tf_type):
+    members_type = [v for k,v in tf_type._fields if k == 'members'][0]
     t_ids = [_resolve_t_id_helper(x) for x in members_type.types]
 
     count = members_type.count
     member_infos_out_type = types.UniTuple(member_info_type, count)
-    # print(members_type.__dict__)
-
 
     def codegen(context, builder, sig, args):
-        [pred,] = args
+        [tf,] = args
 
-        utils = _Utils(context, builder, pred_type)
+        utils = _Utils(context, builder, tf_type)
 
-        baseptr = utils.get_data_pointer(pred)
+        baseptr = utils.get_data_pointer(tf)
         baseptr_val = builder.ptrtoint(baseptr, cgutils.intp_t)
-        dataval = utils.get_data_struct(pred)
+        dataval = utils.get_data_struct(tf)
         index_of_members = dataval._datamodel.get_field_position("members")
 
         member_infos = []
@@ -128,7 +133,7 @@ def _pred_get_chr_mbrs_infos(typingctx, pred_type):
         ret = context.make_tuple(builder,member_infos_out_type, member_infos)
         return ret
 
-    sig = member_infos_out_type(pred_type)
+    sig = member_infos_out_type(tf_type)
     return sig, codegen
 
 # @njit
@@ -137,33 +142,29 @@ def _pred_get_chr_mbrs_infos(typingctx, pred_type):
     # for i,x in enumerate(literal_unroll(members)):
     #     I = literally(i)
 
+from cre.core import T_ID_TUPLE_FACT
+default_idrec  = encode_idrec(T_ID_TUPLE_FACT,0,0xFF)
 
-
-@generated_jit(cache=True)
-def pred_ctor(*members):
-    
-    ember_types = types.Tuple(tuple([_down_cast_helper(x) for x in members[0].types]))
+@generated_jit(cache=True, nopython=True)
+def tup_fact_ctor(*members):
+    # print(members)
+    member_types = members[0]
+    # print(member_types)
+    ember_types = types.Tuple(tuple([_up_cast_helper(x) for x in member_types.types]))
     member_info_tup_type = types.UniTuple(member_info_type,len(member_types))
     member_t_ids = tuple([_resolve_t_id_helper(x) for x in member_types])
 
-    pred_d = {**predicate_field_dict,"members" : member_types,"chr_mbrs_infos":member_info_tup_type}
-    pred_type = PredTypeTemplate([(k,v) for k,v in pred_d.items()])
-
-    
+    tf_d = {**tup_fact_field_dict,"members" : member_types,"chr_mbrs_infos":member_info_tup_type}
+    tf_type = TupleFact([(k,v) for k,v in tf_d.items()])
 
     def impl(*members):
-        st = new(pred_type)
+        st = new(tf_type)
         # Force zero to avoid immutability issues
         fact_lower_setattr(st, 'idrec', u8(-1))
-
         fact_lower_setattr(st, 'hash_val', 0)
         fact_lower_setattr(st, 'num_chr_mbrs', len(members))
-        fact_lower_setattr(st, 'chr_mbrs_infos', _pred_get_chr_mbrs_infos(st))
+        fact_lower_setattr(st, 'chr_mbrs_infos', _tup_fact_get_chr_mbrs_infos(st))
         fact_lower_setattr(st, 'chr_mbrs_infos_offset', _get_member_offset(st,'chr_mbrs_infos'))
-        # print(_pred_get_chr_mbrs_infos(st))
-        # chr_mbrs_infos = id_members_info_ctor(_pred_get_chr_mbrs_infos(st))
-        # fact_lower_setattr(st, 'chr_mbrs_infos', chr_mbrs_infos)
-        # _pred_get_chr_mbrs_infos(st)
         fact_lower_setattr(st, 'members', members)
 
         # Set this last to avoid immutability
@@ -172,11 +173,13 @@ def pred_ctor(*members):
         return st
     return impl
 
-class Pred(CREObjProxy):
-    __numba_ctor = pred_ctor
+TupleFact._ctor = (tup_fact_ctor,)
+
+class TupleFactProxy(CREObjProxy):
+    __numba_ctor = tup_fact_ctor
 
     def __new__(cls, *args):
-        self = pred_ctor(*args)
+        self = tup_fact_ctor(*args)
         return self
 
     def __str__(self):
@@ -185,24 +188,8 @@ class Pred(CREObjProxy):
     def __repr__(self):
         return str(self)
 
-    # @property
-    # def header(self):
-    #     return pred_get_header(self)
 
-    # @property
-    # def members(self):
-    #     return pred_get_members(self)
-
-
-# @njit(cache=True)
-# def pred_get_header(self):
-#     return self.header
-
-# @njit(cache=True)
-# def pred_get_members(self):
-#     return self.members
-
-define_boxing(PredTypeTemplate, Pred)
+define_boxing(TupleFact, TupleFactProxy)
 
 @generated_jit(cache=True)
 def assert_cre_obj(x):
@@ -218,14 +205,28 @@ def assert_cre_obj(x):
         return impl
 
 
-@overload(Pred, prefer_literal=False,)
-def _pred_ctor(*args):
-    if(any([isinstance(x,types.Literal) for x in args])):
-        return
+@type_callable(TupleFact)
+def tf_type_callable(context):
+    def typer(*args,**kwargs):
+        return TupleFact
+    return typer
 
-    def impl(*args):
-        return pred_ctor(*args)
+@overload(numba_typeref_ctor)
+def foo(self, *args):
+    if(isinstance(self.instance_type, TupleFact)): return #not isinstance(self,types.TypeRef) or 
+    def impl(self, *args):
+        return tup_fact_ctor(*args)
     return impl
+
+
+# @overload(TupleFact, prefer_literal=False,)
+# def _tup_fact_ctor(*args):
+#     if(any([isinstance(x,types.Literal) for x in args])):
+#         return
+
+#     def impl(*args):
+#         return pred_ctor(*args)
+#     return impl
 
 # Pred("HI", 1, 1)
 

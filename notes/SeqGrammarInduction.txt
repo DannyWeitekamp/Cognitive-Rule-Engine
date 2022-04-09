@@ -1,0 +1,180 @@
+1)
+abcdef
+-->
+S -> abcdef
+
+A) Add as few nonterminals as necessary
+
++ abcedf  
+--> 
+S -> XYZ
+X -> abc
+Y -> u(de)
+Z -> f
+
+or if 
+
++ abcghf  
+--> 
+S -> XYZ
+X -> abc
+Y -> de
+Y -> gh
+Z -> f
+
+
+B) If a bottom up parse of grammar G fails to parse a subseqence R' of a new positive string R then we will alter the failed production T -> ?. 
+In this case there are a few possibilities:
+
+	1. If there is a subsequence R'' of R' that can be set-covered by a subsequence of the right hand side of T. Then replace that right hand side with T -> XYZ where X->prefix, Z-> postfix and Y->nonseq(?).
+	2. If no such set-covering subsequence R'' can be found then simply add a disjunction to T. 
+
+NOTE1: What about situations like [a][bc][de][f] + [a][cb][ml][f] where in actuality multiple reorderings make sense. Maybe nonseq() in this case nonseq(bcde) has some internal structure that can generalize, or maybe it should just be determined automatically at this step that we really need [a][nonseq(bc)][nonseq(de)][f]  
+
+NOTE2: Perhaps it makes more sense in this case to have a new grammar with fewer nonterminals like this:
+
+S -> abcYf
+Y -> de
+Y -> gh
+
+2)
+  abcdef
++ abdef  
+->
+S -> abYef
+Y -> c
+Y -> \null
+
+
+C) It is possible to no-op 
+
+3)
+  abcdef
++ abcdcdef
+->
+S -> abXef
+X -> cdX
+X -> cd
+
+D) If a disjunction produces a repeated pattern then add a recursive disjunction
+
+
+4)
+  abcdcef
+  abcdcdcef
+-> 
+S -> abXef
+X -> cdX
+X -> cX
+X -> c
+X -> cd
+
+or maybe it is easier to have some special recurse() directive like X -> pattern[X]
+
+-> 
+S -> abXef
+X -> cd[X]
+X -> c[X]
+
+
+D) If a disjunction produces a repeated pattern then add a disjunction into the recursion. There is a preference when deciding if a symbol should be part of a recursion or pre/postfix, for the symbol to be part of the recursion if the symbol was already in the recursion. 
+
+
+5) 
+  abcdefghi
++ ghidefabc
++ ghidefxyz
+->
+
+S-> XdefX
+X-> abc
+X-> ghi
+X-> xyz
+
+E) If two nonterminals would cover the same terminals just merge them
+
+
+
+--- SIERRA Training Seq ----
+
+S : Sub
+C : Copy
+O : Ovrw
+A : Add10
+D : Decr
+F : Done
+
+
+L0 : S0 F
+L1 : S0 S1 F
+L2 : S0 C1 F 
+L3 : O0 A0 O1 D1 S0 S1 F
+L4 : O0 A0 O1 A1 O2 D2 O1 D1 S0 S1 S2 F
+L5 : O0 A0 O1 A1 O2 A2 O3 D3 O2 D2 O1 D1 S0 S1 S2 S3 F
+
+--- Ideal Grammar ---
+
+L0:
+R -> [S F]
+
+L1: 
+R -> [Su F]
+Su -> S Su
+
+L2:
+R -> [Su F]
+Su -> S Su
+Su -> C Su
+
+L3: 
+R -> [Or Dr Su F]
+Su -> S Su
+Su -> C Su
+Dr -> D
+Dr -> -
+Or -> -
+Or -> [O A Or] 
+Or -> [O Or] <<< This would make more sense as O D 
+
+L4: 
+R -> [Ov Dr Su F]
+Su -> S Su
+Su -> C Su
+Dr -> D
+Dr -> -
+Or -> -
+Or -> [O A Or] 
+Or -> [O Or] <<< This would make more sense as O D 
+
+Note: So now we need to figure out this ODODOD issue.
+We probably need to bias the induction so that it favors grouping
+together actions that are spatially close. I wonder if it is possible
+to keep more of a space of grammars in a bottom-up way. Like, some kind symbol attribution table with weights.
+
+For instance, every pair of actions is either contiguous or not and shares matches or not. We have no buisness grouping discontiguous items (unless there are no-ops), so biasing groupings so that we are more likely to choose ones that share arguments.
+ 
+So now since D1 and O1 share an argument it makes more sense to group them and we should get:
+
+L3: 
+R -> [Or Su F]
+Su -> S Su
+Su -> C Su
+Or -> -
+Or -> [O A Or] 
+Or -> [O D Or]
+
+
+Although we might impose some kind of minimal (non-no-op) disjunction bias and get:
+
+L4: 
+R -> [Or Dr Su F]
+Su -> S Su
+Su -> C Su
+Or -> -
+Or -> [O A Or] 
+Dr -> -
+Dr -> [O D Or] 
+
+Which now also works fine for L5
+
+

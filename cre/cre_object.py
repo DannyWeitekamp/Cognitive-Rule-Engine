@@ -197,17 +197,17 @@ def get_cre_obj_idrec(self):
 
 
 
-from cre.core import T_ID_UNRESOLVED, T_ID_BOOL_PRIMITIVE, T_ID_INTEGER_PRIMITIVE, T_ID_FLOAT_PRIMITIVE, T_ID_STRING_PRIMITIVE, T_ID_TUPLE_FACT 
+from cre.core import T_ID_UNRESOLVED, T_ID_BOOL, T_ID_INT, T_ID_FLOAT, T_ID_STR, T_ID_TUPLE_FACT 
 
 def _resolve_t_id_helper(x):
     if(isinstance(x, types.Boolean)):
-        return T_ID_BOOL_PRIMITIVE
+        return T_ID_BOOL
     elif(isinstance(x, types.Integer)):
-        return T_ID_INTEGER_PRIMITIVE
+        return T_ID_INT
     elif(isinstance(x, types.Float)):
-        return T_ID_FLOAT_PRIMITIVE
+        return T_ID_FLOAT
     elif(x is types.unicode_type):
-        return T_ID_STRING_PRIMITIVE
+        return T_ID_STR
     return T_ID_UNRESOLVED
 
 

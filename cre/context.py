@@ -140,7 +140,7 @@ class CREContext(object):
 
     @classmethod
     def init(cls, name):
-        print("INIT" ,name)
+        # print("INIT" ,name)
         if(name not in cls._contexts):
             cls._contexts[name] = cls(name)
 
@@ -158,14 +158,12 @@ class CREContext(object):
 
     def __init__(self,name):
         self.name = name
-        # self.fact_ctors = {}
         self.type_registry = {**DEFAULT_REGISTERED_TYPES}
         self.op_instances = {}
         self.deferred_types = {}
         
         self.parents_of = {}
         self.children_of = {}
-        # self.jitstructs = {}
         
         self.context_data = cd = new_cre_context()
         self.string_enums = cd.string_enums
@@ -177,12 +175,14 @@ class CREContext(object):
         self.spec_flags = cd.spec_flags
         self.fact_to_t_id = cd.fact_to_t_id
         self.fact_num_to_t_id = cd.fact_num_to_t_id
+        # print("CONTEXT:", name)
 
-        # for x in ["<#ANY>",'','?sel']:
-        #   self.enumerize_value(x)
-    # def _register_op_inst(self,op_inst):
-    #     self.op_instances[op_inst.name] = op_inst
-    #     self.type_registry[op_inst.name] = op_inst.__class__
+        #Auto register TupleFact
+        from cre.tuple_fact import TF_FACT_NUM
+        from cre.core import T_ID_TUPLE_FACT
+        self.fact_num_to_t_id[TF_FACT_NUM] = T_ID_TUPLE_FACT
+
+        
     def get_deferred_type(self,name):
         if(name not in self.deferred_types):
             from cre.fact import DeferredFactRefType
@@ -191,7 +191,7 @@ class CREContext(object):
 
 
 
-    def _register_fact_type(self, name, spec, fact_type, inherit_from=None):
+    def _register_fact_type(self, name, fact_type, inherit_from=None):
         #Add attributes to the ctor and type objects
         # fact_ctor.fact_type = fact_type
         # fact_type.fact_ctor = fact_ctor
@@ -200,7 +200,7 @@ class CREContext(object):
         
         # self.fact_ctors[name] = fact_ctor
         self.type_registry[name] = fact_type
-        print("REGISTER", name, self.name)
+        # print("REGISTER", name, self.name)
         #Map to t_ids
         t_id = len(self.type_registry)
         inh_fact_num = inherit_from._fact_num if inherit_from is not None else -1

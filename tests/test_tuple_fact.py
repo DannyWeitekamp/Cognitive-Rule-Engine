@@ -3,7 +3,7 @@
 from cre.utils import _cast_structref
 from cre.context import cre_context
 from cre.memory import Memory
-from cre.tuple_fact import TupleFact#TupleFact, assert_cre_obj, GenericTupleFact
+from cre.tuple_fact import TupleFact, TF#TupleFact, assert_cre_obj, TupleFact
 from cre.primitive import Primitive, StringPrimitiveType
 from cre.cre_object import CREObjType
 from cre.utils import PrintElapse
@@ -59,12 +59,12 @@ def test_eq():
     # assert eq(a1, a2) == True
     # assert eq(a1, b) == False
 
-    a1 = as_cre_obj(TupleFact("HI",TupleFact("HI",2)))
-    a2 = as_cre_obj(TupleFact("HI",TupleFact("HI",2)))
-    b1 = as_cre_obj(TupleFact("HI",TupleFact("HI",3)))
-    b2 = as_cre_obj(TupleFact("HI",TupleFact("HO",2)))
-    b3 = as_cre_obj(TupleFact("HO",TupleFact("HI",2)))
-    b4 = as_cre_obj(TupleFact("HO",TupleFact("HI",2, 0)))
+    a1 = as_cre_obj(TF("HI",TF("HI",2)))
+    a2 = as_cre_obj(TF("HI",TF("HI",2)))
+    b1 = as_cre_obj(TF("HI",TF("HI",3)))
+    b2 = as_cre_obj(TF("HI",TF("HO",2)))
+    b3 = as_cre_obj(TF("HO",TF("HI",2)))
+    b4 = as_cre_obj(TF("HO",TF("HI",2, 0)))
 
     # print(eq(a1, a2))
     assert eq(a1, a2)
@@ -94,12 +94,12 @@ def test_hash():
     # a1 = as_cre_obj(TupleFact("HI",2))
     # print(hsh(a1))
 
-    a1 = as_cre_obj(TupleFact("HI",TupleFact("HI",2)))
-    a2 = as_cre_obj(TupleFact("HI",TupleFact("HI",2)))
-    b1 = as_cre_obj(TupleFact("HI",TupleFact("HI",3)))
-    b2 = as_cre_obj(TupleFact("HI",TupleFact("HO",2)))
-    b3 = as_cre_obj(TupleFact("HO",TupleFact("HI",2)))
-    b4 = as_cre_obj(TupleFact("HO",TupleFact("HI",2, 0)))
+    a1 = as_cre_obj(TF("HI",TF("HI",2)))
+    a2 = as_cre_obj(TF("HI",TF("HI",2)))
+    b1 = as_cre_obj(TF("HI",TF("HI",3)))
+    b2 = as_cre_obj(TF("HI",TF("HO",2)))
+    b3 = as_cre_obj(TF("HO",TF("HI",2)))
+    b4 = as_cre_obj(TF("HO",TF("HI",2, 0)))
 
     print(hsh(a1),hsh(a2))
     print(hsh(a1),hsh(b1))
@@ -120,14 +120,14 @@ N = 10000
 
 @njit(cache=True)
 def _b_dict_insert_tup_fact():
-    d = Dict.empty(GenericTupleFact, i8)
+    d = Dict.empty(TupleFact, i8)
     for i in range(N):
-        hash(TupleFact(str(i),i))
+        hash(TF(str(i),i))
         # d[TupleFact(str(i),i)] = i
     return d
 
-def test_b_dict_insert_TupleFact(benchmark):
-    _b_dict_insert_TupleFact()
+def test_b_dict_insert_tup_fact(benchmark):
+    _b_dict_insert_tup_fact()
     benchmark.pedantic(_b_dict_insert_tup_fact,warmup_rounds=1,rounds=20)
 
 def _b_dict_insert_tup():
@@ -143,21 +143,21 @@ def test_b_dict_insert_py_tup(benchmark):
     
 
 @njit(cache=True)
-def _b_make_TupleFact():
-    d = Dict.empty(GenericTupleFact, i8)
+def _b_make_tup_fact():
+    d = Dict.empty(TupleFact, i8)
     for i in range(N):
-        TupleFact(str(i),i)
+        TF(str(i),i)
         # d[TupleFact(str(i),i)] = i
     return d
 
 def test_b_make_TupleFact(benchmark):
-    _b_make_TupleFact()
-    benchmark.pedantic(_b_make_TupleFact,warmup_rounds=1,rounds=20)    
+    _b_make_tup_fact()
+    benchmark.pedantic(_b_make_tup_fact,warmup_rounds=1,rounds=20)    
 
 
 @njit(cache=True)
 def _b_make_py_tup():
-    d = Dict.empty(GenericTupleFact, i8)
+    d = Dict.empty(TupleFact, i8)
     for i in range(N):
         (str(i),i)
         # d[TupleFact(str(i),i)] = i
@@ -172,9 +172,12 @@ def test_b_make_py_tup(benchmark):
 
 
 if __name__ == "__main__":
-    test_eq()
+    # test_eq()
     test_hash()
     # p = init_prim()
     # print(type(p), p)
     # print(assert_cre_obj(2))
-    # print(_b_dict_insert_tup_fact())
+    # _b_make_tup_fact()
+    _b_dict_insert_tup_fact()
+    # _b_make_py_tup()
+

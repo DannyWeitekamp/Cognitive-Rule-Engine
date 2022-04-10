@@ -153,7 +153,8 @@ def fact_setattr_codegen(context, builder, sig, args, attr, mutability_protected
 
     if(mutability_protected):
         idrec = getattr(dataval, "idrec")
-        idrec_set = builder.icmp_signed('!=', idrec, idrec.type(-1))
+        # If (idec & 0xFF) != 0, throw an error 
+        idrec_set = builder.icmp_unsigned('==', builder.and_(idrec, idrec.type(0xFF)), idrec.type(0))
         with builder.if_then(idrec_set):
             msg =("Facts objects are immutable once declared. Use mem.modify instead.",)
             context.call_conv.return_user_exc(builder, AttributeError, msg)

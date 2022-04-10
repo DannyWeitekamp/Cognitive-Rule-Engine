@@ -1,7 +1,7 @@
 #From here: https://github.com/znerol/py-fnvhash/blob/master/fnvhash/__init__.py
 import numba
 from numba import types, njit
-from numba import void,b1,u1,u2,u4,u8,i1,i2,i4,i8,f4,f8,c8,c16
+from numba import void,b1,u1,u2,u4,u8,i1,i2,i4,i8,f4,f8,c8,c16,types
 from numba.core.types import unicode_type, float64
 from numba.core.dispatcher import Dispatcher
 from numba.extending import intrinsic
@@ -36,9 +36,6 @@ TYPE_ALIASES = {
     'unicode_type' : 'unicode_type',
     'float64' : 'float64',
 }
-
-DEFAULT_REGISTERED_TYPES = {'float64': float64,
-                     'unicode_type' : unicode_type}
 
 JITSTRUCTS = {}                  
 
@@ -119,18 +116,77 @@ CRE_TYPE_ATOM          = int('00001001', 2)
 CRE_TYPE_PRED          = int('00001010', 2)
 
 
+DEFAULT_REGISTERED_TYPES = {
+                            'undefined': types.undefined,
+                            'bool' : types.bool_,
+                            'int' : i8,
+                            'float' : f8,
+                            'str' : unicode_type,
+                            'Fact' : types.undefined,
+                            'TupleFact' : types.undefined,
+                            'Var': types.undefined,
+                            'Op' : types.undefined,
+                            'Literal' : types.undefined,
+                            'Conditions' : types.undefined
+                            }
 
 T_ID_UNRESOLVED = 0
-T_ID_BOOL_PRIMITIVE = 1
-T_ID_INTEGER_PRIMITIVE = 2 
-T_ID_FLOAT_PRIMITIVE = 3
-T_ID_STRING_PRIMITIVE = 4 
+T_ID_BOOL = 1
+T_ID_INT = 2 
+T_ID_FLOAT = 3
+T_ID_STR = 4 
 T_ID_FACT = 5 
 T_ID_TUPLE_FACT = 6 
 T_ID_VAR = 7
 T_ID_OP = 8
 T_ID_LITERAL = 9
 T_ID_CONDITIONS = 10
+
+DEFAULT_REGISTERED_TYPES = {
+                            'undefined': types.undefined,
+                            'bool' : types.bool_,
+                            'int64' : i8,
+                            'float64' : f8,
+                            'str' : unicode_type,
+                            'Fact' : types.undefined,
+                            'TupleFact' : types.undefined,
+                            'Var': types.undefined,
+                            'Op' : types.undefined,
+                            'Literal' : types.undefined,
+                            'Conditions' : types.undefined
+                            }
+
+DEFAULT_TYPE_T_IDS = {
+    # Maps names 
+    'undefined': T_ID_UNRESOLVED,
+    'bool' : T_ID_BOOL,
+    'int' : T_ID_INT,
+    'float' : T_ID_FLOAT,
+    'str' : T_ID_STR,
+    'Fact' : T_ID_FACT,
+    'TupleFact' : T_ID_TUPLE_FACT,
+    'Var': T_ID_VAR,
+    'Op' : T_ID_OP,
+    'Literal' : T_ID_LITERAL,
+    'Conditions' : T_ID_CONDITIONS,
+    # Also map types... do rest as registered 
+    types.bool_ : T_ID_BOOL,
+    i8 : T_ID_INT,
+    f8 : T_ID_FLOAT,
+    unicode_type : T_ID_STR,
+}                 
+
+DEFAULT_T_ID_TYPES = {v:k for k,v in DEFAULT_TYPE_T_IDS.items()}           
+
+def register_global_default(name, typ):
+    '''Not for external use'''
+    assert name in DEFAULT_REGISTERED_TYPES, f"{name} is not preregistered as a global type."
+    DEFAULT_REGISTERED_TYPES[name] = typ
+    DEFAULT_TYPE_T_IDS[typ] = DEFAULT_TYPE_T_IDS[name]
+    DEFAULT_T_ID_TYPES[DEFAULT_TYPE_T_IDS[name]] = typ
+
+
+
 
 
 

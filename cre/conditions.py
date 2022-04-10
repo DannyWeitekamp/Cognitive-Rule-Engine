@@ -18,7 +18,7 @@ from cre.subscriber import base_subscriber_fields, BaseSubscriber, BaseSubscribe
 from cre.vector import VectorType
 from cre.op import GenericOpType, op_str, op_repr, Op, op_copy
 from cre.cre_object import CREObjType, CREObjTypeTemplate
-from cre.core import T_ID_CONDITIONS, T_ID_LITERAL
+from cre.core import T_ID_CONDITIONS, T_ID_LITERAL, register_global_default
 # from cre.predicate_node import BasePredicateNode,BasePredicateNodeType, get_alpha_predicate_node_definition, \
  # get_beta_predicate_node_definition, deref_attrs, define_alpha_predicate_node, define_beta_predicate_node, AlphaPredicateNode, BetaPredicateNode, \
  # LiteralLinkDataType, generate_link_data
@@ -135,6 +135,7 @@ def literal_get_op(self):
 
 define_boxing(LiteralTypeTemplate, Literal)
 LiteralType = LiteralTypeTemplate(literal_fields)
+register_global_default("Literal", LiteralType)
 
 @njit(LiteralType(GenericOpType),cache=True)
 # @overload(Literal)
@@ -256,6 +257,7 @@ class ConditionsTypeTemplate(CREObjTypeTemplate):
 
 
 ConditionsType = ConditionsTypeTemplate(conditions_fields)
+register_global_default("Conditions", ConditionsType)
 
 # lower_cast(ConditionsTypeTemplate, CREObjType)(impl_cre_obj_upcast)
 
@@ -1385,17 +1387,17 @@ def _impl_eq_FrozenArr(a, b):
         return impl
 
 
-@njit(cache=True)
-def test_frzn_ind_arr_type():
-    a1 = FrozenArr(np.arange(3,dtype=np.int64))
-    a2 = FrozenArr(np.arange(3,dtype=np.int64))
-    b = FrozenArr(np.arange(3,dtype=np.int64)+1)
-    print(a1, a2, b)
-    print(hash(a1),hash(a2),hash(b))
-    print(a1 == a2)
-    print(a1 == b)
-    # d = Dict()
-    # d[]
+# @njit(cache=True)
+# def test_frzn_ind_arr_type():
+#     a1 = FrozenArr(np.arange(3,dtype=np.int64))
+#     a2 = FrozenArr(np.arange(3,dtype=np.int64))
+#     b = FrozenArr(np.arange(3,dtype=np.int64)+1)
+#     print(a1, a2, b)
+#     print(hash(a1),hash(a2),hash(b))
+#     print(a1 == a2)
+#     print(a1 == b)
+#     # d = Dict()
+#     # d[]
 
 
 f8_2darr_type = f8[:,::1]
@@ -1459,7 +1461,7 @@ def _conj_from_litset_and_remap(ls_a,ls_b, remap, keys, bpti_a, bpti_b):
         ind_set_b = lit_set_to_ind_sets(lit_set_b, bpti_b)
         matched_mask = get_matched_mask(ind_set_a,ind_set_b,remap)
 
-        print(lit_set_a, lit_set_b, matched_mask)
+        # print(lit_set_a, lit_set_b, matched_mask)
         for keep_it, lit in zip(matched_mask, lit_set_a):
             if(keep_it):
                 new_lit = literal_ctor(lit.op)

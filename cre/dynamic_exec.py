@@ -9,9 +9,9 @@ from cre.cre_object import CREObjTypeTemplate, CREObjType, member_info_type
 from numba.core.datamodel import default_manager, models
 from numba.experimental.structref import define_attributes, StructRefProxy, new, define_boxing
 import operator
-from cre.core import T_ID_CONDITIONS, T_ID_LITERAL, T_ID_OP, T_ID_FACT, T_ID_VAR, T_ID_UNRESOLVED, T_ID_BOOL_PRIMITIVE, T_ID_INTEGER_PRIMITIVE, T_ID_FLOAT_PRIMITIVE, T_ID_STRING_PRIMITIVE, T_ID_TUPLE_FACT
+from cre.core import T_ID_CONDITIONS, T_ID_LITERAL, T_ID_OP, T_ID_FACT, T_ID_VAR, T_ID_UNRESOLVED, T_ID_BOOL, T_ID_INT, T_ID_FLOAT, T_ID_STR, T_ID_TUPLE_FACT
 # from cre.primitive import BooleanPrimitiveType, IntegerPrimitiveType, FloatPrimitiveType, StringPrimitiveType
-from cre.tuple_fact import GenericTupleFact
+from cre.tuple_fact import TupleFact
 from cre.var import GenericVarType
 from cre.op import GenericOpType
 from cre.fact import BaseFact
@@ -22,7 +22,7 @@ cast = _cast_structref
 
 @njit(cache=True)
 def cre_obj_iter_t_id_item_ptrs(_x):
-    x = _cast_structref(GenericTupleFact,_x)
+    x = _cast_structref(TupleFact,_x)
     data_ptr = _struct_get_data_ptr(x)
     # member_info_ptr = _struct_get_data_ptr(x.chr_mbrs_infos) + _struct_get_attr_offset(x.chr_mbrs_infos,"data")
     member_info_ptr = data_ptr + x.chr_mbrs_infos_offset
@@ -37,13 +37,13 @@ def cre_obj_iter_t_id_item_ptrs(_x):
 
 @njit(boolean(u2,i8,i8), cache=True)
 def eq_from_t_id_ptr(t_id, data_ptr_a, data_ptr_b):
-    if(t_id == T_ID_BOOL_PRIMITIVE):
+    if(t_id == T_ID_BOOL):
         return _load_ptr(boolean, data_ptr_a) == _load_ptr(boolean, data_ptr_b)
-    elif(t_id == T_ID_INTEGER_PRIMITIVE):
+    elif(t_id == T_ID_INT):
         return _load_ptr(i8, data_ptr_a) == _load_ptr(i8, data_ptr_b)
-    elif(t_id == T_ID_FLOAT_PRIMITIVE):
+    elif(t_id == T_ID_FLOAT):
         return _load_ptr(f8, data_ptr_a) == _load_ptr(f8, data_ptr_b)
-    elif(t_id == T_ID_STRING_PRIMITIVE):
+    elif(t_id == T_ID_STR):
         return _load_ptr(unicode_type, data_ptr_a) == _load_ptr(unicode_type, data_ptr_b)
     return False
 
@@ -56,8 +56,8 @@ def tuple_fact_eq(a, b):
     if(t_id_b != T_ID_TUPLE_FACT): return False
 
     stack_buffer = None
-    pa = _cast_structref(GenericTupleFact, a)
-    pb = _cast_structref(GenericTupleFact, b)
+    pa = _cast_structref(TupleFact, a)
+    pb = _cast_structref(TupleFact, b)
     stack_head = -1
     is_done = False
 
@@ -95,8 +95,8 @@ def tuple_fact_eq(a, b):
                 if(not eq_from_t_id_ptr(t_id_a, data_ptr_a, data_ptr_b)): return False
 
         if(stack_head > -1):
-            pa = _struct_from_ptr(GenericTupleFact, stack_buffer[stack_head,0]);
-            pb = _struct_from_ptr(GenericTupleFact, stack_buffer[stack_head,1]);
+            pa = _struct_from_ptr(TupleFact, stack_buffer[stack_head,0]);
+            pb = _struct_from_ptr(TupleFact, stack_buffer[stack_head,1]);
             stack_head -=1;
         else:
             is_done = True
@@ -193,7 +193,7 @@ def conds_eq(a,b):
 
 # @njit()
 # def tuple_fact_eq(a,b):
-#     pa, pb = cast(GenericTupleFact, a), cast(GenericTupleFact, b)
+#     pa, pb = cast(TupleFact, a), cast(TupleFact, b)
 
 #     if(not non_tuple_fact_eq(pa.header, pb.header)): return False
 
@@ -211,7 +211,7 @@ def conds_eq(a,b):
 #     t_id_b,_,_ = decode_idrec(b.idrec)
 #     if(t_id_a != t_id_b): return False
 
-#     if(t_id_a <= T_ID_STRING_PRIMITIVE):
+#     if(t_id_a <= T_ID_STR):
 #         return non_tuple_fact_eq(a,b)    
 #     elif(t_id_a == T_ID_TUPLE_FACT):
 #         return tuple_fact_eq(a,b)
@@ -244,17 +244,17 @@ def _cre_obj_eq(a,b):
 
 from numba.cpython.hashing import _Py_hash_t, _Py_uhash_t, _PyHASH_XXROTATE, _PyHASH_XXPRIME_1, _PyHASH_XXPRIME_2, _PyHASH_XXPRIME_5, process_return
 from cre.hashing import accum_item_hash
-print(_PyHASH_XXPRIME_1, _PyHASH_XXPRIME_2, _PyHASH_XXPRIME_5)
+# print(_PyHASH_XXPRIME_1, _PyHASH_XXPRIME_2, _PyHASH_XXPRIME_5)
 
 @njit(u8(u2,i8))
 def hash_from_t_id_ptr(t_id, data_ptr):
-    if(t_id == T_ID_BOOL_PRIMITIVE):
+    if(t_id == T_ID_BOOL):
         return hash(_load_ptr(boolean, data_ptr))
-    elif(t_id == T_ID_INTEGER_PRIMITIVE):
+    elif(t_id == T_ID_INT):
         return hash(_load_ptr(i8, data_ptr))
-    elif(t_id == T_ID_FLOAT_PRIMITIVE):
+    elif(t_id == T_ID_FLOAT):
         return hash(_load_ptr(f8, data_ptr))
-    elif(t_id == T_ID_STRING_PRIMITIVE):
+    elif(t_id == T_ID_STR):
         return hash(_load_ptr(unicode_type, data_ptr))
     return u8(-1)
 
@@ -267,7 +267,7 @@ def tuple_fact_hash(x):
     ''' based roughly on _tuple_hash from numba.cpython.hashing'''
     if(x.hash_val == 0):
         stack_buffer = None
-        p = _cast_structref(GenericTupleFact, x)
+        p = _cast_structref(TupleFact, x)
         stack_head = -1
         is_done = False
 
@@ -297,7 +297,7 @@ def tuple_fact_hash(x):
             acc = accum_item_hash(acc,tl)
 
             if(stack_head > -1):
-                p = _struct_from_ptr(GenericTupleFact, stack_buffer[stack_head]);
+                p = _struct_from_ptr(TupleFact, stack_buffer[stack_head]);
                 stack_head -=1;
             else:
                 is_done = True
@@ -405,7 +405,7 @@ def conds_hash(x):
 # def cre_obj_hash(x):
 #     t_id,_,_ = decode_idrec(x.idrec)
 
-#     # if(t_id <= T_ID_STRING_PRIMITIVE):
+#     # if(t_id <= T_ID_STR):
 #     #     hsh = non_tuple_fact_hash(x)
 #     # elif(t_id == T_ID_TUPLE_FACT):
 #     hsh = tuple_fact_hash(x)

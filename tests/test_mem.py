@@ -1,5 +1,6 @@
 from cre.context import cre_context
 from cre.fact import define_fact
+from cre.tuple_fact import TF, TupleFact
 from cre.memory import Memory, MemoryType, decode_idrec, encode_idrec, next_empty_f_id, make_f_id_empty, retracted_f_ids_for_t_id
 from numba import njit
 from numba.types import unicode_type, NamedTuple
@@ -69,23 +70,14 @@ def test_declare_retract():
         assert declare_retract.py_func(mem) == 10
         assert declare_again.py_func(mem) == 0
 
-        # with pytest.raises(TypingError):
-        #     @njit(cache=True)
-        #     def bad_declare_type(mem):
-        #         mem.declare("Bad")
-        #     bad_declare_type(mem)
-
-        # with pytest.raises(TypingError):
-        #     bad_declare_type.py_func(mem)
-
-        # with pytest.raises(TypingError):
-        #     @njit(cache=True)
-        #     def bad_retract_type(mem):
-        #         mem.retract(["A",1])
-        #     bad_retract_type(mem)
-
-        # with pytest.raises(TypingError):
-        #     bad_retract_type.py_func(mem)
+def test_declare_retract_tuple_fact():
+    with cre_context("test_declare_retract_tuple_fact"):
+        #NRT version
+        mem = Memory()
+        idrec1 = mem.declare(("A",1))
+        idrec2 = mem.declare(TF("A",1))
+        print(decode_idrec(idrec1))
+        print(decode_idrec(idrec2))
 
 ##### test_modify #####
 @njit(cache=True)
@@ -477,6 +469,7 @@ def test_b_get_facts_10000(benchmark):
 
 if __name__ == "__main__":
     import faulthandler; faulthandler.enable()
+    test_declare_retract_tuple_fact()
     # test_declare_overloading()
     # test_modify()
     # test_declare_retract()

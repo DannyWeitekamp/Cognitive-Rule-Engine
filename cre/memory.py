@@ -32,7 +32,8 @@ from cre.transform import infer_type
 
 from cre.subscriber import BaseSubscriberType
 from cre.structref import define_structref
-from cre.fact import BaseFact,BaseFact, cast_fact
+from cre.fact import Fact, BaseFact,BaseFact, cast_fact
+from cre.tuple_fact import TF, TupleFact
 from cre.fact_intrinsics import fact_lower_setattr
 from cre.utils import CastFriendlyMixin, lower_setattr, _cast_structref, _meminfo_from_struct, decode_idrec, encode_idrec, \
  _raw_ptr_from_struct, _ptr_from_struct_incref,  _struct_from_ptr, _decref_ptr, _decref_structref, _raw_ptr_from_struct_incref, _obj_cast_codegen
@@ -205,10 +206,12 @@ class Memory(structref.StructRefProxy):
         return add_subscriber(self,subscriber)
 
     def declare(self,fact,name=None):
-        if(name is None):
-            idrec = declare_fact(self, fact)
-        else:
-            idrec = declare_fact_name(self, fact, name)            
+        print(fact,name)
+        idrec = mem_declare(self,fact,name)
+        # if(name is None):
+        #     idrec = declare_fact(self, fact)
+        # else:
+        #     idrec = declare_fact_name(self, fact, name)            
         return idrec
 
 
@@ -471,7 +474,6 @@ def signal_subscribers_change(mem, idrec):
 # def declare_fact_from_ptr(mem, fact_ptr, fact_num):
     
 
-
 @njit(u8(MemoryType,BaseFact),cache=True)
 def declare_fact(mem, fact):
     #Incref so that the fact is not freed if this is the only reference
@@ -498,6 +500,36 @@ def declare_fact(mem, fact):
     # return idrec
     
     return idrec
+
+
+# from cre.core import T_ID_TUPLE_FACT
+# @njit(u8(MemoryType,TupleFact),cache=True)
+# def declare_tuple_fact(mem, fact):
+#     #Incref so that the fact is not freed if this is the only reference
+#     fact_ptr = i8(_raw_ptr_from_struct_incref(fact)) #.4ms / 10000
+
+#     t_id = T_ID_TUPLE_FACT#resolve_t_id(mem, fact.fact_num)  #.1ms / 10000
+#     facts = facts_for_t_id(mem.mem_data, t_id) #negligible
+#     f_id = next_empty_f_id(mem.mem_data, facts, t_id) # .5ms / 10000
+
+
+#     idrec = encode_idrec(t_id,f_id,0) #negligable
+#     fact.idrec = idrec #negligable
+
+
+#     if(f_id < len(facts)): # .2ms / 10000
+#         if(facts.data[f_id] != 0): _decref_ptr(facts.data[f_id])
+#         facts.data[f_id] = fact_ptr
+        
+#         # signal_subscribers_change(mem, idrec)
+#     else:
+#         facts.add(fact_ptr)
+#         # mem.mem_data.grow_queue.add(idrec)
+#         # signal_subscribers_grow(mem, idrec)
+#     mem.mem_data.change_queue.add(idrec)
+#     # return idrec
+    
+#     return idrec
 
 @njit(cache=True)
 def declare_name(mem,name,idrec):
@@ -610,17 +642,29 @@ def mem_add_subscriber(self, subscriber):
         return add_subscriber(self,subscriber)
     return impl
 
-
+@generated_jit(cache=True)
 @overload_method(MemoryTypeTemplate, "declare")
 def mem_declare(self, fact, name=None):
-    if(not isinstance(fact,types.StructRef)): 
-        raise TypingError(f"Cannot declare fact of type '{type(fact)}'.")
-    if(not name or isinstance(name, (types.NoneType,types.Omitted))):
+    # if(not isinstance(fact,types.StructRef)): 
+    #     
+    # print("<<", fact)
+    # if(isinstance(fact, TupleFact)):
+    #     def impl(self, fact, name=None):
+    #         return declare_tuple_fact(self,fact)
+    
+    if(isinstance(fact, Fact)):
+        if(not name or isinstance(name, (types.NoneType,types.Omitted))):
+            def impl(self, fact, name=None):
+                return declare_fact(self,fact)
+        else:
+            def impl(self, fact, name=None):
+                return declare_fact_name(self,fact,name)
+    elif(isinstance(fact, types.BaseTuple)):
         def impl(self, fact, name=None):
-            return declare_fact(self,fact)
+            return declare_fact(self,TF(*fact))
     else:
-        def impl(self, fact, name=None):
-            return declare_fact_name(self,fact,name)
+        raise TypingError(f"Cannot declare fact of type '{type(fact)}'.")
+    
     return impl
 
 @generated_jit(cache=True)
@@ -648,7 +692,7 @@ def mem_modify(self, fact, attr, val):
 
     SentryLiteralArgs(['attr']).for_function(mem_modify).bind(self, fact, attr, val) 
     a_id = u1(list(fact.field_dict.keys()).index(attr._literal_value))
-    print("a_id", a_id, type(a_id))
+    # print("a_id", a_id, type(a_id))
     # print(attr.__dict__)
     # print(fact.spec[attr._literal_value])
 
@@ -774,7 +818,7 @@ def generic_fact_iterator_ctor(mem, t_ids):
 
 @lower_builtin('getiter', FactIteratorType)
 def getiter_fact_iter(context, builder, sig, args):
-    print("<<", args[0])
+    # print("<<", args[0])
     return args[0].value
 
 @overload_method(FactIteratorType,'__iter__')

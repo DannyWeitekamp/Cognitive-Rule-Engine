@@ -28,7 +28,7 @@ from operator import itemgetter
 from copy import copy
 from os import getenv
 from cre.utils import deref_type, DEREF_TYPE_ATTR, DEREF_TYPE_LIST, listtype_sizeof_item, _obj_cast_codegen
-from cre.core import T_ID_VAR
+from cre.core import T_ID_VAR, register_global_default
 # import inspect
 
 
@@ -96,6 +96,7 @@ class VarTypeTemplate(CREObjTypeTemplate):
 default_manager.register(VarTypeTemplate, models.StructRefModel)
 
 GenericVarType = VarTypeTemplate([(k,v) for k,v in var_fields_dict.items()])
+register_global_default("Var", GenericVarType)
 
 # Allow typed Var instances to be upcast to GenericVarType
 @lower_cast(VarTypeTemplate, GenericVarType)
@@ -304,11 +305,11 @@ class Var(CREObjProxy):
         #     op_to_cond(npo)
 
         if(other is None):
-            with PrintElapse("new_ObjIsNone"):
-                return op_to_cond(ObjIsNone(self))
+            # with PrintElapse("new_ObjIsNone"):
+            return op_to_cond(ObjIsNone(self))
         if(isinstance(other,Var) and isinstance(other.head_type,Fact)):
-            with PrintElapse("new_ObjEquals"):
-                return op_to_cond(ObjEquals(self,other))
+            # with PrintElapse("new_ObjEquals"):
+            return op_to_cond(ObjEquals(self,other))
 
         return Equals(self, other)
     def __ne__(self, other): 

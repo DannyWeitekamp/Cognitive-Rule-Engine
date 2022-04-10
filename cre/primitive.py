@@ -82,13 +82,13 @@ def int_primitive_str(a):
 # @njit(unicode_type(CREObjType,),cache=True)
 # def int_primitive_repr(a):
 #     return repr(_cast_structref(IntegerPrimitiveType,a).value)
-from cre.core import T_ID_BOOL_PRIMITIVE, T_ID_INTEGER_PRIMITIVE, T_ID_FLOAT_PRIMITIVE, T_ID_STRING_PRIMITIVE
+from cre.core import T_ID_BOOL, T_ID_INT, T_ID_FLOAT, T_ID_STR
 
 # @generated_jit(cache=True)
 def primitive_ctor_code_gen(x):
     if(isinstance(x, types.Literal)): return
     if(x is types.boolean):
-        default_idrec = encode_idrec(T_ID_BOOL_PRIMITIVE,0,0xFF)
+        default_idrec = encode_idrec(T_ID_BOOL,0,0xFF)
         def impl(x):
             st = new(BooleanPrimitiveType); 
             fact_lower_setattr(st,'idrec',default_idrec);
@@ -96,7 +96,7 @@ def primitive_ctor_code_gen(x):
             return st
 
     elif(x is i8):
-        default_idrec = encode_idrec(T_ID_INTEGER_PRIMITIVE,0,0xFF)
+        default_idrec = encode_idrec(T_ID_INT,0,0xFF)
         def impl(x):
             st = new(IntegerPrimitiveType)
             fact_lower_setattr(st,'idrec',default_idrec);
@@ -104,7 +104,7 @@ def primitive_ctor_code_gen(x):
             return st
 
     elif(x is f8):
-        default_idrec = encode_idrec(T_ID_FLOAT_PRIMITIVE,0,0xFF)
+        default_idrec = encode_idrec(T_ID_FLOAT,0,0xFF)
         def impl(x):
             st = new(FloatPrimitiveType)
             fact_lower_setattr(st,'idrec',default_idrec);
@@ -112,7 +112,7 @@ def primitive_ctor_code_gen(x):
             return st
 
     elif(x is types.unicode_type):
-        default_idrec = encode_idrec(T_ID_STRING_PRIMITIVE,0,0xFF)
+        default_idrec = encode_idrec(T_ID_STR,0,0xFF)
         def impl(x):
             st = new(StringPrimitiveType)
             fact_lower_setattr(st,'idrec',default_idrec);

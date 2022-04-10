@@ -23,7 +23,7 @@ from cre.vector import VectorType
 from cre.fact import Fact, gen_fact_import_str, get_offsets_from_member_types
 from cre.var import Var, var_memcopy, GenericVarType
 from cre.cre_object import CREObjType, cre_obj_field_dict, CREObjTypeTemplate, CREObjProxy
-from cre.core import T_ID_OP
+from cre.core import T_ID_OP, register_global_default
 # from cre.predicate_node import BasePredicateNode,BasePredicateNodeType, get_alpha_predicate_node_definition, \
 #  get_beta_predicate_node_definition, deref_attrs, define_alpha_predicate_node, define_beta_predicate_node, AlphaPredicateNode, BetaPredicateNode
 from cre.make_source import make_source, gen_def_func, gen_assign, resolve_template, gen_def_class
@@ -281,6 +281,7 @@ def op_define_boxing(struct_type, obj_class):
 
 
 GenericOpType = OpTypeTemplate([(k,v) for k,v in op_fields_dict.items()])
+register_global_default("Op", GenericOpType)
 
 
 class UntypedOp():

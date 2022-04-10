@@ -22,11 +22,11 @@ from numba.core.typing import signature
 
 # from numba.core.extending import overload
 
-from cre.core import TYPE_ALIASES, JITSTRUCTS, py_type_map, numba_type_map, numpy_type_map
+from cre.core import TYPE_ALIASES, JITSTRUCTS, py_type_map, numba_type_map, numpy_type_map, register_global_default
 from cre.gensource import assert_gen_source
 from cre.caching import unique_hash, source_to_cache, import_from_cached, source_in_cache, get_cache_path
 from cre.structref import gen_structref_code, define_structref
-from cre.context import cre_context
+# from cre.context import cre_context
 from cre.utils import (_struct_from_ptr, _cast_structref, struct_get_attr_offset, _obj_cast_codegen,
                        _ptr_from_struct_codegen, _raw_ptr_from_struct, CastFriendlyMixin, _obj_cast_codegen,
                         PrintElapse, _struct_get_data_ptr)
@@ -72,6 +72,61 @@ class Fact(CREObjTypeTemplate):
         # print(args,kwargs)
         # print(self._ctor)
         return self._ctor[0](*args, **kwargs)
+
+@generated_jit(cache=True)
+def call_untyped_fact(self, **kwargs):
+    # print("call_untyped_fact", kwargs)
+
+    typs = tuple(kwargs.values())
+    return_sig = False
+    if(isinstance(typs[0],types.TypeRef)):
+        typs = tuple(x.instance_type for x in typs)
+        return_sig = True    
+    fact_type = self.specialize(**{k:v for k,v in zip(kwargs,typs)})
+
+    if(return_sig):
+        def impl(self,**kwargs):
+            return fact_type
+    else:
+        def impl(self,**kwargs):
+            return fact_type(**kwargs)
+
+    return impl
+
+from numba.core.typing.typeof import typeof
+class UntypedFact(Fact):
+    specializations = {}
+    def __init__(self, fields):
+        # print("INIT")
+        super().__init__(fields)
+    def __call__(self, *args, **kwargs):
+        if(len(kwargs) == 0):
+            # print("SIG",self, args, kwargs)
+            return signature(self,*args)
+        else:
+            # print("kwargs", kwargs)
+            # print()
+
+            if(isinstance(list(kwargs.values())[0],types.Type)):
+                # print("CALL",self, args, kwargs)
+                fact_type = self.specialize(**kwargs)
+                return fact_type#call_untyped_fact(self, **kwargs)
+            else:
+                fact_type = self.specialize(**{k:typeof(v) for k,v in kwargs.items()})
+                # print("CTOR",self, args, kwargs)
+                return fact_type(**kwargs)
+
+
+    def specialize(self, **kwargs):
+        typs = tuple(kwargs.values())
+        # print("typs", typs)
+        self_field_dict = {k:v for (k,v) in zip(kwargs.keys(), typs)}
+        spec = {**self_field_dict, "inherit_from" : self}
+        fact_type = define_fact(self._fact_name, spec)
+        # print("fact_type", fact_type)
+        return fact_type
+
+
 
     # @property
     # def key(self):
@@ -206,7 +261,7 @@ def _merge_spec_inheritance(spec : dict, context):
         # print(context.type_registry)
         # print("RESOLVE", temp, type(temp), inherit_from,type(inherit_from),)
         # print()
-    # print("INHERIT_FROMM",inherit_from)
+    # print("INHERIT_FROM", inherit_from)
     if(not isinstance(inherit_from,types.StructRef)):
         inherit_from = context.type_registry[inherit_from._fact_name]
         
@@ -215,6 +270,7 @@ def _merge_spec_inheritance(spec : dict, context):
         raise ValueError(f"Invalid inherit_from : {inherit_from}")
 
     inherit_spec = inherit_from.spec
+    # print("inherit_spec", inherit_spec)
 
     _intersect = set(inherit_spec.keys()).intersection(set(spec.keys()))
     for k in _intersect:
@@ -453,7 +509,7 @@ def get_offsets_from_member_types(fields):
 #     else:
 #         return repr(typ)
 
-def repr_fact_attr(inst,fact_name,get_ptr=None):
+def repr_fact_attr(inst, fact_name, get_ptr=None):
     # if(isinstance(val,Fact)):
     ptr = get_ptr(inst)
     if(ptr != 0):
@@ -521,13 +577,13 @@ from cre.utils import _sizeof_type, _load_ptr
 
 
 def _prep_field(attr, t, imports_set):
-    
+    from cre.tuple_fact import TupleFactClass
     # elif(isinstance(t,types.ListType) and isinstance(t.dtype,types.StructRef)):
     #     imports_set.add(f"{gen_fact_import_str(t.dtype)}")
 
     # upcast any facts to BaseFact since references to undefined fact types not supported
     if(isinstance(t,fact_types)):
-        if(isinstance(t,Fact)):
+        if(isinstance(t,Fact) and not isinstance(t,TupleFactClass)):
             imports_set.add(f"{gen_fact_import_str(t)}")
         return attr, BaseFact
     elif(isinstance(t,ListType)):
@@ -549,8 +605,9 @@ def _prep_fields_populate_imports(fields, inherit_from=None):
         
     return fields, "\n".join(list(imports_set))
 
-def gen_fact_src(typ, fields, fact_num, inherit_from=None, hash_code="", ind='    '):
+def gen_fact_src(typ, fields, fact_num, inherit_from=None, is_untyped=False, hash_code="", ind='    '):
     '''Generate the source code for a new fact '''
+    # print("ISUNTYPED", typ, is_untyped)
     # print(typ.spec)
     fields, fact_imports = _prep_fields_populate_imports(fields, inherit_from)
 
@@ -600,7 +657,7 @@ from numba.experimental.structref import new#, define_boxing
 from numba.core.extending import overload, lower_cast, type_callable
 from numba.core.imputils import numba_typeref_ctor
 from cre.fact_intrinsics import define_boxing, get_fact_attr_ptr, _register_fact_structref, fact_mutability_protected_setattr, fact_lower_setattr, _fact_get_chr_mbrs_infos
-from cre.fact import repr_list_attr, repr_fact_attr,  FactProxy, Fact{", BaseFact, base_list_type, fact_to_ptr, get_inheritance_bytes_len_ptr" if typ != "BaseFact" else ""}, uint_to_inheritance_bytes
+from cre.fact import repr_list_attr, repr_fact_attr,  FactProxy, Fact, UntypedFact{", BaseFact, base_list_type, fact_to_ptr, get_inheritance_bytes_len_ptr" if typ != "BaseFact" else ""}, uint_to_inheritance_bytes
 from cre.utils import _raw_ptr_from_struct, ptr_t, _get_member_offset, _cast_structref, _load_ptr, _obj_cast_codegen
 import cloudpickle
 from cre.cre_object import member_info_type, set_chr_mbrs
@@ -613,13 +670,13 @@ inheritance_bytes = tuple({"list(parent_inh_bytes) + " if inherit_from else ""}l
 num_inh_bytes = len(inheritance_bytes)
 
 @_register_fact_structref
-class {typ}Class(Fact):
+class {typ}Class({"UntypedFact" if is_untyped else "Fact"}):
     def __init__(self,*args,**kwargs):
         super().__init__(*args,**kwargs)
         self._fact_name = '{typ}'
         self._fact_num = {fact_num}
         self._attr_offsets = attr_offsets
-        # self._hash_code = '{hash_code}'
+        self._hash_code = '{hash_code}'
 
     def preprocess_fields(self, fields):
         return tuple((name, types.unliteral(typ)) for name, typ in fields)
@@ -698,6 +755,7 @@ class {typ}Proxy(FactProxy):
     _chr_mbrs_infos = chr_mbrs_infos
     _isa = isa_{typ}
     _code = {typ}._code
+    _hash_code = '{hash_code}'
 
     def __new__(cls, *args,**kwargs):
         return ctor(*args,**kwargs)
@@ -713,6 +771,7 @@ class {typ}Proxy(FactProxy):
 # Overload '{typ}' as its own constructor
 @type_callable({typ})
 def ssp_call(context):
+    {"raise NotImplementedError('NotImplementedError: Cannot initialize UntypedFact in jitted context.')" if is_untyped else ""}
     def typer({param_seq}):
         return {typ}
     return typer
@@ -764,18 +823,20 @@ def lines_in_fact_registry():
 def add_to_fact_registry(name,hash_code):
     global GLOBAL_FACT_COUNT
     if(GLOBAL_FACT_COUNT == -1): lines_in_fact_registry()
+    count = GLOBAL_FACT_COUNT
     with open(get_cache_path("fact_registry",suffix=''),'a') as f:
         f.write(f"{name} {hash_code} \n")
     GLOBAL_FACT_COUNT += 1
+    return count
 
 
 
-def _fact_from_fields(name, fields, context=None, inherit_from=None, return_proxy=False, return_type_class=False):
-    context = cre_context(context)
+def _fact_from_fields(name, fields, inherit_from=None, is_untyped=False, return_proxy=False, return_type_class=False):
+    # context = cre_context(context)
     hash_code = unique_hash([name,fields])
     if(not source_in_cache(name,hash_code)):
         fact_num = lines_in_fact_registry()
-        source = gen_fact_src(name, fields, fact_num, inherit_from, hash_code)
+        source = gen_fact_src(name, fields, fact_num, inherit_from, is_untyped, hash_code)
         source_to_cache(name, hash_code, source)
         add_to_fact_registry(name, hash_code)
 
@@ -789,36 +850,52 @@ def _fact_from_fields(name, fields, context=None, inherit_from=None, return_prox
         
     return tuple(out) if len(out) > 1 else out[0]
 
-def _fact_from_spec(name, spec, context=None, inherit_from=None, return_proxy=False, return_type_class=False):
+def _fact_from_spec(name, spec, inherit_from=None, return_proxy=False, return_type_class=False):
     # assert parent_fact_type
-    fields = [(k,v['type']) for k, v in spec.items()]
-    return _fact_from_fields(name,fields,context=context,
-             inherit_from=inherit_from, return_proxy=return_proxy,
+    is_untyped = bool(spec is None)
+    fields = [(k,v['type']) for k, v in spec.items()] if spec else {}
+    return _fact_from_fields(name, fields,
+             inherit_from=inherit_from, is_untyped=is_untyped, return_proxy=return_proxy,
             return_type_class=return_type_class)
 
-    
 
-def define_fact(name : str, spec : dict, context=None, return_proxy=False, return_type_class=False):
+
+def define_fact(name : str, spec : dict = None, context=None, return_proxy=False, return_type_class=False):
     '''Defines a new fact.'''
+    from cre.context import cre_context
     context = cre_context(context)
-
-    spec = _standardize_spec(spec,context,name)
-    spec, inherit_from = _merge_spec_inheritance(spec,context)
-
-    if(name in context.type_registry):
-        assert str(context.type_registry[name].spec) == str(spec), \
-        f"Redefinition of fact '{name}' in context '{context.name}' not permitted"
-        fact_type = context.type_registry[name]        
+    specialization_name = name
+    if(spec is not None):
+        spec = _standardize_spec(spec,context,name)
+        spec, inherit_from = _merge_spec_inheritance(spec,context)
+    
+        if(inherit_from is not None and 
+            inherit_from._fact_name == name):
+            # Specialize UntypedFact case
+            fact_type = context.type_registry[name]
+            typ_assigments = ", ".join([f"{k}={v['type']}" for k,v in spec.items() if k not in base_fact_field_dict])
+            specialization_name = f"{name}({typ_assigments})"
+            # print(specialization_name)
     else:
-        fact_type = _fact_from_spec(name, spec, context=context,
-         inherit_from=inherit_from, return_proxy=False, return_type_class=False)
+        inherit_from = None
+
+
+    if(specialization_name in context.type_registry):
+        assert str(context.type_registry[specialization_name].spec) == str(spec), \
+        f"Redefinition of fact '{specialization_name}' in context '{context.name}' not permitted"
+        fact_type = context.type_registry[specialization_name]        
+    else:
+        fact_type = _fact_from_spec(name, spec, inherit_from=inherit_from, 
+         return_proxy=False, return_type_class=False)
+        # print("FT", fact_type, type(fact_type))
         dt = context.get_deferred_type(name)
         dt.define(fact_type)
         context._assert_flags(name, spec)
-        context._register_fact_type(name, spec, fact_type, inherit_from=inherit_from)
-        fact_type.spec = spec
-        fact_type._fact_proxy.spec = spec
-        fact_type._fact_type_class._spec = spec
+        context._register_fact_type(specialization_name, fact_type, inherit_from=inherit_from)
+        _spec = spec if(spec is not None) else {}
+        fact_type.spec = _spec
+        fact_type._fact_proxy.spec = _spec
+        fact_type._fact_type_class._spec = _spec
 
     out = [fact_type]
     if(return_proxy): out.append(fact_type._fact_proxy)
@@ -844,7 +921,9 @@ base_fact_field_dict = {
 base_fact_fields  = [(k,v) for k,v in base_fact_field_dict.items()]
 
 BaseFact = _fact_from_fields("BaseFact", [])
-print("BaseFact", BaseFact, type(BaseFact))
+register_global_default("Fact", BaseFact)
+
+# print("BaseFact", BaseFact, type(BaseFact))
 base_list_type = ListType(BaseFact)
 
 # @lower_cast(Fact, CREObjType)
@@ -880,9 +959,10 @@ def fact_to_ptr_incref(fact):
 @generated_jit
 def cast_fact(typ, val):
     '''Casts a fact to a new type of fact if possible'''
+    from cre.context import cre_context
     context = cre_context()    
     inst_type = typ.instance_type
-    print("CAST", val._fact_name, "to", inst_type._fact_name)
+    # print("CAST", val._fact_name, "to", inst_type._fact_name)
 
     #Check if the fact_type can be casted 
     if(inst_type._fact_name != "BaseFact" and val._fact_name != "BaseFact" and

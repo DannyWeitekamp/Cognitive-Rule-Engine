@@ -327,9 +327,7 @@ def ssp_call(context):
 @overload(numba_typeref_ctor)
 def foo(self, mem):
     if(self.instance_type is not ShortestPathProcessorType): return #not isinstance(self,types.TypeRef) or 
-    print(self, mem)
     def impl(self, mem):
-        print(self)
         return ShortestPathProcessor_ctor(mem)
     return impl
 

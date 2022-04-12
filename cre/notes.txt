@@ -823,7 +823,7 @@ If "true_was_nonzero" and now "true_count" == 0, then retract
 
 
 ---- Oct 28 ----
-Predicates. Instead of having groundings it makes sense to just have predicates where the predicate header and all of its members are just some kind of generic type like CREObj which has some kind of type indicator that keeps track of which of [IntPrimitive, FloatPrimitive, UnicodePrimitive, Var, Op, Fact] it is. Maybe CREObjType designates idrec and BaseFactType designates fact_num. When a predicate is declared....
+Predicates. Instead of having groundings it makes sense to just have predicates where the predicate header and all of its members are just some kind of generic type like CREObj which has some kind of type indicator that keeps track of which of [IntPrimitive, FloatPrimitive, UnicodePrimitive, Var, Op, Fact] it is. Maybe CREObjType designates idrec and BaseFact designates fact_num. When a predicate is declared....
 
 
 

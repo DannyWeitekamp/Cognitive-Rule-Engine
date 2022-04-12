@@ -1316,7 +1316,7 @@ def op_repr(self):
     arg_names = op_get_arg_names(self)
     # print("arg_names", arg_names)
     for i,arg_name in enumerate(arg_names):
-        s =  s.replace(f'{{{i}}}',f'{arg_name}:{self.arg_type_names[i]}')
+        s =  s.replace(f'{{{i}}}',f'[{arg_name}:{self.arg_type_names[i]}]')
 
     #Add spaces after commas
     s = s.replace(", ", ",")

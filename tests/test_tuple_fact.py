@@ -4,11 +4,13 @@ from cre.utils import _cast_structref
 from cre.context import cre_context
 from cre.memory import Memory
 from cre.tuple_fact import TupleFact, TF#TupleFact, assert_cre_obj, TupleFact
-from cre.primitive import Primitive, StringPrimitiveType
+from cre.fact import define_fact#TupleFact, assert_cre_obj, TupleFact
+# from cre.primitive import Primitive, StringPrimitiveType
 from cre.cre_object import CREObjType
 from cre.utils import PrintElapse
 
-from numba import njit, u8, i8
+from numba import njit, u8, i8, bool_
+from numba.types import unicode_type
 from numba.typed import List, Dict
 import pytest
 import numpy as np
@@ -21,13 +23,29 @@ import cre.dynamic_exec
 def as_cre_obj(x):
     return _cast_structref(CREObjType,x)
 
-@njit(cache=True)
-def init_prim():
-    return Primitive(2)
+# @njit(cache=True)
+# def init_prim():
+#     return Primitive(2)
 
-@njit(cache=True)
+@njit(bool_(CREObjType, CREObjType),cache=True)
 def eq(a,b):
     return a == b
+
+
+def test_init():
+    @njit(cache=True)
+    def make_it():
+        return TF("HI",TF("HI",2))
+
+    tf = make_it.py_func()
+    tf = make_it()
+
+
+
+
+
+
+
 
 def test_eq():
     # hi = Primitive("HI")
@@ -59,12 +77,12 @@ def test_eq():
     # assert eq(a1, a2) == True
     # assert eq(a1, b) == False
 
-    a1 = as_cre_obj(TF("HI",TF("HI",2)))
-    a2 = as_cre_obj(TF("HI",TF("HI",2)))
-    b1 = as_cre_obj(TF("HI",TF("HI",3)))
-    b2 = as_cre_obj(TF("HI",TF("HO",2)))
-    b3 = as_cre_obj(TF("HO",TF("HI",2)))
-    b4 = as_cre_obj(TF("HO",TF("HI",2, 0)))
+    a1 = TF("HI",TF("HI",2))
+    a2 = TF("HI",TF("HI",2))
+    b1 = TF("HI",TF("HI",3))
+    b2 = TF("HI",TF("HO",2))
+    b3 = TF("HO",TF("HI",2))
+    b4 = TF("HO",TF("HI",2, 0))
 
     # print(eq(a1, a2))
     assert eq(a1, a2)
@@ -94,12 +112,12 @@ def test_hash():
     # a1 = as_cre_obj(TupleFact("HI",2))
     # print(hsh(a1))
 
-    a1 = as_cre_obj(TF("HI",TF("HI",2)))
-    a2 = as_cre_obj(TF("HI",TF("HI",2)))
-    b1 = as_cre_obj(TF("HI",TF("HI",3)))
-    b2 = as_cre_obj(TF("HI",TF("HO",2)))
-    b3 = as_cre_obj(TF("HO",TF("HI",2)))
-    b4 = as_cre_obj(TF("HO",TF("HI",2, 0)))
+    a1 = TF("HI",TF("HI",2))
+    a2 = TF("HI",TF("HI",2))
+    b1 = TF("HI",TF("HI",3))
+    b2 = TF("HI",TF("HO",2))
+    b3 = TF("HO",TF("HI",2))
+    b4 = TF("HO",TF("HI",2, 0))
 
     print(hsh(a1),hsh(a2))
     print(hsh(a1),hsh(b1))
@@ -115,6 +133,31 @@ def test_hash():
     assert hsh(a1) != hsh(b4)
 
 N = 10000
+
+
+def test_str():
+    with cre_context("test_str"):
+        a1 = TF("HI", TF("HI", 2))
+        # assert str(at) == 'TF("HI", TF("HI", 2))'
+        print(a1)
+
+        a1_typ = TF(unicode_type, TF(unicode_type, i8))
+        print(a1_typ)
+
+        # assert str(a1_typ) == 'TF(unicode_type, TF(unicode_type, i8))'
+
+        BOOP = define_fact("BOOP", {"A" : a1_typ, "B" : "number"})
+
+        b = BOOP(A=a1, B=1)
+
+        # assert str(b) == "BOOP(A=TupleFact('HI', TupleFact('HI', 2)), B=1.0)"
+        print(b)
+
+        print(str(TF(b, 1)))
+
+
+
+
 
 
 
@@ -172,12 +215,16 @@ def test_b_make_py_tup(benchmark):
 
 
 if __name__ == "__main__":
-    # test_eq()
+    test_init()
+    test_eq()
     test_hash()
+    test_str()
     # p = init_prim()
     # print(type(p), p)
     # print(assert_cre_obj(2))
     # _b_make_tup_fact()
-    _b_dict_insert_tup_fact()
+    # _b_dict_insert_tup_fact()
+
+    
     # _b_make_py_tup()
 

@@ -75,7 +75,7 @@ class Fact(CREObjTypeTemplate):
     def __call__(self, *args, **kwargs):
         ''' If a fact_type is called with types return a signature 
             otherwise use it's ctor to return a new instance'''
-        if len(args) == 0 or isinstance(args[0], types.Type):
+        if len(args) > 0 and isinstance(args[0], types.Type):
             return signature(self, *args)
         # print("!!", self._ctor.__module__)
         # print(args,kwargs)
@@ -436,6 +436,9 @@ class FactProxy:
 
     # def __str__(self):
     #     return "duck"
+    def __repr__(self):
+        return str(self)
+
 
 
         
@@ -527,14 +530,14 @@ def get_offsets_from_member_types(fields):
 #         return repr(typ)
 
 def repr_fact_attr(inst):
-    # if(isinstance(val,Fact)):
-    # print("^^", inst._fact_type)
-    inst_type = type(inst)._fact_type
-    # print(inst_type)
-    # raise ValueError()
-    ptr = inst.get_ptr()
-    if(hasattr(inst_type, "_specialization_name")):
+    if(inst is None): return 'None'
+
+    inst_type = type(inst)
+    if(hasattr(inst_type,"_fact_type") and
+        hasattr(inst_type._fact_type, "_specialization_name")):
         return str(inst)
+
+    ptr = inst.get_ptr()
     if(ptr != 0):
         return f'<{str(inst_type)} at {hex(ptr)}>'
     else:

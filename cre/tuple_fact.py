@@ -331,7 +331,6 @@ class TupleFactProxy(FactProxy):
             return define_tuple_fact(args)
         else:
             ctor = getattr(cls,"_ctor",define_tuple_fact(tuple(typeof(x) for x in args))._ctor)[0]
-            print("JJ", args)
             return ctor(*args)
 
     def __init__(self,*args):

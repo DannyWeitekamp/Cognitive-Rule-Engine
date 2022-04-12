@@ -76,6 +76,19 @@ def test_define_fact():
         typ2 = define_fact("BOOP", spec2)
 
 
+def test_untyped_fact():
+    with cre_context("test_untyped_fact") as context:
+        BOOP = define_fact("BOOP")
+
+        @njit(cache=True)
+        def make_boop():
+            return BOOP(A="A", B=1.0)
+
+        # Note: Can't do in jit context yet 
+        # assert make_boop().A == "A"
+        assert make_boop.py_func().A == "A"
+
+
 def test_inheritence_bytes():
     assert np.array_equal(uint_to_inheritance_bytes(0xFF),[255])
     assert np.array_equal(uint_to_inheritance_bytes(0xFF00+1),[255,1])
@@ -115,12 +128,12 @@ def test_inheritence():
         assert np.array_equal(cd.child_t_ids[b3_t_id],[b3_t_id])
 
         b1 = BOOP1("A",7)
-        @njit
-        def check_has_base(b):
+        @njit(cache=True)
+        def get_idrec(b):
             return b.idrec
 
-        assert check_has_base(b1) == u8(-1)
-        assert check_has_base.py_func(b1) == u8(-1)
+        assert get_idrec(b1) == u8(-1)
+        assert get_idrec.py_func(b1) == u8(-1)
 
         b2 = BOOP2("A",7, 6)
         b3 = BOOP3("A",7, 6)
@@ -146,18 +159,6 @@ def test_inheritence():
             okay[6] = (b1.isa(BOOP3) == 0)
             okay[7] = (b2.isa(BOOP3) == 0)
             okay[8] = (b3.isa(BOOP3) == 1)
-
-            # okay[0] = (b1.isa(BOOP1) == 1)
-            # okay[1] = (b2.isa(BOOP1) == 1)
-            # okay[2] = (b3.isa(BOOP1) == 1)
-
-            # okay[3] = (b1.isa(BOOP2) == 0)
-            # okay[4] = (b2.isa(BOOP2) == 1)
-            # okay[5] = (b3.isa(BOOP2) == 1)
-
-            # okay[6] = (b1.isa(BOOP3) == 0)
-            # okay[7] = (b2.isa(BOOP3) == 0)
-            # okay[8] = (b3.isa(BOOP3) == 1)
             return okay
 
         py_okay = check_isa.py_func(b1,b2,b3)
@@ -167,23 +168,6 @@ def test_inheritence():
         assert all(nb_okay), str(nb_okay)
         
             
-        
-
-
-        # print(BOOP1._isa(b1))
-        # print(BOOP1._isa(b2))
-        # print(BOOP1._isa(b3))
-        # print(BOOP2._isa(b1))
-        # print(BOOP2._isa(b2))
-        # print(BOOP2._isa(b3))
-        # print(BOOP3._isa(b1))
-        # print(BOOP3._isa(b2))
-        # print(BOOP3._isa(b3))
-        
-
-        
-
-
 
 def test_cast_fact():
     with cre_context("test_cast_fact") as context:
@@ -254,31 +238,28 @@ def test_cast_fact():
         _b1 = base_up_cast.py_func(_bs)    
         assert type(b1) == type(_b1)     
 
-# def test_fact_eq():
-#     with cre_context("test_fact_eq") as context:
-#         spec1 = {"A" : "string", "B" : "number"}
-#         BOOP1 = define_fact("BOOP1", spec1)
+def test_fact_eq():
+    with cre_context("test_fact_eq") as context:
+        spec1 = {"A" : "string", "B" : "number"}
+        BOOP1 = define_fact("BOOP1", spec1)
 
-#         b1 = BOOP1("A",7)
-#         b2 = BOOP1("A",7)
+        b1 = BOOP1("A",7)
+        b2 = BOOP1("A",7)
+        b3 = BOOP1("B",8)
 
-#         @njit
-#         def do_eq(a,b):
-#             return a == b
+        @njit(cache=True)
+        def do_eq(a,b):
+            return a == b
 
-#         assert do_eq(b1,b2) == False
-#         assert do_eq(b1,b1) == True
-#         assert do_eq(b2,b2) == True
-#         assert do_eq.py_func(b1,b2) == False
-#         assert do_eq.py_func(b1,b1) == True
-#         assert do_eq.py_func(b2,b2) == True
+        assert do_eq(b1,b2) == True
+        assert do_eq(b1,b1) == True
+        assert do_eq(b2,b3) == False
+        assert do_eq.py_func(b1,b2) == True
+        assert do_eq.py_func(b1,b1) == True
+        assert do_eq.py_func(b2,b3) == False
 
-#         assert do_eq(b1,None) == False
-#         assert do_eq.py_func(b1,None) == False
-        
-
-
-
+        assert do_eq(b1,None) == False
+        assert do_eq.py_func(b1,None) == False
 
 
 
@@ -660,7 +641,10 @@ if __name__ == "__main__":
     # test_define_fact()
     # test_inheritence()
     # test_cast_fact()
-    test_protected_mutability()
+    # test_protected_mutability()
+    # test_fact_eq()
+
+    # test_untyped_fact()
     # test_fact_eq()
 
     # test_as_conditions()

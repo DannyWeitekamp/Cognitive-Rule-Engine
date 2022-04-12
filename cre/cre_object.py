@@ -1,6 +1,6 @@
 from numba import i8, u8, u2, u1, types, njit, generated_jit, literal_unroll
 from numba.types import FunctionType, unicode_type, Tuple
-from numba.extending import  overload, lower_getattr
+from numba.extending import  overload, lower_getattr, overload_method
 from cre.utils import _obj_cast_codegen, ptr_t, _raw_ptr_from_struct, _raw_ptr_from_struct_incref, CastFriendlyMixin, decode_idrec, _func_from_address, _cast_structref, _get_member_offset, _struct_get_data_ptr, _sizeof_type, _load_ptr
 from cre.structref import define_structref
 from numba.core.datamodel import default_manager, models
@@ -127,6 +127,9 @@ class CREObjProxy(StructRefProxy):
     def get_ptr_incref(self):
         return get_cre_obj_ptr_incref(self)
 
+    def asa(self, typ):
+        return asa(self,typ)
+
 
 default_manager.register(CREObjTypeTemplate, CREObjModel)
 
@@ -219,13 +222,13 @@ def _get_chr_mbrs_infos_from_attrs(typingctx, st_type, attrs_lit):
 
 
     # st_type = st_type_ref.instance_type
-    print(attrs_lit)
+    # print(attrs_lit)
     if(len(attrs_lit.types) >= 0 and
      not isinstance(attrs_lit.types[0],types.Literal)): return
     
-    print(attrs_lit.types)
+    # print(attrs_lit.types)
     attrs = [x.literal_value for x in attrs_lit.types]
-    print(attrs)
+    # print(attrs)
     # print(ind)
     mbr_types = [v for k,v in st_type._fields if k in attrs]
     t_ids = [_resolve_t_id_helper(x) for x in mbr_types]
@@ -288,3 +291,11 @@ def cre_obj_get_item(obj, item_type, index):
     _, item_ptr = cre_obj_get_item_t_id_ptr(obj,index)
     out = _load_ptr(item_type, item_ptr)
     return out
+
+
+@generated_jit(cache=True,nopython=True)
+@overload_method(CREObjType, "asa")
+def asa(self, typ):
+    def impl(self, typ):
+        return _cast_structref(typ, self)
+    return impl

@@ -6,7 +6,8 @@ from cre.fact import base_fact_field_dict, BaseFact, FactProxy, Fact, add_to_fac
 from cre.fact_intrinsics import fact_lower_setattr, _register_fact_structref
 from cre.cre_object import cre_obj_get_item, CREObjType, CREObjProxy, CREObjTypeTemplate, member_info_type
 from cre.utils import _struct_get_attr_offset, _sizeof_type, _struct_get_data_ptr, _load_ptr, _struct_get_attr_offset, _struct_from_ptr, _cast_structref, _obj_cast_codegen, encode_idrec, decode_idrec, _incref_structref, _get_member_offset
-from cre.primitive import Primitive
+# from cre.primitive import Primitive
+from cre.context import cre_context
 from numba.core.imputils import (lower_cast, numba_typeref_ctor)
 from numba.experimental.structref import new, define_boxing, define_attributes, StructRefProxy
 from numba.core.extending import overload, intrinsic, lower_builtin, type_callable
@@ -16,13 +17,13 @@ import cloudpickle
 
 ##### NOTE NOTE NTOE TODO -- Need distribute "members" across in order to getitem
 
-tup_fact_field_dict = {
-    **base_fact_field_dict,
-    "members": types.Any,
-    "chr_mbrs_infos" : types.UniTuple(member_info_type,1),
-}
+# tup_fact_field_dict = {
+#     **base_fact_field_dict,
+#     # "members": types.Any,
+#     # "chr_mbrs_infos" : types.UniTuple(member_info_type,1),
+# }
 
-tup_fact_fields = [(k,v) for k,v in tup_fact_field_dict.items()]
+# tup_fact_fields = [(k,v) for k,v in tup_fact_field_dict.items()]
 
 def _up_cast_helper(x):
     if(isinstance(x, CREObjTypeTemplate)):
@@ -33,36 +34,37 @@ def _up_cast_helper(x):
 def tf_field_dict_from_types(member_types):   
     member_types = member_types.types if isinstance(member_types, types.Tuple) else member_types
     member_types = tuple([x for x in member_types])
-    member_info_tup_type = types.UniTuple(member_info_type,1)
+    member_info_tup_type = types.UniTuple(member_info_type,len(member_types))
     # member_t_ids = tuple([_resolve_t_id_helper(x) for x in member_types])
-
-    tf_d = {**tup_fact_field_dict,"members" : types.Tuple(member_types),"chr_mbrs_infos":member_info_tup_type}
+    member_field_dict = {f"a{i}":m for i,m in enumerate(member_types)} 
+    # tf_d = {**tup_fact_field_dict,"members" : types.Tuple(member_types),"chr_mbrs_infos":member_info_tup_type}
+    tf_d = {**base_fact_field_dict,**member_field_dict,**{"chr_mbrs_infos":member_info_tup_type}}
+    # print("tf_d", tf_d)
     return tf_d
 
 def repr_tf_item(tf,typ, index):
-    return repr(cre_obj_get_item(tf,typ,index))
+    return repr(cre_obj_get_item(tf.asa(CREObjType),typ,index))
 
-def gen_tuple_fact_source(member_types, TF_FACT_NUM):    
+def gen_tuple_fact_source(member_types, TF_FACT_NUM, specialization_name=None, ind='    '):    
     # attr_offsets = get_offsets_from_member_types(member_types)
-    if(len(member_types) > 0):
-        typ_assigments = ", ".join([str(t) for t in member_types])
-        specialization_name = f"TupleFact({typ_assigments})"
-    else:
-        specialization_name = None
+
+
+    init_fields = f'\n{ind}'.join([f"fact_lower_setattr(st, 'a{i}', members[{i}])" for i in range(len(member_types))])
     # print("::", member_types)
 # attr_offsets = np.array({attr_offsets!r},dtype=np.int16)    
 # SpecializedTF({"types.StarArgTuple(member_types)" if len(member_types) > 0 else ""})
     return (
 f'''from numba import njit, u8, types
 from numba.experimental.structref import new
+from numba.extending import overload, lower_cast
 from cre.fact_intrinsics import define_boxing, get_fact_attr_ptr, _register_fact_structref, fact_mutability_protected_setattr, fact_lower_setattr, _fact_get_chr_mbrs_infos
-from cre.tuple_fact import TupleFactClass, TupleFactProxy, tf_field_dict_from_types, repr_tf_item, T_ID_TUPLE_FACT
+from cre.tuple_fact import TupleFactClass, TupleFactProxy, tf_field_dict_from_types, repr_tf_item, T_ID_TUPLE_FACT{", TupleFact" if specialization_name else ""}
 from cre.utils import encode_idrec, _get_member_offset
 from cre.cre_object import set_chr_mbrs
 import cloudpickle
 TF_FACT_NUM = {TF_FACT_NUM}
 member_types = cloudpickle.loads({cloudpickle.dumps(member_types)})
-
+n_members = len(member_types)
 tf_fields = [(k,v) for k,v in tf_field_dict_from_types(member_types).items()]
 
 @_register_fact_structref
@@ -78,7 +80,11 @@ SpecializedTF._fact_num = TF_FACT_NUM
 SpecializedTF._fact_type_class = SpecializedTFClass
 {f'SpecializedTF._specialization_name = "{specialization_name}"' if(specialization_name is not None) else ''}
 
-
+{(f"""@lower_cast(SpecializedTF, TupleFact)
+def upcast(context, builder, fromty, toty, val):
+    return _obj_cast_codegen(context, builder, val, fromty, toty,incref=False)                        
+""") if specialization_name is not None else ""
+}
 
 default_idrec  = encode_idrec(T_ID_TUPLE_FACT, 0, 0xFF)
 @njit(cache=True)
@@ -87,8 +93,8 @@ def ctor({"*members" if len(member_types) > 0 else ""}):
     fact_lower_setattr(st, 'idrec', default_idrec)
     fact_lower_setattr(st, 'hash_val', 0)
     fact_lower_setattr(st, 'fact_num', {TF_FACT_NUM})
-    set_chr_mbrs(st, ('members',))
-    fact_lower_setattr(st, 'members', members)
+    set_chr_mbrs(st, ({", ".join([f"'a{i}'" for i in range(len(member_types))])}))
+    {init_fields}
     return st
 
 SpecializedTFClass._ctor = (ctor,)
@@ -102,6 +108,12 @@ class SpecializedTFProxy(TupleFactProxy):
     def __str__(self):
         return f"TupleFact({{', '.join([repr_tf_item(self,mt,i) for i,mt in enumerate(member_types)])}})"
 
+@overload(SpecializedTFProxy, prefer_literal=False)
+def overload_tup_fact_ctor(*args):
+    def impl(*args):
+        return ctor(*args)
+    return impl
+
 SpecializedTF._fact_proxy = SpecializedTFProxy
 
 define_boxing(SpecializedTFClass,SpecializedTFProxy)
@@ -110,14 +122,30 @@ define_boxing(SpecializedTFClass,SpecializedTFProxy)
 
 # f'TupleFact({', '.join([repr_tf_item(self,member_types[i],i) for i in range()])})'
 
-def define_tuple_fact(member_types):   
+def define_tuple_fact(member_types, context=None, return_proxy=False, return_type_class=False):   
+    
+    if(len(member_types) > 0):
+        typ_assigments = ", ".join([str(t) for t in member_types])
+        specialization_name = f"TupleFact({typ_assigments})"
+    else:
+        specialization_name = None
+
     TF_hash_code = unique_hash(["TupleFact",member_types])
     if(not source_in_cache("TupleFact",TF_hash_code)):
         TF_FACT_NUM = add_to_fact_registry("TupleFact", TF_hash_code)
-        source = gen_tuple_fact_source(member_types, TF_FACT_NUM)
+        source = gen_tuple_fact_source(member_types, TF_FACT_NUM, specialization_name)
         source_to_cache("TupleFact", TF_hash_code, source)
     tf_type = import_from_cached("TupleFact", TF_hash_code, ["SpecializedTF"])["SpecializedTF"]
-    return tf_type
+
+    if(specialization_name is not None):
+        context = cre_context(context)
+        context._register_fact_type(specialization_name, tf_type, inherit_from=TupleFact)
+
+
+    out = [tf_type]
+    if(return_proxy): out.append(fact_type._fact_proxy)
+    if(return_type_class): out.append(fact_type._fact_type_class)
+    return tuple(out) if len(out) > 1 else out[0]
 
 @_register_fact_structref
 class TupleFactClass(Fact):
@@ -152,7 +180,11 @@ class TupleFactClass(Fact):
         return tuple((name, types.unliteral(typ)) for name, typ in fields)
 
     # def __str__(self):
-    #     # if(hasattr(spec))
+
+    #     if(hasattr(self,"_specialization_name")):
+    #         return self._specialization_name
+    #     else:
+    #         return "TupleFact"
     #     print(self._fact_name)
     #     raise NotImplemented()
     #     return f"cre.{self._fact_name}"#f"cre.TupleFact({",".join(self.field_dict.)})"#self.name#"cre.PredType"
@@ -299,15 +331,17 @@ class TupleFactProxy(FactProxy):
             return define_tuple_fact(args)
         else:
             ctor = getattr(cls,"_ctor",define_tuple_fact(tuple(typeof(x) for x in args))._ctor)[0]
+            print("JJ", args)
             return ctor(*args)
 
     def __init__(self,*args):
+        pass
         # super().__init__(self)
-        print(repr(self))
+        # print(repr(self))
 
-    def __str__(self):
-        # print(self.__dict__, type(self).__dict__)
-        return "TupleFact({})"
+    # def __str__(self):
+    #     # print(self.__dict__, type(self).__dict__)
+    #     return "TupleFact({})"
 
     def __repr__(self):
         return str(self)
@@ -335,40 +369,40 @@ def assert_cre_obj(x):
             return _cast_structref(CREObjType, prim)
         return impl
 
-USE_TREF_CTOR = False
+# USE_TREF_CTOR = False
 
-if(USE_TREF_CTOR):
-    # NOTE This is better than implementing overload() for TupleFactProxy
-    #   since the end user would be able to just use TupleFact as a constructor 
-    #   and type but there is a bug in numba with using *arg in the typer.
-    @type_callable(TupleFactClass)
-    def tf_type_callable(context):
-        def typer(*args):
-            typ = TupleFactClass(*args)
-            return typ
-        return typer
+# if(USE_TREF_CTOR):
+#     # NOTE This is better than implementing overload() for TupleFactProxy
+#     #   since the end user would be able to just use TupleFact as a constructor 
+#     #   and type but there is a bug in numba with using *arg in the typer.
+#     @type_callable(TupleFactClass)
+#     def tf_type_callable(context):
+#         def typer(*args):
+#             typ = TupleFactClass(*args)
+#             return typ
+#         return typer
 
-    @overload(numba_typeref_ctor)
-    def tf_numba_typeref_ctor(self, *args):
-        # print("BEF", self)
-        if(not isinstance(self.instance_type, TupleFactClass)): return
-        # print("##", A, B)
+#     @overload(numba_typeref_ctor)
+#     def tf_numba_typeref_ctor(self, *args):
+#         # print("BEF", self)
+#         if(not isinstance(self.instance_type, TupleFactClass)): return
+#         # print("##", A, B)
         
-        def impl(self, *args):
-            return tup_fact_ctor(*args)
-        return impl
+#         def impl(self, *args):
+#             return tup_fact_ctor(*args)
+#         return impl
 
-    TF = TupleFact
-else:
+#     TF = TupleFact
+# else:
 
-    @overload(TupleFactProxy, prefer_literal=False,)
-    def overload_tup_fact_ctor(*args):
-        # print("OVERLOAD!!!", args)
-        def impl(*args):
-            return tup_fact_ctor(*args)
-        return impl
+@overload(TupleFactProxy, prefer_literal=False,)
+def overload_tup_fact_ctor(*args):
+    ctor = define_tuple_fact(args)._ctor[0]
+    def impl(*args):
+        return ctor(*args)
+    return impl
 
-    TF = TupleFactProxy
+TF = TupleFactProxy
 
 # @lower_builtin(TupleFact, types.VarArg(types.Any))
 # def apply_tuple_fact_ctor(context, builder, sig, args):

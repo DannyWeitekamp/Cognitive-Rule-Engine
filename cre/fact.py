@@ -109,11 +109,12 @@ class UntypedFact(Fact):
         # print("INIT")
         super().__init__(fields)
     def __call__(self, *args, **kwargs):
+        # print("CALL", tuple(kwargs.keys()))
         if(len(kwargs) == 0):
             # print("SIG",self, args, kwargs)
             return signature(self,*args)
         else:
-            # print("kwargs", kwargs)
+            # print("kwargs:", kwargs)
             # print()
 
             if(isinstance(list(kwargs.values())[0],types.Type)):
@@ -122,14 +123,16 @@ class UntypedFact(Fact):
                 return fact_type#call_untyped_fact(self, **kwargs)
             else:
                 fact_type = self.specialize(**{k:typeof(v) for k,v in kwargs.items()})
+                ctor = fact_type._ctor[0]
                 # print("CTOR",self, args, kwargs)
-                return fact_type(**kwargs)
+                return ctor(**kwargs)
 
 
     def specialize(self, **kwargs):
         typs = tuple(kwargs.values())
         # print("typs", typs)
         self_field_dict = {k:v for (k,v) in zip(kwargs.keys(), typs)}
+        # print("<<", self_field_dict)
         spec = {**self_field_dict, "inherit_from" : self}
         fact_type = define_fact(self._fact_name, spec)
         # print("fact_type", fact_type)
@@ -428,6 +431,9 @@ class FactProxy:
     def isa(self, typ):
         return isa(self,typ)
 
+    def asa(self, typ):
+        return asa(self,typ)
+
     # def __str__(self):
     #     return "duck"
 
@@ -522,14 +528,15 @@ def get_offsets_from_member_types(fields):
 
 def repr_fact_attr(inst):
     # if(isinstance(val,Fact)):
-    print("^^", inst._fact_type)
+    # print("^^", inst._fact_type)
     inst_type = type(inst)._fact_type
-    print(inst_type)
+    # print(inst_type)
     # raise ValueError()
+    ptr = inst.get_ptr()
     if(hasattr(inst_type, "_specialization_name")):
         return str(inst)
     if(ptr != 0):
-        return f'<{fact_name} at {hex(inst.get_ptr())}>'
+        return f'<{str(inst_type)} at {hex(ptr)}>'
     else:
         return 'None'
 
@@ -790,13 +797,14 @@ class {typ}Proxy(FactProxy):
 @type_callable({typ})
 def ssp_call(context):
     {"raise NotImplementedError('NotImplementedError: Cannot initialize UntypedFact in jitted context.')" if is_untyped else ""}
-    def typer({param_seq}):
-        return {typ}
+    # Note to self this requires *args, see https://github.com/numba/numba/issues/7973
+    def typer({param_seq}):    
+        {f'return {typ}.specialize({param_seq})' if is_untyped else f'return {typ}'}
     return typer
 
 @overload(numba_typeref_ctor)
 def overload_{typ}(self, {param_defaults_seq}):
-    if(self.instance_type is not {typ}): print("NOPE"); return
+    if(self.instance_type is not {typ}): return
     def impl(self, {param_defaults_seq}):
         return ctor({param_seq})
     return impl
@@ -1023,9 +1031,6 @@ def isa(self, typ):
 @generated_jit(cache=True,nopython=True)
 @overload_method(Fact, "asa")
 def asa(self, typ):
-    # print("<<", typ)
-    _isa = typ.instance_type._isa
-
     def impl(self, typ):
         return _cast_structref(typ, self)
     return impl

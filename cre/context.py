@@ -97,14 +97,12 @@ def assign_name_num_to_t_id(cd, t_id, name, fact_num, inh_fact_num=-1):
         cd.fact_num_to_t_id = grow_fact_num_to_t_id(cd, fact_num*2)
     cd.fact_num_to_t_id[fact_num] = t_id 
 
-
     # Ensure that parent_t_ids and child_t_ids are big enough
     for i in range(len(cd.parent_t_ids),t_id+1):
         cd.parent_t_ids.append(np.empty((0,),dtype=np.int64))
 
     for i in range(len(cd.child_t_ids),t_id+1):
         cd.child_t_ids.append(np.empty((0,),dtype=np.int64))
-
 
     # Use inh_fact_num to fill in the parents 
     if(inh_fact_num != -1):
@@ -117,7 +115,6 @@ def assign_name_num_to_t_id(cd, t_id, name, fact_num, inh_fact_num=-1):
     # else:
     #     cd.parent_t_ids.append(np.empty((0,),dtype=np.int64))
 
-
     # Use the updated parents to update child relations (facts count as their own child) 
     for p_t_id in cd.parent_t_ids[t_id]:
         old_arr = cd.child_t_ids[p_t_id]
@@ -126,7 +123,6 @@ def assign_name_num_to_t_id(cd, t_id, name, fact_num, inh_fact_num=-1):
         new_arr[-1] = t_id
         cd.child_t_ids[p_t_id] = new_arr
     cd.child_t_ids[t_id] = np.array((t_id,),dtype=np.int64)
-
     return t_id
 
 class CREContext(object):
@@ -178,9 +174,13 @@ class CREContext(object):
         # print("CONTEXT:", name)
 
         #Auto register TupleFact
-        from cre.tuple_fact import TF_FACT_NUM
-        from cre.core import T_ID_TUPLE_FACT
-        self.fact_num_to_t_id[TF_FACT_NUM] = T_ID_TUPLE_FACT
+        # from cre.tuple_fact import TupleFact
+        # from cre.fact import BaseFact
+        # from cre.core import T_ID_TUPLE_FACT
+        # self._register_fact_type("BaseFact", BaseFact)
+        # self._register_fact_type("TupleFact", TupleFact)
+        # self.fact_num_to_t_id[TF_FACT_NUM] = T_ID_TUPLE_FACT
+
 
         
     def get_deferred_type(self,name):
@@ -197,6 +197,12 @@ class CREContext(object):
         # fact_type.fact_ctor = fact_ctor
         # fact_ctor.fact_name = name
         # fact_type.fact_name = name
+
+        if("BaseFact" not in self.type_registry and name != "BaseFact" and name != "TupleFact"):
+            from cre.tuple_fact import TupleFact
+            from cre.fact import BaseFact
+            self._register_fact_type("BaseFact", BaseFact)
+            self._register_fact_type("TupleFact", TupleFact)
         
         # self.fact_ctors[name] = fact_ctor
         self.type_registry[name] = fact_type
@@ -204,7 +210,9 @@ class CREContext(object):
         #Map to t_ids
         t_id = len(self.type_registry)
         inh_fact_num = inherit_from._fact_num if inherit_from is not None else -1
-        assign_name_num_to_t_id(self.context_data, t_id, name,fact_type._fact_num, inh_fact_num)
+        # assert inh_fact_num >= 0, "Invalid 
+        # print(t_id, fact_type._fact_num, inh_fact_num)
+        assign_name_num_to_t_id(self.context_data, t_id, name, fact_type._fact_num, inh_fact_num)
         assert t_id == len(self.type_registry), f'{t_id}, {len(self.type_registry)}'
         # fact_type._t_id = t_id
 
@@ -240,7 +248,7 @@ class CREContext(object):
             d[name] = np.array([flag in x['flags'] for attr,x in spec.items()], dtype=np.uint8)
 
 
-    def _assert_flags(self,name,spec):
+    def _assert_flags(self, name, spec):
         return #TODO: Need to rewrite this so it doesn't trigger typed container overloads
         for flag in itertools.chain(*[x['flags'] for atrr,x in spec.items()]):
             if flag not in self.spec_flags:

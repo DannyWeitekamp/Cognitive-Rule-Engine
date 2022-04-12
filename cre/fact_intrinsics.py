@@ -413,7 +413,6 @@ def _fact_get_chr_mbrs_infos(typingctx, fact_type):
                 t_id = context.get_constant(u2, t_ids[i])
                 member_infos.append(context.make_tuple(builder, member_info_type, (t_id, offset) ))
                 i += 1
-                # print("<<", attr, typ)
         ret = context.make_tuple(builder,member_infos_out_type, member_infos)
         return ret
 

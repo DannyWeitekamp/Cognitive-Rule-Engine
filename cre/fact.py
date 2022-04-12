@@ -39,14 +39,23 @@ import cloudpickle
 import numpy as np
 
 GLOBAL_FACT_COUNT = -1
-SPECIAL_ATTRIBUTES = ["inherit_from"]
+SPECIAL_SPEC_ATTRIBUTES = ["inherit_from"]
 
 class Fact(CREObjTypeTemplate):
     def __init__(self, fields):
         super().__init__(fields)
 
     def __str__(self):
-        return self._fact_name if hasattr(self, '_fact_name') else "Fact"
+        # print(type(self))
+        if(hasattr(self,"_specialization_name")):
+            return self._specialization_name
+        elif(hasattr(self, '_fact_name')):
+            return self._fact_name
+        else:
+            return "Fact"
+
+    def preprocess_fields(self, fields):
+        return tuple((name, types.unliteral(typ)) for name, typ in fields)
 
     @property
     def field_dict_keys(self):
@@ -66,7 +75,7 @@ class Fact(CREObjTypeTemplate):
     def __call__(self, *args, **kwargs):
         ''' If a fact_type is called with types return a signature 
             otherwise use it's ctor to return a new instance'''
-        if len(args) > 0 and isinstance(args[0], types.Type):
+        if len(args) == 0 or isinstance(args[0], types.Type):
             return signature(self, *args)
         # print("!!", self._ctor.__module__)
         # print(args,kwargs)
@@ -285,7 +294,7 @@ def _standardize_spec(spec : dict, context, name=''):
 
     out = {}
     for attr,v in spec.items():
-        if(attr in SPECIAL_ATTRIBUTES): out[attr] = v; continue;
+        if(attr in SPECIAL_SPEC_ATTRIBUTES): out[attr] = v; continue;
 
         typ, flags = _get_attr_type_flags(attr,v, context, name)
 
@@ -419,6 +428,8 @@ class FactProxy:
     def isa(self, typ):
         return isa(self,typ)
 
+    # def __str__(self):
+    #     return "duck"
 
 
         
@@ -509,11 +520,16 @@ def get_offsets_from_member_types(fields):
 #     else:
 #         return repr(typ)
 
-def repr_fact_attr(inst, fact_name, get_ptr=None):
+def repr_fact_attr(inst):
     # if(isinstance(val,Fact)):
-    ptr = get_ptr(inst)
+    print("^^", inst._fact_type)
+    inst_type = type(inst)._fact_type
+    print(inst_type)
+    # raise ValueError()
+    if(hasattr(inst_type, "_specialization_name")):
+        return str(inst)
     if(ptr != 0):
-        return f'<{fact_name} at {hex(ptr)}>'
+        return f'<{fact_name} at {hex(inst.get_ptr())}>'
     else:
         return 'None'
 
@@ -530,10 +546,10 @@ def repr_list_attr(val,dtype_name=None):
 
 
 
-def gen_repr_attr_code(a,t,typ_name):
+def gen_repr_attr_code(a,t):
     '''Helper function for generating code for the repr/str of the fact'''
     if(isinstance(t,fact_types)):
-        return f'{a}={{repr_fact_attr(self,"{t._fact_name}",{typ_name}_get_{a}_as_ptr)}}'
+        return f'{a}={{repr_fact_attr(self.{a})}}'
         # return f'{a}=<{t._fact_name} at {{hex({typ_name}_get_{a}_as_ptr(self))}}>'
     elif(isinstance(t,ListType)):
         # TODO : might want to print lists like reference where just the address is printed
@@ -605,7 +621,7 @@ def _prep_fields_populate_imports(fields, inherit_from=None):
         
     return fields, "\n".join(list(imports_set))
 
-def gen_fact_src(typ, fields, fact_num, inherit_from=None, is_untyped=False, hash_code="", ind='    '):
+def gen_fact_src(typ, fields, fact_num, inherit_from=None, specialization_name=None, is_untyped=False, hash_code="", ind='    '):
     '''Generate the source code for a new fact '''
     # print("ISUNTYPED", typ, is_untyped)
     # print(typ.spec)
@@ -637,9 +653,12 @@ def gen_fact_src(typ, fields, fact_num, inherit_from=None, is_untyped=False, has
     #                         if isinstance(t,fact_types) else f"{a}")
     init_fields = f'\n{ind}'.join([f"fact_lower_setattr(st,'{k}',{k})" for k,v in fields])
 
-    str_temp = ", ".join([gen_repr_attr_code(k,v,typ) for k,v in fields])
+    str_temp = ", ".join([gen_repr_attr_code(k,v) for k,v in fields])
+    # print("<<", str_temp)
+    # print("<<", all_fields)
 
     #TODO get rid of this
+
     attr_offsets = get_offsets_from_member_types(all_fields)
 
 # The source code template for a user defined fact. Written to the
@@ -657,7 +676,7 @@ from numba.experimental.structref import new#, define_boxing
 from numba.core.extending import overload, lower_cast, type_callable
 from numba.core.imputils import numba_typeref_ctor
 from cre.fact_intrinsics import define_boxing, get_fact_attr_ptr, _register_fact_structref, fact_mutability_protected_setattr, fact_lower_setattr, _fact_get_chr_mbrs_infos
-from cre.fact import repr_list_attr, repr_fact_attr,  FactProxy, Fact, UntypedFact{", BaseFact, base_list_type, fact_to_ptr, get_inheritance_bytes_len_ptr" if typ != "BaseFact" else ""}, uint_to_inheritance_bytes
+from cre.fact import repr_list_attr, repr_fact_attr, FactProxy, Fact, UntypedFact{", BaseFact, base_list_type, fact_to_ptr, get_inheritance_bytes_len_ptr" if typ != "BaseFact" else ""}, uint_to_inheritance_bytes
 from cre.utils import _raw_ptr_from_struct, ptr_t, _get_member_offset, _cast_structref, _load_ptr, _obj_cast_codegen
 import cloudpickle
 from cre.cre_object import member_info_type, set_chr_mbrs
@@ -677,9 +696,9 @@ class {typ}Class({"UntypedFact" if is_untyped else "Fact"}):
         self._fact_num = {fact_num}
         self._attr_offsets = attr_offsets
         self._hash_code = '{hash_code}'
+        {f'self._specialization_name = "{specialization_name}"' if(specialization_name is not None) else ''}
 
-    def preprocess_fields(self, fields):
-        return tuple((name, types.unliteral(typ)) for name, typ in fields)
+    
 
 field_list = cloudpickle.loads({cloudpickle.dumps(all_fields)})
 {typ} = {typ}Class(field_list)
@@ -750,6 +769,7 @@ class {typ}Proxy(FactProxy):
     _fact_type = {typ}
     _fact_type_class = {typ}Class
     _fact_name = '{typ}'
+    {f'_specialization_name = "{specialization_name}"' if(specialization_name is not None) else ''}
     _fact_num = {fact_num}
     _attr_offsets = attr_offsets
     _chr_mbrs_infos = chr_mbrs_infos
@@ -763,8 +783,6 @@ class {typ}Proxy(FactProxy):
     def __str__(self):
         return f'{typ}({str_temp})'
 
-    def __repr__(self):
-        return str(self)
 
 {properties}
 
@@ -778,7 +796,7 @@ def ssp_call(context):
 
 @overload(numba_typeref_ctor)
 def overload_{typ}(self, {param_defaults_seq}):
-    if(self.instance_type is not {typ}): return
+    if(self.instance_type is not {typ}): print("NOPE"); return
     def impl(self, {param_defaults_seq}):
         return ctor({param_seq})
     return impl
@@ -831,12 +849,12 @@ def add_to_fact_registry(name,hash_code):
 
 
 
-def _fact_from_fields(name, fields, inherit_from=None, is_untyped=False, return_proxy=False, return_type_class=False):
+def _fact_from_fields(name, fields, inherit_from=None, specialization_name=None, is_untyped=False, return_proxy=False, return_type_class=False):
     # context = cre_context(context)
     hash_code = unique_hash([name,fields])
     if(not source_in_cache(name,hash_code)):
         fact_num = lines_in_fact_registry()
-        source = gen_fact_src(name, fields, fact_num, inherit_from, is_untyped, hash_code)
+        source = gen_fact_src(name, fields, fact_num, inherit_from, specialization_name, is_untyped, hash_code)
         source_to_cache(name, hash_code, source)
         add_to_fact_registry(name, hash_code)
 
@@ -850,12 +868,13 @@ def _fact_from_fields(name, fields, inherit_from=None, is_untyped=False, return_
         
     return tuple(out) if len(out) > 1 else out[0]
 
-def _fact_from_spec(name, spec, inherit_from=None, return_proxy=False, return_type_class=False):
+def _fact_from_spec(name, spec, inherit_from=None, specialization_name=None, return_proxy=False, return_type_class=False):
     # assert parent_fact_type
     is_untyped = bool(spec is None)
     fields = [(k,v['type']) for k, v in spec.items()] if spec else {}
     return _fact_from_fields(name, fields,
-             inherit_from=inherit_from, is_untyped=is_untyped, return_proxy=return_proxy,
+             inherit_from=inherit_from, specialization_name=specialization_name,
+            is_untyped=is_untyped, return_proxy=return_proxy,
             return_type_class=return_type_class)
 
 
@@ -873,9 +892,8 @@ def define_fact(name : str, spec : dict = None, context=None, return_proxy=False
             inherit_from._fact_name == name):
             # Specialize UntypedFact case
             fact_type = context.type_registry[name]
-            typ_assigments = ", ".join([f"{k}={v['type']}" for k,v in spec.items() if k not in base_fact_field_dict])
+            typ_assigments = ", ".join([f"{k}={str(v['type'])}" for k,v in spec.items() if k not in base_fact_field_dict])
             specialization_name = f"{name}({typ_assigments})"
-            # print(specialization_name)
     else:
         inherit_from = None
 
@@ -886,7 +904,8 @@ def define_fact(name : str, spec : dict = None, context=None, return_proxy=False
         fact_type = context.type_registry[specialization_name]        
     else:
         fact_type = _fact_from_spec(name, spec, inherit_from=inherit_from, 
-         return_proxy=False, return_type_class=False)
+            specialization_name= (specialization_name if specialization_name != name else None),
+            return_proxy=False, return_type_class=False)
         # print("FT", fact_type, type(fact_type))
         dt = context.get_deferred_type(name)
         dt.define(fact_type)

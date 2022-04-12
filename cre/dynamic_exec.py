@@ -20,6 +20,8 @@ from cre.conditions import LiteralType, ConditionsType
 cast = _cast_structref
 
 
+    
+
 @njit(cache=True)
 def cre_obj_iter_t_id_item_ptrs(_x):
     x = _cast_structref(TupleFact,_x)
@@ -433,10 +435,10 @@ def _cre_obj_hash(x):
             elif(t_id==T_ID_CONDITIONS):
                 return conds_hash(x)
             else:
-                return fact_hash(x)
-            
-            
+                return fact_hash(x)            
         return impl
+
+
 
 
 #### __str__ ### 

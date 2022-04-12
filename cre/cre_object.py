@@ -1,7 +1,7 @@
 from numba import i8, u8, u2, u1, types, njit, generated_jit, literal_unroll
-from numba.types import FunctionType, unicode_type
+from numba.types import FunctionType, unicode_type, Tuple
 from numba.extending import  overload, lower_getattr
-from cre.utils import _obj_cast_codegen, ptr_t, _raw_ptr_from_struct, _raw_ptr_from_struct_incref, CastFriendlyMixin, decode_idrec, _func_from_address, _cast_structref, _get_member_offset
+from cre.utils import _obj_cast_codegen, ptr_t, _raw_ptr_from_struct, _raw_ptr_from_struct_incref, CastFriendlyMixin, decode_idrec, _func_from_address, _cast_structref, _get_member_offset, _struct_get_data_ptr, _sizeof_type, _load_ptr
 from cre.structref import define_structref
 from numba.core.datamodel import default_manager, models
 from numba.core import cgutils
@@ -275,5 +275,16 @@ def set_chr_mbrs(st, chr_mbr_attrs):
     else:
         st.chr_mbrs_infos = ()
     st.hash_val = 0 
-
         
+@njit(Tuple((u2,i8))(CREObjType, i8),cache=True)
+def cre_obj_get_item_t_id_ptr(x, index):
+    data_ptr = _struct_get_data_ptr(x)
+    member_info_ptr = data_ptr + x.chr_mbrs_infos_offset + index*_sizeof_type(member_info_type)
+    t_id, member_offset = _load_ptr(member_info_type, member_info_ptr)
+    return t_id, data_ptr + member_offset
+
+@njit(cache=True)
+def cre_obj_get_item(obj, item_type, index):
+    _, item_ptr = cre_obj_get_item_t_id_ptr(obj,index)
+    out = _load_ptr(item_type, item_ptr)
+    return out

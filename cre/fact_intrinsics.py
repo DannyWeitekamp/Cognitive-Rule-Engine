@@ -117,6 +117,55 @@ def safe_get_fact_ptr(fact):
     else:
         return _raw_ptr_from_struct(_nonoptional(fact))
 
+def fact_getattr_codegen(context, builder, sig, args, attr):
+    from cre.fact import Fact
+    ret_type = sig.return_type
+    typ, _ = sig.args
+    val, _ = args
+    field_type = typ.field_dict[attr]
+    
+
+    # Extract unoptional part of type
+    if(isinstance(ret_type, types.Optional)):
+        ret_type = ret_type.type
+
+    utils = _Utils(context, builder, typ)
+    dataval = utils.get_data_struct(val)
+    ret = getattr(dataval, attr)
+
+    option_ret_type = types.optional(ret_type)
+    if(isinstance(ret_type, (Fact,))):
+        # If a fact member is Null then return None
+        def cast_obj(x):
+            if(_raw_ptr_from_struct(x) != 0):
+                return _cast_structref(ret_type, x)
+            return None
+        ret = context.compile_internal(builder, cast_obj, option_ret_type(field_type,), (ret,))
+        ret_type = option_ret_type
+        
+    elif(isinstance(ret_type, (ListType,))):
+        # List members should always be non-null
+        def cast_obj(x):
+            return _cast_list(ret_type, x)
+        ret = context.compile_internal(builder, cast_obj, option_ret_type(field_type,), (ret,))
+        ret_type = option_ret_type
+        
+    return imputils.impl_ret_borrowed(context, builder, ret_type, ret)
+
+
+
+@intrinsic
+def fact_lower_getattr(typingctx, inst_type, attr_type):
+    if (isinstance(attr_type, types.Literal) and 
+        isinstance(inst_type, types.StructRef)):
+        attr = attr_type.literal_value
+        ret_type = resolve_fact_getattr_type(inst_type, attr)
+        def codegen(context, builder, sig, args):
+            return fact_getattr_codegen(context, builder, sig, args, attr)
+  
+        sig = ret_type(inst_type, attr_type)
+        return sig, codegen
+
 @intrinsic
 def get_fact_attr_ptr(typingctx, inst_type, attr_type):
     from cre.fact import Fact
@@ -263,41 +312,16 @@ def define_attributes(struct_typeclass):
             return typ
 
     @lower_getattr_generic(struct_typeclass)
-    def struct_getattr_impl(context, builder, typ, val, attr):
-        field_type = typ.field_dict[attr]
-        ret_type = resolve_fact_getattr_type(typ,attr)
-
-        # Extract unoptional part of type
-        if(isinstance(ret_type, types.Optional)):
-            ret_type = ret_type.type
-
-        utils = _Utils(context, builder, typ)
-        dataval = utils.get_data_struct(val)
-        ret = getattr(dataval, attr)
-
-        option_ret_type = types.optional(ret_type)
-        if(isinstance(ret_type, (Fact,))):
-            # If a fact member is Null then return None
-            def cast_obj(x):
-                if(_raw_ptr_from_struct(x) != 0):
-                    return _cast_structref(ret_type, x)
-                return None
-            ret = context.compile_internal(builder, cast_obj, option_ret_type(field_type,), (ret,))
-            ret_type = option_ret_type
-            
-        elif(isinstance(ret_type, (ListType,))):
-            # List members should always be non-null
-            def cast_obj(x):
-                return _cast_list(ret_type, x)
-            ret = context.compile_internal(builder, cast_obj, option_ret_type(field_type,), (ret,))
-            ret_type = option_ret_type
-            
-        return imputils.impl_ret_borrowed(context, builder, ret_type, ret)
+    def struct_getattr_impl(context, builder, inst_type, val, attr):
+        ret_type = resolve_fact_getattr_type(inst_type, attr)
+        sig = ret_type(inst_type,types.literal(attr))
+        args = (val, attr)
+        return fact_getattr_codegen(context, builder, sig, args, attr)
+        
 
     @lower_setattr_generic(struct_typeclass)
     def struct_setattr_impl(context, builder, sig, args, attr):
-        
-        dataval = fact_setattr_codegen(context, builder, sig, args, attr, mutability_protected=True)
+        fact_setattr_codegen(context, builder, sig, args, attr, mutability_protected=True)
         
 
         # [inst_type, val_type] = sig.args

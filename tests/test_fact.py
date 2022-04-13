@@ -11,6 +11,8 @@ from numba.types import ListType
 import cre.dynamic_exec
 import pytest
 
+
+
 def test__standardize_spec():
     with cre_context("test__standardize_spec") as context:
         spec = {"A" : "string", "B" : "number"}
@@ -21,14 +23,14 @@ def test__standardize_spec():
         assert str(spec['A']['type']) == 'unicode_type'
         assert str(spec['B']['type']) == 'float64'
 
-        #Strings must always be treated as nominal
-        assert 'nominal' in spec['A']['flags']
+        # #Strings must always be treated as nominal
+        # assert 'nominal' in spec['A']['flags']
     
 
 def test__merge_spec_inheritance():
     with cre_context("test__merge_spec_inheritance") as context:
         spec1 = {"A" : "string", "B" : "number"}
-        BOOP = define_fact("BOOP", spec1, context="test__merge_spec_inheritance")
+        BOOP = define_fact("BOOP", spec1)
 
         #Should be able to inherit from ctor, type or type string
         spec2 = {"inherit_from" : BOOP, "C" : "number"}
@@ -101,18 +103,20 @@ def test_inheritence_bytes():
 def test_inheritence():
     with cre_context("test_inheritence") as context:
         spec1 = {"A" : "string", "B" : "number"}
-        BOOP1 = define_fact("BOOP1", spec1, context="test_inheritence")
+        BOOP1 = define_fact("BOOP1", spec1)
         spec2 = {"inherit_from" : BOOP1, "C" : "number"}
-        BOOP2 = define_fact("BOOP2", spec2, context="test_inheritence")
+        BOOP2 = define_fact("BOOP2", spec2)
         spec3 = {"inherit_from" : BOOP2, "D" : "number"}
-        BOOP3 = define_fact("BOOP3", spec3, context="test_inheritence")
+        BOOP3 = define_fact("BOOP3", spec3)
 
-        assert context.parents_of["BOOP3"] == ["BOOP1","BOOP2"]
-        assert context.children_of["BOOP3"] == []
-        assert context.parents_of["BOOP2"] == ["BOOP1"]
-        assert context.children_of["BOOP2"] == ["BOOP3"]
-        assert context.parents_of["BOOP1"] == []
-        assert context.children_of["BOOP1"] == ["BOOP2","BOOP3"]
+        as_names = lambda x: [y._fact_name for y in x]
+
+        assert as_names(context.parents_of["BOOP3"]) == ["BOOP1","BOOP2"]
+        assert as_names(context.children_of["BOOP3"]) == []
+        assert as_names(context.parents_of["BOOP2"]) == ["BOOP1"]
+        assert as_names(context.children_of["BOOP2"]) == ["BOOP3"]
+        assert as_names(context.parents_of["BOOP1"]) == []
+        assert as_names(context.children_of["BOOP1"]) == ["BOOP2","BOOP3"]
 
         # Context should keep track of parent and child t_ids
         cd = context.context_data
@@ -192,7 +196,8 @@ def test_cast_fact():
         #upcast
         @njit
         def down_cast(b):
-            return cast_fact(BOOP1,b)    
+            # return cast_fact(BOOP1,b)    
+            return b.asa(BOOP1)
 
         _b1 = down_cast(b3)
         assert type(b1) == type(_b1)
@@ -202,7 +207,8 @@ def test_cast_fact():
         #Upcast back
         @njit
         def up_cast(b):
-            return cast_fact(BOOP3,b)    
+            return b.asa(BOOP3)
+            # return cast_fact(BOOP3,b)    
         _b3 = up_cast(_b1)
         assert type(b3) == type(_b3)
         _b3 = up_cast.py_func(_b1)    
@@ -213,7 +219,8 @@ def test_cast_fact():
         #Bad cast
         @njit
         def bad_cast(b):
-            return cast_fact(FLOOP,b) 
+            # return cast_fact(FLOOP,b) 
+            return b.asa(FLOOP) 
 
         with pytest.raises(TypeError):
             bad_cast(b3)
@@ -224,7 +231,8 @@ def test_cast_fact():
         #Always allow casting to and from BaseFact
         @njit
         def base_down_cast(b):
-            return cast_fact(BaseFact,b)    
+            # return cast_fact(BaseFact,b)    
+            return b.asa(BaseFact)
         _bs = base_down_cast(_b1)
         assert type(bs) == type(_bs)
         _bs = base_down_cast.py_func(_b1)    
@@ -232,7 +240,8 @@ def test_cast_fact():
 
         @njit
         def base_up_cast(b):
-            return cast_fact(BOOP1,b)    
+            # return cast_fact(BOOP1,b)    
+            return b.asa(BOOP1)#cast_fact(BOOP1,b)    
         _b1 = base_up_cast(_bs)
         assert type(b1) == type(_b1)
         _b1 = base_up_cast.py_func(_bs)    
@@ -261,6 +270,29 @@ def test_fact_eq():
         assert do_eq(b1,None) == False
         assert do_eq.py_func(b1,None) == False
 
+from cre.fact_intrinsics import fact_lower_getattr
+
+def test_getattr():
+    spec = {"A" : "string", "B" : "number"}
+    BOOP = define_fact("BOOP", spec)
+
+    @njit(cache=True)
+    def get_it(b):
+        return (b.A,b.B)
+
+    b = BOOP("A",1)
+
+    assert get_it.py_func(b) == ("A",1)
+    assert get_it(b) == ("A",1)
+
+    @njit(cache=True)
+    def get_it_intrinsic(b):
+        return (fact_lower_getattr(b,"A"),fact_lower_getattr(b,"B"))    
+
+    # assert get_it_intrinsic.py_func(b) == ("A",1)
+    assert get_it_intrinsic(b) == ("A",1)
+
+
 
 
 def test_protected_mutability():
@@ -268,9 +300,9 @@ def test_protected_mutability():
     with cre_context("test_protected_mutability") as context:
         print("RUNTIME1.2")
         spec = {"A" : "string", "B" : "number"}
-        BOOP = define_fact("BOOP", spec,context="test_protected_mutability")
+        BOOP = define_fact("BOOP", spec)
         print("RUNTIME1.3")
-        mem = Memory(context="test_protected_mutability")
+        mem = Memory()
         print("RUNTIME1")
         b1 = BOOP("A",0)
         b2 = BOOP("B",0)
@@ -384,7 +416,7 @@ from cre.utils import _list_base_from_ptr, _list_base, _cast_list
 def get_base(x):
     return _list_base(x)
 
-def _test_list_type():
+def test_list_type():
     with cre_context("test_list_type"):
         spec = {"A" : "string", "B" : "number"}
         BOOP = define_fact("BOOP", spec)
@@ -398,7 +430,7 @@ def _test_list_type():
         def get_items(srl):
             items = srl.items
             if(items is not None):
-                print(_cast_list(blst_t, items))
+                # print(_cast_list(blst_t, items))
                 # print("base1",_list_base(items))    
                 return srl.items
             return None
@@ -449,9 +481,9 @@ def _test_list_type():
 
         print("START!")
 
-        print(get_items(bl))
-        print(len_items(bl))
-        print(iter_items(bl))
+        assert len(get_items(bl))  == 2
+        assert len_items(bl)  == 2
+        assert iter_items(bl) == 2
 
         print("END")
 
@@ -466,19 +498,28 @@ def _test_list_type():
         #     str(i)
         #     i+=1
         a = SelfRefList()
+        assert len(a.items) == 0
+
         b = SelfRefList()
         c = SelfRefList()
         p1 = SelfRefList(List([a,b,c]))
-        print(p1.items)
-
+        assert len(p1.items) == 3
+        
         p1 = SelfRefList()
         p1.items = List([a,b,c])
-        print(p1.items)
+        assert len(p1.items) == 3
+        # print(p1.items)
 
         
-        print(get_items(p1))
-        print(len_items(p1))
-        print(iter_items(p1))
+
+        assert len(get_items(a)) == 0
+        assert len(get_items(p1))  == 3
+        assert len_items(p1)  == 3
+        assert iter_items(p1) == 3
+
+        # print(get_items(p1))
+        # print(len_items(p1))
+        # print(iter_items(p1))
 
 
 
@@ -632,9 +673,9 @@ def test_b_py_dict_boop_10000(benchmark):
 
 if __name__ == "__main__":
     import faulthandler; faulthandler.enable()
-    # test_list_type()
+    # test_getattr()
     
-    # _test_list_type()
+    # test_list_type()
     # _test_reference_type()
     # test__standardize_spec()
     # test__merge_spec_inheritance()
@@ -654,7 +695,6 @@ if __name__ == "__main__":
     # test_eq()
     # test_inheritence()
     # test_inheritence_bytes()
-    # _test_list_type()
 
 
 

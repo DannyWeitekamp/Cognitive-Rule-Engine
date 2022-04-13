@@ -247,20 +247,15 @@ def _standardize_type(typ, context, name='', attr=''):
     return typ
 
 
-def _get_attr_type_flags(attr, v, context, name=''):
+# def _standardize_type(attr, attr_spec, context, name=''):
     '''A helper function for _standardize_spec'''
 
     # Extract typ_str + flags
     
-    if(isinstance(v,dict)):
-        assert "type" in v, "Attribute specifications must have 'type' property, got %s." % v
-        typ = _standardize_type(v['type'], context, name, attr)
-        flags = [x.lower() for x in v.get('flags',[])]
-    else:
-        typ, flags = _standardize_type(v, context, name, attr), []
+    
     
 
-    return typ, flags
+    # return typ, rest
 
 def _merge_spec_inheritance(spec : dict, context):
     '''Expands a spec with attributes from its 'inherit_from' type'''
@@ -296,16 +291,16 @@ def _standardize_spec(spec : dict, context, name=''):
     '''Takes in a spec and puts it in standard form'''
 
     out = {}
-    for attr,v in spec.items():
-        if(attr in SPECIAL_SPEC_ATTRIBUTES): out[attr] = v; continue;
+    for attr, attr_spec in spec.items():
+        if(attr in SPECIAL_SPEC_ATTRIBUTES): out[attr] = attr_spec; continue;
 
-        typ, flags = _get_attr_type_flags(attr,v, context, name)
+        if(isinstance(attr_spec, dict) and not "type" in attr_spec):
+            raise AttributeError("Attribute specifications must have 'type' property, got %s." % v)
+        
+        typ, attr_spec = (attr_spec['type'], attr_spec) if isinstance(attr_spec, dict) else (attr_spec, {})
+        typ = _standardize_type(typ, context, name, attr)
 
-        #Strings are always nominal
-        if(typ == unicode_type and ('nominal' not in flags)): flags.append('nominal')
-
-        out[attr] = {"type": typ, "flags" : flags}
-
+        out[attr] = {"type": typ,**{k:v for k,v in attr_spec.items() if k != "type"}}
     return out
 
 
@@ -1034,8 +1029,23 @@ def isa(self, typ):
 @generated_jit(cache=True,nopython=True)
 @overload_method(Fact, "asa")
 def asa(self, typ):
-    def impl(self, typ):
-        return _cast_structref(typ, self)
+    # from numba.extending import SentryLiteralArgs
+    # SentryLiteralArgs(['unsafe']).for_function(asa).bind(self, typ, unsafe) 
+
+    # print("<<", unsafe)
+    _typ = typ.instance_type
+    use_unsafe_cast = (_typ is CREObjType) or (_typ is BaseFact)
+
+    if(not use_unsafe_cast):
+        # fn1, fn2 = self._fact_name, _typ._fact_name
+        error_message = f"Cannot cast fact of type '{str(self)}' to '{str(_typ)}.'"
+        _isa = typ.instance_type._isa
+        def impl(self, typ):
+            if(not _isa(self)): raise TypeError(error_message)
+            return _cast_structref(typ, self)
+    else:
+        def impl(self, typ):
+            return _cast_structref(typ, self)
     return impl
 
 #### Hashing ####

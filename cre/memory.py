@@ -206,7 +206,6 @@ class Memory(structref.StructRefProxy):
         return add_subscriber(self,subscriber)
 
     def declare(self,fact,name=None):
-        print(fact,name)
         idrec = mem_declare(self,fact,name)
         # if(name is None):
         #     idrec = declare_fact(self, fact)
@@ -280,7 +279,7 @@ class MemoryTypeTemplate(types.StructRef):
         return tuple((name, types.unliteral(typ)) for name, typ in fields)
 
 mem_fields = [
-    ("mem_data",MemoryDataType),
+    ("mem_data", MemoryDataType),
     ("context_data" , CREContextDataType),
     ("halt_flag", u1),
     ("backtrack_flag", u1)

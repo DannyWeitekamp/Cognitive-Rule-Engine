@@ -233,11 +233,17 @@ class CREContext(object):
 
         #Track inheritence structure
         i_name = inherit_from._fact_name if inherit_from else None
-        self.parents_of[name] = self.parents_of.get(i_name,[]) + [i_name] if i_name else []
+        self.parents_of[name] = self.parents_of.get(i_name,[]) + [inherit_from] if i_name else []
         if(i_name):
-            for p in self.parents_of[name]:
-                self.children_of[p] = self.children_of.get(p,[]) + [name]
+            for parent in self.parents_of[name]:
+                p = parent._fact_name
+                self.children_of[p] = self.children_of.get(p,[]) + [fact_type]
         self.children_of[name] = []
+
+        # Index on both the type and it's name
+        self.parents_of[fact_type] = self.parents_of[name]
+        self.children_of[fact_type] = self.children_of[name]
+
         
 
 

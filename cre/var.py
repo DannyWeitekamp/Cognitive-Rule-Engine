@@ -127,7 +127,7 @@ class Var(CREObjProxy):
         st._derefs_str = ""
 
         # if(not skip_assign_alias):
-            # assign_to_alias_in_parent_frame(st,alias)
+            # assign_to_falias_in_parent_frame(st,alias)
 
         # print("after")
         return st
@@ -163,7 +163,7 @@ class Var(CREObjProxy):
             head_type = self.head_type.item_type
 
             attr = str(attr_or_ind)
-            a_id = 0
+            a_id = u1(0)
             offset = int(attr_or_ind)*listtype_sizeof_item(self.head_type)
             deref_type = DEREF_TYPE_LIST
             _derefs_str += f"[{attr_or_ind}]"
@@ -613,7 +613,7 @@ class StructAttribute(AttributeTemplate):
 
 #### getattr and dereferencing ####
 
-@njit(cache=True)
+@njit(types.void(GenericVarType, GenericVarType),cache=True)
 def var_memcopy(self,st):
     new_deref_attrs = List.empty_list(unicode_type)
     # new_deref_offsets = np.empty(len(),dtype=deref_type)

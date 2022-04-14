@@ -67,7 +67,7 @@ class Fact(CREObjTypeTemplate):
         return self._attr_offsets[self.get_attr_a_id(attr)]
 
     def get_attr_a_id(self, attr):
-        return self.field_dict_keys.index(attr)
+        return u1(self.field_dict_keys.index(attr))
 
     def get_attr_from_a_id(self, a_id):
         return self.field_dict_keys[a_id]
@@ -1032,7 +1032,6 @@ def asa(self, typ):
     # from numba.extending import SentryLiteralArgs
     # SentryLiteralArgs(['unsafe']).for_function(asa).bind(self, typ, unsafe) 
 
-    # print("<<", unsafe)
     _typ = typ.instance_type
     use_unsafe_cast = (_typ is CREObjType) or (_typ is BaseFact)
 

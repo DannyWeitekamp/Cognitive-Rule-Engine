@@ -102,6 +102,16 @@ class CREObjTypeTemplate(CastFriendlyMixin, types.StructRef):
     def __str__(self):
         return f"cre.CREObjType"
 
+    def hrepr():
+        '''A human-readable repr for cre objects'''
+        return f"{str(self)}(fields=({', '.join([f'{k}={str(v)}' for k,v in self._fields])}))" 
+
+
+    # def __repr__(self):
+    #     '''Make repr more readable than'''
+    #     return f"{str(self)}(fields=({', '.join([f'{k}={str(v)}' for k,v in self._fields])}))" 
+
+
 CREObjType = CREObjTypeTemplate(cre_obj_fields) 
 
 # @njit(cache=True)

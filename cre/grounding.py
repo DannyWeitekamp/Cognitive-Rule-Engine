@@ -10,9 +10,9 @@ from cre.context import cre_context
 from cre.default_ops import Add, Subtract, Divide
 from cre.var import Var, GenericVarType
 from cre.op import GenericOpType
-from cre.utils import _func_from_address
+from cre.utils import _func_from_address, _cast_structref, _obj_cast_codegen
 from cre.structref import define_structref
-from cre.incr_processor import incr_processor_fields
+from cre.incr_processor import incr_processor_fields, IncrProcessorType, init_incr_processor
 from cre.memory import Memory, MemoryType
 from numba.extending import overload_method, overload, lower_cast, SentryLiteralArgs
 # from collections import OrderedSet
@@ -20,13 +20,12 @@ from numba.extending import overload_method, overload, lower_cast, SentryLiteral
 
 
 
-Grounding = define_fact("Grounding")
+gval = define_fact("gval")
 
 
 flattener_fields = {
     **incr_processor_fields,    
     "fact_visible_attr_pairs" : types.Any,
-    "in_mem" : MemoryType,
     "out_mem" : MemoryType,
 }
 
@@ -47,7 +46,7 @@ BOOP3 = define_fact("BOOP3", spec3)
 
 
 @generated_jit(cache=True, nopython=True)    
-def flattener_update_for_attr(fact_type, attr, in_mem, out_mem):#, context_name="cre_default"):
+def flattener_update_for_attr(self, fact_type, attr):#, context_name="cre_default"):
     print("flattener_update_for_attr:: ")
     grounding_types = []
     # for fact_ref, attr in fact_visible_attr_pairs:
@@ -55,19 +54,34 @@ def flattener_update_for_attr(fact_type, attr, in_mem, out_mem):#, context_name=
     # head_type = Tuple((GenericVarType,fact_type.instance_type))
     head_type = GenericVarType
     # head_type = fact_type.instance_type
-    val_type = resolve_fact_getattr_type(fact_type.instance_type, attr.literal_value)        
-    grounding_type = Grounding(head=head_type, value=val_type)#, flt_val=f8, nom_val=i8)
-    # print(grounding_type)
+    attr = attr.literal_value
+    fact_type = fact_type.instance_type
+
+    # Construct the 'grounding_type' directly and get it's 'ctor'
+    #  since for now we can't use gval as it's own constructor
+    val_type = resolve_fact_getattr_type(fact_type, attr)        
+    grounding_type = gval(head=head_type, val=val_type)#, flt_val=f8, nom_val=i8)
     ctor = grounding_type._ctor[0]
 
-    def impl(fact_type, attr, in_mem, out_mem):
-        for fact in in_mem.get_facts(fact_type):
-            v = fact_lower_getattr(fact, attr)
-            # g = ctor(head=(Var(fact_type,fact.A),fact), value=v)
-            g = ctor(head=Var(fact_type,fact.A), value=v)
+    # Make a special constructor for a Var(fact_type, unique_id).attr
+    # NOTE: should probably just wrap this into it's own thing in
+    a_id = fact_type.get_attr_a_id(attr)
+    offset = fact_type.get_attr_offset(attr)
+    fact_num = fact_type._fact_num
+    var_head_type_name = str(fact_type.spec[attr]['type'])
+    from cre.var import new_appended_var_generic, DEREF_TYPE_ATTR
+    @njit
+    def var_w_attr_dref(v_name, attr):
+        v = _cast_structref(GenericVarType, Var(fact_type, v_name))
+        return new_appended_var_generic(v, attr, a_id, offset, var_head_type_name, fact_num, DEREF_TYPE_ATTR)
 
-            out_mem.declare(g)
-            # g = ctor(head=fact, value=v)
+    def impl(self, fact_type, attr):
+        
+
+        for fact in self.in_mem.get_facts(fact_type):
+            v = fact_lower_getattr(fact, attr)
+            g = ctor(head=var_w_attr_dref(fact.A, attr),val=v)
+            self.out_mem.declare(g)
             print(g)
     return impl
 
@@ -75,30 +89,44 @@ def flattener_update_for_attr(fact_type, attr, in_mem, out_mem):#, context_name=
 
 
 @generated_jit(cache=True, nopython=True)    
-def flattener_update(fact_visible_attr_pairs, in_mem, out_mem):#, context_name="cre_default"):
+def flattener_update(self):#, context_name="cre_default"):
+    print()
     print("flattener_update:: ")
+    # print(self.__dict__)
+
+    print(self.hrepr())
+    # for attr,t in self._fields:
+    #     print()
+    #     print(attr, t)
+    # print("::")
+    # print(self.fields)
 
     # grounding_types = []
     # for fact_ref, attr in fact_visible_attr_pairs:
     #     # print(fact_ref, attr)
     #     val_type = resolve_fact_getattr_type(fact_ref.instance_type, attr.literal_value)        
-    #     grounding_type = Grounding(head=head_type, value=val_type)#, flt_val=f8, nom_val=i8)
+    #     grounding_type = gval(head=head_type, value=val_type)#, flt_val=f8, nom_val=i8)
     #     grounding_types.append(grounding_type)
     # grounding_types = tuple(grounding_types)
     # ctor = grounding_type._ctor[0]
     # print(fact_visible_attr_pairs)
     # if(not context): context
-    def impl(fact_visible_attr_pairs, in_mem, out_mem):
+    def impl(self):#fact_visible_attr_pairs, in_mem, out_mem):
         i = 0
-        for tup in literal_unroll(fact_visible_attr_pairs):
-            fact_type, attr = tup
-            flattener_update_for_attr(fact_type, attr, in_mem, out_mem)
+        for change_event in self.get_changes():
+            print(change_event)
+            if(change_event.was_declared):
+                pass
+
+            for tup in literal_unroll(self.fact_visible_attr_pairs):
+                fact_type, attr = tup
+                flattener_update_for_attr(self, fact_type, attr)
             # # print(fact_type, attr)
             # # print("--", fact_type, "--")
             # print("--", i, ":", attr, "--")
             # for fact in in_mem.get_facts(fact_type):
             #     v = fact_lower_getattr(fact, attr)
-            #     g = Grounding(head=(Var(fact_type,fact.A),fact), val=v)
+            #     g = gval(head=(Var(fact_type,fact.A),fact), val=v)
             #     print(g)
             i += 1
             # print()
@@ -106,12 +134,45 @@ def flattener_update(fact_visible_attr_pairs, in_mem, out_mem):#, context_name="
         # return st
     return impl
 
-
+from numba.core.typing.typeof import typeof
 @generated_jit(cache=True, nopython=True)    
-def flattener_ctor(fact_visible_attr_pairs, in_mem, out_mem):
-    FlattenerType = 
+def flattener_ctor(fact_types, in_mem, context_data, out_mem=None):
+    fact_visible_attr_pairs = get_semantic_visibile_fact_attrs(fact_types)
+    fact_visible_attr_pairs_type = typeof(fact_visible_attr_pairs)
+    # print(fact_visible_attr_pairs_type)
+    # fact_visible_attr_pairs_type = types.Tuple()
+    fields = {**flattener_fields, "fact_visible_attr_pairs" : fact_visible_attr_pairs_type}
+    fl_proxy, f_type, f_type_class  = define_structref("Flattener", fields, return_template=True) 
+
+    @lower_cast(f_type, IncrProcessorType)
+    def upcast(context, builder, fromty, toty, val):
+        return _obj_cast_codegen(context, builder, val, fromty, toty, incref=False)
+
+    @generated_jit(cache=True)
+    @overload_method(f_type_class,'get_changes')
+    def self_get_changes(self, end=-1, exhaust_changes=True):
+        def impl(self, end=-1, exhaust_changes=True):
+            incr_pr = _cast_structref(IncrProcessorType, self)
+            return incr_pr.get_changes(end=end, exhaust_changes=exhaust_changes)
+        return impl
 
 
+    # print("&&", fact_visible_attr_pairs)
+    # print("<<", f_type.hrepr())
+
+    def impl(fact_types, in_mem, context_data, out_mem=None):
+        st = new(f_type)
+        init_incr_processor(st, in_mem)
+        st.fact_visible_attr_pairs = fact_visible_attr_pairs
+        # st.in_mem = in_mem
+        st.out_mem = out_mem if(out_mem is not None) else Memory(context_data)
+        return st
+        # st.fact_visible_attr_pairs = fact_visible_attr_pairs
+    return impl
+
+def new_flattener(fact_types, in_mem, out_mem=None, context=None):
+    context_data = cre_context(context).context_data
+    return flattener_ctor(fact_types, in_mem, context_data, out_mem)
 
 
 
@@ -121,7 +182,7 @@ def get_semantic_visibile_fact_attrs(fact_types):
 
     sem_vis_fact_attrs = {}
     for ft in fact_types:
-        ft = ft_ref.instance_type if (isinstance(ft, types.TypeRef)) else ft
+        ft = ft.instance_type if (isinstance(ft, types.TypeRef)) else ft
         parents = context.parents_of.get(ft._fact_name,[])
         # print()
         # print(ft.spec)
@@ -139,10 +200,6 @@ def get_semantic_visibile_fact_attrs(fact_types):
     # print([(ft._fact_name, attr) for ft, attr in visible_semantic_attrs])
                 # print(ft._fact_name, attr)
 
-
-svfa = get_semantic_visibile_fact_attrs((BOOP1, BOOP2, BOOP3))
-print([(ft._fact_name, attr) for ft, attr in svfa])
-
 mem = Memory()
 mem.declare(BOOP1("A", 1))
 mem.declare(BOOP1("B", 2))
@@ -152,7 +209,15 @@ mem.declare(BOOP3("E", 5, 15, 105))
 mem.declare(BOOP3("F", 6, 16, 106))
 
 
-flattener_update(svfa, mem, Memory())
+
+fl = new_flattener((BOOP1, BOOP2, BOOP3), mem)
+
+svfa = get_semantic_visibile_fact_attrs((BOOP1, BOOP2, BOOP3))
+print([(ft._fact_name, attr) for ft, attr in svfa])
+
+
+
+flattener_update(fl)
 # flattener_ctor((BOOP1, BOOP2, BOOP3))
 
 
@@ -199,19 +264,19 @@ def flattener_ctor():
 @generated_jit(cache=True, nopython=True)
 @overload_method(EnumerizerTypeClass, "add_grounding")
 def new_op_grounding(self, op, return_type, *args):
-    '''Creates a new Grounding Fact for an op and a set of arguments'''
+    '''Creates a new gval Fact for an op and a set of arguments'''
 
     # Fix annoying numba bug where StarArgs becomes a tuple() of cre.Tuples
     if(isinstance(args,tuple) and isinstance(args[0],types.BaseTuple)):
         args = args[0]
     
     # Because of numba issue: https://github.com/numba/numba/issues/7973
-    #  inlining Grounding(head=???, value=??) w/ arguments doesn't work
+    #  inlining gval(head=???, value=??) w/ arguments doesn't work
     #  so just grab it's ctor and use that directly
     # head_type = TF(GenericOpType,TF(*args))
     head_type = Tuple((GenericOpType,args))
     # print(head_type)
-    grounding_type = Grounding(head=head_type, value=return_type.instance_type, flt_val=f8, nom_val=i8)
+    grounding_type = gval(head=head_type, value=return_type.instance_type, flt_val=f8, nom_val=i8)
     ctor = grounding_type._ctor[0]
     
     # Find the types for the op's check and call
@@ -226,7 +291,7 @@ def new_op_grounding(self, op, return_type, *args):
         if(op.check_addr != 0):
             check = _func_from_address(check_f_type, op.check_addr)
             check_ok = check(*args)
-            if(not check(*args)): raise ValueError("Grounding attempt failed check().")
+            if(not check(*args)): raise ValueError("gval attempt failed check().")
 
         call = _func_from_address(call_f_type, op.call_addr)
         value = call(*args)

@@ -19,7 +19,7 @@ from cre.fact import BaseFact
 from cre.utils import decode_idrec, encode_idrec
 
 incr_processor_fields = {
-    "mem" : MemoryType,
+    "in_mem" : MemoryType,
     "change_queue_head" : i8,
 }
 
@@ -33,14 +33,14 @@ IncrProcessorTypeTemplate.__str__ = lambda x : "cre.IncrProcessor"
 
 @njit(IncrProcessorType(IncrProcessorType, MemoryType),cache=True)
 def init_incr_processor(st, mem):
-    st.mem = mem
+    st.in_mem = mem
     st.change_queue_head = 0
     return st
 
 # @njit(IncrProcessorType(IncrProcessorType, MemoryType),cache=True)
 # def incr_processor_ctor(st, mem):
 #     st = new(IncrProcessorType)
-#     st.mem = mem
+#     st.in_mem = mem
 #     st.change_queue_head = 0
 #     return st
 
@@ -97,7 +97,7 @@ def accumulate_change_events(cq, start, end=-1):
         the changes between start and end. If end is not set then it defaults
         to the head of the the change_queue.
     '''
-    # cq = incr_pr.mem.mem_data.change_queue
+    # cq = incr_pr.in_mem.mem_data.change_queue
     if(end == -1): end = cq.head
     ce_dict = Dict.empty(u8,ChangeEventType)
     for i in range(start, end):
@@ -134,7 +134,7 @@ def accumulate_change_events(cq, start, end=-1):
 @overload_method(IncrProcessorTypeTemplate,'get_changes')
 def incr_pr_accumulate_change_events(incr_pr, end=-1, exhaust_changes=True):
     def impl(incr_pr, end=-1, exhaust_changes=True):
-        cq = incr_pr.mem.mem_data.change_queue
+        cq = incr_pr.in_mem.mem_data.change_queue
         start = incr_pr.change_queue_head
         if(end == -1): end = cq.head
         change_events = accumulate_change_events(cq, start, end)

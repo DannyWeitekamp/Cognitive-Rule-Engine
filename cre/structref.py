@@ -116,6 +116,10 @@ class CastFriendlyStructref(types.StructRef):
     def unify(self, typingctx, other):
         if(self.can_convert_to(typingctx, other)):
             return other
+
+    def hrepr(self):
+        '''A human-readable repr for cre objects'''
+        return f"{self._typename}({', '.join([f'{k}={str(v)}' for k,v in self._fields])})" 
 # print(DictType(i8,i8))
 # print(fields)
 # print(gen_structref_code("BOOP",fields))

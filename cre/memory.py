@@ -324,9 +324,9 @@ def overload_Memory(context_data=None, mem_data=None):
         glb_context_data = CREContext.get_context().context_data
         def impl(context_data=None, mem_data=None):
             return mem_ctor(glb_context_data, mem_data)
-
     else:
-        return mem_ctor
+        def impl(context_data=None, mem_data=None):
+            return mem_ctor(context_data, mem_data)
         # def impl(context_data=None, mem_data=None):
         #     return mem_ctor(context_data, mem_data)
 
@@ -876,6 +876,22 @@ def fact_iter_next_raw_ptr(it):
         else:
             it.curr_ind = 0
             it.curr_t_id_ind += 1
+
+
+@generated_jit(cache=True)
+@overload_method(MemoryTypeTemplate,'get_t_id')
+def get_t_id(mem, fact_type, no_subtypes=False):
+    def impl(mem, fact_type, no_subtypes=False):
+        return mem.context_data.fact_num_to_t_id[fact_num]
+    return impl
+
+@generated_jit(cache=True)
+@overload_method(MemoryTypeTemplate,'get_subtype_t_ids')
+def get_subtype_t_ids(mem, fact_type, no_subtypes=False):
+    def impl(mem, fact_type, no_subtypes=False):
+        return mem.context_data.child_t_ids[cd.fact_num_to_t_id[fact_num]]
+    return impl
+
 
 @generated_jit(cache=True)
 @overload_method(MemoryTypeTemplate,'get_facts')

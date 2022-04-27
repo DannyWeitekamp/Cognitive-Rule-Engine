@@ -91,7 +91,7 @@ def impl_cre_obj_upcast(context, builder, fromty, toty, val):
 
 class CREObjTypeTemplate(CastFriendlyMixin, types.StructRef):
     def __init__(self, fields):
-        super().__init__(fields)
+        types.StructRef.__init__(self,fields)
 
     def __init_subclass__(cls, **kwargs):
         super().__init_subclass__(**kwargs)

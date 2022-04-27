@@ -73,14 +73,15 @@ class SpecializedTFClass(TupleFactClass):
     def __str__(self):
         return '{specialization_name if specialization_name else "TupleFact"}'
 
-SpecializedTF = SpecializedTFClass(tf_fields)
+SpecializedTF = fact_type = SpecializedTFClass(tf_fields)
 SpecializedTF._fact_name = "TupleFact"
 SpecializedTF._fact_num = TF_FACT_NUM
 # SpecializedTF._attr_offsets = attr_offsets
 SpecializedTF._fact_type_class = SpecializedTFClass
 {f'SpecializedTF._specialization_name = "{specialization_name}"' if(specialization_name is not None) else ''}
 
-{(f"""@lower_cast(SpecializedTF, TupleFact)
+{(f"""SpecializedTF.parent_type = TupleFact
+@lower_cast(SpecializedTF, TupleFact)
 def upcast(context, builder, fromty, toty, val):
     return _obj_cast_codegen(context, builder, val, fromty, toty,incref=False)                        
 """) if specialization_name is not None else ""

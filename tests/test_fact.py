@@ -171,7 +171,130 @@ def test_inheritence():
         nb_okay = check_isa(b1,b2,b3)
         assert all(nb_okay), str(nb_okay)
         
-            
+def test_context_helpers():
+    with cre_context("test_context_helpers") as context:
+        spec1 = {"A" : "string", "B" : "number"}
+        BOOP1 = define_fact("BOOP1", spec1)
+        spec2 = {"inherit_from" : BOOP1, "C" : "number"}
+        BOOP2 = define_fact("BOOP2", spec2)
+        spec3 = {"inherit_from" : BOOP2, "D" : "number"}
+        BOOP3 = define_fact("BOOP3", spec3)
+
+        ### Check get_t_id ###
+        b1_t_id = context.get_t_id(name="BOOP1")
+        b2_t_id = context.get_t_id(name="BOOP2")
+        b3_t_id = context.get_t_id(name="BOOP3")
+
+        assert  context.get_t_id(fact_type=BOOP1) == b1_t_id 
+        assert  context.get_t_id(fact_type=BOOP2) == b2_t_id 
+        assert  context.get_t_id(fact_type=BOOP3) == b3_t_id 
+
+        assert context.get_t_id(fact_num=BOOP1._fact_num) == b1_t_id 
+        assert context.get_t_id(fact_num=BOOP2._fact_num) == b2_t_id 
+        assert context.get_t_id(fact_num=BOOP3._fact_num) == b3_t_id 
+
+        with pytest.raises(ValueError):
+            context.get_t_id()
+
+        with pytest.raises(ValueError):
+            context.get_t_id(name="SHLOOP")
+
+        ### Check get_fact_num ###
+        b1_fact_num = context.get_fact_num(fact_type=BOOP1)
+        b2_fact_num = context.get_fact_num(fact_type=BOOP2)
+        b3_fact_num = context.get_fact_num(fact_type=BOOP3)
+
+        assert context.get_fact_num(name="BOOP1") == b1_fact_num 
+        assert context.get_fact_num(name="BOOP2") == b2_fact_num 
+        assert context.get_fact_num(name="BOOP3") == b3_fact_num 
+
+        assert context.get_fact_num(t_id=b1_t_id) == b1_fact_num 
+        assert context.get_fact_num(t_id=b2_t_id) == b2_fact_num 
+        assert context.get_fact_num(t_id=b3_t_id) == b3_fact_num 
+
+        with pytest.raises(ValueError):
+            context.get_fact_num()
+
+        with pytest.raises(ValueError):
+            context.get_fact_num(name="SHLOOP")
+
+        ### Check get_fact_type ###
+        assert context.get_fact_type(fact_num=b1_fact_num) == BOOP1 
+        assert context.get_fact_type(fact_num=b2_fact_num) == BOOP2 
+        assert context.get_fact_type(fact_num=b3_fact_num) == BOOP3 
+
+        assert context.get_fact_type(name="BOOP1") == BOOP1 
+        assert context.get_fact_type(name="BOOP2") == BOOP2 
+        assert context.get_fact_type(name="BOOP3") == BOOP3 
+
+        assert context.get_fact_type(t_id=b1_t_id) == BOOP1  
+        assert context.get_fact_type(t_id=b2_t_id) == BOOP2 
+        assert context.get_fact_type(t_id=b3_t_id) == BOOP3  
+
+        with pytest.raises(ValueError):
+            context.get_fact_type()
+
+        with pytest.raises(ValueError):
+            context.get_fact_type(name="SHLOOP")
+
+
+def test_context_retroactive_register():
+    with cre_context("test_context_retroactive_register") as context:
+        spec1 = {"A" : "string", "B" : "number"}
+        BOOP1 = define_fact("BOOP1", spec1)
+        spec2 = {"inherit_from" : BOOP1, "C" : "number"}
+        BOOP2 = define_fact("BOOP2", spec2)
+        spec3 = {"inherit_from" : BOOP2, "D" : "number"}
+        BOOP3 = define_fact("BOOP3", spec3)
+
+    # Make a new context to ensure that we can retroactively define 
+    with cre_context("other_context1") as context:
+        with pytest.raises(ValueError):
+            context.get_t_id(name="BOOP1")
+
+        b1_t_id = context.get_t_id(fact_type=BOOP1)
+        b2_t_id = context.get_t_id(fact_type=BOOP2)
+        b3_t_id = context.get_t_id(fact_type=BOOP3)
+
+        assert b1_t_id != b2_t_id and b2_t_id != b3_t_id
+
+        assert context.get_t_id(fact_num=BOOP1._fact_num) == b1_t_id
+        assert context.get_t_id(fact_num=BOOP2._fact_num) == b2_t_id
+        assert context.get_t_id(fact_num=BOOP3._fact_num) == b3_t_id
+
+        cd = context.context_data
+        assert np.array_equal(cd.parent_t_ids[b1_t_id],[])
+        assert np.array_equal(cd.parent_t_ids[b2_t_id],[b1_t_id])
+        assert np.array_equal(cd.parent_t_ids[b3_t_id],[b1_t_id,b2_t_id])
+        assert np.array_equal(cd.child_t_ids[b1_t_id],[b1_t_id,b2_t_id,b3_t_id])
+        assert np.array_equal(cd.child_t_ids[b2_t_id],[b2_t_id,b3_t_id])
+        assert np.array_equal(cd.child_t_ids[b3_t_id],[b3_t_id])
+
+    # Check that retroactive definition works fine for declare()
+    with cre_context("other_context") as context:
+        with pytest.raises(ValueError):
+            context.get_t_id(name="BOOP1")
+
+        b1_t_id = context.get_t_id(fact_type=BOOP1)
+        b2_t_id = context.get_t_id(fact_type=BOOP2)
+        b3_t_id = context.get_t_id(fact_type=BOOP3)
+
+        assert b1_t_id != b2_t_id and b2_t_id != b3_t_id
+
+        assert context.get_t_id(fact_num=BOOP1._fact_num) == b1_t_id
+        assert context.get_t_id(fact_num=BOOP2._fact_num) == b2_t_id
+        assert context.get_t_id(fact_num=BOOP3._fact_num) == b3_t_id
+
+        cd = context.context_data
+        assert np.array_equal(cd.parent_t_ids[b1_t_id],[])
+        assert np.array_equal(cd.parent_t_ids[b2_t_id],[b1_t_id])
+        assert np.array_equal(cd.parent_t_ids[b3_t_id],[b1_t_id,b2_t_id])
+        assert np.array_equal(cd.child_t_ids[b1_t_id],[b1_t_id,b2_t_id,b3_t_id])
+        assert np.array_equal(cd.child_t_ids[b2_t_id],[b2_t_id,b3_t_id])
+        assert np.array_equal(cd.child_t_ids[b3_t_id],[b3_t_id])
+
+
+
 
 def test_cast_fact():
     with cre_context("test_cast_fact") as context:
@@ -673,6 +796,9 @@ def test_b_py_dict_boop_10000(benchmark):
 
 if __name__ == "__main__":
     import faulthandler; faulthandler.enable()
+
+    test_context_helpers()
+    test_context_retroactive_register()
     # test_getattr()
     
     # test_list_type()

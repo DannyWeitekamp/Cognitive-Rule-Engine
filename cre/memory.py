@@ -133,7 +133,7 @@ def init_mem_data(context_data):
     #                         enum_data, enum_consistency, subscribers,
     #                         unnamed_counter, BaseFact() #Empty BaseFact is NULL_FACT
     #                          )
-    L = max(len(context_data.attr_inds_by_type),1)
+    L = max(context_data.next_t_id,1)
     expand_mem_data_types(mem_data,L)
     return mem_data
 
@@ -217,14 +217,14 @@ class Memory(structref.StructRefProxy):
     def retract(self,identifier):
         return mem_retract(self,identifier)
 
-    def get_facts(self,typ):
+    def get_facts(self,typ=None, no_subtypes=False):
         if(isinstance(typ,str)):
             typ = self.context.type_registry[typ]
         # name = str(typ)
         # t_id = self.context.context_data.fact_num_to_t_id[typ._fact_num]
         # t_ids = np.empty((1,), dtype=np.uint16)
         # t_ids[0] = t_id
-        return get_facts(self, typ)
+        return get_facts(self, typ, no_subtypes)
 
     def iter_facts(self,typ):
         if(isinstance(typ,str)):
@@ -250,10 +250,24 @@ class Memory(structref.StructRefProxy):
     @property
     def backtrack_flag(self):
         return get_backtrack_flag(self)
+
+    def __str__(self,ind="    "):
+        strs = []
+        from cre.utils import PrintElapse
+        with PrintElapse("__STR__"):
+            for typ in self.context.registered_types:
+                # print("<<", typ)
+                if(isinstance(typ,Fact)):
+                    for fact in self.get_facts(typ, no_subtypes=True):
+                        strs.append(str(fact))
+            nl = "\n"
+        return f'''Memory(facts=({nl}{ind}{f"{nl}{ind}".join(strs)}{nl})'''
     
 
     def __del__(self):        
+        # NOTE: This definitely has bugs
         try:
+            # pass
             mem_data_dtor(self.mem_data)
         except Exception as e:
             # If the process is ending then global variables can be sporatically None
@@ -415,14 +429,29 @@ def next_empty_f_id(mem_data,facts,t_id):
 #         return t_id
         
 #     return impl
+from cre.context import grow_fact_num_to_t_id
 @njit(u2(MemoryType, i8),cache=True)
 def resolve_t_id(mem, fact_num):
-    # _, fact_num, a_id = decode_idrec(fact.idrec)
-    # if(fact.idrec == u8(-1)):
+    '''Gets a t_id from a mem (which is was instantiated under some context) 
+       and a fact_num. If the fact with 'fact_num' wasn't registered in the 
+       mem's context then ensure that it gets registered retroactively.
+    '''
     
-    # else:
-    #     t_id = fact_num
+    # Ensure that 'fact_num_to_t_id' for the mem's context is big enough.
+    fntt = mem.context_data.fact_num_to_t_id
+    if(fact_num >= len(fntt)):
+        fntt = grow_fact_num_to_t_id(mem.context_data, fact_num*2)
+
+    # Get the t_id for fact_num. If zero then register fact_num and
+    #  mark the context as having an unhandled registration that needs
+    #  to be processed on the python side.
     t_id = mem.context_data.fact_num_to_t_id[fact_num]
+    if(t_id == 0):
+        t_id = mem.context_data.get_next_t_id()
+        mem.context_data.fact_num_to_t_id[fact_num] = t_id
+        mem.context_data.has_unhandled_retro_register = True
+
+    # Ensure that the data structures in mem_data are long enough to index t_id.
     L = len(mem.mem_data.facts)
     if(t_id >= L):
         expand_mem_data_types(mem.mem_data, 1+L-t_id)
@@ -475,10 +504,12 @@ def signal_subscribers_change(mem, idrec):
 
 @njit(u8(MemoryType,BaseFact),cache=True)
 def declare_fact(mem, fact):
-    #Incref so that the fact is not freed if this is the only reference
+    # Incref so that the fact is not freed if this is the only reference
     fact_ptr = i8(_raw_ptr_from_struct_incref(fact)) #.4ms / 10000
     t_id = resolve_t_id(mem, fact.fact_num)  #.1ms / 10000
     facts = facts_for_t_id(mem.mem_data, t_id) #negligible
+
+    # Get the next empty f_id. Retracted f_ids are recycled for cache locality.
     f_id = next_empty_f_id(mem.mem_data, facts, t_id) # .5ms / 10000
 
 
@@ -612,7 +643,7 @@ def mem_backtrack(self):
 @generated_jit(cache=True)
 @overload_method(MemoryTypeTemplate, "get_fact")
 def mem_get_fact(self, identifier, typ=None):
-    if(typ is None):
+    if(isinstance(typ,types.Omitted) or typ is None):
         return_typ = BaseFact    
     else:
         return_typ = typ.instance_type
@@ -878,7 +909,7 @@ def fact_iter_next_raw_ptr(it):
             it.curr_t_id_ind += 1
 
 
-@generated_jit(cache=True)
+@generated_jit(cache=True, nopython=True)
 @overload_method(MemoryTypeTemplate,'get_t_id')
 def get_t_id(mem, fact_type, no_subtypes=False):
     def impl(mem, fact_type, no_subtypes=False):
@@ -895,11 +926,17 @@ def get_subtype_t_ids(mem, fact_type, no_subtypes=False):
 
 @generated_jit(cache=True)
 @overload_method(MemoryTypeTemplate,'get_facts')
-def get_facts(mem, fact_type, no_subtypes=False):
-    assert isinstance(fact_type, types.TypeRef)
-
-    fact_type = fact_type.instance_type
-    fact_num = fact_type._fact_num
+def get_facts(mem, fact_type=None, no_subtypes=False):
+    # print(repr(fact_type))
+    if(isinstance(fact_type, types.TypeRef)):
+        _fact_type = fact_type.instance_type
+    elif(isinstance(fact_type, types.NoneType)):
+        _fact_type = BaseFact
+    else:
+        raise ValueError("fact_type of get_facts() must be a numba type or None.")
+    
+    fact_num = getattr(_fact_type,'_fact_num', 0)
+    # print(repr(_fact_type))
     # print("BEF")
     # it_type = FactIteratorType([(k,v) for k,v in {{**fact_iterator_field_dict ,"fact_type": types.TypeRef(typ)}}.items()])
     # print("<<", it_type)
@@ -910,27 +947,35 @@ def get_facts(mem, fact_type, no_subtypes=False):
     #     source_to_cache('FactIterator', hash_code, source)
     # it_type = import_from_cached('FactIterator', hash_code, ['f_iter_type'])['f_iter_type']
     # print("<<", it_type)
-    def impl(mem, fact_type, no_subtypes=False):
+    def impl(mem, fact_type=None, no_subtypes=False):
         cd = mem.context_data
         # print(cd.fact_num_to_t_id, fact_num)
-        if(no_subtypes):
-            t_ids = np.array((cd.fact_num_to_t_id[fact_num],),dtype=np.int64)
+        if(fact_type is None):
+            #### SHERE
+            t_ids = np.arange(mem.mem_data.facts.head, dtype=np.int64)
         else:
-            t_ids = cd.child_t_ids[cd.fact_num_to_t_id[fact_num]]
+            t_id = cd.fact_num_to_t_id[fact_num]
+            # print(">>", t_id)
+            if(no_subtypes):
+                t_ids = np.array((t_id,),dtype=np.int64)
+            else:                
+                t_ids = cd.child_t_ids[t_id]
 
-        out = List.empty_list(fact_type)
+        out = List.empty_list(_fact_type)
         curr_t_id_ind = 0
         curr_ind = 0
         while(True):
             if(curr_t_id_ind >= len(t_ids)): break
             t_id = t_ids[curr_t_id_ind]
+            # print("BEF", t_id)
             facts_ptr = mem.mem_data.facts[i8(t_id)]
+            # print("facts_ptr", facts_ptr)
             if(facts_ptr != 0):
                 facts = _struct_from_ptr(VectorType, facts_ptr)
                 if(curr_ind < len(facts)):
                     ptr = facts[curr_ind]
                     curr_ind +=1
-                    if(ptr != 0): out.append(_struct_from_ptr(fact_type, ptr))
+                    if(ptr != 0): out.append(_struct_from_ptr(_fact_type, ptr))
                 else:
                     curr_ind = 0
                     curr_t_id_ind +=1

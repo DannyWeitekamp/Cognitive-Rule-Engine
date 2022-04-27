@@ -43,7 +43,8 @@ SPECIAL_SPEC_ATTRIBUTES = ["inherit_from"]
 
 class Fact(CREObjTypeTemplate):
     def __init__(self, fields):
-        super().__init__(fields)
+        super(Fact, self).__init__(fields)        
+        # print("INIT FACT", self.name)
 
     def __str__(self):
         # print(type(self))
@@ -106,8 +107,11 @@ from numba.core.typing.typeof import typeof
 class UntypedFact(Fact):
     specializations = {}
     def __init__(self, fields):
-        # print("INIT")
-        super().__init__(fields)
+        super(UntypedFact, self).__init__(fields)
+        # Not sure why but if this property isn't called
+        #   then it might be undefined 
+        self.name
+        print("INIT UntypedFact", self.name)
     def __call__(self, *args, **kwargs):
         # print("CALL", tuple(kwargs.keys()))
         if(len(kwargs) == 0):
@@ -350,6 +354,10 @@ class FactProxy:
             return fact_eq(self,other)
         return False
 
+    def restore(self,context=None):
+        context = cre_context(context)
+        # if(context.tt_id):
+
     # def __hash__(self):
     #     from cre.dynamic_exec import fact_hash
     #     return fact_hash(self)
@@ -450,7 +458,7 @@ def gen_fact_import_str(t):
     return f"from cre_cache.{t._fact_name}._{t._hash_code} import {t._fact_name}"
 
 def gen_inherit_import_str(t):
-    return f"from cre_cache.{t._fact_name}._{t._hash_code} import {t._fact_name}, inheritance_bytes as parent_inh_bytes"
+    return f"from cre_cache.{t._fact_name}._{t._hash_code} import {t._fact_name} as parent_type, inheritance_bytes as parent_inh_bytes"
 
 def _gen_getter_jit(f_typ,typ,attr):
     if(isinstance(typ,(Fact,DeferredFactRefType))):
@@ -706,13 +714,15 @@ class {typ}Class({"UntypedFact" if is_untyped else "Fact"}):
     
 
 field_list = cloudpickle.loads({cloudpickle.dumps(all_fields)})
-{typ} = {typ}Class(field_list)
+{typ} = fact_type = {typ}Class(field_list)
 {typ}_w_mbr_infos = {typ}Class(field_list+
 [("chr_mbrs_infos", UniTuple(member_info_type,{len(fields)})),
  ("num_inh_bytes", u1),
  ("inh_bytes", UniTuple(u1, num_inh_bytes))])
 
-{(f"""@lower_cast({typ}, {inherit_from._fact_name})
+
+{(f"""{typ}.parent_type = parent_type
+@lower_cast({typ}, parent_type)
 def upcast(context, builder, fromty, toty, val):
     return _obj_cast_codegen(context, builder, val, fromty, toty,incref=False)                        
 """) if inherit_from is not None else ""
@@ -853,6 +863,16 @@ def add_to_fact_registry(name,hash_code):
     GLOBAL_FACT_COUNT += 1
     return count
 
+def fact_type_from_fact_num(fact_num):
+    name, hash_code = None, None
+    with open(get_cache_path("fact_registry",suffix=''),'r') as f:
+        for i, line in enumerate(f):
+            if(i == fact_num):
+                tokens = line.split()
+                name, hash_code = tokens[0], tokens[1]
+                break
+    fact_type = import_from_cached(name,hash_code,['fact_type'])['fact_type']
+    return fact_type
 
 
 def _fact_from_fields(name, fields, inherit_from=None, specialization_name=None, is_untyped=False, return_proxy=False, return_type_class=False):
@@ -915,7 +935,7 @@ def define_fact(name : str, spec : dict = None, context=None, return_proxy=False
         # print("FT", fact_type, type(fact_type))
         dt = context.get_deferred_type(name)
         dt.define(fact_type)
-        context._assert_flags(name, spec)
+        # context._assert_flags(name, spec)
         context._register_fact_type(specialization_name, fact_type, inherit_from=inherit_from)
         _spec = spec if(spec is not None) else {}
         fact_type.spec = _spec
@@ -940,7 +960,7 @@ def define_facts(specs, #: list[dict[str,dict]],
 base_fact_field_dict = {
     **cre_obj_field_dict,
     "fact_num": i8,
-    # "member_info" : types.UniTuple(member_info_type,1),# sentry type will be as long as there are members
+    # "member_info" : tyes.UniTuple(member_info_type,1),# sentry type will be as long as there are members
 }
 
 base_fact_fields  = [(k,v) for k,v in base_fact_field_dict.items()]

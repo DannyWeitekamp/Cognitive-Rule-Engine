@@ -14,7 +14,7 @@ from cre.caching import cache_dir
 
 os.environ['NUMBA_CACHE_DIR'] = os.path.join(os.path.split(cache_dir)[0], "numba_cache")
 
-
+from numba.core.dispatcher import Dispatcher
 import numba.typed.typedlist as tl_mod 
 import numba.typed.typeddict as td_mod
 #Monkey Patch Numba so that the builtin functions for List() and Dict() cache between runs 
@@ -23,10 +23,12 @@ def monkey_patch_caching(mod,exclude=[]):
         if(isinstance(val,Dispatcher) and name not in exclude):
             val.enable_caching()
 
+# monkey_patch_caching(tl_mod,['_sort'])
+# monkey_patch_caching(td_mod)
+
 #They promised to fix this by 0.51.0, so we'll only run it if an earlier release
 # if(tuple([int(x) for x in numba.__version__.split('.')]) < (0,55,0)):
-monkey_patch_caching(tl_mod,['_sort'])
-monkey_patch_caching(td_mod)
+
 
 
 #These will be filled in if the user registers a new type

@@ -203,6 +203,56 @@ def test_get_facts():
             assert len(all_tf) == 9
 
 
+def test_retroactive_register():
+    with cre_context("test_context_retroactive_register") as context:
+        spec1 = {"A" : "string", "B" : "number"}
+        BOOP1 = define_fact("BOOP1", spec1)
+        spec2 = {"inherit_from" : BOOP1, "C" : "number"}
+        BOOP2 = define_fact("BOOP2", spec2)
+        spec3 = {"inherit_from" : BOOP2, "D" : "number"}
+        BOOP3 = define_fact("BOOP3", spec3)
+    # Check that retroactive registration works fine for declare()
+    with cre_context("other_context") as context:
+        with pytest.raises(ValueError):
+            context.get_t_id(name="BOOP1")
+
+        mem = Memory()
+        mem.declare(BOOP1("A",1))
+        mem.declare(BOOP1("A",2))
+        mem.declare(BOOP2("B",2, 3))
+        mem.declare(BOOP2("B",3, 3))
+        mem.declare(BOOP3("C",3, 4, 5))
+        mem.declare(BOOP3("C",4, 4, 5))
+
+        b1_t_id = context.get_t_id(fact_type=BOOP1)
+        b2_t_id = context.get_t_id(fact_type=BOOP2)
+        b3_t_id = context.get_t_id(fact_type=BOOP3)
+
+        assert b1_t_id != b2_t_id and b2_t_id != b3_t_id
+
+        assert context.get_t_id(fact_num=BOOP1._fact_num) == b1_t_id
+        assert context.get_t_id(fact_num=BOOP2._fact_num) == b2_t_id
+        assert context.get_t_id(fact_num=BOOP3._fact_num) == b3_t_id
+        
+
+        # NOTE: Inheritance tracking doesn't work in this case... would require some refactoring
+        #  issue is that assign_name_num_to_t_id() requires a name and the fact_num of the inherited type
+        # cd = context.context_data
+        # print(cd.parent_t_ids)
+        # print(cd.parent_t_ids[b1_t_id])
+        # print(cd.parent_t_ids[b2_t_id])
+        # print(cd.parent_t_ids[b3_t_id])
+        # print(cd.child_t_ids[b1_t_id])
+        # print(cd.child_t_ids[b2_t_id])
+        # print(cd.child_t_ids[b3_t_id])
+        # assert np.array_equal(cd.parent_t_ids[b1_t_id],[])
+        # assert np.array_equal(cd.parent_t_ids[b2_t_id],[b1_t_id])
+        # assert np.array_equal(cd.parent_t_ids[b3_t_id],[b1_t_id,b2_t_id])
+        # assert np.array_equal(cd.child_t_ids[b1_t_id],[b1_t_id,b2_t_id,b3_t_id])
+        # assert np.array_equal(cd.child_t_ids[b2_t_id],[b2_t_id,b3_t_id])
+        # assert np.array_equal(cd.child_t_ids[b3_t_id],[b3_t_id])
+
+
 # from itertools import product
 
 # NOTE: Something funny going on here, getting errors like:
@@ -469,7 +519,8 @@ def test_b_get_facts_10000(benchmark):
 
 if __name__ == "__main__":
     import faulthandler; faulthandler.enable()
-    test_declare_retract_tuple_fact()
+    test_retroactive_register()
+    # test_declare_retract_tuple_fact()
     # test_declare_overloading()
     # test_modify()
     # test_declare_retract()

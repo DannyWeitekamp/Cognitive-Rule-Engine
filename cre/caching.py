@@ -27,7 +27,11 @@ if not os.path.exists(cache_dir):
 sys.path.insert(0, appdirs.user_cache_dir)
 
 def clear_cache():
+	#Clear the cache folder determined by AppDirs
 	shutil.rmtree(os.path.abspath(os.path.join(cache_dir,"../")))
+
+	#Clear __pycache__ in /cre
+	shutil.rmtree(os.path.abspath(os.path.join(os.path.dirname(__file__),"__pycache__")))
 	print("Cache Cleared!")
 
 import linecache

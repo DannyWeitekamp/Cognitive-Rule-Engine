@@ -153,13 +153,25 @@ DEFAULT_REGISTERED_TYPES = {
                             'int64' : i8,
                             'float64' : f8,
                             'str' : unicode_type,
-                            'Fact' : types.undefined,
-                            'TupleFact' : types.undefined,
-                            'Var': types.undefined,
-                            'Op' : types.undefined,
-                            'Literal' : types.undefined,
-                            'Conditions' : types.undefined
+                            'Fact' : None,
+                            'TupleFact' : None,
+                            'Var': None,
+                            'Op' : None,
+                            'Literal' : None,
+                            'Conditions' : None
                             }
+
+
+SHORT_NAMES = {
+    types.undefined : "undf",
+    types.bool_ : "u1",
+    i8 : "i8",
+    f8 : "f8",
+    unicode_type : "str",
+}
+
+def short_name(x):
+    return SHORT_NAMES[x]
 
 DEFAULT_TYPE_T_IDS = {
     # Maps names 

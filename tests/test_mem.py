@@ -374,7 +374,7 @@ def test_mem_leaks():
         mem = Memory()
         mem = None; gc.collect()
         print(used_bytes()-init_used)
-        assert used_bytes()-init_used == 0
+        assert used_bytes()-init_used <= 0
 
         # Declare a bunch of stuff
         mem = Memory()
@@ -382,7 +382,7 @@ def test_mem_leaks():
             tf = TextField()
             mem.declare(tf, str(i))
         tf, mem = None, None; gc.collect()
-        assert used_bytes()-init_used == 0
+        assert used_bytes()-init_used <= 0
 
         # Declare More than one kind of stuff
         mem = Memory()
@@ -392,7 +392,7 @@ def test_mem_leaks():
             mem.declare(tf, str(i))
             mem.declare(b, "B"+str(i))
         tf, mem, b = None, None, None; gc.collect()
-        assert used_bytes()-init_used == 0
+        assert used_bytes()-init_used <= 0
 
         # Declare More than one kind of stuff and retract some
         mem = Memory()
@@ -406,7 +406,7 @@ def test_mem_leaks():
             mem.retract("B"+str(i))
         tf, mem, b = None, None, None; gc.collect()
         # print(used_bytes()-init_used)
-        assert used_bytes()-init_used == 0
+        assert used_bytes()-init_used <= 0
 
 
 
@@ -519,10 +519,10 @@ def test_b_get_facts_10000(benchmark):
 
 if __name__ == "__main__":
     import faulthandler; faulthandler.enable()
-    test_retroactive_register()
+    # test_retroactive_register()
     # test_declare_retract_tuple_fact()
     # test_declare_overloading()
-    # test_modify()
+    test_modify()
     # test_declare_retract()
     # test_retract_keyerror()
     # test_subscriber()

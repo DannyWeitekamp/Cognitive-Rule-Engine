@@ -134,6 +134,11 @@ def encode_idrec(t_id, f_id, a_id):
     return (t_id << 48) | (f_id << 8) | a_id
 
 meminfo_type = types.MemInfoPointer(types.voidptr)
+@lower_cast(meminfo_type, i8)
+def cast_meminfo_to_ptr(context, builder, fromty, toty, val):
+    return builder.ptrtoint(val, cgutils.intp_t)
+
+
 
 @intrinsic
 def lower_setattr(typingctx, inst_type, attr_type, val_type):
@@ -278,8 +283,6 @@ def _cast_list(typingctx, cast_type_ref, frmty):
 
 
     
-    
-
 
 
 
@@ -300,7 +303,10 @@ def _struct_from_ptr(typingctx, struct_type, raw_ptr):
         _, raw_ptr = args
         _, raw_ptr_ty = sig.args
 
-        meminfo = builder.inttoptr(raw_ptr, cgutils.voidptr_t)
+        if(not isinstance(raw_ptr_ty, types.MemInfoPointer)):
+            meminfo = builder.inttoptr(raw_ptr, cgutils.voidptr_t)
+        else:
+            meminfo = raw_ptr
 
         st = cgutils.create_struct_proxy(inst_type)(context, builder)
         st.meminfo = meminfo

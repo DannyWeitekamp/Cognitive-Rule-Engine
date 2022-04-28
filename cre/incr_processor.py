@@ -23,7 +23,7 @@ incr_processor_fields = {
     "change_queue_head" : i8,
 }
 
-IncrProcessor, IncrProcessorType, IncrProcessorTypeTemplate = define_structref("IncrProcessor", incr_processor_fields, define_constructor=True, return_template=True) 
+IncrProcessor, IncrProcessorType, IncrProcessorTypeTemplate = define_structref("IncrProcessor", incr_processor_fields, define_constructor=True, return_type_class=True) 
 IncrProcessorTypeTemplate.__str__ = lambda x : "cre.IncrProcessor"    
 
 

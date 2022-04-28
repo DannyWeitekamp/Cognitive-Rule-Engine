@@ -134,6 +134,7 @@ def define_tuple_fact(member_types, context=None, return_proxy=False, return_typ
     TF_hash_code = unique_hash(["TupleFact",member_types])
     if(not source_in_cache("TupleFact",TF_hash_code)):
         TF_FACT_NUM = add_to_fact_registry("TupleFact", TF_hash_code)
+        print(member_types)
         source = gen_tuple_fact_source(member_types, TF_FACT_NUM, specialization_name)
         source_to_cache("TupleFact", TF_hash_code, source)
     tf_type = import_from_cached("TupleFact", TF_hash_code, ["SpecializedTF"])["SpecializedTF"]
@@ -331,6 +332,7 @@ class TupleFactProxy(FactProxy):
         if(len(args) == 0 or isinstance(args[0],types.Type)):
             return define_tuple_fact(args)
         else:
+            print(args)
             ctor = getattr(cls,"_ctor",define_tuple_fact(tuple(typeof(x) for x in args))._ctor)[0]
             return ctor(*args)
 

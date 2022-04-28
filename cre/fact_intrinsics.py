@@ -45,6 +45,7 @@ def define_boxing(struct_type, obj_class):
         raise ValueError(f"cannot register {types.StructRef}")
 
     obj_ctor = obj_class._numba_box_
+    struct_type._proxy_class = obj_class
 
     @box(struct_type)
     def box_struct_ref(typ, val, c):

@@ -49,7 +49,7 @@ context_data_fields = [
     ("child_t_ids", ListType(i8[::1]))
 ]
 
-CREContextData, CREContextDataType, CREContextDataTypeClass  = define_structref("CREContextData",context_data_fields, define_constructor=False, return_template=True)
+CREContextData, CREContextDataType, CREContextDataTypeClass  = define_structref("CREContextData",context_data_fields, define_constructor=False, return_type_class=True)
 
 # if(not source_in_cache("CREContextData",'CREContextData')):
 #     source = gen_struct_code("CREContextData",context_data_fields)
@@ -96,18 +96,22 @@ def grow_fact_num_to_t_id(cd, new_size=-1):
     return new_fact_num_to_t_id
 
 @njit(cache=True)
-def assign_name_num_to_t_id(cd, name, fact_num, inh_fact_num=-1):
+def assign_name_to_t_id(cd,name,t_id):
+    cd.fact_to_t_id[name] = t_id 
+
+@njit(cache=True)
+def assign_fact_num_to_t_id(cd, fact_num, inh_fact_num=-1):
     # Assign the new t_id to the given name and fact_num
     if(fact_num >= len(cd.fact_num_to_t_id)):
         cd.fact_num_to_t_id = grow_fact_num_to_t_id(cd, fact_num*2)
 
     # If a t_id was already assigned then return that
     if(cd.fact_num_to_t_id[fact_num] != 0):
-        return cd.fact_num_to_t_id[fact_num]
-
-    t_id = cd.get_next_t_id()
-    cd.fact_num_to_t_id[fact_num] = t_id 
-    cd.fact_to_t_id[name] = t_id 
+        t_id = cd.fact_num_to_t_id[fact_num]
+    else:
+        t_id = cd.get_next_t_id()
+        cd.fact_num_to_t_id[fact_num] = t_id 
+        
 
     # Ensure that parent_t_ids and child_t_ids are big enough
     for i in range(len(cd.parent_t_ids),t_id+1):
@@ -117,6 +121,7 @@ def assign_name_num_to_t_id(cd, name, fact_num, inh_fact_num=-1):
         cd.child_t_ids.append(np.zeros((0,),dtype=np.int64))
 
     # Use inh_fact_num to fill in the parents 
+    # did_parent_update = False
     if(inh_fact_num != -1):
         inh_t_id = cd.fact_num_to_t_id[inh_fact_num]
         old_arr = cd.parent_t_ids[inh_t_id]
@@ -124,15 +129,18 @@ def assign_name_num_to_t_id(cd, name, fact_num, inh_fact_num=-1):
         new_arr[:len(old_arr)] = old_arr
         new_arr[-1] = inh_t_id
         cd.parent_t_ids[t_id] = new_arr
+        # did_parent_update = True
     
 
     # Use the updated parents to update child relations (facts count as their own child) 
-    for p_t_id in cd.parent_t_ids[t_id]:
-        old_arr = cd.child_t_ids[p_t_id]
-        new_arr = np.empty((len(old_arr)+1,),dtype=np.int64)
-        new_arr[:len(old_arr)] = old_arr
-        new_arr[-1] = t_id
-        cd.child_t_ids[p_t_id] = new_arr
+    if(inh_fact_num != -1):
+        for p_t_id in cd.parent_t_ids[t_id]:
+            old_arr = cd.child_t_ids[p_t_id]
+            new_arr = np.empty((len(old_arr)+1,),dtype=np.int64)
+            new_arr[:len(old_arr)] = old_arr
+            new_arr[-1] = t_id
+            cd.child_t_ids[p_t_id] = new_arr
+    # Always treat as own child
     cd.child_t_ids[t_id] = np.array((t_id,),dtype=np.int64)
     return t_id
 
@@ -144,6 +152,10 @@ def get_next_t_id(self):
         self.next_t_id += 1
         return t_id
     return impl
+
+@njit(cache=True)
+def clear_unhandled_retro_register(self):
+    self.has_unhandled_retro_register = False
 
 class CREContext(object):
     _contexts = {}
@@ -237,8 +249,7 @@ class CREContext(object):
             for fact_num, t_id in enumerate(cd.fact_num_to_t_id):
                 if(t_id >= len(self.t_id_to_type) or self.t_id_to_type[t_id] is None):
                     self._retroactive_register(fact_num)
-
-
+            clear_unhandled_retro_register(cd)
 
     @property
     def registered_types(self):
@@ -260,7 +271,8 @@ class CREContext(object):
         # print("_register_fact_type", name)
 
         inh_fact_num = inherit_from._fact_num if inherit_from is not None else -1
-        t_id = assign_name_num_to_t_id(self.context_data, name, fact_type._fact_num, inh_fact_num)
+        t_id = assign_fact_num_to_t_id(self.context_data, fact_type._fact_num, inh_fact_num)
+        assign_name_to_t_id(self.context_data,name,t_id)
 
         # Fill in the python facing 'type_registry' and 't_id_to_type'
         self.type_registry[name] = fact_type
@@ -292,13 +304,13 @@ class CREContext(object):
         self.children_of[fact_type] = self.children_of[name]
 
         
-    def get_fact_type(self, name:str = None, fact_num:int = None,
+    def get_type(self, name:str = None, fact_num:int = None,
                  t_id:int = None, retro_register:bool = True):
         '''Retrieves the type associated with a user defined fact given a
             name, fact_num, or t_id. If retro_register True then the
             context is allowed to retroactively register a type by it's 
             fact_num. '''
-
+        self._ensure_retro_registers()
         # If got a name then check the registry for the name 
         if(name is not None):
             if(name in self.type_registry):
@@ -325,15 +337,14 @@ class CREContext(object):
 
 
     def _retroactive_register(self, fact_num):
-        print("RETRO")
         from cre.fact import fact_type_from_fact_num
         ft = fact_type = fact_type_from_fact_num(fact_num)
         types = []
         while(ft is not None):
-            print(ft)
             types.append(ft)
             ft = getattr(ft,"parent_type",None)
         for ft in reversed(types):
+            print("<<",ft)
             self._register_fact_type(ft._fact_name, ft, getattr(ft,'parent_type', None))
 
     def get_t_id(self, name:str=None, fact_num:int=None,
@@ -377,7 +388,7 @@ class CREContext(object):
 
         # Resolve fact_type if one wasn't given.
         if(fact_type is None): 
-            fact_type = self.get_fact_type(name=name,t_id=t_id)
+            fact_type = self.get_type(name=name,t_id=t_id)
         if(fact_type is not None): 
             return fact_type._fact_num
         

@@ -1,13 +1,26 @@
 from numba import i8, u8, u2, u1, types, njit, generated_jit, literal_unroll
 from numba.types import FunctionType, unicode_type, Tuple
 from numba.extending import  overload, lower_getattr, overload_method
-from cre.utils import _obj_cast_codegen, ptr_t, _raw_ptr_from_struct, _raw_ptr_from_struct_incref, CastFriendlyMixin, decode_idrec, _func_from_address, _cast_structref, _get_member_offset, _struct_get_data_ptr, _sizeof_type, _load_ptr
+from cre.utils import _obj_cast_codegen, ptr_t, _raw_ptr_from_struct, _raw_ptr_from_struct_incref, CastFriendlyMixin, decode_idrec, _func_from_address, _cast_structref, _get_member_offset, _struct_get_data_ptr, _sizeof_type, _load_ptr, _struct_from_ptr
 from cre.structref import define_structref
 from numba.core.datamodel import default_manager, models
 from numba.core import cgutils
-from numba.experimental.structref import define_attributes, StructRefProxy, new, define_boxing, _Utils
+from numba.experimental.structref import define_attributes, StructRefProxy, new, _Utils, define_boxing
 from numba.experimental import structref
-from numba.extending import intrinsic, lower_cast
+from numba.core import types, imputils, cgutils
+from numba.core.datamodel import default_manager, models
+from numba.core.extending import (
+    intrinsic,
+    lower_cast,
+    # infer_getattr,
+    # lower_getattr_generic,
+    # lower_setattr_generic,
+    box,
+    unbox,
+    NativeValue,
+    intrinsic,
+    overload,
+)
 
 import operator
 
@@ -112,8 +125,22 @@ class CREObjTypeTemplate(CastFriendlyMixin, types.StructRef):
     #     return f"{str(self)}(fields=({', '.join([f'{k}={str(v)}' for k,v in self._fields])}))" 
 
 
-CREObjType = CREObjTypeTemplate(cre_obj_fields) 
+# @lower_cast(types.MemInfoPointer, types.Integer)
+# def cast_meminfo_to_ptr(context, builder, fromty, toty, val):
+#     return builder.ptrtoint(val, cgutils.intp_t)
 
+
+CREObjType = CREObjTypeTemplate(cre_obj_fields) 
+default_manager.register(CREObjTypeTemplate, CREObjModel)
+define_attributes(CREObjType)
+
+
+meminfo_type = types.MemInfoPointer(types.voidptr)
+@njit(u2(meminfo_type),cache=True)
+def get_t_id(ptr):
+    cre_obj =  _struct_from_ptr(CREObjType,ptr)
+    t_id, _, _ = decode_idrec(cre_obj.idrec)
+    return t_id
 # @njit(cache=True)
 # def cre_obj_ctor(idrec):
 #     st = new(CREObjType)
@@ -121,7 +148,18 @@ CREObjType = CREObjTypeTemplate(cre_obj_fields)
 #     return st
 
 
+
 class CREObjProxy(StructRefProxy):
+    @classmethod
+    def _numba_box_(cls, ty, mi):
+        instance = ty.__new__(cls)
+        instance._type = ty
+        instance._meminfo = mi
+
+        instance.recover_type_safe()
+        
+        return instance
+
     # __numba_ctor = cre_obj_ctor
     # def __new__(cls, idrec):
     #     return cre_obj_ctor(idrec)
@@ -140,12 +178,96 @@ class CREObjProxy(StructRefProxy):
     def asa(self, typ):
         return asa(self,typ)
 
+    def recover_type(self,context=None):
+        ''' Try to recover the true type that the object was instantiated as'''            
+        from cre.context import cre_context
+        context = cre_context(context)
+        t_id = get_t_id(self._meminfo)
+        # The type associated with the object's t_id in 'context'
+        t_id_type = context.get_type(t_id=t_id)
+        if(self.__class__ is not t_id_type and hasattr(t_id_type,"_proxy_class")):
+            self._type = t_id_type
+            self.__class__ = t_id_type._proxy_class
+        
+        return self
 
-default_manager.register(CREObjTypeTemplate, CREObjModel)
+    def recover_type_safe(self,context=None):
+        try:
+            return self.recover_type(context)
+        except (ValueError, AttributeError):
+            return self
+
+
+define_boxing(CREObjTypeTemplate, CREObjProxy)
+
+# @njit(u2(i8),cache=False)
+
+
+
+
+
+# def define_boxing(struct_type, obj_class):
+#     '''
+#     Variation on define_boxing for CREObjects returns the t_id at boxing.
+#     '''
+#     obj_ctor = obj_class._numba_box_
+
+#     @box(struct_type)
+#     def box_struct_ref(typ, val, c):
+#         """
+#         Convert a raw pointer to a Python int.
+#         """
+#         utils = _Utils(c.context, c.builder, typ)
+#         struct_ref = utils.get_struct_ref(val)
+#         meminfo = struct_ref.meminfo
+
+#         # ptr = c.builder.ptrtoint(meminfo, cgutils.intp_t)
+
+#         # print(ptr)
+
+#         def get_t_id(cre_obj):
+#             # cre_obj =  _struct_from_ptr(CREObjType,ptr)
+#             t_id, _, _ = decode_idrec(cre_obj.idrec)
+#             return t_id
+#         t_id = c.context.compile_internal(c.builder, get_t_id, u2(CREObjType,), (val,))
+
+#         mip_type = types.MemInfoPointer(types.voidptr)
+#         boxed_meminfo = c.box(mip_type, meminfo)
+#         boxed_t_id = c.box(i8, t_id)
+#         # t_id = boxed_meminfo
+
+#         ctor_pyfunc = c.pyapi.unserialize(c.pyapi.serialize_object(obj_ctor))
+#         ty_pyobj = c.pyapi.unserialize(c.pyapi.serialize_object(typ))
+
+#         res = c.pyapi.call_function_objargs(
+#             ctor_pyfunc, [ty_pyobj, boxed_meminfo, boxed_t_id],
+#         )
+#         c.pyapi.decref(ctor_pyfunc)
+#         c.pyapi.decref(ty_pyobj)
+#         c.pyapi.decref(boxed_meminfo)
+#         return res
+
+#     @unbox(struct_type)
+#     def unbox_struct_ref(typ, obj, c):
+#         mi_obj = c.pyapi.object_getattr_string(obj, "_meminfo")
+
+#         mip_type = types.MemInfoPointer(types.voidptr)
+
+#         mi = c.unbox(mip_type, mi_obj).value
+
+#         utils = _Utils(c.context, c.builder, typ)
+#         struct_ref = utils.new_struct_ref(mi)
+#         out = struct_ref._getvalue()
+
+#         c.pyapi.decref(mi_obj)
+#         return NativeValue(out)
+
+
+
+
+
 
 # overload(CREObjProxy)(cre_obj_ctor)
-define_attributes(CREObjType)
-define_boxing(CREObjTypeTemplate, CREObjProxy)
 
 
 # def _fact_eq(a,b):

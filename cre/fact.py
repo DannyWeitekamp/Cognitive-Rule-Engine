@@ -30,7 +30,7 @@ from cre.structref import gen_structref_code, define_structref
 from cre.utils import (_struct_from_ptr, _cast_structref, struct_get_attr_offset, _obj_cast_codegen,
                        _ptr_from_struct_codegen, _raw_ptr_from_struct, CastFriendlyMixin, _obj_cast_codegen,
                         PrintElapse, _struct_get_data_ptr)
-from cre.cre_object import CREObjTypeTemplate, cre_obj_field_dict, CREObjModel, CREObjType, member_info_type
+from cre.cre_object import CREObjTypeTemplate, cre_obj_field_dict, CREObjModel, CREObjType, member_info_type, CREObjProxy
 
 from numba.core.typeconv import Conversion
 import operator
@@ -108,10 +108,6 @@ class UntypedFact(Fact):
     specializations = {}
     def __init__(self, fields):
         super(UntypedFact, self).__init__(fields)
-        # Not sure why but if this property isn't called
-        #   then it might be undefined 
-        self.name
-        print("INIT UntypedFact", self.name)
     def __call__(self, *args, **kwargs):
         # print("CALL", tuple(kwargs.keys()))
         if(len(kwargs) == 0):
@@ -266,6 +262,11 @@ def _merge_spec_inheritance(spec : dict, context):
     if("inherit_from" not in spec): return spec, None
     inherit_from = spec["inherit_from"]
 
+    unified_attrs = []
+    if(isinstance(inherit_from, dict)):
+        unified_attrs = inherit_from.get('unified_attrs')
+        inherit_from = inherit_from['type']
+
     if(isinstance(inherit_from, str)):
         temp = inherit_from
         inherit_from = context.type_registry[inherit_from]
@@ -285,6 +286,7 @@ def _merge_spec_inheritance(spec : dict, context):
 
     _intersect = set(inherit_spec.keys()).intersection(set(spec.keys()))
     for k in _intersect:
+        if(k in unified_attrs): continue
         if(spec[k]['type'] != inherit_spec[k]['type']): 
             raise TypeError(f"Attribute type {k}:{spec[k]['type']} does not" +
                             f"match inherited attribute {k}:{inherit_spec[k]['type']}")
@@ -312,11 +314,11 @@ def _standardize_spec(spec : dict, context, name=''):
 
 
 ###### Fact Definition #######
-class FactProxy:
-    '''Essentially the same as numba.experimental.structref.StructRefProxy 0.51.2
-        except that __new__ is not defined to statically define the constructor.
-    '''
-    __slots__ = ('_fact_type', '_meminfo')
+class FactProxy(CREObjProxy):
+    # '''Essentially the same as numba.experimental.structref.StructRefProxy 0.51.2
+    #     except that __new__ is not defined to statically define the constructor.
+    # '''
+    # __slots__ = ('_fact_type', '_meminfo')
 
     @classmethod
     def _numba_box_(cls, mi):
@@ -335,10 +337,15 @@ class FactProxy:
         instance :
              a FactProxy instance.
         """
-        instance = super().__new__(cls)
+        inst = super(FactProxy,cls)._numba_box_(BaseFact,mi)
+        # print("<<", inst._type)
+        # inst._fact_type = inst._type
+        # inst = super().__new__(cls)
         # instance._type = BaseFact
-        instance._meminfo = mi
-        return instance
+        # inst._meminfo = mi
+        # inst = inst.recover_type_safe()
+        # inst.recover_type_safe()
+        return inst
 
     @property
     def _numba_type_(self):
@@ -722,9 +729,12 @@ field_list = cloudpickle.loads({cloudpickle.dumps(all_fields)})
 
 
 {(f"""{typ}.parent_type = parent_type
-@lower_cast({typ}, parent_type)
-def upcast(context, builder, fromty, toty, val):
-    return _obj_cast_codegen(context, builder, val, fromty, toty,incref=False)                        
+pt = parent_type
+while(pt is not None):
+    @lower_cast({typ}, pt)
+    def upcast(context, builder, fromty, toty, val):
+        return _obj_cast_codegen(context, builder, val, fromty, toty,incref=False)                        
+    pt = getattr(pt, 'parent_type', None)
 """) if inherit_from is not None else ""
 }
 

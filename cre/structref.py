@@ -35,7 +35,7 @@ def gen_structref_code(typ,fields,
 f'''
 from numba.core import types
 from numba import njit
-from cre.structref import CastFriendlyStructref
+from cre.structref import CastFriendlyStructref, define_boxing
 {extra_imports}
 {getter_jits}
 {register_decorator}
@@ -51,7 +51,7 @@ class {typ}(structref.StructRefProxy):
 {getters}
 
 {f'structref.define_constructor({typ}, {typ}TypeTemplate, [{attr_list}])' if(define_constructor) else ''}
-{f'structref.define_boxing({typ}TypeTemplate, {typ})' if(define_boxing) else ''}
+{f'define_boxing({typ}TypeTemplate, {typ})' if(define_boxing) else ''}
 
 
 '''
@@ -79,17 +79,21 @@ def define_structref_template(name, fields, define_constructor=True,define_boxin
     ctor._hash_code = hash_code
     return ctor,template
 
-def define_structref(name, fields, define_constructor=True, define_boxing=True, return_template=False):
+def define_structref(name, fields, define_constructor=True, define_boxing=True, return_type_class=False):
     if(isinstance(fields,dict)): fields = [(k,v) for k,v in fields.items()]
     ctor, template = define_structref_template(name,fields, define_constructor=define_constructor,define_boxing=define_boxing)
     struct_type = template(fields=fields)
     struct_type._hash_code = ctor._hash_code
-    if(return_template):
+    if(return_type_class):
         return ctor, struct_type, template
     else:
         return ctor, struct_type
 
 
+def define_boxing(struct_type, obj_class):
+    '''Same as in numba.experimental.structref but give the type a reference to the proxy'''
+    struct_type._proxy_class = obj_class
+    structref.define_boxing(struct_type, obj_class)
 
 class CastFriendlyStructref(types.StructRef):
     def can_convert_to(self, typingctx, other):

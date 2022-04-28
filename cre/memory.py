@@ -8,7 +8,7 @@ from numba.typed import List, Dict
 from numba.core.types import DictType, ListType, unicode_type, float64, NamedTuple, NamedUniTuple, UniTuple, Tuple, Array, optional
 from numba.cpython.unicode import  _set_code_point
 from numba.experimental import structref
-from numba.experimental.structref import new, define_boxing
+from numba.experimental.structref import new
 from numba.extending import overload_method, intrinsic, overload, lower_cast, lower_builtin, SentryLiteralArgs
 from numba.core.errors import RequireLiteralValue
 from cre.core import TYPE_ALIASES, JITSTRUCTS, py_type_map, numba_type_map, numpy_type_map
@@ -31,7 +31,7 @@ from cre.transform import infer_type
 
 
 from cre.subscriber import BaseSubscriberType
-from cre.structref import define_structref
+from cre.structref import define_structref, define_boxing
 from cre.fact import Fact, BaseFact,BaseFact, cast_fact
 from cre.tuple_fact import TF, TupleFact
 from cre.fact_intrinsics import fact_lower_setattr
@@ -186,7 +186,7 @@ def decref_fact(x):
     return _decref_structref(x)
 
 
-#### Knowledge Base Definition ####
+#### Memory Definition ####
 
 class Memory(structref.StructRefProxy):
     ''' '''
@@ -218,8 +218,10 @@ class Memory(structref.StructRefProxy):
         return mem_retract(self,identifier)
 
     def get_facts(self,typ=None, no_subtypes=False):
+        self.context._ensure_retro_registers()
         if(isinstance(typ,str)):
             typ = self.context.type_registry[typ]
+
         # name = str(typ)
         # t_id = self.context.context_data.fact_num_to_t_id[typ._fact_num]
         # t_ids = np.empty((1,), dtype=np.uint16)
@@ -227,6 +229,7 @@ class Memory(structref.StructRefProxy):
         return get_facts(self, typ, no_subtypes)
 
     def iter_facts(self,typ):
+        self.context._ensure_retro_registers()
         if(isinstance(typ,str)):
             typ = self.context.type_registry[typ]
         # name = str(typ)
@@ -251,24 +254,33 @@ class Memory(structref.StructRefProxy):
     def backtrack_flag(self):
         return get_backtrack_flag(self)
 
-    def __str__(self,ind="    "):
+    def _repr_helper(self,rfunc,ind="    ",sep="\n",pad='\n'):
         strs = []
+        for typ in self.context.registered_types:
+            if(isinstance(typ,Fact)):
+                for fact in self.get_facts(typ, no_subtypes=True):
+                    strs.append(str(fact))
+        nl = "\n"
+        return f'''Memory(facts=({pad}{ind}{f"{sep}{ind}".join(strs)}{pad})'''
+
+    def __str__(self,**kwargs):
         from cre.utils import PrintElapse
         with PrintElapse("__STR__"):
-            for typ in self.context.registered_types:
-                # print("<<", typ)
-                if(isinstance(typ,Fact)):
-                    for fact in self.get_facts(typ, no_subtypes=True):
-                        strs.append(str(fact))
-            nl = "\n"
-        return f'''Memory(facts=({nl}{ind}{f"{nl}{ind}".join(strs)}{nl})'''
+            return self._repr_helper(str,**kwargs)
+
+
+    def __repr__(self,**kwargs):
+        from cre.utils import PrintElapse
+        with PrintElapse("__REPR__"):
+            return self._repr_helper(repr,**kwargs)
     
 
     def __del__(self):        
         # NOTE: This definitely has bugs
         try:
             # pass
-            mem_data_dtor(self.mem_data)
+            if(hasattr(self,'mem_data')):
+                mem_data_dtor(self.mem_data)
         except Exception as e:
             # If the process is ending then global variables can be sporatically None
             #   thus skip any TypeError of this sort.
@@ -352,7 +364,6 @@ def facts_for_t_id(mem_data,t_id):
     L = len(mem_data.facts)
     if(t_id >= L):
         expand_mem_data_types(mem_data, (t_id+1)-L)
-    # print("L",L,t_id,(t_id+1)-L,len(mem_data.facts))
     return _struct_from_ptr(VectorType, mem_data.facts[t_id])
 
 @njit(cache=True)
@@ -507,6 +518,8 @@ def declare_fact(mem, fact):
     # Incref so that the fact is not freed if this is the only reference
     fact_ptr = i8(_raw_ptr_from_struct_incref(fact)) #.4ms / 10000
     t_id = resolve_t_id(mem, fact.fact_num)  #.1ms / 10000
+
+
     facts = facts_for_t_id(mem.mem_data, t_id) #negligible
 
     # Get the next empty f_id. Retracted f_ids are recycled for cache locality.
@@ -949,13 +962,10 @@ def get_facts(mem, fact_type=None, no_subtypes=False):
     # print("<<", it_type)
     def impl(mem, fact_type=None, no_subtypes=False):
         cd = mem.context_data
-        # print(cd.fact_num_to_t_id, fact_num)
         if(fact_type is None):
-            #### SHERE
             t_ids = np.arange(mem.mem_data.facts.head, dtype=np.int64)
         else:
             t_id = cd.fact_num_to_t_id[fact_num]
-            # print(">>", t_id)
             if(no_subtypes):
                 t_ids = np.array((t_id,),dtype=np.int64)
             else:                
@@ -967,15 +977,17 @@ def get_facts(mem, fact_type=None, no_subtypes=False):
         while(True):
             if(curr_t_id_ind >= len(t_ids)): break
             t_id = t_ids[curr_t_id_ind]
-            # print("BEF", t_id)
+
+            if(t_id >= len(mem.mem_data.facts)): break
             facts_ptr = mem.mem_data.facts[i8(t_id)]
-            # print("facts_ptr", facts_ptr)
             if(facts_ptr != 0):
+                
                 facts = _struct_from_ptr(VectorType, facts_ptr)
                 if(curr_ind < len(facts)):
                     ptr = facts[curr_ind]
                     curr_ind +=1
-                    if(ptr != 0): out.append(_struct_from_ptr(_fact_type, ptr))
+                    if(ptr != 0): 
+                        out.append(_struct_from_ptr(_fact_type, ptr))
                 else:
                     curr_ind = 0
                     curr_t_id_ind +=1
@@ -983,8 +995,6 @@ def get_facts(mem, fact_type=None, no_subtypes=False):
                 curr_ind = 0
                 curr_t_id_ind += 1
         return out
-        # _it = generic_fact_iterator_ctor(mem,t_ids)
-        # return _cast_structref(it_type, _it)
     return impl
 
         

@@ -36,6 +36,7 @@ def _expand(self):
     '''
     new_data = np.empty(len(self.data)*2, dtype=np.int64)
     new_data[:len(self.data)] = self.data
+    new_data[len(self.data):-1] = 0
     self.data = new_data
 
 

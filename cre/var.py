@@ -5,12 +5,12 @@ from numba import types, njit, i8, u8, i4, u1, i8, literally, generated_jit
 from numba.typed import List
 from numba.types import ListType, unicode_type, void, Tuple
 from numba.experimental import structref
-from numba.experimental.structref import new, define_boxing, define_attributes, _Utils
+from numba.experimental.structref import new, define_attributes, _Utils
 from numba.extending import lower_cast, overload_method, intrinsic, overload_attribute, intrinsic, lower_getattr_generic, overload, infer_getattr, lower_setattr_generic
 from numba.core.typing.templates import AttributeTemplate
 from cre.caching import gen_import_str, unique_hash,import_from_cached, source_to_cache, source_in_cache
 from cre.context import cre_context
-from cre.structref import define_structref, define_structref_template, CastFriendlyStructref
+from cre.structref import define_structref, define_boxing, define_structref_template, CastFriendlyStructref
 from cre.memory import MemoryType, Memory, facts_for_t_id, fact_at_f_id
 from cre.fact import define_fact, BaseFact, cast_fact, DeferredFactRefType, Fact, _standardize_type
 from cre.utils import PrintElapse, ptr_t, _struct_from_meminfo, _meminfo_from_struct, _cast_structref, cast_structref, decode_idrec, lower_getattr, _struct_from_ptr,  lower_setattr, lower_getattr, _raw_ptr_from_struct, _decref_ptr, _incref_ptr, _incref_structref, _ptr_from_struct_incref

@@ -1,7 +1,7 @@
 import numpy as np
 from cre.fact import (_fact_from_spec, _standardize_spec, _merge_spec_inheritance, 
      define_fact, cast_fact, _cast_structref, BaseFact, DeferredFactRefType, isa,
-      uint_to_inheritance_bytes, get_inheritance_bytes_len_ptr)
+      uint_to_inheritance_bytes, get_inheritance_bytes_len_ptr, get_inheritance_fact_nums)
 from cre.context import cre_context
 from cre.memory import Memory
 from cre.cre_object import CREObjType
@@ -98,7 +98,7 @@ def test_inheritence_bytes():
     assert np.array_equal(uint_to_inheritance_bytes(0xFF00+0xFF),[255,255])
     assert np.array_equal(uint_to_inheritance_bytes(0xFF00+0xFF+1),[1,0,0])
 
-    
+
 
 def test_inheritence():
     with cre_context("test_inheritence") as context:
@@ -148,6 +148,12 @@ def test_inheritence():
         print(l,p)
         l,p = get_inheritance_bytes_len_ptr(b3)
         print(l,p)
+
+
+        fact_nums1 = get_inheritance_fact_nums(b1)
+        fact_nums2 = get_inheritance_fact_nums(b2)
+        fact_nums3 = get_inheritance_fact_nums(b3)
+        print(fact_nums1, fact_nums2, fact_nums3)
 
         @njit(cache=True)
         def check_isa(b1,b2,b3):

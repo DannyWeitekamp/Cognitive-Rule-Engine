@@ -3,7 +3,7 @@ from cre.context import cre_context
 from cre.memory import Memory 
 from cre.flattener import Flattener, get_semantic_visibile_fact_attrs, flattener_update
 from cre.fact import define_fact
-
+import pytest_benchmark
 
 
 def test_flatten():
@@ -26,19 +26,26 @@ def test_flatten():
         mem.declare(BOOP2("D", 4, 14))
         mem.declare(BOOP3("E", 5, 15, 105))
         mem.declare(BOOP3("F", 6, 16, 106))
+        print(mem)
 
         fl = Flattener((BOOP1, BOOP2, BOOP3), mem)
         out_mem = fl.apply()
         out_mem = fl.apply()
 
         from cre.gval import gval
-        print(set([x.val for x in out_mem.get_facts(gval)]))
+        values = set([x.val for x in out_mem.get_facts(gval)])
+        print(values)
+        
+
+
         
         print(fl)
         print("-------")
         print(out_mem)
         print(out_mem)
         print(repr(out_mem))
+
+        assert values == {"A", "B", "C", "D", "E" ,"F", 13., 14., 15., 16., 105.,106.}
 
 # with cre_context("flat") as context:
 
@@ -63,9 +70,9 @@ def setup_flatten():
         fl.update()
         _b_dec_10000(mem)
         
-    return (fl,), {}
+    return (fl,mem), {}
 
-def do_flatten(fl):
+def do_flatten(fl,mem):
     fl.update()
     return fl.out_mem
 
@@ -74,13 +81,13 @@ def test_b_flatten(benchmark):
 
 if(__name__ == "__main__"):
     test_flatten()
-    from cre.utils import PrintElapse
-    fl = setup_flatten()[0][0]
-    with PrintElapse("ABC"):
-        fl.update()
-    fl = setup_flatten()[0][0]
-    with PrintElapse("ABC"):
-        fl.update()
+    # from cre.utils import PrintElapse
+    # fl = setup_flatten()[0][0]
+    # with PrintElapse("ABC"):
+    #     fl.update()
+    # fl = setup_flatten()[0][0]
+    # with PrintElapse("ABC"):
+    #     fl.update()
 
 
 # mem.declare(BOOP1("zA", 1))

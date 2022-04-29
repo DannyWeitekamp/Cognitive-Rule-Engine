@@ -19,9 +19,6 @@ from cre.vector import VectorType
 from cre.op import GenericOpType, op_str, op_repr, Op, op_copy
 from cre.cre_object import CREObjType, CREObjTypeTemplate
 from cre.core import T_ID_CONDITIONS, T_ID_LITERAL, register_global_default
-# from cre.predicate_node import BasePredicateNode,BasePredicateNodeType, get_alpha_predicate_node_definition, \
- # get_beta_predicate_node_definition, deref_attrs, define_alpha_predicate_node, define_beta_predicate_node, AlphaPredicateNode, BetaPredicateNode, \
- # LiteralLinkDataType, generate_link_data
 from numba.core import imputils, cgutils
 from numba.core.datamodel import default_manager, models
 from cre.var import *

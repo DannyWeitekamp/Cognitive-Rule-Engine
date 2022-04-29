@@ -78,14 +78,10 @@ class Fact(CREObjTypeTemplate):
             otherwise use it's ctor to return a new instance'''
         if len(args) > 0 and isinstance(args[0], types.Type):
             return signature(self, *args)
-        # print("!!", self._ctor.__module__)
-        # print(args,kwargs)
-        # print(self._ctor)
         return self._ctor[0](*args, **kwargs)
 
 @generated_jit(cache=True)
 def call_untyped_fact(self, **kwargs):
-    # print("call_untyped_fact", kwargs)
 
     typs = tuple(kwargs.values())
     return_sig = False
@@ -109,33 +105,24 @@ class UntypedFact(Fact):
     def __init__(self, fields):
         super(UntypedFact, self).__init__(fields)
     def __call__(self, *args, **kwargs):
-        # print("CALL", tuple(kwargs.keys()))
         if(len(kwargs) == 0):
-            # print("SIG",self, args, kwargs)
             return signature(self,*args)
         else:
-            # print("kwargs:", kwargs)
-            # print()
 
             if(isinstance(list(kwargs.values())[0],types.Type)):
-                # print("CALL",self, args, kwargs)
                 fact_type = self.specialize(**kwargs)
                 return fact_type#call_untyped_fact(self, **kwargs)
             else:
                 fact_type = self.specialize(**{k:typeof(v) for k,v in kwargs.items()})
                 ctor = fact_type._ctor[0]
-                # print("CTOR",self, args, kwargs)
                 return ctor(**kwargs)
 
 
     def specialize(self, **kwargs):
         typs = tuple(kwargs.values())
-        # print("typs", typs)
         self_field_dict = {k:v for (k,v) in zip(kwargs.keys(), typs)}
-        # print("<<", self_field_dict)
         spec = {**self_field_dict, "inherit_from" : self}
         fact_type = define_fact(self._fact_name, spec)
-        # print("fact_type", fact_type)
         return fact_type
 
 
@@ -705,7 +692,7 @@ from cre.cre_object import member_info_type, set_chr_mbrs
 
 
 attr_offsets = np.array({attr_offsets!r},dtype=np.int16)
-inheritance_bytes = tuple({"list(parent_inh_bytes) + " if inherit_from else ""}list(uint_to_inheritance_bytes({fact_num}))) 
+inheritance_bytes = tuple({"list(parent_inh_bytes) + [u1(0)] + " if inherit_from else ""}list(uint_to_inheritance_bytes({fact_num}))) 
 num_inh_bytes = len(inheritance_bytes)
 
 @_register_fact_structref
@@ -1043,6 +1030,27 @@ def get_inheritance_bytes_len_ptr(st):
              (st.num_chr_mbrs * _sizeof_type(member_info_type))
     num_inh_bytes = _load_ptr(u1, ptr)
     return num_inh_bytes, ptr+1
+
+
+@njit(ListType(i8)(BaseFact), cache=True)
+def get_inheritance_fact_nums(st):
+    nbytes, ptr = get_inheritance_bytes_len_ptr(st)
+    # fact_nums = np.empty(len())
+    fact_nums = List.empty_list(i8)
+    prev_byte = u1(-1)
+    val = i8(0)
+    prev_val = i8(0)
+    for i in range(nbytes):
+        byte = _load_ptr(u1,ptr+i)
+        val = (val << 8) | byte
+        if(byte != 0 and prev_byte == 0):
+            fact_nums.append(prev_val>>8)    
+            val = i8(byte)
+            
+        prev_byte = byte
+        prev_val = val
+    fact_nums.append(val)    
+    return fact_nums
 
 
 

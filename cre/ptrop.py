@@ -14,7 +14,6 @@ from cre.caching import gen_import_str, unique_hash,import_from_cached, source_t
 from cre.context import cre_context
 from cre.structref import define_structref, define_structref_template
 from cre.memory import MemoryType, Memory, facts_for_t_id, fact_at_f_id
-# from cre.fact import define_fact, BaseFact, cast_fact, DeferredFactRefType, Fact
 from cre.utils import (_struct_from_meminfo, _meminfo_from_struct, _cast_structref, cast_structref, decode_idrec, lower_getattr, _struct_from_ptr,  lower_setattr, lower_getattr,
                        _raw_ptr_from_struct, _decref_ptr, _incref_ptr, _incref_structref, _ptr_from_struct_incref, _struct_from_ptr)
 from cre.utils import assign_to_alias_in_parent_frame, as_typed_list, iter_typed_list
@@ -22,8 +21,6 @@ from cre.subscriber import base_subscriber_fields, BaseSubscriber, BaseSubscribe
 from cre.vector import VectorType
 from cre.fact import Fact, gen_fact_import_str, get_offsets_from_member_types
 from cre.var import Var,str_var_ptr_derefs
-# from cre.predicate_node import BasePredicateNode,BasePredicateNodeType, get_alpha_predicate_node_definition, \
-#  get_beta_predicate_node_definition, deref_attrs, define_alpha_predicate_node, define_beta_predicate_node, AlphaPredicateNode, BetaPredicateNode
 from cre.make_source import make_source, gen_def_func, gen_assign, resolve_template, gen_def_class
 from numba.core import imputils, cgutils
 from numba.core.datamodel import default_manager, models, register_default
@@ -36,7 +33,6 @@ from os import getenv
 from cre.utils import deref_type, listtype_sizeof_item
 import inspect, cloudpickle, pickle
 from textwrap import dedent, indent
-# from itertools import combinations
 from collections.abc import Iterable
 from cre.op import Op, OpMeta, UntypedOp, resolve_return_type, new_vars_from_types, op_ctor
 from cre.utils import PrintElapse

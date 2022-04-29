@@ -101,6 +101,7 @@ def assign_name_to_t_id(cd,name,t_id):
 
 @njit(cache=True)
 def assign_fact_num_to_t_id(cd, fact_num, inh_fact_num=-1):
+    # print("assign_fact_num_to_t_id", fact_num)
     # Assign the new t_id to the given name and fact_num
     if(fact_num >= len(cd.fact_num_to_t_id)):
         cd.fact_num_to_t_id = grow_fact_num_to_t_id(cd, fact_num*2)
@@ -129,6 +130,7 @@ def assign_fact_num_to_t_id(cd, fact_num, inh_fact_num=-1):
         new_arr[:len(old_arr)] = old_arr
         new_arr[-1] = inh_t_id
         cd.parent_t_ids[t_id] = new_arr
+        # print("UPD PAR", inh_fact_num, new_arr)
         # did_parent_update = True
     
 
@@ -140,8 +142,10 @@ def assign_fact_num_to_t_id(cd, fact_num, inh_fact_num=-1):
             new_arr[:len(old_arr)] = old_arr
             new_arr[-1] = t_id
             cd.child_t_ids[p_t_id] = new_arr
+
     # Always treat as own child
-    cd.child_t_ids[t_id] = np.array((t_id,),dtype=np.int64)
+    if(len(cd.child_t_ids[t_id])==0):
+        cd.child_t_ids[t_id] = np.array((t_id,),dtype=np.int64)
     return t_id
 
 @generated_jit(cache=True)

@@ -383,9 +383,11 @@ def test_declare_fact():
         assert len(AB_op_comp_binding_pairs) >= 4 * len(A_op_comp_binding_pairs)
 
         for op_comp, binding in A_op_comp_binding_pairs:
+            print("<<", op_comp, binding)
             op = op_comp.flatten()
+
             assert(op(*binding)==36.0)
-            print(op, binding)
+            
 
             # print(op, binding, op(*binding))
 

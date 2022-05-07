@@ -8,6 +8,9 @@ from cre.utils import _load_ptr, _struct_from_ptr, decode_idrec
 
 @Op(shorthand = '({0} == {1})', commutes=True)
 def Equals(a, b):
+    # print("BEF", a, b)
+    # print("##", a,b, a==b)
+    # print("START Equals", a == b, len(a), len(b))
     return a == b
 
 @Op(shorthand = '({0} < {1})')
@@ -74,6 +77,7 @@ def ObjEquals(ptrs):
     '''From two head_ptrs see if the underlying pointers to objects are the same'''
     # objptr0 = _struct_from_ptr(BaseFact,_load_ptr(i8,ptrs[0]))
     # objptr1 = _struct_from_ptr(BaseFact,_load_ptr(i8,ptrs[1]))
+    # print("START ObjEquals")
     objptr0 = _load_ptr(i8,ptrs[0])
     objptr1 = _load_ptr(i8,ptrs[1])
     # print("OJBS", decode_idrec(_struct_from_ptr(BaseFact,objptr0).idrec)[1] if objptr0 else -1,

@@ -5,7 +5,7 @@ from cre.conditions import *
 from cre.memory import Memory
 from cre.context import cre_context
 # from cre.matching import get_ptr_matches,_get_matches
-from cre.utils import _struct_from_ptr
+from cre.utils import _struct_from_ptr, _list_base,_list_base_from_ptr,_load_ptr, _incref_structref, _raw_ptr_from_struct
 from numba.core.runtime.nrt import rtsys
 import gc
 
@@ -240,20 +240,48 @@ def _test_NOT():
         assert match_names(c,mem) == [['2','0']]
 
         #TODO: Make sure NOT() works on betas
+# @njit(cache=True)
+# def get_list_base(lst):
+#     # _incref_structref(lst)
+
+#     base = _list_base(lst)
+#     inst_ptr = _raw_ptr_from_struct(lst)
+#     print("inst:", inst_ptr, "base:", _list_base_from_ptr(inst_ptr), base, lst)
+#     # print("HALLOOOO", _load_ptr(unicode_type,base))
+#     # print()
+#     return len(_load_ptr(unicode_type,base))
 
 def test_list():
     with cre_context("test_list"):
         TList = define_fact("TList",{"name" : "string", "items" : "ListType(string)"})
+        # print(TList.name)
         v1 = Var(TList,"v1")
         v2 = Var(TList,"v2")
 
+        # print("--len(LIST[0])", get_list_base(l1), get_list_base(l2))
+        # print("--len(LIST[0])", get_list_base(l1), get_list_base(l2))
+
+        # print("FACT BASES", a.get_ptr(), b.get_ptr())
         mem = Memory()
-        mem.declare(TList("A", List(["x","a"])))
-        mem.declare(TList("B", List(["x","b"])))
+        mem.declare(TList("A", List(["x","a"])),)
+        mem.declare(TList("B", List(["x","b"] )))
+
+        # print("head_type", v1.items[0].head_type)
+        # print((v1.items[0] == v2.items[0]).call_sig)
+
+        # print("MOOOO", v2.items[0].deref_offsets)
 
         c = (v1 != v2) & (v1.items[0] == v2.items[0])
         names = match_names(c, mem)
         assert set_is_same(names, [['A','B'],['B','A']])
+
+        # Checks that empty matches work fine
+        c = (v1 != v2) & (v1.items[0] != v2.items[0])
+        names = match_names(c, mem)
+        assert set_is_same(names, [])
+
+        
+        # raise ValueError()
 
         c = (v1 != v2) & (v1.items[1] != v2.items[1])
 
@@ -267,13 +295,23 @@ def test_list():
         names = match_names(c, mem)
         assert set_is_same(names, [["A"],["B"],["C"]])
 
+
+        
+
+
+        # print(l1,l2)
+
 def test_multiple_types():
-    with cre_context("test_multiple_types"):
+    with cre_context("test_multiple_types") as c:
         BOOP = define_fact("BOOP",{"name": "string", "B" : "number"})
         TList = define_fact("TList",{"name" : "string", "items" : "ListType(string)"})
 
+        print("THE ACTUAL T_IDS",BOOP.t_id,TList.t_id)
+
         b = Var(BOOP,"b")
         t = Var(TList,"t")
+
+        print(c.context_data.fact_to_t_id["BOOP"], c.context_data.fact_to_t_id["TList"])
 
         mem = Memory()
         mem.declare(BOOP("A", 0))
@@ -514,7 +552,7 @@ def test_b_matching_betas_lit(benchmark):
 
 if(__name__ == "__main__"):
     import faulthandler; faulthandler.enable()
-    test_mem_leaks()
+    # test_mem_leaks()
     # dat = matching_alphas_setup()[0]
     # dat = matching_betas_setup()[0]
 
@@ -543,14 +581,12 @@ if(__name__ == "__main__"):
 
     # test_ref_matching()
     # test_multiple_deref()
-    # test_applying()
     # test_matching()
     # test_matching_unconditioned()
     # test_ref_matching()
-    # test_multiple_deref()
     # test_list()
-    # test_list()
-    test_multiple_types()
+    test_list()
+    # test_multiple_types()
     # test_ref_matching()
     # import pytest.__main__.benchmark
     # matching_1_t_4_lit_setup()

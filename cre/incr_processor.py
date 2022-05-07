@@ -106,7 +106,8 @@ def accumulate_change_events(cq, start, end=-1):
         idrec = encode_idrec(t_id, f_id, u1(0))
         if(idrec not in ce_dict):
             ce_dict[idrec] = change_event_ctor(idrec)
-        ce = ce_dict[idrec]            
+        ce = ce_dict[idrec]
+
         if(a_id == RETRACT):
             ce.was_modified = False
             ce.was_declared = False

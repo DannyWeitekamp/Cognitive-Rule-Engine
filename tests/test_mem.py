@@ -31,27 +31,28 @@ with cre_context("test_declare_retract"):
     TextField = define_fact("TextField",tf_spec)
 
 @njit(cache=True)
-def declare_retract(mem):
+def declare_retract(mem,t_id):
     for i in range(100):
         i_s = "A" + str(i)
         mem.declare(TextField(i_s,i_s,i_s,i_s,i_s),i_s)
 
     for i in range(0,100,10):
+        print("<<", i)
         i_s = "A" + str(i)
         mem.retract(i_s)
 
     # print(mem.mem_data.empty_f_id_heads)
-    t_id = mem.context_data.fact_to_t_id["TextField"]
+    # t_id = mem.context_data.fact_to_t_id["TextField"]
     return retracted_f_ids_for_t_id(mem.mem_data,t_id).head
 
 @njit(cache=True)
-def declare_again(mem):
+def declare_again(mem,t_id):
     for i in range(0,100,10):
         i_s = "B" + str(i)
         mem.declare(TextField(i_s,i_s,i_s,i_s,i_s),i_s)
 
 
-    t_id = mem.context_data.fact_to_t_id["TextField"]
+    # t_id = mem.context_data.fact_to_t_id["TextField"]
     return retracted_f_ids_for_t_id(mem.mem_data,t_id).head#mem.mem_data.empty_f_id_heads[t_id]
 
 
@@ -62,13 +63,13 @@ def test_declare_retract():
     with cre_context("test_declare_retract"):
         #NRT version
         mem = Memory()
-        assert declare_retract(mem) == 10
-        assert declare_again(mem) == 0
+        assert declare_retract(mem,TextField.t_id) == 10
+        assert declare_again(mem,TextField.t_id) == 0
         print("A")
         #Python version
         mem = Memory()
-        assert declare_retract.py_func(mem) == 10
-        assert declare_again.py_func(mem) == 0
+        assert declare_retract.py_func(mem,TextField.t_id) == 10
+        assert declare_again.py_func(mem,TextField.t_id) == 0
 
 def test_declare_retract_tuple_fact():
     with cre_context("test_declare_retract_tuple_fact"):
@@ -224,34 +225,22 @@ def test_retroactive_register():
         mem.declare(BOOP3("C",3, 4, 5))
         mem.declare(BOOP3("C",4, 4, 5))
 
-        b1_t_id = context.get_t_id(fact_type=BOOP1)
-        b2_t_id = context.get_t_id(fact_type=BOOP2)
-        b3_t_id = context.get_t_id(fact_type=BOOP3)
+        b1_t_id = context.get_t_id(_type=BOOP1)
+        b2_t_id = context.get_t_id(_type=BOOP2)
+        b3_t_id = context.get_t_id(_type=BOOP3)
 
         assert b1_t_id != b2_t_id and b2_t_id != b3_t_id
 
-        assert context.get_t_id(fact_num=BOOP1._fact_num) == b1_t_id
-        assert context.get_t_id(fact_num=BOOP2._fact_num) == b2_t_id
-        assert context.get_t_id(fact_num=BOOP3._fact_num) == b3_t_id
+        # c = context
+        # assert np.array_equal(c.get_parent_t_ids(t_id=b3_t_id),[b1_t_id,b2_t_id])
+        # assert np.array_equal(c.get_parent_t_ids(t_id=b2_t_id),[b1_t_id])
+        # assert np.array_equal(c.get_parent_t_ids(t_id=b1_t_id),[])
         
+        # assert np.array_equal(c.get_child_t_ids(t_id=b3_t_id),[b3_t_id])
+        # assert np.array_equal(c.get_child_t_ids(t_id=b2_t_id),[b2_t_id,b3_t_id])
+        # assert np.array_equal(c.get_child_t_ids(t_id=b1_t_id),[b1_t_id,b2_t_id,b3_t_id])
 
-        # NOTE: Inheritance tracking doesn't work in this case... would require some refactoring
-        #  issue is that assign_name_num_to_t_id() requires a name and the fact_num of the inherited type
-        # cd = context.context_data
-        # print(cd.parent_t_ids)
-        # print(cd.parent_t_ids[b1_t_id])
-        # print(cd.parent_t_ids[b2_t_id])
-        # print(cd.parent_t_ids[b3_t_id])
-        # print(cd.child_t_ids[b1_t_id])
-        # print(cd.child_t_ids[b2_t_id])
-        # print(cd.child_t_ids[b3_t_id])
-        # assert np.array_equal(cd.parent_t_ids[b1_t_id],[])
-        # assert np.array_equal(cd.parent_t_ids[b2_t_id],[b1_t_id])
-        # assert np.array_equal(cd.parent_t_ids[b3_t_id],[b1_t_id,b2_t_id])
-        # assert np.array_equal(cd.child_t_ids[b1_t_id],[b1_t_id,b2_t_id,b3_t_id])
-        # assert np.array_equal(cd.child_t_ids[b2_t_id],[b2_t_id,b3_t_id])
-        # assert np.array_equal(cd.child_t_ids[b3_t_id],[b3_t_id])
-
+       
 
 # from itertools import product
 
@@ -519,11 +508,12 @@ def test_b_get_facts_10000(benchmark):
 
 if __name__ == "__main__":
     import faulthandler; faulthandler.enable()
+    test_declare_retract()
     # test_retroactive_register()
     # test_declare_retract_tuple_fact()
     # test_declare_overloading()
-    test_modify()
-    # test_declare_retract()
+    # test_modify()
+    
     # test_retract_keyerror()
     # test_subscriber()
     # test_get_facts()

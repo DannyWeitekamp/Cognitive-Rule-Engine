@@ -1,5 +1,5 @@
 import numpy as np
-from numba import njit, generated_jit, types, literal_unroll, u8, i8, f8, u1
+from numba import njit, generated_jit, types, literal_unroll, u8, i8, f8, u1, u2
 from numba.types import unicode_type,  intp, Tuple,  Tuple, DictType, ListType
 from numba.typed import Dict, List
 from numba.experimental.structref import new
@@ -11,7 +11,7 @@ from cre.fact_intrinsics import fact_lower_getattr, resolve_fact_getattr_type
 from cre.tuple_fact import TupleFact, TF
 from cre.context import cre_context
 from cre.default_ops import Add, Subtract, Divide
-from cre.var import Var, GenericVarType
+from cre.var import Var, GenericVarType, var_append_deref, get_var_type
 from cre.op import GenericOpType
 from cre.utils import _func_from_address, _cast_structref, _obj_cast_codegen, _func_from_address, _incref_structref
 from cre.structref import define_structref
@@ -55,7 +55,8 @@ flattener_fields = {
     "update_addrs" : ListType(a_id_addr_pair_list_type),
     "idrec_map" : DictType(u8,ListType(u8)),
     "inv_idrec_map" : DictType(u8,ListType(u8)),
-    "var_map" : DictType(unicode_type, GenericVarType),
+    "base_var_map" : DictType(Tuple((u2,unicode_type)), GenericVarType),
+    "var_map" : DictType(Tuple((unicode_type,unicode_type)), GenericVarType),
     "fact_visible_attr_pairs" : types.Any,
 }
 
@@ -80,6 +81,8 @@ def self_get_changes(self, end=-1, exhaust_changes=True):
 
 @njit(cache=True)
 def update_addrs_add(update_addrs, t_id, a_id, addr):
+    for i in range(len(update_addrs),t_id+1):
+        update_addrs.append(List.empty_list(a_id_addr_pair_type))
     update_addrs[t_id].append((u1(a_id), addr))
 
 
@@ -89,6 +92,9 @@ def new_update_addrs(n):
     for i in range(n):
         update_addrs.append(List.empty_list(a_id_addr_pair_type))
     return update_addrs
+
+unicode_pair_type = Tuple((unicode_type,unicode_type))
+t_id_alias_pair_type = Tuple((u2,unicode_type))
 
 from numba.core.typing.typeof import typeof
 @generated_jit(cache=True, nopython=True)    
@@ -103,7 +109,8 @@ def flattener_ctor(fact_types, in_mem, context_data, update_addrs, out_mem):
         init_incr_processor(st, in_mem)
         st.fact_visible_attr_pairs = fact_visible_attr_pairs
         st.update_addrs = update_addrs
-        st.var_map = Dict.empty(unicode_type, GenericVarType)
+        st.base_var_map = Dict.empty(t_id_alias_pair_type, GenericVarType)
+        st.var_map = Dict.empty(unicode_pair_type, GenericVarType)
         st.out_mem = out_mem 
         return st
     return impl
@@ -117,7 +124,7 @@ f'''from numba import njit, types
 from cre.flattener import flattener_update_for_attr, update_sig
 from cre.utils import _cast_structref
 import cloudpickle
-from cre.gval import gval
+# from cre.gval import gval
 
 fact_type = cloudpickle.loads({cloudpickle.dumps(fact_type)})
 id_attr = "{id_attr}"
@@ -133,7 +140,7 @@ class Flattener(structref.StructRefProxy):
         context_data = context.context_data    
         fact_visible_attr_pairs = get_semantic_visibile_fact_attrs(fact_types)
         id_attr = "A"
-        update_addrs = new_update_addrs(len(context.type_registry)+1)
+        update_addrs = new_update_addrs(len(context.name_to_type)+1)
 
         for fact_type, attr in fact_visible_attr_pairs:
             if(isinstance(attr, types.Literal)): attr = attr.literal_value
@@ -144,13 +151,14 @@ class Flattener(structref.StructRefProxy):
                 source_to_cache('flattener_update', hash_code, source)
             update_func = import_from_cached('flattener_update', hash_code, ['flattener_update_fact'])['flattener_update_fact']
 
-            t_id = context_data.fact_num_to_t_id[fact_type._fact_num]
+            t_id = context.get_t_id(_type=fact_type)
 
             update_addr = _get_wrapper_address(update_func, update_sig)
             update_addrs_add(update_addrs, t_id, fact_type.get_attr_a_id(attr), update_addr)
-            for c_fact_type in context.children_of[fact_type._fact_name]:
-                c_t_id = context_data.fact_num_to_t_id[c_fact_type._fact_num]
-                update_addrs_add(update_addrs, c_t_id, c_fact_type.get_attr_a_id(attr), update_addr)
+            for c_t_id in context.get_child_t_ids(t_id=t_id):
+                c_fact_type = context.get_type(t_id=c_t_id)
+                if(t_id != c_t_id):
+                    update_addrs_add(update_addrs, c_t_id, c_fact_type.get_attr_a_id(attr), update_addr)
 
         if(in_mem is None): in_mem = Memory(context);
         if(out_mem is None): out_mem = Memory(context);
@@ -216,51 +224,36 @@ def get_ground_type(head_type,val_type):
     return 
 # from cre.gval import gval
 @generated_jit(cache=True, nopython=True)    
-def flattener_update_for_attr(self, fact, id_attr, attr):#, context_name="cre_default"):
-    
+def flattener_update_for_attr(self, fact, id_attr, attr):#, context_name="cre_default"):    
     print("flattener_update_for_attr:: ", fact, id_attr, attr)
-    # grounding_types = []
-    # head_type = GenericVarType
     attr = attr.literal_value
     fact_type = fact
-
-    # Construct the 'grounding_type' directly and get it's 'ctor'
-    #  since for now we can't use gval as it's own constructor
-    # val_type = resolve_fact_getattr_type(fact_type, attr)        
-    # print("BEF")
-    # from cre.gval import gval_of_type, new_gval
-    # print("GVAL", gval)
-    # grounding_type = gval(head=head_type, val=val_type)
-    # grounding_spec = {"inherit_from" : {"type": gval, "unified_attrs": ["head", "val"]},
-    #                   "head":head_type, "val":val_type}
-    # grounding_type = define_fact(f"gval_v_{short_name(val_type)}", grounding_spec)
-    # gval_type = gval_of_type(val_type)
-    # gval_ctor = gval_type._ctor[0]
-    # print(gval_ctor)
-
-    # Make a special constructor for a Var(fact_type, unique_id).attr
-    # NOTE: should probably just wrap this into it's own thing in Var
-    a_id = fact_type.get_attr_a_id(attr)
-    offset = fact_type.get_attr_offset(attr)
-    fact_num = fact_type._fact_num
-    var_head_type_name = str(fact_type.spec[attr]['type'])
-    from cre.var import new_appended_var_generic, DEREF_TYPE_ATTR
-    @njit
-    def var_w_attr_dref(self, v_name, attr):
-        if(v_name not in self.var_map):
-            self.var_map[v_name] = _cast_structref(GenericVarType, Var(fact_type, v_name))
-        return new_appended_var_generic(self.var_map[v_name], attr, a_id, offset, var_head_type_name, fact_num, DEREF_TYPE_ATTR)
+    t_id = fact_type.t_id
+    base_var_type = get_var_type(fact_type)
 
     def impl(self, fact, id_attr, attr):
-        # upfront cost of ~2.58 ms to handle change_events
+        # upfront cost of ~2.5 ms to handle change_events
         identifier = fact_lower_getattr(fact, id_attr) # negligible
         v = fact_lower_getattr(fact, attr) # negligible
-        var = var_w_attr_dref(self, identifier, attr) # 9.5 ms
-        # g = new_gval(head=Var(unicode_type,"A"),val=v)
 
-        # g = new_gval(head=var, val=v)
-        # g = new_gval(head=fact, val=v) # 1.2 ms
-        # self.out_mem.declare(g)
+        # Get or make a base_var for 'identifier'.'attr'.  
+        tup = (identifier,attr)
+        if(tup not in self.var_map):
+
+            # Get or make a base_var for 'identifier' 
+            btup = (t_id,identifier)
+            if(btup not in self.base_var_map):
+
+                # Make the base_var and cache it
+                self.base_var_map[btup] = Var(fact_type, identifier)
+
+            # Apply .attr to the base_var and cache it
+            base_var = _cast_structref(base_var_type, self.base_var_map[btup])
+            var = var_append_deref(base_var,attr)
+            self.var_map[tup] = _cast_structref(GenericVarType, var)
+
+        g = new_gval(head=self.var_map[tup], val=v)
+        self.out_mem.declare(g)
     return impl
 
 
@@ -270,8 +263,11 @@ def flattener_update(self):
         for change_event in self.get_changes():
             if(change_event.was_declared or change_event.was_modified):
                 t_id = change_event.t_id
+
+
                 
                 update_addrs = self.update_addrs[t_id]
+                # print("change_event t_id : ", t_id, update_addrs)
                 for a_id, update_addr in update_addrs:
                     if(change_event.was_modified and a_id not in change_event.a_ids):
                         continue
@@ -299,7 +295,7 @@ def flattener_update(self):
 #     context_data = context.context_data    
 #     fact_visible_attr_pairs = get_semantic_visibile_fact_attrs(fact_types)
 #     id_attr = "A"
-#     update_addrs = new_update_addrs(len(context.type_registry)+1)
+#     update_addrs = new_update_addrs(len(context.name_to_type)+1)
 
 #     for fact_type, attr in fact_visible_attr_pairs:
 #         if(isinstance(attr, types.Literal)): attr = attr.literal_value

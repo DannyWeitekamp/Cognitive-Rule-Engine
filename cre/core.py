@@ -10,7 +10,7 @@ import numpy as np
 import numba.typed.typedlist as tl_mod 
 import numba.typed.typeddict as td_mod
 import os
-from cre.caching import cache_dir
+from cre.caching import cache_dir, get_cache_path, import_from_cached
 
 os.environ['NUMBA_CACHE_DIR'] = os.path.join(os.path.split(cache_dir)[0], "numba_cache")
 
@@ -80,8 +80,8 @@ def standardize_type(typ, context, name='', attr=''):
             typ = numba_type_map[TYPE_ALIASES[typ_str.lower()]]
         # elif(typ_str == name):
         #     typ = context.get_deferred_type(name)# DeferredFactRefType(name)
-        elif(typ_str in context.type_registry):
-            typ = context.type_registry[typ_str]
+        elif(typ_str in context.name_to_type):
+            typ = context.name_to_type[typ_str]
         else:
             typ = context.get_deferred_type(typ_str)
             # raise TypeError(f"Attribute type {typ_str!r} not recognized in spec" + 
@@ -91,6 +91,59 @@ def standardize_type(typ, context, name='', attr=''):
 
     if(hasattr(typ, "_fact_type")): typ = typ._fact_type
     return typ
+
+GLOBAL_TYPE_COUNT = -1
+
+# The fact registry is used to give a unique number to each fact definition
+#  it is just a text file with <Fact Name> <Hash Code> on each line
+def lines_in_type_registry():
+    global GLOBAL_TYPE_COUNT
+    if(GLOBAL_TYPE_COUNT == -1):
+        try:
+            with open(get_cache_path("type_registry",suffix=''),'r') as f:
+                GLOBAL_TYPE_COUNT = len([1 for line in f])
+        except FileNotFoundError:
+            GLOBAL_TYPE_COUNT = 0
+    return GLOBAL_TYPE_COUNT
+
+def add_to_type_registry(name, hash_code):
+    global GLOBAL_TYPE_COUNT
+    if(GLOBAL_TYPE_COUNT == -1): lines_in_type_registry()
+    count = GLOBAL_TYPE_COUNT
+    with open(get_cache_path("type_registry",suffix=''),'a') as f:
+        f.write(f"{name} {hash_code}\n")
+    GLOBAL_TYPE_COUNT += 1
+    return count
+
+def type_from_t_id(t_id):
+    if(t_id < len(DEFAULT_REGISTERED_TYPES)):
+        return list(DEFAULT_REGISTERED_TYPES.values())[t_id]
+    name, hash_code = None, None
+    with open(get_cache_path("type_registry",suffix=''),'r') as f:
+        for i, line in enumerate(f):
+            if(i == t_id):
+                tokens = line.split()
+                name, hash_code = tokens[0], tokens[1]
+                break
+    # if(hash_code == 'builtin'):
+    #     raise ImportError("Cannot import builtin.")
+    # else:
+    fact_type = import_from_cached(name, hash_code, ['fact_type'])['fact_type']
+    return fact_type
+    # raise ImportError(f"No type registered to t_id={t_id}")
+
+def t_id_from_type(typ, hash_code=None):
+    if(hash_code is None): hash_code = hash(typ)
+    name = str(typ)
+    with open(get_cache_path("type_registry",suffix=''),'r') as f:
+        for i, line in enumerate(f):
+            tokens = line.split()
+            if(tokens[0] == name and tokens[1] == hash_code):
+                return i
+    return -1
+            
+
+
 
 
 # @intrinsic
@@ -127,6 +180,7 @@ DEFAULT_REGISTERED_TYPES = {
                             'int' : i8,
                             'float' : f8,
                             'str' : unicode_type,
+                            'CREObj' : types.undefined,
                             'Fact' : types.undefined,
                             'TupleFact' : types.undefined,
                             'Var': types.undefined,
@@ -135,31 +189,32 @@ DEFAULT_REGISTERED_TYPES = {
                             'Conditions' : types.undefined
                             }
 
-T_ID_UNRESOLVED = 0
-T_ID_BOOL = 1
-T_ID_INT = 2 
-T_ID_FLOAT = 3
-T_ID_STR = 4 
-T_ID_FACT = 5 
-T_ID_TUPLE_FACT = 6 
-T_ID_VAR = 7
-T_ID_OP = 8
-T_ID_LITERAL = 9
-T_ID_CONDITIONS = 10
+if(not os.path.exists(get_cache_path("type_registry",suffix=''))):
+    for t in DEFAULT_REGISTERED_TYPES:
+        add_to_type_registry(t,"builtin")
 
-DEFAULT_REGISTERED_TYPES = {
-                            'undefined': types.undefined,
-                            'bool' : types.bool_,
-                            'int64' : i8,
-                            'float64' : f8,
-                            'str' : unicode_type,
-                            'Fact' : None,
-                            'TupleFact' : None,
-                            'Var': None,
-                            'Op' : None,
-                            'Literal' : None,
-                            'Conditions' : None
-                            }
+
+DEFAULT_TYPE_T_IDS = {}
+for i, (name, typ) in enumerate(DEFAULT_REGISTERED_TYPES.items()):
+    DEFAULT_TYPE_T_IDS[name] = i
+    if(typ is not types.undefined):
+        DEFAULT_TYPE_T_IDS[typ] = i
+
+DEFAULT_T_ID_TYPES = {v:k for k,v in DEFAULT_TYPE_T_IDS.items()}           
+
+
+T_ID_UNDEFINED = DEFAULT_TYPE_T_IDS['undefined']
+T_ID_BOOL = DEFAULT_TYPE_T_IDS['bool']
+T_ID_INT = DEFAULT_TYPE_T_IDS['int'] 
+T_ID_FLOAT = DEFAULT_TYPE_T_IDS['float']
+T_ID_STR = DEFAULT_TYPE_T_IDS['str']
+T_ID_CRE_OBJ = DEFAULT_TYPE_T_IDS['CREObj']
+T_ID_FACT = DEFAULT_TYPE_T_IDS['Fact']
+T_ID_TUPLE_FACT = DEFAULT_TYPE_T_IDS['TupleFact']
+T_ID_VAR = DEFAULT_TYPE_T_IDS['Var']
+T_ID_OP = DEFAULT_TYPE_T_IDS['Op']
+T_ID_LITERAL = DEFAULT_TYPE_T_IDS['Literal']
+T_ID_CONDITIONS = DEFAULT_TYPE_T_IDS['Conditions']
 
 
 SHORT_NAMES = {
@@ -173,27 +228,6 @@ SHORT_NAMES = {
 def short_name(x):
     return SHORT_NAMES[x]
 
-DEFAULT_TYPE_T_IDS = {
-    # Maps names 
-    'undefined': T_ID_UNRESOLVED,
-    'bool' : T_ID_BOOL,
-    'int' : T_ID_INT,
-    'float' : T_ID_FLOAT,
-    'str' : T_ID_STR,
-    'Fact' : T_ID_FACT,
-    'TupleFact' : T_ID_TUPLE_FACT,
-    'Var': T_ID_VAR,
-    'Op' : T_ID_OP,
-    'Literal' : T_ID_LITERAL,
-    'Conditions' : T_ID_CONDITIONS,
-    # Also map types... do rest as registered 
-    types.bool_ : T_ID_BOOL,
-    i8 : T_ID_INT,
-    f8 : T_ID_FLOAT,
-    unicode_type : T_ID_STR,
-}                 
-
-DEFAULT_T_ID_TYPES = {v:k for k,v in DEFAULT_TYPE_T_IDS.items()}           
 
 def register_global_default(name, typ):
     '''Not for external use'''

@@ -21,7 +21,7 @@ from cre.utils import assign_to_alias_in_parent_frame, _raw_ptr_from_struct_incr
 from cre.subscriber import base_subscriber_fields, BaseSubscriber, BaseSubscriberType, init_base_subscriber, link_downstream
 from cre.vector import VectorType
 from cre.fact import Fact, gen_fact_import_str, get_offsets_from_member_types
-from cre.var import Var, VarTypeTemplate
+from cre.var import Var, VarTypeClass
 from cre.op import GenericOpType, OpTypeTemplate
 from cre.make_source import make_source, gen_def_func, gen_assign, resolve_template, gen_def_class
 from numba.core import imputils, cgutils
@@ -151,7 +151,7 @@ SC_Record, SC_RecordType = \
 #             st.is_op = True
 #             st.op = op_or_var
 #             return st
-#     elif(isinstance(op_or_var, VarTypeTemplate)):
+#     elif(isinstance(op_or_var, VarTypeClass)):
 #         def impl(data, stride, op_or_var, depth, nargs):
 #             st = _sc_record_ctor_helper(data, stride, op_or_var, depth, nargs)
 #             st.is_op = False
@@ -183,7 +183,7 @@ def overload_SC_Record(op_or_var, depth=0, nargs=0, stride=None, prev_entry_ptr=
             st.data = np.empty(data_len,dtype=np.uint32)
             
             return st
-    elif(isinstance(op_or_var, VarTypeTemplate)):
+    elif(isinstance(op_or_var, VarTypeClass)):
         def impl(op_or_var, depth=0, nargs=0, stride=None, prev_entry_ptr=0):
             st = new(SC_RecordType)
             st.is_op = False
@@ -708,7 +708,7 @@ def expl_tree_entry_ctor(op_or_var, child_arg_ptrs=None):
             st.op = op_or_var
             st.child_arg_ptrs = child_arg_ptrs
             return st
-    elif(isinstance(op_or_var, VarTypeTemplate)):
+    elif(isinstance(op_or_var, VarTypeClass)):
         def impl(op_or_var, child_arg_ptrs=None):
             st = new(ExplanationTreeEntryType)
             st.is_op = False
@@ -1118,10 +1118,10 @@ def gen_src_planner_declare_fact(fact_def, visible_attrs=[], ind='    '):
     src = \
 f'''
 from numba import njit, types
-from cre.var import Var, get_var_definition
+from cre.var import Var, get_var_type
 from cre.sc_planner2 import planner_declare_val, SetChainingPlannerType
 {gen_fact_import_str(fact_def)}
-var_type = get_var_definition({name},{name})
+var_type = get_var_type({name},{name})
 @njit(types.void(SetChainingPlannerType, {name}, types.Optional(var_type)),cache=True)
 def declare_fact(planner, fact, var=None):
     v = Var({name}) if var is None else var

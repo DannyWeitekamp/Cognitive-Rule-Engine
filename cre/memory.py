@@ -26,13 +26,13 @@ import sys
 import cloudpickle
 import __main__
 
-from cre.context import _BaseContextful, CREContextDataType, CREContext, assign_fact_num_to_t_id
+from cre.context import _BaseContextful, CREContextDataType, CREContext, ensure_inheritance, cre_context
 from cre.transform import infer_type
 
 
 from cre.subscriber import BaseSubscriberType
 from cre.structref import define_structref, define_boxing
-from cre.fact import Fact, BaseFact,BaseFact, cast_fact, get_inheritance_fact_nums
+from cre.fact import Fact, BaseFact,BaseFact, cast_fact, get_inheritance_t_ids
 from cre.tuple_fact import TF, TupleFact
 from cre.fact_intrinsics import fact_lower_setattr
 from cre.utils import CastFriendlyMixin, lower_setattr, _cast_structref, _meminfo_from_struct, decode_idrec, encode_idrec, \
@@ -132,7 +132,7 @@ def init_mem_data(context_data):
     #                         enum_data, enum_consistency, subscribers,
     #                         unnamed_counter, BaseFact() #Empty BaseFact is NULL_FACT
     #                          )
-    L = max(context_data.next_t_id,1)
+    L = max(len(context_data.parent_t_ids)+1,1)
     expand_mem_data_types(mem_data,L)
     return mem_data
 
@@ -190,7 +190,7 @@ def decref_fact(x):
 class Memory(structref.StructRefProxy):
     ''' '''
     def __new__(cls, context=None):
-        context = CREContext.get_context(context)
+        context = cre_context(context)#CREContext.get_context(context)
         context_data = context.context_data
         mem_data = init_mem_data(context_data)
         self = mem_ctor(context_data,mem_data)
@@ -219,7 +219,7 @@ class Memory(structref.StructRefProxy):
     def get_facts(self,typ=None, no_subtypes=False):
         self.context._ensure_retro_registers()
         if(isinstance(typ,str)):
-            typ = self.context.type_registry[typ]
+            typ = self.context.name_to_type[typ]
 
         # name = str(typ)
         # t_id = self.context.context_data.fact_num_to_t_id[typ._fact_num]
@@ -230,7 +230,7 @@ class Memory(structref.StructRefProxy):
     def iter_facts(self,typ):
         self.context._ensure_retro_registers()
         if(isinstance(typ,str)):
-            typ = self.context.type_registry[typ]
+            typ = self.context.name_to_type[typ]
         # name = str(typ)
         # t_id = self.context.context_data.fact_num_to_t_id[typ._fact_num]
         # t_ids = np.empty((1,), dtype=np.uint16)
@@ -395,15 +395,10 @@ def make_f_id_empty(mem_data, t_id, f_id):
 def next_empty_f_id(mem_data,facts,t_id):
     '''Gets the next dead f_id from retracting facts otherwise returns 
         a fresh one pointing to the end of the meminfo list'''
-    # print("BEEP",mem_data.retracted_f_ids[t_id])
     f_id_vec = retracted_f_ids_for_t_id(mem_data,t_id)
-    # print("HEAD",f_id_vec.head,f_id_vec.data)
-    # es_s = mem_data.empty_f_id_stacks[t_id]
-    # es_h = mem_data.empty_f_id_heads[t_id]
     if(f_id_vec.head <= 0):
         return len(facts) # a fresh f_id
 
-    # mem_data.empty_f_id_heads[t_id] = es_h = es_h - 1
     return f_id_vec.pop()#es_s[es_h] # a recycled f_id
 
 # @njit(cache=True,inline='never')
@@ -426,34 +421,40 @@ def next_empty_f_id(mem_data,facts,t_id):
 #         return t_id
         
 #     return impl
-from cre.context import grow_fact_num_to_t_id
+# from cre.context import grow_fact_num_to_t_id
 @njit(u2(MemoryType, BaseFact),cache=True)
 def resolve_t_id(mem, fact):
     '''Gets a t_id from a mem (which is was instantiated under some context) 
        and a fact_num. If the fact with 'fact_num' wasn't registered in the 
        mem's context then ensure that it gets registered retroactively.
     '''
-    fact_num = fact.fact_num
+    # fact_num = fact.fact_num
     cd = mem.context_data
     # Ensure that 'fact_num_to_t_id' for the mem's context is big enough.
-    fntt = cd.fact_num_to_t_id
-    if(fact_num >= len(fntt)):
-        fntt = grow_fact_num_to_t_id(cd, fact_num*2)
+    # fntt = cd.fact_num_to_t_id
+    # if(fact_num >= len(fntt)):
+    #     fntt = grow_fact_num_to_t_id(cd, fact_num*2)
 
     # Get the t_id for fact_num. If zero then register fact_num and
     #  mark the context as having an unhandled registration that needs
     #  to be processed on the python side.
-    t_id = cd.fact_num_to_t_id[fact_num]
-    if(t_id == 0):
+    # t_id = cd.fact_num_to_t_id[fact_num]
+    # if(t_id == 0):
         # t_id = mem.context_data.get_next_t_id()
-        inh_fact_nums = get_inheritance_fact_nums(fact)
-        parent_fact_num = -1
-        for fact_num in inh_fact_nums:
-            t_id = assign_fact_num_to_t_id(cd, fact_num, parent_fact_num)
-            parent_fact_num = i8(fact_num)
 
-        # mem.context_data.fact_num_to_t_id[fact_num] = t_id
-        cd.has_unhandled_retro_register = True
+    t_id, _, _ = decode_idrec(fact.idrec)
+    # ensure_inheritance()
+
+
+    if(t_id >= len(cd.child_t_ids) or len(cd.child_t_ids[t_id])==0):
+        inh_t_ids = get_inheritance_t_ids(fact)
+        parent_t_id = -1
+        for _t_id in inh_t_ids:
+            ensure_inheritance(cd, _t_id, parent_t_id)
+            parent_t_id = i8(_t_id)
+
+    # mem.context_data.fact_num_to_t_id[fact_num] = t_id
+    cd.has_unhandled_retro_register = True
 
     # Ensure that the data structures in mem_data are long enough to index t_id.
     L = len(mem.mem_data.facts)
@@ -680,14 +681,7 @@ def mem_add_subscriber(self, subscriber):
 
 @generated_jit(cache=True)
 @overload_method(MemoryTypeTemplate, "declare")
-def mem_declare(self, fact, name=None):
-    # if(not isinstance(fact,types.StructRef)): 
-    #     
-    # print("<<", fact)
-    # if(isinstance(fact, TupleFact)):
-    #     def impl(self, fact, name=None):
-    #         return declare_tuple_fact(self,fact)
-    
+def mem_declare(self, fact, name=None):    
     if(isinstance(fact, Fact)):
         if(not name or isinstance(name, (types.NoneType,types.Omitted))):
             def impl(self, fact, name=None):
@@ -728,9 +722,6 @@ def mem_modify(self, fact, attr, val):
 
     SentryLiteralArgs(['attr']).for_function(mem_modify).bind(self, fact, attr, val) 
     a_id = u1(list(fact.field_dict.keys()).index(attr._literal_value))
-    # print("a_id", a_id, type(a_id))
-    # print(attr.__dict__)
-    # print(fact.spec[attr._literal_value])
 
     def impl(self, fact, attr, val):
         fact_lower_setattr(fact, attr, val)
@@ -934,23 +925,24 @@ def get_facts(mem, fact_type=None, no_subtypes=False):
     else:
         raise ValueError("fact_type of get_facts() must be a numba type or None.")
     
-    fact_num = getattr(_fact_type,'_fact_num', 0)
+    # fact_num = getattr(_fact_type,'_fact_num', 0)
 
     # hash_code = unique_hash([fact_type])
     # if(not source_in_cache('FactIterator', hash_code)):
     #     source = gen_fact_iter_source(fact_type)
     #     source_to_cache('FactIterator', hash_code, source)
     # it_type = import_from_cached('FactIterator', hash_code, ['f_iter_type'])['f_iter_type']
+    fact_t_id = _fact_type.t_id
     def impl(mem, fact_type=None, no_subtypes=False):
         cd = mem.context_data
         if(fact_type is None):
             t_ids = np.arange(mem.mem_data.facts.head, dtype=np.int64)
         else:
-            t_id = cd.fact_num_to_t_id[fact_num]
+            # t_id = fact_type.t_id#cd.fact_num_to_t_id[fact_num]
             if(no_subtypes):
-                t_ids = np.array((t_id,),dtype=np.int64)
+                t_ids = np.array((fact_t_id,),dtype=np.int64)
             else:                
-                t_ids = cd.child_t_ids[t_id]
+                t_ids = cd.child_t_ids[fact_t_id]
 
         out = List.empty_list(_fact_type)
         curr_t_id_ind = 0

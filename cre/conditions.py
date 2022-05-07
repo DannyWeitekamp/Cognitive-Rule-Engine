@@ -259,7 +259,7 @@ register_global_default("Conditions", ConditionsType)
 # lower_cast(ConditionsTypeTemplate, CREObjType)(impl_cre_obj_upcast)
 
 # Manually register the type to avoid automatic getattr overloading 
-# default_manager.register(VarTypeTemplate, models.StructRefModel)
+# default_manager.register(VarTypeClass, models.StructRefModel)
 class Conditions(structref.StructRefProxy):
     def __new__(cls, _vars, dnf=None):
         # return structref.StructRefProxy.__new__(cls, *args)
@@ -297,8 +297,11 @@ class Conditions(structref.StructRefProxy):
     def var_base_types(self):
         if(not hasattr(self,"_var_base_types")):
             context = cre_context()
-            delimited_type_names = conds_get_delimited_type_names(self,";",True).split(";")
-            self._var_base_types = tuple([context.type_registry[x] for x in delimited_type_names])
+            var_t_ids = conds_get_var_t_ids(self)
+            self._var_base_types = tuple([context.get_type(t_id=t_id) for t_id in var_t_ids])
+            # delimited_type_names = conds_get_delimited_type_names(self,";",True).split(";")
+            # self._var_base_types = tuple([context.type_registry[x] for x in delimited_type_names])
+            
         return self._var_base_types
 
 
@@ -314,7 +317,7 @@ class Conditions(structref.StructRefProxy):
             sig_str = _get_sig_str(self)
             fact_types = sig_str[1:-1].split(",")
             print(fact_types)
-            self._signature = types.void(*[context.type_registry[x] for x in fact_types])            
+            self._signature = types.void(*[context.name_to_type[x] for x in fact_types])            
 
         return self._signature
 
@@ -350,15 +353,22 @@ class Conditions(structref.StructRefProxy):
 define_boxing(ConditionsTypeTemplate,Conditions)
 
 
-
-@njit(unicode_type(ConditionsType,unicode_type,types.boolean), cache=True)
-def conds_get_delimited_type_names(self,delim,ignore_ext_nots):
-    s,l = "", len(self.vars)
+@njit(u2[::1](ConditionsType))
+def conds_get_var_t_ids(self):
+    t_ids = np.empty((len(self.vars),),dtype=np.uint16)
     for i, v in enumerate(self.vars):
-        if(ignore_ext_nots and v.is_not): continue
-        s += v.base_type_name
-        s += delim
-    return s[:-len(delim)]
+        t_ids[i] = v.base_t_id
+    return t_ids
+
+
+# @njit(unicode_type(ConditionsType,unicode_type,types.boolean), cache=True)
+# def conds_get_delimited_type_names(self,delim,ignore_ext_nots):
+#     s,l = "", len(self.vars)
+#     for i, v in enumerate(self.vars):
+#         if(ignore_ext_nots and v.is_not): continue
+#         s += v.base_type_name
+#         s += delim
+#     return s[:-len(delim)]
 
 # @njit(void(ConditionsType),cache=True)
 # def conds_dtor(self):
@@ -539,7 +549,7 @@ def _conditions_ctor_var_list(_vars,dnf=None):
 @overload(Conditions,strict=False)
 def conditions_ctor(_vars, dnf=None):
     print("CONDITIONS CONSTRUCTOR", _vars, dnf)
-    if(isinstance(_vars,VarTypeTemplate)):
+    if(isinstance(_vars,VarTypeClass)):
         # _vars is single Var
         def impl(_vars,dnf=None):
             return _conditions_ctor_single_var(_vars,dnf)
@@ -566,6 +576,8 @@ def _get_sig_str(conds):
         # if(i < len(conds.vars)-1): s += ","
     return s + ")"
 
+
+from cre.var import get_base_type_name
 @njit(cache=True)
 def conditions_repr(self,alias=None):
     s = ""
@@ -575,7 +587,7 @@ def conditions_repr(self,alias=None):
     s += " = "
     for j, v in enumerate(self.vars):
         prefix = "NOT" if(v.is_not) else "Var"
-        s_v = prefix + "(" + v.base_type_name + ")"
+        s_v = prefix + "(" + get_base_type_name(v) + ")"
         # : s_v = "NOT(" + s_v +")"
         s += s_v
         if(j < len(self.vars)-1): s += ", "
@@ -719,8 +731,8 @@ def _conditions_and(left, right):
 # @njit(cache=True)
 @generated_jit(cache=True)    
 def conditions_and(self, other):
-    if(isinstance(other, VarTypeTemplate)):
-        if(isinstance(self,VarTypeTemplate)):
+    if(isinstance(other, VarTypeClass)):
+        if(isinstance(self,VarTypeClass)):
             def impl(self,other):
                 self_c = _conditions_ctor_single_var(self)
                 other_c = _conditions_ctor_single_var(other)
@@ -730,7 +742,7 @@ def conditions_and(self, other):
                 other_c = _conditions_ctor_single_var(other)
                 return _conditions_and(self,other_c)
     else:
-        if(isinstance(self,VarTypeTemplate)):
+        if(isinstance(self,VarTypeClass)):
             def impl(self,other):
                 self_c = _conditions_ctor_single_var(self)
                 return _conditions_and(self_c,other)
@@ -765,8 +777,8 @@ def _conditions_or(left,right):
 
 @generated_jit(cache=True)    
 def conditions_or(self,other):
-    if(isinstance(other, VarTypeTemplate)):
-        if(isinstance(self,VarTypeTemplate)):
+    if(isinstance(other, VarTypeClass)):
+        if(isinstance(self,VarTypeClass)):
             def impl(self,other):
                 self_c = _conditions_ctor_single_var(self)
                 other_c = _conditions_ctor_single_var(other)
@@ -776,7 +788,7 @@ def conditions_or(self,other):
                 other_c = _conditions_ctor_single_var(other)
                 return _conditions_or(self,other_c)
     else:
-        if(isinstance(self,VarTypeTemplate)):
+        if(isinstance(self,VarTypeClass)):
             def impl(self,other):
                 self_c = _conditions_ctor_single_var(self)
                 return _conditions_or(self_c,other)
@@ -843,7 +855,7 @@ def _build_var_conjugate(v):
 def _var_NOT(c):
     '''Implementation of NOT for Vars moved outside of NOT 
         definition to avoid recursion issue'''
-    if(isinstance(c,VarTypeTemplate)):
+    if(isinstance(c,VarTypeClass)):
         st_typ = c
         def impl(c):
             if(c.conj_ptr == 0):
@@ -886,7 +898,7 @@ def NOT(c, alias=None):
         #  apply NOT() to all vars and make sure the pointers
         #  for the new vars are tracked in the dnf
         return _conditions_NOT(c)            
-    elif(isinstance(c, (VarTypeTemplate, Var))):    
+    elif(isinstance(c, (VarTypeClass, Var))):    
         # Mark a var as NOT(v) meaning we test that nothing
         #  binds to it. Return a new instance to maintain
         #  value semantics.
@@ -912,7 +924,7 @@ def overload_NOT(c, alias=None):
         def impl(c,alias=None):
             return _conditions_NOT(c)
         return impl
-    elif(isinstance(c,VarTypeTemplate)):
+    elif(isinstance(c,VarTypeClass)):
         #TODO: Possible to assign to alias in parent in jit context?
         def impl(c,alias=None):
             return _var_NOT(c)
@@ -936,7 +948,7 @@ def conditions_not(c):
         def impl(c):
             dnf = dnf_not(c.dnf)
             return Conditions(c.base_var_map, dnf)
-    elif(isinstance(c,VarTypeTemplate)):
+    elif(isinstance(c,VarTypeClass)):
         # If we applied to a var then serves as NOT()
         def impl(c):
             return _var_NOT(c)

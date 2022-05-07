@@ -113,7 +113,7 @@ class CastFriendlyMixin():
 
 #### deref_type ####
 
-_deref_type = np.dtype([('type', np.uint8),  ('a_id', np.uint8), ('fact_num', np.int64), ('offset', np.int64)])
+_deref_type = np.dtype([('type', np.uint8),  ('a_id', np.uint32), ('t_id', np.uint16), ('offset', np.int32)])
 deref_type = numba.from_dtype(_deref_type)
 
 DEREF_TYPE_ATTR = 0
@@ -310,10 +310,6 @@ def _struct_from_ptr(typingctx, struct_type, raw_ptr):
 
         st = cgutils.create_struct_proxy(inst_type)(context, builder)
         st.meminfo = meminfo
-
-
-        #NOTE: Fixes sefault but not sure about it's lifecycle (i.e. watch out for memleaks)
-        # context.nrt.incref(builder, types.MemInfoPointer(types.voidptr), meminfo)
 
         return impl_ret_borrowed(
             context,
@@ -555,7 +551,13 @@ def _load_ptr(typingctx, typ, ptr):
         _,ptr = args
         llrtype = context.get_value_type(inst_type)
         ptr = builder.inttoptr(ptr, ll_types.PointerType(llrtype))
+
+        # dm_item = context.data_model_manager[inst_type]
+        # ret = dm_item.load_from_data_pointer(builder, ptr)
+
         ret = builder.load(ptr)
+        # if context.enable_nrt:
+        #     context.nrt.incref(builder, llrtype, ret)
         return imputils.impl_ret_borrowed(context, builder, inst_type, ret)
 
     sig = inst_type(typ,ptr)
@@ -629,13 +631,12 @@ def base_ptr_from_container_data(builder,cd):
 
 
 @intrinsic
-def _list_base(typingctx, l_ty):#, w_ty, index_ty):
+def _list_base(typingctx, l_ty):
     is_none = isinstance(l_ty.item_type, types.NoneType)
     sig = i8(l_ty,)
     def codegen(context, builder, sig, args):
-        # [tl,] = sig.args
         [l, ] = args
-        #The type can be anything for the sake of getting the base ptr
+        #The type can be anything for the sake of getting the base ptr.
         tl = ListType(i8) 
         lp = _container_get_data(context, builder, tl, l)
 
@@ -647,27 +648,19 @@ def _list_base(typingctx, l_ty):#, w_ty, index_ty):
     return sig, codegen
 
 @intrinsic
-def _list_base_from_ptr(typingctx, ptr_ty):#, w_ty, index`_ty):
-    # is_none = isinstance(l_ty.item_type, types.NoneType)
+def _list_base_from_ptr(typingctx, ptr_ty):
     sig = i8(ptr_ty,)
     def codegen(context, builder, sig, args):
-        # [tl,] = sig.args
         [ptr, ] = args
-
-        typ = ListType(i8) 
 
         mi = builder.inttoptr(ptr, cgutils.voidptr_t)
 
-        ctor = cgutils.create_struct_proxy(typ)
-        dstruct = ctor(context, builder)
-# 
-        data_ptr = context.nrt.meminfo_data(builder, mi)
-        data_ptr = builder.bitcast(data_ptr, ll_list_type.as_pointer())
+        data_pointer = context.nrt.meminfo_data(builder, mi)
+        data_pointer = builder.bitcast(data_pointer, cgutils.voidptr_t.as_pointer())
+        data = builder.load(data_pointer)
 
-        data = builder.load(data_ptr)
         base_ptr = base_ptr_from_container_data(builder, data)
         out = builder.ptrtoint(base_ptr, cgutils.intp_t)
-
         return out
     return sig, codegen
 

@@ -20,7 +20,7 @@ from cre.utils import assign_to_alias_in_parent_frame, as_typed_list, iter_typed
 from cre.subscriber import base_subscriber_fields, BaseSubscriber, BaseSubscriberType, init_base_subscriber, link_downstream
 from cre.vector import VectorType
 from cre.fact import Fact, gen_fact_import_str, get_offsets_from_member_types
-from cre.var import Var,str_var_ptr_derefs
+from cre.var import Var
 from cre.make_source import make_source, gen_def_func, gen_assign, resolve_template, gen_def_class
 from numba.core import imputils, cgutils
 from numba.core.datamodel import default_manager, models, register_default

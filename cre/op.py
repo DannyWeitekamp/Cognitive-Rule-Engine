@@ -16,7 +16,7 @@ from cre.structref import define_structref, define_structref_template
 from cre.memory import MemoryType, Memory, facts_for_t_id, fact_at_f_id
 from cre.utils import (_struct_from_meminfo, _meminfo_from_struct, _cast_structref, cast_structref, decode_idrec, lower_getattr, _struct_from_ptr,  lower_setattr, lower_getattr,
                        _raw_ptr_from_struct, _raw_ptr_from_struct_incref, _decref_ptr, _incref_ptr, _incref_structref, _ptr_from_struct_incref, ptr_t)
-from cre.utils import encode_idrec, assign_to_alias_in_parent_frame, as_typed_list, iter_typed_list
+from cre.utils import encode_idrec, assign_to_alias_in_parent_frame, as_typed_list
 from cre.subscriber import base_subscriber_fields, BaseSubscriber, BaseSubscriberType, init_base_subscriber, link_downstream
 from cre.vector import VectorType
 from cre.fact import Fact, gen_fact_import_str, get_offsets_from_member_types
@@ -1319,6 +1319,8 @@ def op_repr(self):
     s = s.replace(",", ", ")
     return s
 
+from cre.var import get_base_type_name
+
 @njit(cache=True)
 def get_arg_seq(self,type_annotations=False):
     s = ""
@@ -1326,7 +1328,7 @@ def get_arg_seq(self,type_annotations=False):
         s += alias
         if(type_annotations): 
             v = _struct_from_ptr(GenericVarType, self.inv_base_var_map[alias])
-            s += ":" + v.base_type_name
+            s += ":" + get_base_type_name(v)#.base_type_name
 
         if(i < len(self.inv_base_var_map)-1): 
             s += "," + (" " if type_annotations else "")
@@ -1381,11 +1383,11 @@ class DerefInstr():
 
     @property
     def template(self):
-        return f'{{}}{str_deref_attrs(iter_typed_list(self.deref_attrs))}'
+        return f'{{}}{str_deref_attrs(self.deref_attrs)}'
 
     def _get_hashable(self):
         if(not hasattr(self,"_hashable")):
-            self._hashable = (self.var.base_ptr, tuple(iter_typed_list(self.deref_attrs)))
+            self._hashable = (self.var.base_ptr, tuple(self.deref_attrs))
         return self._hashable
 
     def __eq__(self, other):
@@ -1449,7 +1451,7 @@ class OpComp():
             # print("arg_names", arg_names)
             return x.gen_expr('python',arg_names=arg_names)
         elif(isinstance(x,DerefInstr)):
-            deref_attrs = list(iter_typed_list(x.deref_attrs))
+            deref_attrs = x.deref_attrs
             return f'{{{self.base_vars[x.var.base_ptr][1]}}}{str_deref_attrs(deref_attrs)}'
         else:
             return repr(x) 
@@ -1496,7 +1498,7 @@ class OpComp():
                         base_vars[b_ptr] = (x,len(arg_types),t)
                         arg_types.append(t)
                     
-                    if(x.base_type != x.head_type):
+                    if(len(x.deref_offsets) > 0):
                         d_instr = DerefInstr(x)
                         if(d_instr not in head_vars): 
                             arg_ind = base_vars[b_ptr][1]
@@ -1715,7 +1717,9 @@ class OpComp():
         body = const_defs
         for i,instr in enumerate(self.instructions):
             if(isinstance(instr, DerefInstr)):
+                
                 deref_str = f'{g_nm(instr.var,names)}{str_deref_attrs(instr.deref_attrs)}'
+                # print("IS DEREF INSTR", deref_str)
                 body += f"{ind}{gen_assign(lang, f'i{i}', deref_str)}\n"
             else:
                 inp_seq = ", ".join([g_nm(x,names) for x in instr.args])
@@ -1759,7 +1763,7 @@ class OpComp():
         if(head_type_names is None): head_type_names = [f"h{i}_type" for i in range(n_heads)] 
         body = ""
         for i in range(n_heads):
-            # print(i, head_type_names)
+            # print("**", i, head_type_names)
             load_str = f'_load_ptr({head_type_names[i]},ptrs[{i}])'
             body += f"{ind}{gen_assign(lang,f'i{i}',load_str)}\n"
         inps = ",".join([f'i{i}' for i in range(len(arg_names))])
@@ -1834,6 +1838,7 @@ class OpComp():
         op_call_fnames = {op : f'call{j}' for j,op in self.used_ops.values()}
         call_src = self.gen_call('python', op_call_fnames=op_call_fnames)
 
+
         has_check = any([hasattr(op, 'check') for _,op in self.used_ops.values()])
         if(has_check):
             op_check_fnames = {op : f'check{j}' for j,op in self.used_ops.values()}
@@ -1850,7 +1855,12 @@ class OpComp():
         return_type = list(self.instructions.values())[-1].return_type
         call_sig = return_type(*self.arg_types)
         check_sig = u1(*self.arg_types)
+        # print()
         head_types = [x[2] for x in self.head_vars.values()]
+        # print("-------")
+        # print(head_types)
+        # print(call_sig)
+        # print(call_src)
         # print(call_sig)
 # 
 # boolean(*head_arg_types)
@@ -1892,6 +1902,7 @@ class __GenerateOp__(Op):
     call = call
     {"check = check" if(has_check) else ""}
     _long_hash = {long_hash!r}
+
 '''
         return source
 

@@ -7,7 +7,7 @@ from cre.tuple_fact import TupleFact, TF#TupleFact, assert_cre_obj, TupleFact
 from cre.fact import define_fact#TupleFact, assert_cre_obj, TupleFact
 # from cre.primitive import Primitive, StringPrimitiveType
 from cre.cre_object import CREObjType
-from cre.utils import PrintElapse
+from cre.utils import PrintElapse, decode_idrec
 
 from numba import njit, u8, i8, bool_
 from numba.types import unicode_type
@@ -83,6 +83,13 @@ def test_eq():
     b2 = TF("HI",TF("HO",2))
     b3 = TF("HO",TF("HI",2))
     b4 = TF("HO",TF("HI",2, 0))
+
+    print(decode_idrec(a1.idrec))
+    print(decode_idrec(a2.idrec))
+    print(decode_idrec(b1.idrec))
+    print(decode_idrec(b2.idrec))
+    print(decode_idrec(b3.idrec))
+    print(decode_idrec(b4.idrec))
 
     # print(eq(a1, a2))
     assert eq(a1, a2)

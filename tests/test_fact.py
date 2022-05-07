@@ -1,11 +1,11 @@
 import numpy as np
 from cre.fact import (_fact_from_spec, _standardize_spec, _merge_spec_inheritance, 
      define_fact, cast_fact, _cast_structref, BaseFact, DeferredFactRefType, isa,
-      uint_to_inheritance_bytes, get_inheritance_bytes_len_ptr, get_inheritance_fact_nums)
+      uint_to_inheritance_bytes, get_inheritance_bytes_len_ptr, get_inheritance_t_ids)
 from cre.context import cre_context
 from cre.memory import Memory
 from cre.cre_object import CREObjType
-from numba import njit, u8
+from numba import njit, u8, u1
 from numba.typed import List
 from numba.types import ListType
 import cre.dynamic_exec
@@ -120,9 +120,9 @@ def test_inheritence():
 
         # Context should keep track of parent and child t_ids
         cd = context.context_data
-        b1_t_id = cd.fact_num_to_t_id[BOOP1._fact_num]
-        b2_t_id = cd.fact_num_to_t_id[BOOP2._fact_num]
-        b3_t_id = cd.fact_num_to_t_id[BOOP3._fact_num]
+        b1_t_id = BOOP1.t_id
+        b2_t_id = BOOP2.t_id#cd.get_t_id(_type=BOOP2)
+        b3_t_id = BOOP3.t_id#cd.get_t_id(_type=BOOP3)
 
         assert np.array_equal(cd.parent_t_ids[b1_t_id],[])
         assert np.array_equal(cd.parent_t_ids[b2_t_id],[b1_t_id])
@@ -136,8 +136,8 @@ def test_inheritence():
         def get_idrec(b):
             return b.idrec
 
-        assert get_idrec(b1) == u8(-1)
-        assert get_idrec.py_func(b1) == u8(-1)
+        assert get_idrec(b1) & 0xFF == u1(-1)
+        assert get_idrec.py_func(b1) & 0xFF == u1(-1)
 
         b2 = BOOP2("A",7, 6)
         b3 = BOOP3("A",7, 6)
@@ -150,10 +150,10 @@ def test_inheritence():
         print(l,p)
 
 
-        fact_nums1 = get_inheritance_fact_nums(b1)
-        fact_nums2 = get_inheritance_fact_nums(b2)
-        fact_nums3 = get_inheritance_fact_nums(b3)
-        print(fact_nums1, fact_nums2, fact_nums3)
+        t_ids1 = get_inheritance_t_ids(b1)
+        t_ids2 = get_inheritance_t_ids(b2)
+        t_ids3 = get_inheritance_t_ids(b3)
+        print(t_ids1, t_ids2, t_ids3)
 
         @njit(cache=True)
         def check_isa(b1,b2,b3):
@@ -191,13 +191,13 @@ def test_context_helpers():
         b2_t_id = context.get_t_id(name="BOOP2")
         b3_t_id = context.get_t_id(name="BOOP3")
 
-        assert  context.get_t_id(fact_type=BOOP1) == b1_t_id 
-        assert  context.get_t_id(fact_type=BOOP2) == b2_t_id 
-        assert  context.get_t_id(fact_type=BOOP3) == b3_t_id 
+        assert  context.get_t_id(_type=BOOP1) == b1_t_id 
+        assert  context.get_t_id(_type=BOOP2) == b2_t_id 
+        assert  context.get_t_id(_type=BOOP3) == b3_t_id 
 
-        assert context.get_t_id(fact_num=BOOP1._fact_num) == b1_t_id 
-        assert context.get_t_id(fact_num=BOOP2._fact_num) == b2_t_id 
-        assert context.get_t_id(fact_num=BOOP3._fact_num) == b3_t_id 
+        # assert context.get_t_id(fact_num=BOOP1._fact_num) == b1_t_id 
+        # assert context.get_t_id(fact_num=BOOP2._fact_num) == b2_t_id 
+        # assert context.get_t_id(fact_num=BOOP3._fact_num) == b3_t_id 
 
         with pytest.raises(ValueError):
             context.get_t_id()
@@ -206,28 +206,28 @@ def test_context_helpers():
             context.get_t_id(name="SHLOOP")
 
         ### Check get_fact_num ###
-        b1_fact_num = context.get_fact_num(fact_type=BOOP1)
-        b2_fact_num = context.get_fact_num(fact_type=BOOP2)
-        b3_fact_num = context.get_fact_num(fact_type=BOOP3)
+        # b1_fact_num = context.get_fact_num(_type=BOOP1)
+        # b2_fact_num = context.get_fact_num(_type=BOOP2)
+        # b3_fact_num = context.get_fact_num(_type=BOOP3)
 
-        assert context.get_fact_num(name="BOOP1") == b1_fact_num 
-        assert context.get_fact_num(name="BOOP2") == b2_fact_num 
-        assert context.get_fact_num(name="BOOP3") == b3_fact_num 
+        # assert context.get_fact_num(name="BOOP1") == b1_fact_num 
+        # assert context.get_fact_num(name="BOOP2") == b2_fact_num 
+        # assert context.get_fact_num(name="BOOP3") == b3_fact_num 
 
-        assert context.get_fact_num(t_id=b1_t_id) == b1_fact_num 
-        assert context.get_fact_num(t_id=b2_t_id) == b2_fact_num 
-        assert context.get_fact_num(t_id=b3_t_id) == b3_fact_num 
+        # assert context.get_fact_num(t_id=b1_t_id) == b1_fact_num 
+        # assert context.get_fact_num(t_id=b2_t_id) == b2_fact_num 
+        # assert context.get_fact_num(t_id=b3_t_id) == b3_fact_num 
 
-        with pytest.raises(ValueError):
-            context.get_fact_num()
+        # with pytest.raises(ValueError):
+        #     context.get_fact_num()
 
-        with pytest.raises(ValueError):
-            context.get_fact_num(name="SHLOOP")
+        # # with pytest.raises(ValueError):
+        #     context.get_fact_num(name="SHLOOP")
 
         ### Check get_type ###
-        assert context.get_type(fact_num=b1_fact_num) == BOOP1 
-        assert context.get_type(fact_num=b2_fact_num) == BOOP2 
-        assert context.get_type(fact_num=b3_fact_num) == BOOP3 
+        # assert context.get_type(fact_num=b1_fact_num) == BOOP1 
+        # assert context.get_type(fact_num=b2_fact_num) == BOOP2 
+        # assert context.get_type(fact_num=b3_fact_num) == BOOP3 
 
         assert context.get_type(name="BOOP1") == BOOP1 
         assert context.get_type(name="BOOP2") == BOOP2 
@@ -258,23 +258,28 @@ def test_context_retroactive_register():
         with pytest.raises(ValueError):
             context.get_t_id(name="BOOP1")
 
-        b1_t_id = context.get_t_id(fact_type=BOOP1)
-        b2_t_id = context.get_t_id(fact_type=BOOP2)
-        b3_t_id = context.get_t_id(fact_type=BOOP3)
+        b1_t_id = context.get_t_id(_type=BOOP1)
+        b2_t_id = context.get_t_id(_type=BOOP2)
+        b3_t_id = context.get_t_id(_type=BOOP3)
 
         assert b1_t_id != b2_t_id and b2_t_id != b3_t_id
 
-        assert context.get_t_id(fact_num=BOOP1._fact_num) == b1_t_id
-        assert context.get_t_id(fact_num=BOOP2._fact_num) == b2_t_id
-        assert context.get_t_id(fact_num=BOOP3._fact_num) == b3_t_id
+        c = context
+        assert np.array_equal(c.get_parent_t_ids(t_id=b3_t_id),[b1_t_id,b2_t_id])
+        assert np.array_equal(c.get_parent_t_ids(t_id=b2_t_id),[b1_t_id])
+        assert np.array_equal(c.get_parent_t_ids(t_id=b1_t_id),[])
+        
+        assert np.array_equal(c.get_child_t_ids(t_id=b3_t_id),[b3_t_id])
+        assert np.array_equal(c.get_child_t_ids(t_id=b2_t_id),[b2_t_id,b3_t_id])
+        assert np.array_equal(c.get_child_t_ids(t_id=b1_t_id),[b1_t_id,b2_t_id,b3_t_id])
 
-        cd = context.context_data
-        assert np.array_equal(cd.parent_t_ids[b1_t_id],[])
-        assert np.array_equal(cd.parent_t_ids[b2_t_id],[b1_t_id])
-        assert np.array_equal(cd.parent_t_ids[b3_t_id],[b1_t_id,b2_t_id])
-        assert np.array_equal(cd.child_t_ids[b1_t_id],[b1_t_id,b2_t_id,b3_t_id])
-        assert np.array_equal(cd.child_t_ids[b2_t_id],[b2_t_id,b3_t_id])
-        assert np.array_equal(cd.child_t_ids[b3_t_id],[b3_t_id])
+        # cd = context.context_data
+        # assert np.array_equal(cd.parent_t_ids[b1_t_id],[])
+        # assert np.array_equal(cd.parent_t_ids[b2_t_id],[b1_t_id])
+        # assert np.array_equal(cd.parent_t_ids[b3_t_id],[b1_t_id,b2_t_id])
+        # assert np.array_equal(cd.child_t_ids[b1_t_id],[b1_t_id,b2_t_id,b3_t_id])
+        # assert np.array_equal(cd.child_t_ids[b2_t_id],[b2_t_id,b3_t_id])
+        # assert np.array_equal(cd.child_t_ids[b3_t_id],[b3_t_id])
 
     
 
@@ -307,10 +312,11 @@ def test_cast_fact():
             # return cast_fact(BOOP1,b)    
             return b.asa(BOOP1)
 
+        # Note w/ auto type resolution this isn't all that useful
         _b1 = down_cast(b3)
-        assert type(b1) == type(_b1)
+        # assert type(b1) == type(_b1)
         _b1 = down_cast.py_func(b3)    
-        assert type(b1) == type(_b1)
+        # assert type(b1) == type(_b1)
 
         #Upcast back
         @njit
@@ -342,18 +348,18 @@ def test_cast_fact():
             # return cast_fact(BaseFact,b)    
             return b.asa(BaseFact)
         _bs = base_down_cast(_b1)
-        assert type(bs) == type(_bs)
+        # assert type(bs) == type(_bs)
         _bs = base_down_cast.py_func(_b1)    
-        assert type(bs) == type(_bs)    
+        # assert type(bs) == type(_bs)    
 
         @njit
         def base_up_cast(b):
             # return cast_fact(BOOP1,b)    
             return b.asa(BOOP1)#cast_fact(BOOP1,b)    
         _b1 = base_up_cast(_bs)
-        assert type(b1) == type(_b1)
+        # assert type(b1) == type(_b1)
         _b1 = base_up_cast.py_func(_bs)    
-        assert type(b1) == type(_b1)     
+        # assert type(b1) == type(_b1)     
 
 def test_fact_eq():
     with cre_context("test_fact_eq") as context:
@@ -429,7 +435,6 @@ def test_protected_mutability():
         def declare_it(mem,b,name):
             mem.declare(b,name)
 
-        print("RUNTIME3.1",b1.fact_num)
         declare_it(mem,b1,"b1")
         print("RUNTIME3.2")
         declare_it.py_func(mem,b2,"b2")
@@ -804,8 +809,9 @@ if __name__ == "__main__":
     # _test_reference_type()
     # test_hash()
     # test_eq()
-    test_inheritence()
+    # test_inheritence()
     # test_inheritence_bytes()
+    test_context_retroactive_register()
 
 
 

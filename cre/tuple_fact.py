@@ -2,7 +2,7 @@ from numba import njit, u1,u2, i4, i8, u8, types, literal_unroll, generated_jit
 from numba.typed import List
 from numba.types import ListType, unicode_type
 from cre.caching import unique_hash, source_to_cache, import_from_cached, source_in_cache, get_cache_path
-from cre.fact import base_fact_field_dict, BaseFact, FactProxy, Fact, add_to_fact_registry
+from cre.fact import base_fact_field_dict, BaseFact, FactProxy, Fact, add_to_type_registry
 from cre.fact_intrinsics import fact_lower_setattr, _register_fact_structref
 from cre.cre_object import cre_obj_get_item, CREObjType, CREObjProxy, CREObjTypeTemplate, member_info_type
 from cre.utils import _struct_get_attr_offset, _sizeof_type, _struct_get_data_ptr, _load_ptr, _struct_get_attr_offset, _struct_from_ptr, _cast_structref, _obj_cast_codegen, encode_idrec, decode_idrec, _incref_structref, _get_member_offset
@@ -38,44 +38,58 @@ def tf_field_dict_from_types(member_types):
     # member_t_ids = tuple([_resolve_t_id_helper(x) for x in member_types])
     member_field_dict = {f"a{i}":m for i,m in enumerate(member_types)} 
     # tf_d = {**tup_fact_field_dict,"members" : types.Tuple(member_types),"chr_mbrs_infos":member_info_tup_type}
-    tf_d = {**base_fact_field_dict,**member_field_dict,**{"chr_mbrs_infos":member_info_tup_type}}
+    tf_d = {**base_fact_field_dict,**member_field_dict}#,**{"chr_mbrs_infos":member_info_tup_type}}
     # print("tf_d", tf_d)
     return tf_d
 
 def repr_tf_item(tf,typ, index):
     return repr(cre_obj_get_item(tf.asa(CREObjType),typ,index))
 
-def gen_tuple_fact_source(member_types, TF_FACT_NUM, specialization_name=None, ind='    '):    
+from cre.fact import _gen_props, _gen_getter_jit
+def gen_tuple_fact_source(member_types, TF_T_ID, specialization_name=None, ind='    '):    
     # attr_offsets = get_offsets_from_member_types(member_types)
-
-
+    base_fields = [(k,v) for k,v in base_fact_field_dict.items()]
+    getter_jits = "\n".join([_gen_getter_jit("TupleFact",t,attr) for attr,t in base_fields])
+    properties = "\n".join([_gen_props("TupleFact",attr) for attr,t in base_fields])
     init_fields = f'\n{ind}'.join([f"fact_lower_setattr(st, 'a{i}', members[{i}])" for i in range(len(member_types))])
     # print("::", member_types)
 # attr_offsets = np.array({attr_offsets!r},dtype=np.int16)    
 # SpecializedTF({"types.StarArgTuple(member_types)" if len(member_types) > 0 else ""})
     return (
-f'''from numba import njit, u8, types
+f'''from numba import njit, u1, u8, types
+from numba.types import UniTuple
 from numba.experimental.structref import new
 from numba.extending import overload, lower_cast
+from cre.fact import uint_to_inheritance_bytes
 from cre.fact_intrinsics import define_boxing, get_fact_attr_ptr, _register_fact_structref, fact_mutability_protected_setattr, fact_lower_setattr, _fact_get_chr_mbrs_infos
 from cre.tuple_fact import TupleFactClass, TupleFactProxy, tf_field_dict_from_types, repr_tf_item, T_ID_TUPLE_FACT{", TupleFact" if specialization_name else ""}
-from cre.utils import encode_idrec, _get_member_offset
-from cre.cre_object import set_chr_mbrs
+from cre.utils import encode_idrec, _get_member_offset, _cast_structref
+from cre.cre_object import member_info_type, set_chr_mbrs
 import cloudpickle
-TF_FACT_NUM = {TF_FACT_NUM}
+TF_T_ID = T_ID_TUPLE_FACT#{TF_T_ID}
 member_types = cloudpickle.loads({cloudpickle.dumps(member_types)})
 n_members = len(member_types)
 tf_fields = [(k,v) for k,v in tf_field_dict_from_types(member_types).items()]
 
+inheritance_bytes = tuple(list(uint_to_inheritance_bytes(T_ID_TUPLE_FACT)) + [u1(0)] + list(uint_to_inheritance_bytes({TF_T_ID}))) 
+num_inh_bytes = len(inheritance_bytes)
+
 @_register_fact_structref
 class SpecializedTFClass(TupleFactClass):
-    _fact_num = TF_FACT_NUM
+    t_id = TF_T_ID
     def __str__(self):
         return '{specialization_name if specialization_name else "TupleFact"}'
 
 SpecializedTF = fact_type = SpecializedTFClass(tf_fields)
+SpecializedTF_w_mbr_infos = SpecializedTFClass(tf_fields+
+[("chr_mbrs_infos", UniTuple(member_info_type,{len(member_types)})),
+ ("num_inh_bytes", u1),
+ ("inh_bytes", UniTuple(u1, num_inh_bytes))])
+
+
+
 SpecializedTF._fact_name = "TupleFact"
-SpecializedTF._fact_num = TF_FACT_NUM
+SpecializedTF.t_id = TF_T_ID
 # SpecializedTF._attr_offsets = attr_offsets
 SpecializedTF._fact_type_class = SpecializedTFClass
 {f'SpecializedTF._specialization_name = "{specialization_name}"' if(specialization_name is not None) else ''}
@@ -87,27 +101,31 @@ def upcast(context, builder, fromty, toty, val):
 """) if specialization_name is not None else ""
 }
 
-default_idrec  = encode_idrec(T_ID_TUPLE_FACT, 0, 0xFF)
+default_idrec  = encode_idrec(TF_T_ID, 0, 0xFF)
 @njit(cache=True)
 def ctor({"*members" if len(member_types) > 0 else ""}):
-    st = new(SpecializedTF)
+    st = new(SpecializedTF_w_mbr_infos)
     fact_lower_setattr(st, 'idrec', default_idrec)
     fact_lower_setattr(st, 'hash_val', 0)
-    fact_lower_setattr(st, 'fact_num', {TF_FACT_NUM})
     set_chr_mbrs(st, ({", ".join([f"'a{i}'" for i in range(len(member_types))])}))
+    fact_lower_setattr(st,'num_inh_bytes', num_inh_bytes)
+    fact_lower_setattr(st,'inh_bytes', inheritance_bytes)
     {init_fields}
-    return st
+    return _cast_structref(SpecializedTF,st)
 
 SpecializedTFClass._ctor = (ctor,)
+
+{getter_jits}
 
 class SpecializedTFProxy(TupleFactProxy):
     __numba_ctor = ctor
     _fact_type = SpecializedTF
     _fact_type_class = SpecializedTFClass
-    _fact_num = TF_FACT_NUM
+    t_id = TF_T_ID
 
     def __str__(self):
         return f"TupleFact({{', '.join([repr_tf_item(self,mt,i) for i,mt in enumerate(member_types)])}})"
+{properties}
 
 @overload(SpecializedTFProxy, prefer_literal=False)
 def overload_tup_fact_ctor(*args):
@@ -133,9 +151,11 @@ def define_tuple_fact(member_types, context=None, return_proxy=False, return_typ
 
     TF_hash_code = unique_hash(["TupleFact",member_types])
     if(not source_in_cache("TupleFact",TF_hash_code)):
-        TF_FACT_NUM = add_to_fact_registry("TupleFact", TF_hash_code)
-        print(member_types)
-        source = gen_tuple_fact_source(member_types, TF_FACT_NUM, specialization_name)
+        # from cre.core import T_ID_TUPLE_FACT
+        TF_T_ID = add_to_type_registry("TupleFact", TF_hash_code)
+
+        # TupleFacts all have the same t_id
+        source = gen_tuple_fact_source(member_types, TF_T_ID, specialization_name)
         source_to_cache("TupleFact", TF_hash_code, source)
     tf_type = import_from_cached("TupleFact", TF_hash_code, ["SpecializedTF"])["SpecializedTF"]
 
@@ -354,7 +374,7 @@ define_boxing(TupleFactClass, TupleFactProxy)
 
 TupleFact = TupleFactClass()
 # print(TupleFact.__module__)
-TF_FACT_NUM = TupleFact._fact_num
+# TF_FACT_NUM = TupleFact._fact_num
 
 register_global_default("TupleFact", TupleFact)
 

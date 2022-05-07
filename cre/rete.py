@@ -339,7 +339,7 @@ def make_deref_record_parent(deref_depends, idrec, r_ptr):
     p[r_ptr] = u1(1)
     return _raw_ptr_from_struct(p)
 
-@njit(i8(deref_type,i8),inline='always',cache=True)
+@njit(i8(deref_type,i8),inline='never',cache=True)
 def deref_once(deref,inst_ptr):
     if(deref.type == u1(DEREF_TYPE_ATTR)):
         return _ptr_to_data_ptr(inst_ptr)
@@ -354,6 +354,7 @@ def resolve_head_ptr(self, arg_ind, base_t_id, f_id, deref_offsets):
         Keep in mind that a head_ptr is the pointer to the address where the data is stored not the data itself.
     '''
     facts = _struct_from_ptr(VectorType, self.mem.mem_data.facts[base_t_id])
+    # print(deref_offsets)
     if(len(deref_offsets) > 0):
         inst_ptr = facts.data[f_id]
         if(len(deref_offsets) > 1):
@@ -361,9 +362,15 @@ def resolve_head_ptr(self, arg_ind, base_t_id, f_id, deref_offsets):
             for k in range(len(deref_offsets)-1):
                 if(inst_ptr == 0): break;
                 deref = deref_offsets[k]
-                data_ptr = deref_once(deref,inst_ptr)
+                data_ptr = deref_once(deref, inst_ptr)
+                # print(f"{deref.type} inst_ptr {inst_ptr} -> {data_ptr+deref.offset}")
+                # print("data_ptr", k, data_ptr)
+                # Note: This won't retreive an idrec for lists 
                 rel_idrecs[k] = _load_ptr(u8, data_ptr)
                 inst_ptr = _load_ptr(i8, data_ptr+deref.offset)
+                # print("inst_ptr", k, inst_ptr)
+
+
 
             # Inject a deref record so that we can track changes to intermediate facts
             parent_ptrs = rel_idrecs.astype(i8) 
@@ -374,7 +381,9 @@ def resolve_head_ptr(self, arg_ind, base_t_id, f_id, deref_offsets):
 
         if(inst_ptr != 0):
             deref = deref_offsets[-1]
-            data_ptr = deref_once(deref,inst_ptr)
+            data_ptr = deref_once(deref, inst_ptr)
+            # print(f"{deref.type} inst_ptr {inst_ptr} -> {data_ptr+deref.offset}")
+            # print("data_ptr", -1, data_ptr,data_ptr+deref.offset)
             return data_ptr+deref.offset
         else:
             return 0
@@ -411,7 +420,7 @@ def validate_head_or_retract(self, arg_ind, idrec, head_ptrs, r):
             # print("resolve_head_ptr", f_id, head_ptr)
             if(head_ptr == 0): 
                 is_valid=False;
-                # del change_set[idrec];
+                # del change_set[idrec]`;
                 break; 
             head_ptrs[i] = head_ptr
 
@@ -801,9 +810,14 @@ def _handle_beta_match(tt, negated, inp_state_i, inp_state_j, match_head_ptrs_fu
     ind0, ind1 = match_inds[0], match_inds[1]
     if(not inp_state_j.head_was_valid): return
     
-    # print("L", match_inds, match_inp_ptrs)
+    
     was_match = tt[ind0, ind1]
     is_match = match_head_ptrs_func(match_inp_ptrs) ^ negated
+
+
+    # print("L", match_inds, match_inp_ptrs, is_match, "NEGATED", negated)
+    # if(not negated):
+    #     print(_load_ptr(u8,match_inp_ptrs[0]), _load_ptr(u8,match_inp_ptrs[1]))
     tt[ind0, ind1] = u1(is_match)
     count_diff = i8(is_match) - i8(was_match)
     inp_state_i.true_count += count_diff
@@ -874,7 +888,7 @@ def update_node(self):
     # print("C")
 
     # return
-
+    # print("MATCH_ADDR", self.op.match_head_ptrs_addr)
     match_head_ptrs_func = _func_from_address(match_heads_f_type, self.op.match_head_ptrs_addr)
 
 
@@ -1250,9 +1264,12 @@ def _global_map_insert(idrec, g_map, node):
 
 @njit(cache=True)
 def _get_var_t_id(mem, var):
-    t_id = mem.context_data.fact_to_t_id.get(var.base_type_name,None)
-    if(t_id is None): raise ValueError("Base Vars of Conditions() must inherit from Fact")
-    return t_id
+    # t_id = mem.context_data.fact_to_t_id.get(var.base_type_name,None)
+    # if(t_id == 14): t_id = 19
+    # print("_get_var_t_id", t_id, var.base_type_name)
+    # if(t_id is None): raise ValueError("Base Vars of Conditions() must inherit from Fact")
+    # print("_get_var_t_id", var.base_t_id)
+    return var.base_t_id
 
 @njit(cache=True)
 def _ensure_long_enough(nodes_by_nargs, nargs):
@@ -1268,7 +1285,7 @@ def _make_rete_nodes(mem, c, index_map):
     global_deref_idrec_map = Dict.empty(u8, node_list_type)
     # global_t_id_root_memory_map = Dict.empty(u8, node_list_type)
 
-    fnum_to_t_id = mem.context_data.fact_num_to_t_id
+    # fnum_to_t_id = mem.context_data.fact_num_to_t_id
     # fname_to_t_id = mem.context_data.fact_to_t_id
 
     # Make an identity node (i.e. lit,op=None) so there are always alphas
@@ -1314,14 +1331,14 @@ def _make_rete_nodes(mem, c, index_map):
                         idrec1 = encode_idrec(u2(t_id),0,u1(d_offset.a_id))
                         _global_map_insert(idrec1, global_deref_idrec_map, node)
                         # print("-idrec1", decode_idrec(idrec1))
-                        fn = d_offset.fact_num
-                        if(fn >= 0 and fn < len(fnum_to_t_id)):
-                            t_id = fnum_to_t_id[d_offset.fact_num]
-                            idrec2 = encode_idrec(u2(t_id),0,0)
-                            _global_map_insert(idrec2, global_deref_idrec_map, node)
+                        t_id = d_offset.t_id
+                        # if(fn >= 0 and fn < len(fnum_to_t_id)):
+                            # t_id = fnum_to_t_id[d_offset.fact_num]
+                        idrec2 = encode_idrec(u2(t_id),0,0)
+                        _global_map_insert(idrec2, global_deref_idrec_map, node)
                             # print("--idrec2", decode_idrec(idrec2))
-                        else:
-                            break
+                        # else:
+                        #     break
                                 
 
     return nodes_by_nargs, global_deref_idrec_map
@@ -1485,7 +1502,7 @@ def parse_mem_change_queue(r_graph):
     for i in range(r_graph.change_head, change_queue.head):
         idrec = u8(change_queue[i])
         t_id, f_id, a_id = decode_idrec(idrec)
-        # print(t_id, f_id, a_id)
+        # print("idrec", t_id, f_id, a_id)
 
         # Add this idrec to change_set of root nodes
         # root_node_mem = global_t_id_root_memory_map.get(t_id,None)
@@ -1803,27 +1820,35 @@ def update_other_idrecs(m_node):
 
         # other_idrecs_d = _dict_from_ptr(dict_i8_u1_type, matches[f_id]) 
         # print("C", other_f_ids_d)
-        # print("C", )
+        
         # print("C", len(other_f_ids_d))
         arg_ind = m_node.associated_arg_ind
         other_ind = 0 if arg_ind == 1 else 1
         node = m_node.node
         associated_output = node.outputs[arg_ind]
-        this_internal_ind = associated_output.match_inds[m_node.curr_ind]
 
-        truth_table = node.truth_table
-        input_states = node.input_state_buffers[other_ind]
-        
-        other_idrecs = np.empty((len(associated_output.match_inds)), dtype=np.uint64)
-        k = 0
-        if(arg_ind == 0):
-            for i, t in enumerate(truth_table[this_internal_ind, :]):
-                if(t): other_idrecs[k] = input_states[i].idrec; k += 1
-        else:        
-            for i, t in enumerate(truth_table[:, this_internal_ind]):
-                if(t): other_idrecs[k] = input_states[i].idrec; k += 1
+        n_match_inds = len(associated_output.match_inds)
+        other_idrecs = np.empty((n_match_inds,), dtype=np.uint64)
+        if(m_node.curr_ind < n_match_inds):
+            this_internal_ind = associated_output.match_inds[m_node.curr_ind]
+            # print("C", arg_ind, associated_output.match_inds, m_node.curr_ind)
+            truth_table = node.truth_table
+            input_states = node.input_state_buffers[other_ind]
+            # print("D", input_states)
+            
+            # print(truth_table, this_internal_ind)
+            k = 0
+            if(arg_ind == 0):
+                for i, t in enumerate(truth_table[this_internal_ind, :]):
+                    if(t): other_idrecs[k] = input_states[i].idrec; k += 1
+            else:        
+                for i, t in enumerate(truth_table[:, this_internal_ind]):
+                    if(t): other_idrecs[k] = input_states[i].idrec; k += 1
 
-        m_node.other_idrecs = other_idrecs[:k]
+            m_node.other_idrecs = other_idrecs[:k]
+        else:
+            raise ValueError("Tried to update empty MatchIterNode.")
+            # m_node.other_idrecs = other_idrecs
         # this_input_state = m_node.node.truth_table[arg_ind][]
         # # this_ind = 
         # other_idrecs = np.empty((len(other_input_state),), dtype=np.uint64)
@@ -1845,6 +1870,7 @@ def restitch_match_iter(m_iter, start_from):
     for i in range(start_from,-1,-1):
         # print("I", i)
         m_node = m_iter.iter_nodes[i]
+        cnt = 0
         if(m_node.curr_ind == -1):
             if(m_node.depends_on_var_ind == -1):
                 # print("A")
@@ -1852,18 +1878,24 @@ def restitch_match_iter(m_iter, start_from):
                 associated_output = m_node.node.outputs[m_node.associated_arg_ind]
                 matches = associated_output.match_idrecs
                 idrecs = np.empty((len(matches)),dtype=np.uint64)
-                cnt = 0
+                
                 # print("B", matches, len(m_node.node.var_inds))
                 # print(matches)
                 # for j, (f_id, v) in enumerate(matches.items()):
                 for j, idrec in enumerate(matches):
                     if(idrec == 0): continue
                     idrecs[j] = idrec; cnt += 1;
+
+                if(cnt == 0):
+                    m_iter.is_empty = True
+                    break
+
                 m_node.idrecs = idrecs[:cnt]
 
                 # print("N_IDRECS",m_node.idrecs)
                 # if(i == start_from and len(m_node.idrecs) == 0):
                 #     print("EMPTY")
+                
 
 
                 # print("C", cnt)
@@ -1875,9 +1907,11 @@ def restitch_match_iter(m_iter, start_from):
                 m_node.idrecs = dep_node.other_idrecs
                 # m_node.curr_ind = 0
             m_node.curr_ind = 0
-        if(i > 0):
+        if(i > 0 and cnt > 0):
             # print("SS")
             update_other_idrecs(m_node)
+
+            # print("DONE")
             # print("S UPDATE OTHER", i, m_node.other_idrecs)
         # else:
         #     print("CURRIND", m_node.curr_ind)

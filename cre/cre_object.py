@@ -1,6 +1,7 @@
 from numba import i8, u8, u2, u1, types, njit, generated_jit, literal_unroll
 from numba.types import FunctionType, unicode_type, Tuple
 from numba.extending import  overload, lower_getattr, overload_method
+from cre.core import register_global_default
 from cre.utils import _obj_cast_codegen, ptr_t, _raw_ptr_from_struct, _raw_ptr_from_struct_incref, CastFriendlyMixin, decode_idrec, _func_from_address, _cast_structref, _get_member_offset, _struct_get_data_ptr, _sizeof_type, _load_ptr, _struct_from_ptr
 from cre.structref import define_structref
 from numba.core.datamodel import default_manager, models
@@ -131,6 +132,7 @@ class CREObjTypeTemplate(CastFriendlyMixin, types.StructRef):
 
 
 CREObjType = CREObjTypeTemplate(cre_obj_fields) 
+register_global_default("CREObj", CREObjType)
 default_manager.register(CREObjTypeTemplate, CREObjModel)
 define_attributes(CREObjType)
 
@@ -183,18 +185,21 @@ class CREObjProxy(StructRefProxy):
         from cre.context import cre_context
         context = cre_context(context)
         t_id = get_t_id(self._meminfo)
-        # The type associated with the object's t_id in 'context'
-        t_id_type = context.get_type(t_id=t_id)
-        if(self.__class__ is not t_id_type and hasattr(t_id_type,"_proxy_class")):
-            self._type = t_id_type
-            self.__class__ = t_id_type._proxy_class
+
+        if(t_id != T_ID_TUPLE_FACT):
+            # The type associated with the object's t_id in 'context'
+            t_id_type = context.get_type(t_id=t_id)
+            if(self.__class__ is not t_id_type and hasattr(t_id_type,"_proxy_class")):
+                self._type = t_id_type
+                self.__class__ = t_id_type._proxy_class
         
         return self
 
     def recover_type_safe(self,context=None):
         try:
             return self.recover_type(context)
-        except (ValueError, AttributeError):
+        except (ValueError, AttributeError) as e:
+            print("RECOVER FAILED", e)
             return self
 
 
@@ -332,7 +337,7 @@ def get_cre_obj_idrec(self):
 
 
 
-from cre.core import T_ID_UNRESOLVED, T_ID_BOOL, T_ID_INT, T_ID_FLOAT, T_ID_STR, T_ID_TUPLE_FACT 
+from cre.core import T_ID_UNDEFINED, T_ID_BOOL, T_ID_INT, T_ID_FLOAT, T_ID_STR, T_ID_TUPLE_FACT 
 
 def _resolve_t_id_helper(x):
     if(isinstance(x, types.Boolean)):
@@ -343,7 +348,7 @@ def _resolve_t_id_helper(x):
         return T_ID_FLOAT
     elif(x is types.unicode_type):
         return T_ID_STR
-    return T_ID_UNRESOLVED
+    return T_ID_UNDEFINED
 
 
 

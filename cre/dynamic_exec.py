@@ -9,7 +9,7 @@ from cre.cre_object import CREObjTypeTemplate, CREObjType, member_info_type
 from numba.core.datamodel import default_manager, models
 from numba.experimental.structref import define_attributes, StructRefProxy, new, define_boxing
 import operator
-from cre.core import T_ID_CONDITIONS, T_ID_LITERAL, T_ID_OP, T_ID_FACT, T_ID_VAR, T_ID_UNRESOLVED, T_ID_BOOL, T_ID_INT, T_ID_FLOAT, T_ID_STR, T_ID_TUPLE_FACT
+from cre.core import T_ID_CONDITIONS, T_ID_LITERAL, T_ID_OP, T_ID_FACT, T_ID_VAR, T_ID_UNDEFINED, T_ID_BOOL, T_ID_INT, T_ID_FLOAT, T_ID_STR, T_ID_TUPLE_FACT
 # from cre.primitive import BooleanPrimitiveType, IntegerPrimitiveType, FloatPrimitiveType, StringPrimitiveType
 from cre.tuple_fact import TupleFact
 from cre.var import GenericVarType
@@ -72,9 +72,9 @@ def tuple_fact_eq(a, b):
 
         for (t_id_a, data_ptr_a), (t_id_b, data_ptr_b) in zip(cre_obj_iter_t_id_item_ptrs(pa),cre_obj_iter_t_id_item_ptrs(pb)):
             
-            if(t_id_a == T_ID_UNRESOLVED): 
+            if(t_id_a == T_ID_UNDEFINED): 
                 t_id_a,_, _ = decode_idrec(_struct_from_ptr(CREObjType, _load_ptr(i8, data_ptr_a) ).idrec)
-            if(t_id_b == T_ID_UNRESOLVED): 
+            if(t_id_b == T_ID_UNDEFINED): 
                 t_id_b,_, _ = decode_idrec(_struct_from_ptr(CREObjType, _load_ptr(i8, data_ptr_b) ).idrec)
 
             # print("t_ids", t_id_a, t_id_b)
@@ -115,9 +115,9 @@ def fact_eq(a, b):
     if(tla != tlb): return False
 
     for (t_id_a, data_ptr_a), (t_id_b, data_ptr_b) in zip(cre_obj_iter_t_id_item_ptrs(a),cre_obj_iter_t_id_item_ptrs(b)):        
-        if(t_id_a == T_ID_UNRESOLVED): 
+        if(t_id_a == T_ID_UNDEFINED): 
             t_id_a,_, _ = decode_idrec(_struct_from_ptr(CREObjType, _load_ptr(i8, data_ptr_a) ).idrec)
-        if(t_id_b == T_ID_UNRESOLVED): 
+        if(t_id_b == T_ID_UNDEFINED): 
             t_id_b,_, _ = decode_idrec(_struct_from_ptr(CREObjType, _load_ptr(i8, data_ptr_b) ).idrec)
 
         if(t_id_a != t_id_b): return False
@@ -278,7 +278,7 @@ def tuple_fact_hash(x):
             tl = p.num_chr_mbrs
             for t_id, data_ptr in cre_obj_iter_t_id_item_ptrs(p):
                 # print("t_id", t_id)
-                if(t_id == T_ID_UNRESOLVED): 
+                if(t_id == T_ID_UNDEFINED): 
                     t_id,_, _ = decode_idrec(_struct_from_ptr(CREObjType,_load_ptr(i8, data_ptr)).idrec)
                 if(t_id == T_ID_TUPLE_FACT):
                     # print("IS PRED")
@@ -317,7 +317,7 @@ def fact_hash(x):
         acc = _PyHASH_XXPRIME_5
         tl = x.num_chr_mbrs
         for t_id, data_ptr in cre_obj_iter_t_id_item_ptrs(x):
-            if(t_id == T_ID_UNRESOLVED): 
+            if(t_id == T_ID_UNDEFINED): 
                 t_id,_, _ = decode_idrec(_struct_from_ptr(CREObjType,_load_ptr(i8, data_ptr)).idrec)
             if(t_id == T_ID_TUPLE_FACT):
                 raise Exception()

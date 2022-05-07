@@ -1,4 +1,5 @@
 from numba import njit
+from cre.utils import decode_idrec 
 from cre.context import cre_context 
 from cre.memory import Memory 
 from cre.flattener import Flattener, get_semantic_visibile_fact_attrs, flattener_update
@@ -33,6 +34,8 @@ def test_flatten():
         out_mem = fl.apply()
 
         from cre.gval import gval
+        t_ids = set([decode_idrec(x.idrec)[0] for x in out_mem.get_facts(gval)])
+        print(t_ids,gval.t_id)
         values = set([x.val for x in out_mem.get_facts(gval)])
         print(values)
         

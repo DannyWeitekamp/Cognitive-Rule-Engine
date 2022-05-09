@@ -6,6 +6,13 @@ from cre.flattener import Flattener, get_semantic_visibile_fact_attrs, flattener
 from cre.fact import define_fact
 import pytest_benchmark
 
+def flat_mem_vals(flat_mem):
+    from cre.gval import gval
+    t_ids = set([decode_idrec(x.idrec)[0] for x in flat_mem.get_facts(gval)])
+    values = set([x.val for x in flat_mem.get_facts(gval)])
+    return values
+
+
 
 def test_flatten():
     with cre_context("test_flatten") as context:
@@ -21,34 +28,46 @@ def test_flatten():
 
 
         mem = Memory()
-        mem.declare(BOOP1("A", 1))
-        mem.declare(BOOP1("B", 2))
-        mem.declare(BOOP2("C", 3, 13))
-        mem.declare(BOOP2("D", 4, 14))
-        mem.declare(BOOP3("E", 5, 15, 105))
-        mem.declare(BOOP3("F", 6, 16, 106))
-        print(mem)
+        a = BOOP1("A", 1)
+        b = BOOP1("B", 2)
+        c = BOOP2("C", 3, 13)
+        d = BOOP2("D", 4, 14)
+        e = BOOP3("E", 5, 15, 105)
+        f = BOOP3("F", 6, 16, 106)
+
+        a_idrec = mem.declare(a)
+        b_idrec = mem.declare(b)
+        c_idrec = mem.declare(c)
+        d_idrec = mem.declare(d)
+        e_idrec = mem.declare(e)
+        f_idrec = mem.declare(f)
+        print("-------")
 
         fl = Flattener((BOOP1, BOOP2, BOOP3), mem)
+        
         out_mem = fl.apply()
-        out_mem = fl.apply()
-
-        from cre.gval import gval
-        t_ids = set([decode_idrec(x.idrec)[0] for x in out_mem.get_facts(gval)])
-        print(t_ids,gval.t_id)
-        values = set([x.val for x in out_mem.get_facts(gval)])
+        values = flat_mem_vals(out_mem)
+        print(out_mem)
         print(values)
-        
-
-
-        
-        print(fl)
-        print("-------")
-        print(out_mem)
-        print(out_mem)
-        print(repr(out_mem))
-
         assert values == {"A", "B", "C", "D", "E" ,"F", 13., 14., 15., 16., 105.,106.}
+
+        mem.retract(c)
+        mem.retract(d)
+
+        out_mem = fl.apply()
+        values = flat_mem_vals(out_mem)
+        print(values)
+        assert values == {"A", "B", "E" ,"F", 15., 16., 105.,106.}
+
+        mem.modify(e, "D", 777)
+        mem.modify(f, "A", "Z")
+
+        out_mem = fl.apply()
+        values = flat_mem_vals(out_mem)
+        print(values)
+        assert values == {"A", "B", "E" ,"Z", 15., 16., 777., 106.}
+
+
 
 # with cre_context("flat") as context:
 

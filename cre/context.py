@@ -344,7 +344,7 @@ class CREContext(object):
     
     def get_parent_t_ids(self, _type=None, name:str=None, t_id=None):
         if(t_id is None):
-            _type = self.get_type(name=name,t_id=t_id)
+            t_id = self.get_t_id(_type=_type,name=name)
 
         if(t_id is None):
             raise ValueError("Bad arguments for 'get_parent_t_ids'. Expecting one keyword argument name:str, t_id:int, or _type:Type")
@@ -360,7 +360,7 @@ class CREContext(object):
 
     def get_child_t_ids(self, _type=None, name:str=None, t_id=None, inclusive=True):
         if(t_id is None):
-            _type = self.get_type(name=name,t_id=t_id)
+            t_id = self.get_t_id(_type=_type,name=name)
 
         if(t_id is None):
             raise ValueError("Bad arguments for 'get_parent_t_ids'. Expecting one keyword argument name:str, t_id:int, or _type:Type")

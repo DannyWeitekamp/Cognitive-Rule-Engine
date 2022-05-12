@@ -2,7 +2,7 @@ import operator
 import numpy as np
 import numba
 from numba.core.dispatcher import Dispatcher
-from numba import types, njit, i8, u8, i4, u1, i8, literally, generated_jit, boolean
+from numba import types, njit, i8, u8, i4, u1, u2, i8, literally, generated_jit, boolean
 from numba.typed import List, Dict
 from numba.types import ListType, DictType, unicode_type, void, Tuple
 from numba.experimental import structref
@@ -239,9 +239,11 @@ class PtrOp(Op,metaclass=PtrOpMeta):
 
 
         # with PrintElapse("new_OP"):
+        return_t_id = cre_context().get_t_id(_type=cls.signature.return_type)
         op_inst = op_ctor(
             cls.__name__,
             str(types.boolean),
+            u2(return_t_id),
             cls.arg_type_names,
             head_var_ptrs,
             _expr_template,

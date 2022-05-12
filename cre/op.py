@@ -2,7 +2,7 @@ import operator
 import numpy as np
 import numba
 from numba.core.dispatcher import Dispatcher
-from numba import types, njit, i8, u8, i4, u1, i8, literally, generated_jit, boolean
+from numba import types, njit, i8, u8, i4, u1, u2, literally, generated_jit, boolean
 from numba.typed import List, Dict
 from numba.types import ListType, DictType, unicode_type, void, Tuple
 from numba.experimental import structref
@@ -23,7 +23,7 @@ from cre.fact import Fact, gen_fact_import_str, get_offsets_from_member_types
 from cre.var import Var, var_memcopy, GenericVarType
 from cre.cre_object import CREObjType, cre_obj_field_dict, CREObjTypeTemplate, CREObjProxy
 from cre.core import T_ID_OP, register_global_default
-from cre.make_source import make_source, gen_def_func, gen_assign, resolve_template, gen_def_class
+from cre.make_source import make_source, gen_def_func, gen_assign, gen_if, gen_not, resolve_template, gen_def_class
 from numba.core import imputils, cgutils
 from numba.core.datamodel import default_manager, models, register_default
 from numba.experimental.function_type import _get_wrapper_address
@@ -133,14 +133,14 @@ def match({arg_names}):
     {f"if(not check({arg_names})): return 0" if(hasattr(cls,'check')) else ""}
     return 1 if(call({arg_names})) else 0
 
-match_head = match
+match_heads = match
 
 {"".join([f'h{i}_type, ' for i in range(len(arg_types))])} = call_sig.args
 
 @njit(boolean(i8[::1],) ,cache=True)
 def match_head_ptrs(ptrs):
 {indent(nl.join([f'i{i} = _load_ptr(h{i}_type,ptrs[{i}])' for i in range(len(arg_types))]),prefix='    ')}
-    return match_head({",".join([f'i{i}' for i in range(len(arg_types))])})
+    return match_heads({",".join([f'i{i}' for i in range(len(arg_types))])})
 
 
 
@@ -149,14 +149,6 @@ field_dict = {{**op_fields_dict,**{{f"arg{{i}}" : t for i,t in enumerate(call_si
 '''
     return source
 
-def gen_call_intrinsic_source(return_type,n_args):
-    source = f''' 
-@intrinsic
-def call_intrinsic(typingctx, {[f"a{i}" for i in range(n_args)]}):
-    sig = 
-    return 
-'''
-    return source
 
 from cre.var import GenericVarType
 
@@ -181,11 +173,14 @@ op_fields_dict = {
     "head_ranges" : head_range_type[::1],
 
     "return_type_name" : unicode_type,
+    
     "arg_type_names" : ListType(unicode_type),
     "call_addr" : i8,
     "call_multi_addr" : i8,
     "check_addr" : i8,
     "match_head_ptrs_addr" : i8,
+
+    "return_t_id" : u2,
     "is_ptr_op" : types.boolean,
     
     # "arg_types" : types.Any,
@@ -303,23 +298,24 @@ class UntypedOp():
 
 
     def __call__(self,*py_args):
-
-        # with PrintElapse("  get types"):
-        # Fill types and check for all_const/not_var 
         arg_types = [] 
         all_const = True
         any_not_var = False
         any_deref_vars = False
-        for x in py_args:
-            # print(type(x))
-            arg_types.append(resolve_return_type(x))
+        py_args = list(py_args)
+        for i, x in enumerate(py_args):
+            if(isinstance(x,types.Type)):
+                arg_types.append(x)
+                x = py_args[i] = Var(x)
+            else:
+                arg_types.append(resolve_return_type(x))
+
             if(isinstance(x,(OpMeta,OpComp, Op))):
                 all_const = False
                 any_not_var = True
             elif(isinstance(x,(Var))):
                 if(len(x.deref_offsets) > 0):
                     any_deref_vars = True
-
                 all_const = False
             else:
                 any_not_var = True
@@ -362,7 +358,9 @@ class UntypedOp():
             head_vars = {}
             base_to_arg_num = {}
             for x in py_args:
-                # print(x,type(x),isinstance(x,Var))
+                # print("<<", x,type(x),isinstance(x,Var))
+                # print
+                
                 if(isinstance(x,Var)):
                     b_ptr = x.base_ptr
                     if(b_ptr not in base_to_arg_num): base_to_arg_num[b_ptr] = len(base_to_arg_num)
@@ -503,7 +501,7 @@ def make_head_ranges(n_args, head_var_ptrs):
 
 
 @njit(cache=True)
-def op_ctor(name, return_type_name, arg_type_names, head_var_ptrs, 
+def op_ctor(name, return_type_name, return_t_id, arg_type_names, head_var_ptrs, 
             expr_template="MOOSE", shorthand_template="ROOF",
             call_addr=0, call_multi_addr=0, check_addr=0, match_head_ptrs_addr=0, is_ptr_op=False):
     '''The constructor for an Op instance that can be passed to the numba runtime'''
@@ -511,6 +509,7 @@ def op_ctor(name, return_type_name, arg_type_names, head_var_ptrs,
     st.idrec = encode_idrec(T_ID_OP, 0, 0)
     st.name = name
     st.return_type_name = return_type_name
+    st.return_t_id = return_t_id
 
     st.arg_type_names = arg_type_names
     st.base_var_map = Dict.empty(i8, unicode_type)
@@ -973,9 +972,11 @@ class Op(CREObjProxy,metaclass=OpMeta):
         #     cls.call_addr,
         #     cls.__dict__.get('check_addr',0),)
         # Make the op instance
+        return_t_id = cre_context().get_t_id(_type=cls.signature.return_type)
         op_inst = op_ctor(
             cls.__name__,
             str(cls.signature.return_type),
+            u2(return_t_id),
             cls.arg_type_names,
             head_var_ptrs,
             str(cls._expr_template),
@@ -1630,7 +1631,7 @@ class OpComp():
                             op_call_fnames=None,
                             op_check_fnames=None,
                             skip_consts=False,
-                            args_are_heads=False,
+                            skip_deref_instrs=False,
                             **kwargs):
         ''' Helper function that fills 'names' which is a dictionary of 
             various objects to their equivalent string expressions, in 
@@ -1638,7 +1639,7 @@ class OpComp():
             and optionally 'const_defs'. '''
         names = {}
         
-        if(not args_are_heads):
+        if(not skip_deref_instrs):
             arg_names = self._gen_arg_seq(lang, arg_names, names)
             for i,instr in enumerate(self.instructions):
                 names[instr] = f'i{i}'
@@ -1686,11 +1687,8 @@ class OpComp():
             return names, arg_names, const_defs
 
     def gen_expr(self, lang='python', **kwargs):
-        '''Generates a oneline expression for the OpComp'''
-        
+        '''Generates a oneline expression for the OpComp'''        
         names, arg_names = self._call_check_prereqs(lang, skip_consts=True, **kwargs)
-        # print("gen_expr", arg_names)
-        # raise ValueError()
         for i,instr in enumerate(self.instructions):
             instr_reprs = []
             if(isinstance(instr, DerefInstr)):
@@ -1704,100 +1702,101 @@ class OpComp():
                     else:
                         instr_reprs.append(repr(x))
 
-            # instr_names = ",".join(instr_reprs)
                 instr_kwargs = {**kwargs,'arg_names':instr_reprs}
                 names[instr] = instr.op.gen_expr(lang=lang,**instr_kwargs) #f'{names[]}({instr_names})'
-        # print(names)
         return names[list(self.instructions.keys())[-1]]
 
+
+    def _gen_instrs_helper(self, names, lang='python', on_check_fail='return 0', ind='    ', **kwargs):
+        ''' Handles the source generation for instructions such as Ops and DerefInstrs.'''
+        body = ""
+        for i,instr in enumerate(self.instructions):
+            if(isinstance(instr, DerefInstr)):
+                if(kwargs.get('skip_deref_instrs',False)): continue
+
+                # On a 'DerefInstr' assign 'i{i}' to the head of instr.var (e.g. `i0 = a0.value`)
+                deref_str = f'{g_nm(instr.var,names)}{str_deref_attrs(instr.deref_attrs)}'
+                body += f"{ind}{gen_assign(lang, f'i{i}', deref_str)}\n"
+            else:
+                if(kwargs.get('skip_op_instrs',False)): continue
+
+                # Delimited input sequence for check/call e.g. `a0,i0` as in `call(a0,i0)`
+                inp_seq = ", ".join([g_nm(x,names) for x in instr.args])
+
+                if(hasattr(instr.op,'check') and on_check_fail != ""):
+                    # Assign a variable for the result of applying check e.g. `k0 = check(a0,a1)`
+                    check_fname = names[(instr.op.unq,'check')]
+                    body += f"{ind}{gen_assign(lang, f'k{i}', f'{check_fname}({inp_seq}')})\n"
+
+                    # If that variable is false do something e.g. `if(not k0): return 0`
+                    body += f"{ind}{gen_if(lang, cond=gen_not(lang,f'k{i}'), rest=on_check_fail, newline='')}\n"
+
+                # Assign a variable for the result of applying call e.g. `i0 = call0(a0,i0)`
+                call_fname = names[(instr.op.unq,'call')]
+                body += f"{ind}{gen_assign(lang, f'i{i}', f'{call_fname}({inp_seq})')}\n"
+        return body
+
     
+    def gen_base_func_from_head_func(self, fname, head_fname,  lang='python',  ind='    ', **kwargs):
+        ''' Creates source for a function that applies the op's deref instructions (e.g. `i0 = a0.value`) 
+            to get the head values then applies the function with `head_fname` on those. For instance:
+            ```
+            @njit(call_sig,cache=True)
+            def call(a0, a1):
+                i0 = a0.val
+                return call_heads(i0, a0, a1) ```
+        '''
+        names, arg_names, const_defs = self._call_check_prereqs(lang, **kwargs)
+        body = ""
+        body = self._gen_instrs_helper(names, lang=lang, skip_op_instrs=True, ind=ind, **kwargs)
+        inp_seq = ", ".join([g_nm(v_ptr_or_dref,names) for v_ptr_or_dref in self.head_vars])
+        tail = f"{ind}return {head_fname}({inp_seq})\n"
+        return gen_def_func(lang, fname, ", ".join(arg_names), body, tail)        
+
+    def gen_head_ptr_wrapper(self, fname, head_fname, head_type_names=None, lang='python',  ind='    ', **kwargs):
+        '''Creates source for a function that takes in an array of pointers, loads the pointers
+            by the appropriate types and then calls the function with 'head_fname' on them: For instance:
+            ```
+            @njit(boolean(i8[::1],),cache=True)
+            def match_head_ptrs(ptrs):
+                i0 = _load_ptr(h0_type,ptrs[0])
+                i1 = _load_ptr(h1_type,ptrs[1])
+                i2 = _load_ptr(h2_type,ptrs[2])
+                return match_heads(i0,i1,i2) ```
+        '''
+        names, arg_names, const_defs = self._call_check_prereqs(lang, skip_deref_instrs=True, **kwargs)
+        n_heads = len(self.head_vars)
+
+        # List of head_type names
+        if(head_type_names is None): 
+            head_type_names = [f"h{i}_type" for i in range(n_heads)] 
+
+        # Make _load_ptr() instructions (e.g. `i0 = _load_ptr(h0_type,ptrs[0])`)
+        body = ""
+        for i in range(n_heads):
+            load_str = f'_load_ptr({head_type_names[i]},ptrs[{i}])'
+            body += f"{ind}{gen_assign(lang,f'i{i}',load_str)}\n"
+        inps = ",".join([f'i{i}' for i in range(len(arg_names))])
+        tail = f"{ind}return {head_fname}({inps})\n"
+        return gen_def_func(lang, fname, 'ptrs', body, tail)
+
     def gen_call(self, lang='python', fname="call", ind='    ', **kwargs):
         '''Generates source for the equivalent call function for the OpComp'''
         names, arg_names, const_defs = self._call_check_prereqs(lang, **kwargs)
         body = const_defs
-        for i,instr in enumerate(self.instructions):
-            if(isinstance(instr, DerefInstr)):
-                
-                deref_str = f'{g_nm(instr.var,names)}{str_deref_attrs(instr.deref_attrs)}'
-                # print("IS DEREF INSTR", deref_str)
-                body += f"{ind}{gen_assign(lang, f'i{i}', deref_str)}\n"
-            else:
-                inp_seq = ", ".join([g_nm(x,names) for x in instr.args])
-                call_fname = names[(instr.op.unq,'call')]
-                body += f"{ind}{gen_assign(lang, f'i{i}', f'{call_fname}({inp_seq})')}\n"
+        body += self._gen_instrs_helper(names, lang=lang, on_check_fail='raise Exception()', ind=ind, **kwargs)
 
         tail = f'{ind}return i{len(self.instructions)-1}\n'
         return gen_def_func(lang, fname, ", ".join(arg_names), body, tail)
 
-    def gen_head_wrapper(self, fname, wrapped_fname,  lang='python',  ind='    ', **kwargs):
-        # kwargs['args_are_heads'] = True
-        names, arg_names, const_defs = self._call_check_prereqs(lang, **kwargs)
-        body = ""
-        # print("^^", self.instructions)
-        # inps = {}
-        for i,instr in enumerate(self.instructions):
-            # print(type(instr))
-            if(isinstance(instr, DerefInstr)):
-                deref_str = f'{g_nm(instr.var,names)}{str_deref_attrs(instr.deref_attrs)}'
-                body += f"{ind}{gen_assign(lang, f'i{i}', deref_str)}\n"
-                # inps.append(g_nm(instr,names))
-            # else:
-            #     print("instr.args", instr.args, [g_nm(x,names) for x in instr.args])
-            #     for x in instr.args:
-
-            #         if(isinstance(x, (Var,DerefInstr))): inps[g_nm(x,names)] =1
-                        
-                # inps += [g_nm(x,names) ]
-
-        inp_seq = ", ".join([g_nm(v_ptr_or_dref,names) for v_ptr_or_dref in self.head_vars])
-        # inp_seq = ",".join(inps.keys())
-        tail = f"{ind}return {wrapped_fname}({inp_seq})\n"
-        return gen_def_func(lang, fname, ", ".join(arg_names), body, tail)        
-
-
-    def gen_ptr_wrapper(self, fname, wrapped_fname, head_type_names=None, lang='python',  ind='    ', **kwargs):
-        kwargs['args_are_heads'] = True
-        names, arg_names, const_defs = self._call_check_prereqs(lang, **kwargs)
-        # print(arg_names)
-        n_heads = len(self.head_vars)
-        if(head_type_names is None): head_type_names = [f"h{i}_type" for i in range(n_heads)] 
-        body = ""
-        for i in range(n_heads):
-            # print("**", i, head_type_names)
-            load_str = f'_load_ptr({head_type_names[i]},ptrs[{i}])'
-            body += f"{ind}{gen_assign(lang,f'i{i}',load_str)}\n"
-        inps = ",".join([f'i{i}' for i in range(len(arg_names))])
-        tail = f"{ind}return {wrapped_fname}({inps})\n"
-        return gen_def_func(lang, fname, 'ptrs', body, tail)
-
 
     def gen_match(self, lang='python', fname="match", ind='    ', **kwargs):
-        '''Generates source for the equivalent check function for the OpComp'''
+        '''Generates source for the equivalent match function for the OpComp'''
         names, arg_names, const_defs = self._call_check_prereqs(lang, **kwargs)
-        args_are_heads = kwargs.get('args_are_heads',False)
         # print(names)
         body = const_defs
-        final_k = "True"
+        body += self._gen_instrs_helper(names, lang=lang,on_check_fail='return 0', ind=ind, **kwargs)
 
-        for i,instr in enumerate(self.instructions):            
-            if(isinstance(instr, DerefInstr)):
-                if(args_are_heads):
-                    continue
-                deref_str = f'{g_nm(instr.var,names)}{str_deref_attrs(instr.deref_attrs)}'
-                body += f"{ind}{gen_assign(lang, f'i{i}', deref_str)}\n"
-            else:
-                # print([(g_nm(x,names), x) for x in instr.args])
-                inp_seq = ", ".join([g_nm(x,names) for x in instr.args])
-                if(hasattr(instr.op,'check')):#hasattr(instr, 'check')):
-                    check_fname = names[(instr.op.unq,'check')]
-                    # print("CHECK", (instr.op.unq,'check'), check_fname)
-                    body += f"{ind}{gen_assign(lang, f'k{i}', f'{check_fname}({inp_seq}')})\n"
-                    body += f"{ind}if(not k{i}): return 0\n"
-
-                call_fname = names[(instr.op.unq,'call')]
-                body += f"{ind}{gen_assign(lang, f'i{i}', f'{call_fname}({inp_seq})')}\n"
-            # call_fname = names[(instr.op.unq,'call')]
-            # check_body += f"{ind}{gen_assign(lang, f'i{i}', f'{call_fname}({inp_seq})')}\n"
         tail = f"{ind}return True if i{len(self.instructions)-1} else False\n"
         return gen_def_func(lang, fname, ", ".join(arg_names), body, tail)
 
@@ -1805,57 +1804,38 @@ class OpComp():
     def gen_check(self, lang='python', fname="check", ind='    ', **kwargs):
         '''Generates source for the equivalent check function for the OpComp'''
         names, arg_names, const_defs = self._call_check_prereqs(lang, **kwargs)
-        # print(names)
         body = const_defs
-        final_k = "True"
-        for i,instr in enumerate(self.instructions):
-            # print(type(self))
-            # print(self.used_ops)
-            # j,_ = self.used_ops[instr]
-            if(isinstance(instr, DerefInstr)):
-                deref_str = f'{g_nm(instr.var,names)}{str_deref_attrs(instr.deref_attrs)}'
-                body += f"{ind}{gen_assign(lang, f'i{i}', deref_str)}\n"
-            else:
-                inp_seq = ", ".join([g_nm(x,names) for x in instr.args])
-                if(hasattr(instr.op,'check')):#hasattr(instr, 'check')):
-                    check_fname = names[(instr.op.unq,'check')]
-                    # print("CHECK", (instr.op.unq,'check'), check_fname)
-                    body += f"{ind}{gen_assign(lang, f'k{i}', f'{check_fname}({inp_seq}')})\n"
-                    body += f"{ind}if(not k{i}): return 0\n"
-                    final_k = f'k{i}'
-
-                if(i < len(self.instructions)-1):
-                    call_fname = names[(instr.op.unq,'call')]
-                    body += f"{ind}{gen_assign(lang, f'i{i}', f'{call_fname}({inp_seq})')}\n"
-        tail = f"{ind}return {final_k}\n" 
+        body += self._gen_instrs_helper(names, lang=lang,on_check_fail='return 0', ind=ind, **kwargs)
+        
+        tail = f"{ind}return True\n" 
         return gen_def_func(lang, fname, ", ".join(arg_names), body, tail)
 
     
     def gen_flattened_op_src(self, long_hash, ind='    '):
         '''Generates python source for the equivalant flattened Op'''
-        op_imports = self.gen_op_imports('python')
-        
-        op_call_fnames = {op : f'call{j}' for j,op in self.used_ops.values()}
-        call_src = self.gen_call('python', op_call_fnames=op_call_fnames)
-
-
         has_check = any([hasattr(op, 'check') for _,op in self.used_ops.values()])
-        if(has_check):
-            op_check_fnames = {op : f'check{j}' for j,op in self.used_ops.values()}
-            check_src = self.gen_check('python', op_call_fnames=op_call_fnames, op_check_fnames=op_check_fnames)
-            match_heads_src = self.gen_match('python', fname="match_heads",
-             args_are_heads=True, op_call_fnames=op_call_fnames, op_check_fnames=op_check_fnames)
-        else:
-            match_heads_src = self.gen_match('python', fname="match_heads",
-             args_are_heads=True, op_call_fnames=op_call_fnames)
-        match_head_ptrs_src = self.gen_ptr_wrapper("match_head_ptrs", "match_heads")
-        match_src = self.gen_head_wrapper("match", "match_heads")
 
+        op_imports = self.gen_op_imports('python')
+        op_call_fnames = {op : f'call{j}' for j,op in self.used_ops.values()}
+        op_check_fnames = {op : f'check{j}' for j,op in self.used_ops.values()} if(has_check) else None
+            
+
+        call_heads_src = self.gen_call('python', fname='call_heads', skip_deref_instrs=True,
+            op_call_fnames=op_call_fnames, op_check_fnames=op_check_fnames)
+        call_head_ptrs_src = self.gen_head_ptr_wrapper("call_head_ptrs", "call_heads")
+        call_src = self.gen_base_func_from_head_func("call", "call_heads")
+        
+        match_heads_src = self.gen_match('python', fname="match_heads",
+             skip_deref_instrs=True, op_call_fnames=op_call_fnames, op_check_fnames=op_check_fnames)
+        match_head_ptrs_src = self.gen_head_ptr_wrapper("match_head_ptrs", "match_heads")
+        match_src = self.gen_base_func_from_head_func("match", "match_heads")
+
+        if(has_check):
+            check_src = self.gen_check('python', op_call_fnames=op_call_fnames, op_check_fnames=op_check_fnames)
 
         return_type = list(self.instructions.values())[-1].return_type
         call_sig = return_type(*self.arg_types)
         check_sig = u1(*self.arg_types)
-        # print()
         head_types = [x[2] for x in self.head_vars.values()]
         # print("-------")
         # print(head_types)
@@ -1879,17 +1859,25 @@ head_types = cloudpickle.loads({cloudpickle.dumps(head_types)})
 
 {"".join([f'h{i}_type,' for i in range(len(head_types))])} = head_types
 
+
+@njit(call_sig.return_type(*head_types),cache=True)
+{call_heads_src}
+
+@njit(call_sig.return_type(i8[::1]), cache=True)
+{call_head_ptrs_src}
+
 @njit(call_sig,cache=True)
 {call_src}
 
 @njit(boolean(*head_types), cache=True)
 {match_heads_src}
 
+@njit(boolean(i8[::1],),cache=True)
+{match_head_ptrs_src}
+
 @njit(boolean(*call_sig.args),cache=True)
 {match_src}
 
-@njit(boolean(i8[::1],),cache=True)
-{match_head_ptrs_src}
 '''
         if(has_check): source +=f'''
 @njit(boolean(*call_sig.args),cache=True)
@@ -1927,3 +1915,63 @@ class __GenerateOp__(Op):
         # var_ptrs_dtor(self.head_var_ptrs)
 # 
 
+
+
+
+
+'''
+@njit(call_sig,cache=True)
+def call(a0):
+    i0 = a0.B
+    i1 = call0(i0, i0)
+    return i1
+
+
+@njit(call_sig.return_type(i8[::1]), cache=True)
+def call_head_ptrs(ptrs):
+    i0 = _load_ptr(h0_type,ptrs[0])
+    return call0(i0)
+
+
+@njit(boolean(*head_types), cache=True)
+def match_heads(a0):
+    i1 = call0(a0, a0)
+    return True if i1 else False
+
+
+@njit(boolean(*call_sig.args),cache=True)
+def match(a0):
+    i0 = a0.B
+    return match_heads(i0)
+
+
+@njit(boolean(i8[::1],),cache=True)
+def match_head_ptrs(ptrs):
+    i0 = _load_ptr(h0_type,ptrs[0])
+    return match_heads(i0)
+
+THINKING THINKING 
+
+So for each thing call, check, apply, match we need:
+-normal
+-head_ptrs
+-heads
+
+
+
+call_heads
+call_head_ptrs
+call
+
+check_heads
+check_head_ptrs
+check
+
+match_heads
+match_head_ptrs
+match
+
+
+def match
+
+'''

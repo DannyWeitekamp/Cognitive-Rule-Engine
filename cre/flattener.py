@@ -22,7 +22,7 @@ from numba.experimental import structref
 from numba.extending import overload_method, overload, lower_cast, SentryLiteralArgs
 from numba.experimental.function_type import _get_wrapper_address
 import cloudpickle
-from cre.gval import gval_of_type, new_gval, gval as gval_type
+from cre.gval import get_gval_type, new_gval, gval as gval_type
 
 def get_semantic_visibile_fact_attrs(fact_types):
     ''' Takes in a set of fact types and returns all (fact, attribute) pairs
@@ -92,9 +92,9 @@ def get_flattener_type(fact_types):
 
 from numba.core.typing.typeof import typeof
 @generated_jit(cache=True, nopython=True)    
-def flattener_ctor(flattener_type, in_mem, context_data, out_mem):
+def flattener_ctor(flattener_type, in_mem, out_mem):
     fact_visible_attr_pairs = flattener_type.instance_type._fact_visible_attr_pairs
-    def impl(flattener_type, in_mem, context_data, out_mem):
+    def impl(flattener_type, in_mem, out_mem):
         st = new(flattener_type)
         init_incr_processor(st, in_mem)
         st.fact_visible_attr_pairs = fact_visible_attr_pairs
@@ -110,12 +110,11 @@ def flattener_ctor(flattener_type, in_mem, context_data, out_mem):
 class Flattener(structref.StructRefProxy):
     def __new__(cls, fact_types, in_mem=None, out_mem=None, context=None):
         context = cre_context(context)
-        context_data = context.context_data    
         if(in_mem is None): in_mem = Memory(context);
         if(out_mem is None): out_mem = Memory(context);
         
         flattener_type = get_flattener_type(fact_types)
-        self = flattener_ctor(flattener_type, in_mem, context_data, out_mem)
+        self = flattener_ctor(flattener_type, in_mem, out_mem)
         self._out_mem = out_mem
         return self
 
@@ -157,16 +156,16 @@ def flattener_update_for_attr(self, fact, id_attr, attr):
     #  that will force a unique implementation for this function.
     SentryLiteralArgs(['id_attr','attr']).for_function(flattener_update_for_attr).bind(self, fact, id_attr, attr) 
 
-    # Iplementation Constants
+    # Implement Constants
     attr = attr.literal_value
     fact_type = fact
     t_id = fact_type.t_id
     base_var_type = get_var_type(fact_type)
 
     def impl(self, fact, id_attr, attr):
-        # upfront cost of ~2.5 ms/10k to handle change_events.
+        # NOTE: upfront cost of ~2.5 ms/10k to handle change_events.
 
-        # Get the identifier ('id_attr') and value ('attr') from fact.
+        # Get the identifier 'id_attr' and value 'attr' from fact.
         identifier = fact_lower_getattr(fact, id_attr) # time negligible
         v = fact_lower_getattr(fact, attr) # time negligible
 
@@ -198,17 +197,20 @@ def flattener_update_for_attr(self, fact, id_attr, attr):
             self.idrec_map[fact.idrec] = List.empty_list(u8)
         self.idrec_map[fact.idrec].append(idrec)
 
-        # if(idrec not in self.inv_idrec_map):
-        #     self.idrec_map[idrec] = List.empty_list(u8)
-        # self.idrec_map[idrec].append(fact.idrec)
-
     return impl
 
-# @njit(cache=True)
-# def clear_modify():
-
-
-
+@njit(cache=True)
+def clean_a_id(self, change_idrec, a_id):
+    '''Cleans the gvals associated with the fact at 'change_idrec' with 'a_id' ''' 
+    if(change_idrec in self.idrec_map):
+        for idrec in self.idrec_map[change_idrec]:
+            gval = self.out_mem.get_fact(idrec).asa(gval_type)
+            var = _cast_structref(GenericVarType, gval.head)
+            if(var.deref_offsets[0].a_id == a_id):
+                self.out_mem.retract(idrec)
+                self.idrec_map[change_idrec].remove(idrec)
+                break
+            
 @generated_jit(cache=True, nopython=True)    
 def flattener_update(self):
     # One set of arguments typ:Type, t_ids:tuple(ints), attr:str, a_id:int
@@ -219,55 +221,36 @@ def flattener_update(self):
         args = (typ, tuple([*c.get_child_t_ids(_type=typ)]), typ.get_attr_a_id(attr.literal_value), attr)
         impl_args.append(args)
     impl_args = tuple(impl_args)
-    print([tuple(str(x) for x in y) for y in impl_args])
+    # print([tuple(str(x) for x in y) for y in impl_args])
     def impl(self):
-        out = self.out_mem
-        idrec = u8(0)
         # For each change event that occured since the last call to update() 
         for change_event in self.get_changes():
-            # On RETRACT.
+            # On RETRACT: Remove downstream gvals and clean out of idrec_map
             if(change_event.was_retracted):
                 if(change_event.idrec in self.idrec_map):
                     for idrec in self.idrec_map[change_event.idrec]:
-                        out.retract(idrec)
+                        self.out_mem.retract(idrec)
                     del self.idrec_map[change_event.idrec]
 
             # On DECLARE or MODIFY.
             if(change_event.was_declared or change_event.was_modified):
-                _t_id = change_event.t_id
-
                 # Apply the implementation for each 'attr' as needed. 
                 for args in literal_unroll(impl_args):
-                    typ, t_ids, a_id, attr  = args
+                    typ, child_t_ids, a_id, attr  = args
 
-                    #Only apply for fact types that have the attr
-                    if(change_event.t_id in t_ids):
-                        # On MODIFY.
+                    #Only apply for fact types that have 'attr'
+                    if(change_event.t_id in child_t_ids):
                         if(change_event.was_modified):
-                            # If it's a modify event make sure the a_id matches this implementation
                             if(a_id in change_event.a_ids):
-                                if(change_event.idrec in self.idrec_map):
-                                    for idrec in self.idrec_map[change_event.idrec]:
-                                        # Retract any old stuff 
-                                        var = _cast_structref(GenericVarType, out.get_fact(idrec).asa(gval_type).head)
-                                        if(var.deref_offsets[0].a_id == a_id):
-                                            out.retract(idrec)
-                                            break
-                                    if(idrec != 0):
-                                        self.idrec_map[change_event.idrec].remove(idrec)
+                                # Clean out old gval
+                                clean_a_id(self, change_event.idrec, a_id)
                             else:
+                                # Skip if MODIFY a_id doesn't match this implementation
                                 continue
 
-                        # if(okay):
                         fact = _cast_structref(typ, self.in_mem.get_fact(change_event.idrec))
                         flattener_update_for_attr(self,fact,"A", attr)
 
     return impl
 
-
-
-### THINKING THINKING THINKING ###
-'''
-Makeing Var's is a bit slow... a big part is probably needing to make
-lists 
-'''
+    

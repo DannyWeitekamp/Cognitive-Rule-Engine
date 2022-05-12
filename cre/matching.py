@@ -245,7 +245,6 @@ def _get_ptr_matches(conds):
         # print("C", partial_matches)
 
     #Turn indicies into fact pointers 
-    # Time Negligible
     matching_fact_ptrs = np.empty((len(partial_matches),n_vars-np.sum(is_not)),dtype=np.int64)
     for i,match in enumerate(partial_matches):
         j = 0

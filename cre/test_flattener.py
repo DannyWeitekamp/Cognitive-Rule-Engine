@@ -13,7 +13,6 @@ def flat_mem_vals(flat_mem):
     return values
 
 
-
 def test_flatten():
     with cre_context("test_flatten") as context:
         spec1 = {"A" : {"type" : "string", "is_semantic_visible" : True}, 

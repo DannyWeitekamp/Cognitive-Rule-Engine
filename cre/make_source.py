@@ -169,12 +169,15 @@ def resolve_template(lang, templates,desc="",accum_all=False):
         raise LookupError(f"Missing {desc} template for language : {lang}")
 
 
+
+
 def apply_template(template,*args,**kwargs):
     if(isinstance(template,str)):
         return template.format(*args,**kwargs)
     else:
         return template(*args,**kwargs)
-        
+
+### Assign ###         
 
 assign_templates = {
     "javascript" : "let {alias} = {rest}",
@@ -183,8 +186,29 @@ assign_templates = {
 def gen_assign(lang,alias,rest):
     template = resolve_template(lang, assign_templates, 'assign')
     return apply_template(template,alias=alias,rest=rest)
+
+### If ###         
+
+if_templates = {
+    "javascript" : "if({cond}){{{newline}{rest}{newline}}}",
+    "python" : "if({cond}):{newline}{rest}"
+}
+def gen_if(lang,cond,rest,newline=r'\n'):
+    template = resolve_template(lang, if_templates, 'if')
+    return apply_template(template,cond=cond,rest=rest, newline=newline)
+
+### Not ###
+
+not_templates = {
+    "javascript" : "!{rest}",
+    "python" : "not {rest}"
+}
+def gen_not(lang,rest):
+    template = resolve_template(lang, not_templates, 'not')
+    return apply_template(template,rest=rest)
     
 
+### Def Func ###
 
 def def_func_python(fname, args, body, tail, is_method=False):
     return f'''def {fname}({args}):
@@ -204,6 +228,8 @@ def gen_def_func(lang, fname, args, body, tail=''):
     template = resolve_template(lang, def_func_templates, 'def_func')
     return apply_template(template,fname=fname,args=args, body=body, tail=tail)
     
+
+### Def Class ###
 
 def def_class_js(name, body, parent_classes="", inst_self=False):
     extends = "" if parent_classes == "" else f"extends {parent_classes} "

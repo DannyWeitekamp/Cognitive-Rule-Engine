@@ -625,11 +625,11 @@ if __name__ == "__main__":
     #     test_source_gen()
 
     #     test_commutes()
-    # test_fact_args()
+    test_fact_args()
     # test_head_ptrs_ranges()
     # not_jit_compilable()
     # test_ptr_ops()
-    test_hash()
-    test_eq()
+    # test_hash()
+    # test_eq()
             
 

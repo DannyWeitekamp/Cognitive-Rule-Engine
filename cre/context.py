@@ -139,6 +139,10 @@ def ensure_inheritance(cd, t_id, inh_t_id=-1):
 def clear_unhandled_retro_register(self):
     self.has_unhandled_retro_register = False
 
+@njit(cache=True)
+def get_has_unhandled_retro_register(self):
+    self.has_unhandled_retro_register = False
+
 class CREContext(object):
     _contexts = {}
 
@@ -219,6 +223,9 @@ class CREContext(object):
         self._ensure_retro_registers()
         return self.t_id_to_type
 
+    @property
+    def has_unhandled_retro_register(self):
+        get_has_unhandled_retro_register(self)
 
     def _assert_written_to_type_registry(self, typ):
         if(typ not in self.type_to_t_id):

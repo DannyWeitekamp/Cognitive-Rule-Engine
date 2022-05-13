@@ -787,52 +787,54 @@ def iter_typed_list(lst):
             
 ##### Make Tuple of StructRefs from array of ptrs ####
 
-@intrinsic
-def _struct_tuple_from_pointer_arr(typingctx, struct_types, ptr_arr):
-    ''' Takes a tuple of fact types and a ptr_array i.e. an i8[::1] and outputs 
-        the facts pointed to, casted to the appropriate types '''
-    # print(">>",struct_types)
-    _struct_types = struct_types
-    if(isinstance(struct_types, types.TypeRef )): _struct_types = struct_types.instance_type
+# @intrinsic
+# def _struct_tuple_from_pointer_arr(typingctx, struct_types, ptr_arr):
+#     ''' Takes a tuple of fact types and a ptr_array i.e. an i8[::1] and outputs 
+#         the facts pointed to, casted to the appropriate types '''
+#     # print(">>",struct_types)
+#     _struct_types = struct_types
+#     if(isinstance(struct_types, types.TypeRef )): _struct_types = struct_types.instance_type
 
-    if(isinstance(_struct_types, types.UniTuple)):
-        typs = tuple([_struct_types.dtype.instance_type] * _struct_types.count)
-        out_type =  types.UniTuple(_struct_types.dtype.instance_type,_struct_types.count)
-    else:
-        # print(struct_types.__dict__)
-        typs = tuple([x.instance_type for x in _struct_types.types])
-        out_type =  types.Tuple(typs)
-    # print(typs)
-    # print(out_type)
+#     typs = tuple([x.instance_type for x in _struct_types])
+#     print("<<", typs)
+#     # if(isinstance(_struct_types, types.UniTuple)):
+#     #     typs = tuple([_struct_types.dtype.instance_type] * _struct_types.count)
+#     #     out_type =  types.UniTuple(_struct_types.dtype.instance_type,_struct_types.count)
+#     # else:
+#     #     # print(struct_types.__dict__)
+#     #     typs = tuple([x.instance_type for x in _struct_types.types])
+#     #     out_type =  types.Tuple(typs)
+#     # print(typs)
+#     # print(out_type)
     
-    sig = out_type(struct_types,i8[::1])
-    def codegen(context, builder, sig, args):
-        _,ptrs = args
+#     sig = out_type(struct_types,i8[::1])
+#     def codegen(context, builder, sig, args):
+#         _,ptrs = args
 
-        vals = []
-        ary = make_array(i8[::1])(context, builder, value=ptrs)
-        for i, inst_type in enumerate(typs):
-            i_val = context.get_constant(types.intp, i)
+#         vals = []
+#         ary = make_array(i8[::1])(context, builder, value=ptrs)
+#         for i, inst_type in enumerate(typs):
+#             i_val = context.get_constant(types.intp, i)
 
-            # Same as _struct_from_ptr
-            raw_ptr = _getitem_array_single_int(context,builder,i8,i8[::1],ary,i_val)
-            meminfo = builder.inttoptr(raw_ptr, cgutils.voidptr_t)
+#             # Same as _struct_from_ptr
+#             raw_ptr = _getitem_array_single_int(context,builder,i8,i8[::1],ary,i_val)
+#             meminfo = builder.inttoptr(raw_ptr, cgutils.voidptr_t)
 
-            context.nrt.incref(builder, types.MemInfoPointer(types.voidptr), meminfo)
+#             context.nrt.incref(builder, types.MemInfoPointer(types.voidptr), meminfo)
 
-            st = cgutils.create_struct_proxy(inst_type)(context, builder)
-            st.meminfo = meminfo
+#             st = cgutils.create_struct_proxy(inst_type)(context, builder)
+#             st.meminfo = meminfo
 
             
 
-            vals.append(st._getvalue())
+#             vals.append(st._getvalue())
 
 
-        ret = context.make_tuple(builder,out_type,vals)
-        return ret#impl_ret_borrowed(context, builder, sig.return_type, ret)
-        # return 
+#         ret = context.make_tuple(builder,out_type,vals)
+#         return ret#impl_ret_borrowed(context, builder, sig.return_type, ret)
+#         # return 
 
-    return sig,codegen
+#     return sig,codegen
 
 
 @intrinsic
@@ -892,5 +894,42 @@ def _get_member_offset(typingctx, struct_type, attr_literal):
     sig = u2(struct_type, attr_literal)
     return sig, codegen
 
+@intrinsic
+def _struct_tuple_from_pointer_arr(typingctx, struct_types, ptr_arr):
+    ''' Takes a tuple of fact types and a ptr_array i.e. an i8[::1] and outputs 
+        the facts pointed to, casted to the appropriate types '''
+    # print(">>",struct_types)
+    if(isinstance(struct_types, types.UniTuple)):
+        typs = tuple([struct_types.dtype.instance_type] * struct_types.count)
+        out_type =  types.UniTuple(struct_types.dtype.instance_type,struct_types.count)
+    else:
+        # print(struct_types.__dict__)
+        typs = tuple([x.instance_type for x in struct_types.types])
+        out_type =  Tuple(typs)
+    print(out_type)
+    
+    sig = out_type(struct_types,i8[::1])
+    def codegen(context, builder, sig, args):
+        _,ptrs = args
+
+        vals = []
+        ary = make_array(i8[::1])(context, builder, value=ptrs)
+        for i, inst_type in enumerate(typs):
+            i_val = context.get_constant(types.intp, i)
+
+            # Same as _struct_from_ptr
+            raw_ptr = _getitem_array_single_int(context,builder,i8,i8[::1],ary,i_val)
+            meminfo = builder.inttoptr(raw_ptr, cgutils.voidptr_t)
+
+            st = cgutils.create_struct_proxy(inst_type)(context, builder)
+            st.meminfo = meminfo
+
+            context.nrt.incref(builder, types.MemInfoPointer(types.voidptr), meminfo)
+
+            vals.append(st._getvalue())
 
 
+        
+        return context.make_tuple(builder,out_type,vals)
+
+    return sig,codegen

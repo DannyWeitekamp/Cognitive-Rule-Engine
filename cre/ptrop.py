@@ -82,11 +82,16 @@ class UntypedPtrOp():
 
 
 def gen_ptr_op_source(cls):
-    return f'''from numba import njit, i8, boolean
+    return f'''import numpy as np
+from numba import njit, i8, boolean
+from numba.experimental.function_type import _get_wrapper_address
 import cloudpickle
 
 match_head_ptrs_pyfunc = cloudpickle.loads({cls.match_head_ptrs_bytes})
 match_head_ptrs = njit(boolean(i8[::1]),cache=True)(match_head_ptrs_pyfunc)
+
+method_addrs = np.zeros((7,),dtype=np.int64)
+method_addrs[4] = _get_wrapper_address(match_head_ptrs, boolean(i8[::1]))
 
 '''
 
@@ -121,10 +126,11 @@ def new_ptr_op(name, members, head_vars=None, return_class=False):
         source = gen_ptr_op_source(cls)
         source_to_cache(name,long_hash,source)
 
-    l = import_from_cached(name, long_hash, ['match_head_ptrs'])
+    l = import_from_cached(name, long_hash, ['match_head_ptrs','method_addrs'])
     cls.match_head_ptrs = l['match_head_ptrs']
     cls.match_head_ptrs = staticmethod(cls.match_head_ptrs)
-    cls.match_head_ptrs_addr = _get_wrapper_address(cls.match_head_ptrs, boolean(i8[::1]))
+    cls.method_addrs = l['method_addrs']
+    # cls.match_head_ptrs_addr = _get_wrapper_address(cls.match_head_ptrs, boolean(i8[::1]))
     
     
 
@@ -246,9 +252,10 @@ class PtrOp(Op,metaclass=PtrOpMeta):
             u2(return_t_id),
             cls.arg_type_names,
             head_var_ptrs,
+            cls.method_addrs,
             _expr_template,
             _shorthand_template,
-            match_head_ptrs_addr=cls.match_head_ptrs_addr,
+            # match_head_ptrs_addr=cls.match_head_ptrs_addr,
             is_ptr_op=True
             )
         

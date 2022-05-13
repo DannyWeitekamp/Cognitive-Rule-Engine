@@ -420,8 +420,8 @@ def test_anti_unify():
 # logger.setLevel(logging.DEBUG)
 
 if(__name__ == "__main__"):
-    # test_anti_unify()
-    test_unconditioned()
+    test_anti_unify()
+    # test_unconditioned()
     # test_build_conditions()
     # test_list_operations()
     # test_link()

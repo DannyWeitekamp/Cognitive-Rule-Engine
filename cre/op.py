@@ -62,7 +62,7 @@ Using objmode (i.e. native python) instead. To ignore warning set nopython=False
     warnings.warn(s, NumbaPerformanceWarning)
 
 
-def gen_op_source(cls, call_needs_jitting, check_needs_jitting):
+def gen_op_source(cls):
     '''Generate source code for the relevant functions of a user defined Op.
        Note: The jitted call() and check() functions are pickled, the bytes dumped  
         into the source, and then reconstituted at runtime. This strategy seems to work
@@ -77,17 +77,22 @@ def gen_op_source(cls, call_needs_jitting, check_needs_jitting):
     # arg_offsets = offsets[len(op_fields_dict):]
     nl = "\n"
     source = \
-f'''from numba import njit, void, i8, boolean, objmode
+f'''import numpy as np
+from numba import njit, void, i8, boolean, objmode
 from numba.experimental.function_type import _get_wrapper_address
 from numba.core.errors import NumbaError, NumbaPerformanceWarning
 from cre.utils import _func_from_address, _load_ptr
 from cre.op import op_fields_dict, OpTypeTemplate, warn_cant_compile
 import cloudpickle
+
 nopython_call = {cls.nopython_call} 
 nopython_check = {cls.nopython_check} 
 
+method_addrs = np.zeros((7,),dtype=np.int64)
+
 call_sig = cloudpickle.loads({cloudpickle.dumps(cls.call_sig)})
 call_pyfunc = cloudpickle.loads({cls.call_bytes})
+{"".join([f'h{i}_type, ' for i in range(len(arg_types))])} = call_sig.args
 
 try:
     call = njit(call_sig,cache=True)(call_pyfunc)
@@ -97,14 +102,20 @@ except NumbaError as e:
 
 if(nopython_call==False):
     return_type = call_sig.return_type
-    if(not nopython_call):
-        @njit(cache=True)
-        def call({arg_names}):
-            with objmode(_return=return_type):
-                _return = call_pyfunc({arg_names})
-            return _return
+    @njit(cache=True)
+    def call({arg_names}):
+        with objmode(_return=return_type):
+            _return = call_pyfunc({arg_names})
+        return _return
 
-call_addr = _get_wrapper_address(call, call_sig)
+# call_addr = _get_wrapper_address(call, call_sig)
+call_heads = call
+
+@njit(call_sig.return_type(i8[::1],) ,cache=True)
+def call_head_ptrs(ptrs):
+{indent(nl.join([f'i{i} = _load_ptr(h{i}_type,ptrs[{i}])' for i in range(len(arg_types))]),prefix='    ')}
+    return call_heads({",".join([f'i{i}' for i in range(len(arg_types))])})
+
 '''
     if(hasattr(cls,'check')):
         source += f'''
@@ -124,7 +135,9 @@ if(nopython_check==False):
             _return = check_pyfunc({arg_names})
         return _return
 
-check_addr = _get_wrapper_address(check, check_sig)
+# check_addr = _get_wrapper_address(check, check_sig)
+
+method_addrs[6] = _get_wrapper_address(check, check_sig)
 '''
 # arg_offsets = {str(arg_offsets)}
     source += f'''
@@ -135,14 +148,19 @@ def match({arg_names}):
 
 match_heads = match
 
-{"".join([f'h{i}_type, ' for i in range(len(arg_types))])} = call_sig.args
+
 
 @njit(boolean(i8[::1],) ,cache=True)
 def match_head_ptrs(ptrs):
 {indent(nl.join([f'i{i} = _load_ptr(h{i}_type,ptrs[{i}])' for i in range(len(arg_types))]),prefix='    ')}
     return match_heads({",".join([f'i{i}' for i in range(len(arg_types))])})
 
-
+method_addrs[0] = _get_wrapper_address(call_heads, call_sig)
+method_addrs[1] = _get_wrapper_address(call_head_ptrs, call_sig.return_type(i8[::1]))
+method_addrs[2] = method_addrs[0] # call is call_heads 
+method_addrs[3] = _get_wrapper_address(match_heads, boolean(*call_sig.args))
+method_addrs[4] = _get_wrapper_address(match_head_ptrs, boolean(i8[::1],))
+method_addrs[5] = method_addrs[3] # match is match_heads
 
 field_dict = {{**op_fields_dict,**{{f"arg{{i}}" : t for i,t in enumerate(call_sig.args)}}}}
 {cls.__name__+'Type'} = OpTypeTemplate([(k,v) for k,v in field_dict.items()]) 
@@ -176,9 +194,13 @@ op_fields_dict = {
     
     "arg_type_names" : ListType(unicode_type),
     "call_addr" : i8,
-    "call_multi_addr" : i8,
-    "check_addr" : i8,
+    "call_heads_addr" : i8,
+    "call_head_ptrs_addr" : i8,
+    "match_addr" : i8,
+    "match_heads_addr" : i8,
     "match_head_ptrs_addr" : i8,
+    "check_addr" : i8,
+    
 
     "return_t_id" : u2,
     "is_ptr_op" : types.boolean,
@@ -500,10 +522,56 @@ def make_head_ranges(n_args, head_var_ptrs):
     return head_ranges
 
 
+# @njit(cache=True)
+# def op_reparametrize(op,head_var_ptrs):
+#     st = new(GenericOpType)
+
+#     st.idrec = op.idrec
+#     st.name = op.name
+#     st.return_type_name = op.return_type_name
+#     st.return_t_id = op.return_t_id
+
+#     st.arg_type_names = op.arg_type_names
+#     st.expr_template = op.expr_template
+#     st.shorthand_template = op.shorthand_template
+
+#     st.call_heads_addr = op.call_heads_addr
+#     st.call_head_ptrs_addr = op.call_head_ptrs_addr
+#     st.call_addr = op.call_addr
+#     st.match_heads_addr = op.match_heads_addr
+#     st.match_head_ptrs_addr = op.match_head_ptrs_addr
+#     st.match_addr = op.match_addr
+#     st.check_addr = op.check_addr
+
+#     st.is_ptr_op = op.is_ptr_op
+
+#     st.base_var_map = Dict.empty(i8, unicode_type)
+#     st.inv_base_var_map = Dict.empty(unicode_type, i8)
+#     st.base_vars = List.empty_list(GenericVarType)
+#     st.head_vars = List.empty_list(GenericVarType)
+#     generated_aliases = gen_placeholder_aliases(head_var_ptrs)
+#     j = 0
+#     for head_ptr in head_var_ptrs:
+#         head_var = _struct_from_ptr(GenericVarType, head_ptr)
+#         st.head_vars.append(head_var)
+#         base_ptr = i8(head_var.base_ptr)
+#         if(base_ptr not in st.base_var_map):
+#             base_var = _struct_from_ptr(GenericVarType, base_ptr)
+#             st.base_vars.append(base_var)
+#             alias = base_var.alias
+#             if(alias == ""):
+#                 alias = generated_aliases[j]; j+=1;
+            
+#             st.base_var_map[base_ptr] = alias
+#             st.inv_base_var_map[alias] = base_ptr
+
+#     st.head_var_ptrs = head_var_ptrs
+#     st.head_ranges = make_head_ranges(len(st.base_var_map), head_var_ptrs)
+
+
 @njit(cache=True)
-def op_ctor(name, return_type_name, return_t_id, arg_type_names, head_var_ptrs, 
-            expr_template="MOOSE", shorthand_template="ROOF",
-            call_addr=0, call_multi_addr=0, check_addr=0, match_head_ptrs_addr=0, is_ptr_op=False):
+def op_ctor(name, return_type_name, return_t_id, arg_type_names, head_var_ptrs, method_addrs,
+            expr_template="MOOSE", shorthand_template="ROOF",is_ptr_op=False):
     '''The constructor for an Op instance that can be passed to the numba runtime'''
     st = new(GenericOpType)
     st.idrec = encode_idrec(T_ID_OP, 0, 0)
@@ -538,11 +606,15 @@ def op_ctor(name, return_type_name, return_t_id, arg_type_names, head_var_ptrs,
 
     st.expr_template = expr_template
     st.shorthand_template = shorthand_template
-            
-    st.call_addr = call_addr
-    st.call_multi_addr = call_multi_addr
-    st.check_addr = check_addr
-    st.match_head_ptrs_addr = match_head_ptrs_addr
+
+    st.call_heads_addr = method_addrs[0]
+    st.call_head_ptrs_addr = method_addrs[1]
+    st.call_addr = method_addrs[2]
+    st.match_heads_addr = method_addrs[3]
+    st.match_head_ptrs_addr = method_addrs[4]
+    st.match_addr = method_addrs[5]
+    st.check_addr = method_addrs[6]
+
     st.is_ptr_op = is_ptr_op
 
     return st
@@ -625,8 +697,8 @@ def new_op(name, members, head_vars=None, return_class=False):
     
     # with PrintElapse("\thandling"):
     # See if call/check etc. are raw python functions and need to be wrapped in @jit.
-    call_needs_jitting = not isinstance(members['call'], Dispatcher)
-    check_needs_jitting = has_check and (not isinstance(members['check'],Dispatcher))
+    # call_needs_jitting = not isinstance(members['call'], Dispatcher)
+    # check_needs_jitting = has_check and (not isinstance(members['check'],Dispatcher))
     
     # 'cls' is the class of the user defined Op (i.e. Add(a,b)).
     cls = type.__new__(OpMeta,name,(Op,),members) 
@@ -654,13 +726,12 @@ def new_op(name, members, head_vars=None, return_class=False):
     #Triggers getter
     long_hash = cls.long_hash 
     if(not source_in_cache(name, long_hash) or getattr(cls,'cache',True) == False):
-        source = gen_op_source(cls, call_needs_jitting, check_needs_jitting)
+        source = gen_op_source(cls)
         source_to_cache(name,long_hash,source)
 
     # to_import = ['call','call_addr'] if call_needs_jitting else []
-    to_import = ['match_head_ptrs']
-    if(call_needs_jitting): to_import += ['call','call_addr']
-    if(check_needs_jitting): to_import += ['check', 'check_addr']
+    to_import = ['call', 'method_addrs']
+    if(has_check): to_import += ['check']
     l = import_from_cached(name, long_hash, to_import)
     for key, value in l.items():
         setattr(cls, key, value)
@@ -670,17 +741,17 @@ def new_op(name, members, head_vars=None, return_class=False):
     cls.call = staticmethod(cls.call)
     if(has_check): cls.check = staticmethod(cls.check)
 
-    # Get store the addresses for call/check
-    if(not call_needs_jitting): 
-        cls.call_sig = cls.signature
-        cls.call_addr = _get_wrapper_address(cls.call,cls.call_sig)
+    # # Get store the addresses for call/check
+    # if(not call_needs_jitting): 
+    #     cls.call_sig = cls.signature
+    #     cls.call_addr = _get_wrapper_address(cls.call,cls.call_sig)
 
-    if(not check_needs_jitting and has_check):
-        # cls.check_sig = u1(*cls.signature.args)
-        cls.check_addr = _get_wrapper_address(cls.check,cls.check_sig)
+    # if(not check_needs_jitting and has_check):
+    #     # cls.check_sig = u1(*cls.signature.args)
+    #     cls.check_addr = _get_wrapper_address(cls.check,cls.check_sig)
 
     # print(cls.match_head_ptrs.overloads.keys())
-    cls.match_head_ptrs_addr = _get_wrapper_address(cls.match_head_ptrs,boolean(i8[::1],))
+    # cls.match_head_ptrs_addr = _get_wrapper_address(cls.match_head_ptrs,boolean(i8[::1],))
 
     # Standardize shorthand definitions
     if(hasattr(cls,'shorthand') and 
@@ -979,11 +1050,13 @@ class Op(CREObjProxy,metaclass=OpMeta):
             u2(return_t_id),
             cls.arg_type_names,
             head_var_ptrs,
+            cls.method_addrs,
             str(cls._expr_template),
             str(cls._shorthand_template),
-            call_addr=cls.call_addr,
-            check_addr=cls.__dict__.get('check_addr',0),
-            match_head_ptrs_addr=cls.match_head_ptrs_addr,
+            
+            # call_addr=cls.call_addr,
+            # check_addr=cls.__dict__.get('check_addr',0),
+            # match_head_ptrs_addr=cls.match_head_ptrs_addr,
             )
         # print("<<", op_inst, cls._expr_template)
         
@@ -1844,10 +1917,11 @@ class OpComp():
         # print(call_sig)
 # 
 # boolean(*head_arg_types)
-        source = f'''
+        source = f'''import numpy as np
 from numba import i8, boolean, njit
 from numba.types import unicode_type
 from numba.extending import intrinsic
+from numba.experimental.function_type import _get_wrapper_address
 from numba.core import cgutils
 from cre.op import Op
 from cre.utils import _load_ptr
@@ -1859,6 +1933,7 @@ head_types = cloudpickle.loads({cloudpickle.dumps(head_types)})
 
 {"".join([f'h{i}_type,' for i in range(len(head_types))])} = head_types
 
+method_addrs = np.zeros((7,),dtype=np.int64)
 
 @njit(call_sig.return_type(*head_types),cache=True)
 {call_heads_src}
@@ -1878,10 +1953,21 @@ head_types = cloudpickle.loads({cloudpickle.dumps(head_types)})
 @njit(boolean(*call_sig.args),cache=True)
 {match_src}
 
+method_addrs[0] = _get_wrapper_address(call_heads, call_sig.return_type(*head_types))
+method_addrs[1] = _get_wrapper_address(call_head_ptrs, call_sig.return_type(i8[::1]))
+method_addrs[2] = _get_wrapper_address(call, call_sig)
+method_addrs[3] = _get_wrapper_address(match_heads, boolean(*head_types))
+method_addrs[4] = _get_wrapper_address(match_head_ptrs, boolean(i8[::1],))
+method_addrs[5] = _get_wrapper_address(match, boolean(*call_sig.args))
+    
+
+
 '''
         if(has_check): source +=f'''
 @njit(boolean(*call_sig.args),cache=True)
 {check_src}
+
+method_addrs[6] = _get_wrapper_address(check, boolean(*call_sig.args))
 '''
         source += f'''
 
@@ -1889,7 +1975,11 @@ class __GenerateOp__(Op):
     signature = call_sig
     call = call
     {"check = check" if(has_check) else ""}
+    method_addrs = method_addrs
     _long_hash = {long_hash!r}
+    
+
+
 
 '''
         return source

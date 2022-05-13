@@ -178,13 +178,13 @@ def literal_not(self):
     return n
 
 
-literal_unique_tuple_type = Tuple((u1, i8))
+literal_unique_tuple_type = Tuple((i8, i8))
 @njit(literal_unique_tuple_type(LiteralType), cache=True)
 def literal_get_unique_tuple(self):
     '''Outputs a tuple that uniquely identifies an instance
          of a literal independant of the Vars in its underlying op
     '''
-    return (self.negated, self.op.call_addr)
+    return (i8(self.negated), self.op.call_addr)
 
 
 #TODO compartator helper?
@@ -1091,7 +1091,8 @@ def build_distributed_dnf(c,index_map=None):
 
 # op.call_addr -> list of arrays of base_ptrs 
 # lit_set_type = DictType(i8,var_set_list_type)
-
+lit_list = ListType(LiteralType)
+lit_unq_tup_type = Tuple((i8,i8))
 
 @njit(cache=True)
 def conds_to_lit_sets(self):
@@ -1102,7 +1103,7 @@ def conds_to_lit_sets(self):
         remappings where like-terms get chances to be remapped.'''
     lit_sets = List()
     for conjunct in self.dnf:
-        d = Dict()#Dict.empty(i8, var_set_list_type)
+        d = Dict.empty(lit_unq_tup_type, lit_list)#Dict.empty(i8, var_set_list_type)
         for lit in conjunct:
             unq_tup = literal_get_unique_tuple(lit)
             # print(unq_tup)
@@ -1127,7 +1128,7 @@ def conds_to_lit_sets(self):
 def intersect_keys(a, b):
     l = List()
     for k in a:
-        print(k, k in b)
+        # print(k, k in b)
         if(k in b): l.append(k)
     return l
 
@@ -1282,7 +1283,7 @@ def score_remaps(lit_set_a, lit_set_b, bpti_a, bpti_b, remap_inds=None, op_key_i
 
     scored_remaps = List.empty_list(f8_i2_arr_tup)
     # For every unique type of literal (e.g. (x<y) & (a<b))
-    for _, k in enumerate(op_key_intersection):
+    for k in op_key_intersection:
         # print("<<", k)
         # print(lit_set_a[k])
 

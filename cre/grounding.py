@@ -46,9 +46,12 @@ feature_applier_fields = {
     "out_mem" : MemoryType,
     "idrec_map" : DictType(u8,ListType(u8)),
     "inv_idrec_map" : DictType(u8,ListType(u8)),
-    "ops_by_ret_t_id" : DictType(u2,ListType(GenericOpType)),
+    "ops" : ListType(GenericOpType),
+    "fact_vecs" : ListType(ListType(VectorType)),
+    # "ops_by_t_id_sig" : DictType(u2,ListType(GenericOpType)),
     "fact_vecs_needs_update" : types.bool_,
-    "fact_vecs" : DictType(u2,ListType(ListType(VectorType))),
+    # "fact_vecs" : DictType(u2,ListType(ListType(VectorType))),
+    
     "val_t_id_to_gval_t_id" : DictType(u2,u2),
     "unq_arg_types":  types.Any,
     "unq_return_types":  types.Any
@@ -71,7 +74,7 @@ def upcast(context, builder, fromty, toty, val):
 
 @generated_jit(cache=True)
 @overload_method(FeatureApplierTypeClass,'get_changes')
-def self_get_changes(self, end=-1, exhaust_changes=True):
+def feature_applier_get_changes(self, end=-1, exhaust_changes=True):
     def impl(self, end=-1, exhaust_changes=True):
         incr_pr = _cast_structref(IncrProcessorType, self)
         return incr_pr.get_changes(end=end, exhaust_changes=exhaust_changes)
@@ -94,35 +97,33 @@ def get_feature_applier_type(ops):
 
 
 @njit(cache=True)
-def update_fact_vecs(self):
-    self.fact_vecs = Dict.empty(u2, list_vec_list_type)
-    print(self.fact_vecs)
-    for ret_t_id, ops in self.ops_by_ret_t_id.items():
-        fact_vecs_for_t_id = List.empty_list(vec_list_type)
-        print(ret_t_id)
-        for op in ops:
-            fact_vecs = List.empty_list(VectorType)
-            for i,v in enumerate(op.base_vars):
-                print(v.base_t_id, self.val_t_id_to_gval_t_id)
-                gval_t_id = self.val_t_id_to_gval_t_id[u2(v.base_t_id)]
-                ptr = self.in_mem.mem_data.facts[gval_t_id]
-                # print(gval_t_id, ptr)
-                # Skip if any of the argument vectors are uninitialized
-                if(ptr == 0): 
-                    self.fact_vecs_needs_update = True
-                    return
-                fact_vec = _struct_from_ptr(VectorType,ptr)
-                fact_vecs.append(fact_vec)
-            fact_vecs_for_t_id.append(fact_vecs)
-        self.fact_vecs[u2(ret_t_id)] = fact_vecs_for_t_id
-    self.fact_vecs_needs_update = False
-    # print("***********")
-    
+def get_op_fact_vecs(self, op):
+    fact_vecs = List.empty_list(VectorType)
+    for i,v in enumerate(op.base_vars):
+        gval_t_id = self.val_t_id_to_gval_t_id[u2(v.base_t_id)]
+        ptr = self.in_mem.mem_data.facts[gval_t_id]
+        # print(gval_t_id, ptr)
+        # Skip if any of the argument vectors are uninitialized
+        if(ptr == 0): 
+            self.fact_vecs_needs_update = True
+            return
+        fact_vec = _struct_from_ptr(VectorType,ptr)
+        fact_vecs.append(fact_vec)
+    return fact_vecs
 
+@njit(cache=True)
+def update_fact_vecs(self):
+    for op_ind, op in enumerate(self.ops):
+        self.fact_vecs[op_ind] = get_op_fact_vecs(self,op)
+
+@njit(cache=True)
+def add_op(self,op):
+    self.ops.append(op)
+    self.fact_vecs.append(get_op_fact_vecs(self,op))
 
 from numba.core.typing.typeof import typeof
 @generated_jit(cache=True, nopython=True)    
-def feature_applier_ctor(st_type, ops, in_mem, out_mem):
+def feature_applier_ctor(st_type, in_mem, out_mem):
     # print(ops, in_mem, out_mem)
     context = cre_context()
 
@@ -135,19 +136,12 @@ def feature_applier_ctor(st_type, ops, in_mem, out_mem):
 
     arg_gval_t_ids = tuple([(a,b) for a,b in zip(unq_arg_t_ids,unq_gval_t_ids)])
     
-    def impl(st_type, ops, in_mem, out_mem):
+    def impl(st_type, in_mem, out_mem):
         st = new(st_type)
         init_incr_processor(st, in_mem)
-        ops_by_ret_t_id = Dict.empty(u2,op_list_type)
-        for op in ops:
-            if(op.return_t_id not in ops_by_ret_t_id):
-                ops_by_ret_t_id[op.return_t_id] = List.empty_list(GenericOpType)
-            ops_by_ret_t_id[op.return_t_id].append(op)
-        st.ops_by_ret_t_id = ops_by_ret_t_id
 
-        # print(ops_by_ret_t_id)
-
-        # st.ops = ops
+        st.ops = List.empty_list(GenericOpType)
+        st.fact_vecs = List.empty_list(vec_list_type)
         st.idrec_map = Dict.empty(u8, u8_list)
         st.inv_idrec_map = Dict.empty(u8, u8_list)
         st.out_mem = out_mem 
@@ -157,13 +151,12 @@ def feature_applier_ctor(st_type, ops, in_mem, out_mem):
             arg_t_id, gval_t_id = tup
             st.val_t_id_to_gval_t_id[u2(arg_t_id)] = u2(gval_t_id)
 
-        # print("*****:")
-        update_fact_vecs(st)
-
-        # print(st.fact_vecs)
-
         return st
     return impl
+
+@njit(cache=True)
+def get_fact_vecs_needs_update(self):
+    return self.fact_vecs_needs_update
 
 
 class FeatureApplier(structref.StructRefProxy):
@@ -174,7 +167,10 @@ class FeatureApplier(structref.StructRefProxy):
 
 
         feature_applier_type = get_feature_applier_type(ops)
-        self = feature_applier_ctor(feature_applier_type, List(ops), in_mem, out_mem)
+        self = feature_applier_ctor(feature_applier_type, in_mem, out_mem)
+        self.ops = []
+        for op in ops:
+            self.add_op(op)
         self._out_mem = out_mem
         return self
 
@@ -186,6 +182,13 @@ class FeatureApplier(structref.StructRefProxy):
     def out_mem(self):
         return self._out_mem
 
+    @property
+    def fact_vecs_needs_update(self):
+        return get_fact_vecs_needs_update(self)
+
+    def get_changes(self):
+        return feature_applier_get_changes(self)
+
     def apply(self, in_mem=None):
         if(in_mem is not None):
             set_in_mem(self, in_mem)
@@ -195,164 +198,16 @@ class FeatureApplier(structref.StructRefProxy):
     def update(self):
         feature_applier_update(self)
 
+    def add_op(self,op):
+        self.ops.append(op)
+        add_op(self,op)
+
 define_boxing(FeatureApplierTypeClass, FeatureApplier)
 
 @njit(types.void(GenericFeatureApplierType, MemoryType),cache=True)
 def set_in_mem(self, x):
     self.in_mem = x
     update_fact_vecs(self)
-
-
-@generated_jit(cache=True, nopython=True)
-# @overload_method(EnumerizerTypeClass, "add_grounding")
-def new_op_grounding(op, return_type, *args):
-    '''Creates a new gval Fact for an op and a set of arguments'''
-    # print(return_type,f8, return_type.__dict__, type(return_type))
-    if(hasattr(return_type,'instance_type')):
-        return_type = return_type.instance_type
-
-    # Fix annoying numba bug where StarArgs becomes a tuple() of cre.Tuples
-    if(isinstance(args,tuple) and isinstance(args[0],types.BaseTuple)):
-        args = args[0]
-
-    gval_type = get_gval_type(return_type)
-    
-    # Find the types for the op's check and call
-    call_sig = return_type(*args)
-    check_sig = types.bool_(*args)
-    call_f_type = types.FunctionType(call_sig)
-    check_f_type = types.FunctionType(check_sig)
-
-    def impl(op, return_type, *args):
-        # If check exists try it first 
-        if(op.check_addr != 0):
-            check = _func_from_address(check_f_type, op.check_addr)
-            check_ok = check(*args)
-            if(not check(*args)): raise ValueError("gval attempt failed check().")
-
-
-        call = _func_from_address(call_f_type, op.call_addr)
-        v = call(*args)
-
-        gval = new_gval(head=TF(op,*args),val=v)
-        # grounding = ctor(head=head, value=value)
-        return gval
-    return impl
-
-
-def ground_op(op,*args):
-    return_type = op.signature.return_type
-    return new_op_grounding(op, return_type, *args)
-
-
-# @njit(cache=True)
-# def add(a,b):
-#     return a+b
-
-
-
-
-# def gen_src_apply_gval_multi(op,ind='    '):
-#     arg_types = op.signature
-#     n_args = len(arg_types)
-#     has_check = (op.check_addr != 0)
-#     src = f'''import cloudpickle
-# sig = cloudpickle.loads({cloudpickle.dumps(op.signature)})
-# arg_types = sig.args
-# check_f_type = types.bool(*arg_types)
-# {f"{', '.join([f'arg_type{i}' for i in range(n_args)])} = arg_types" }
-
-# def update_gval_multi(op, in_mem, out_mem):
-#     {"check = _func_from_address(check_f_type, op.check_addr)" if has_check else ""}
-#     call = _func_from_address(sig, op.check_addr)"
-# '''
-#     for i in range(n_args):
-#         src += f'{ind}gvals{i} = in_mem.get_facts(arg_types{i})'
-#     c_ind = ind
-#     src += f'''
-#     lengths = ({",".join([f"len(gvals{i})" for i in range(n_args)])})
-#     for const_pos in range({n_args}):
-#         for inds in product_iter_w_const(lengths, const_post, 0):
-
-#     '''
-    
-#     # src += "
-#     for i in range(n_args):
-#         src += f'{c_ind}for i{i} in range(len(gvals)):\n'
-#         c_ind  += ind
-#     # src += 
-
-# @njit(cache=True)
-# def extract_fact_vecs(op):
-    
-val_offset = gval_type.get_attr_offset('val')
-    
-@generated_jit
-def iter_val_ptrs_for_change(self, ret_t_id, t_id, f_id):
-    def impl(self, ret_t_id, t_id, f_id):
-        for op_ind, op in enumerate(self.ops_by_ret_t_id[ret_t_id]):
-            for const_pos, v in enumerate(op.base_vars):
-                # Skip op args that don't match the change_event's t_id
-                if(self.val_t_id_to_gval_t_id[u2(v.base_t_id)] != t_id): continue
-
-                # Extract the fact_vecs and their lengths
-                fact_vecs = self.fact_vecs[ret_t_id][op_ind]
-                lengths = np.array([len(x) for x in fact_vecs],dtype=np.int64)
-                gval_ptrs = np.empty((len(lengths),),dtype=np.int64)
-                val_ptrs = np.empty((len(lengths),),dtype=np.int64)
-                for inds in product_iter_w_const(lengths, const_pos, f_id):
-                    # Extract the pointers to gvals check if okay (non-zero)
-                    okay = True
-                    for i, ind in enumerate(inds):
-                        ptr = fact_vecs[i].data[ind]
-
-                        # Skip holes in the fact_vec
-                        if(ptr != 0):
-                            gval_ptrs[i] = ptr
-                        else:
-                            okay = False; 
-                            break;
-
-                    if(okay):
-                        if(len(np.unique(gval_ptrs)) == len(gval_ptrs)):
-                            for i,ptr in enumerate(gval_ptrs):
-                                val_ptrs[i] = _ptr_to_data_ptr(ptr)+val_offset
-                                print(_load_ptr(f8,val_ptrs[i]))
-                                # eq_f8
-
-
-                            print(t_id, inds, val_ptrs)
-                            yield val_ptrs
-                            
-    return impl
-
-
-
-@generated_jit
-def feature_applier_update(self):
-    context = cre_context()
-    return_t_ids = tuple([context.get_t_id(_type=typ) for typ in self._unq_return_types])
-    print("<<", return_t_ids)
-    def impl(self):
-        if(self.fact_vecs_needs_update): update_fact_vecs(self)
-        for change_event in self.get_changes():
-            if(change_event.was_retracted):
-                pass
-
-            if(change_event.was_declared or change_event.was_modified):
-                pass
-
-            t_id, f_id, _ = decode_idrec(change_event.idrec)
-
-            for ret_t_id in literal_unroll(return_t_ids):
-                for val_ptrs in iter_val_ptrs_for_change(self, ret_t_id, t_id, f_id):
-                    pass
-                # update_for_ret_t_id(self,ret_t_id)
-                # print(ret_t_id, self.ops_by_ret_t_id)
-                
-                    
-
-    return impl
 
 @njit(cache=True)
 def product_iter_w_const(lengths, const_position, const_ind):
@@ -384,6 +239,91 @@ def product_iter_w_const(lengths, const_position, const_ind):
 
 
 
+@generated_jit(cache=True)
+def iter_arg_gval_ptrs(self, op_ind, t_id, f_id):
+    def impl(self, op_ind, t_id, f_id):
+        op = self.ops[op_ind]
+
+        # Extract the fact_vecs and their lengths
+        fact_vecs = self.fact_vecs[op_ind]
+        lengths = np.array([len(x) for x in fact_vecs],dtype=np.int64)
+        gval_ptrs = np.empty((len(lengths),),dtype=np.int64)
+
+        for const_pos, var in enumerate(op.base_vars):
+            # Skip op args that don't match the change_event's t_id
+            if(self.val_t_id_to_gval_t_id[u2(var.base_t_id)] != t_id): continue
+
+            for inds in product_iter_w_const(lengths, const_pos, f_id):
+                # Extract the pointers to gvals check if okay (non-zero)
+                okay = True
+                for i, ind in enumerate(inds):
+                    ptr = fact_vecs[i].data[ind]
+                    if(ptr == 0): okay = False; break;
+                    gval_ptrs[i] = ptr
+
+                # Ensure that they are unique
+                if(okay and len(np.unique(gval_ptrs)) == len(gval_ptrs)):
+                    yield gval_ptrs
+    return impl
+
+    
+val_offset = gval_type.get_attr_offset('val')
+    
+@generated_jit(nopython=True)
+def update_for_op_ind(self, return_type, arg_types, op_ind, change_events):
+    '''Updates the FeatureApplier for the op at 'op_ind'. Goes through
+        if one of op's arguments is associated with t_id, '''
+    
+    context = cre_context()
+    return_type = return_type.instance_type
+    arg_types = tuple([x.instance_type for x in arg_types])
+    n_args = len(arg_types)
+        
+    # return_type = op.signature.return_type
+    call_head_ptrs_func_type = types.FunctionType(return_type(i8[::1]))
+    gval_type = get_gval_type(return_type)
+    arg_gval_t_ids = context.get_t_id(_type=gval_type)
+
+    def impl(self, return_type, arg_types, op_ind, change_events):
+        for change_event in change_events:
+            if(change_event.was_retracted):
+                pass
+
+            if(change_event.was_declared or change_event.was_modified):
+                pass
+
+            t_id, f_id, _ = decode_idrec(change_event.idrec)
+
+            call_head_ptrs = _func_from_address(call_head_ptrs_func_type, self.ops[op_ind].call_head_ptrs_addr)
+            val_ptrs = np.empty((n_args,),dtype=np.int64)
+
+            # Get unique sets of pointers to the gval instances in 'in_mem' such that the 
+            #  gval for this event is held fixed and the others are taken in every permutation.
+            for gval_ptrs in iter_arg_gval_ptrs(self, op_ind, t_id, f_id):
+
+                # For each gval get the address for 'val' slot
+                for i,ptr in enumerate(gval_ptrs):
+                    val_ptrs[i] = _ptr_to_data_ptr(ptr)+val_offset    
+
+                # Execute op.call(), passing args by reference (via `call_head_ptrs`)
+                v = call_head_ptrs(val_ptrs)
+                # print(val_ptrs, v)
+                
+    return impl
+
+
+def feature_applier_update(self):
+    ''' The main FeatureApplier update function. Update one op at a time
+        to simplify typing
+    '''
+    if(self.fact_vecs_needs_update): update_fact_vecs(self)
+    change_events = self.get_changes()
+    for op_ind, op in enumerate(self.ops):
+        ret_type = op.signature.return_type
+        arg_types = op.signature.args
+        update_for_op_ind(self, ret_type, arg_types, op_ind, change_events)
+
+
 if(__name__ == "__main__"):
     from cre.flattener import Flattener
     from cre.default_ops import Equals
@@ -403,9 +343,9 @@ if(__name__ == "__main__"):
         a = BOOP1("A", 1)
         b = BOOP1("B", 2)
         c = BOOP2("C", 3, 13)
-        d = BOOP2("D", 4, 14)
-        e = BOOP3("E", 5, 15, 105)
-        f = BOOP3("F", 6, 16, 106)
+        d = BOOP2("D", 4, 13)
+        e = BOOP3("E", 5, 14, 106)
+        f = BOOP3("A", 6, 16, 106)
 
         a_idrec = mem.declare(a)
         b_idrec = mem.declare(b)
@@ -422,7 +362,7 @@ if(__name__ == "__main__"):
         eq_f8 = Equals(f8, f8)
         eq_str = Equals(unicode_type, unicode_type)
 
-        feat_mem = FeatureApplier([eq_f8],flat_mem)
+        feat_mem = FeatureApplier([eq_f8,eq_str],flat_mem)
         feat_mem.update()
 
 

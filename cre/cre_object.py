@@ -1,3 +1,4 @@
+import numpy as np
 from numba import i8, u8, u2, u1, types, njit, generated_jit, literal_unroll
 from numba.types import FunctionType, unicode_type, Tuple
 from numba.extending import  overload, lower_getattr, overload_method
@@ -157,7 +158,6 @@ class CREObjProxy(StructRefProxy):
         instance = ty.__new__(cls)
         instance._type = ty
         instance._meminfo = mi
-
         instance.recover_type_safe()
         
         return instance
@@ -192,6 +192,15 @@ class CREObjProxy(StructRefProxy):
             if(self.__class__ is not t_id_type and hasattr(t_id_type,"_proxy_class")):
                 self._type = t_id_type
                 self.__class__ = t_id_type._proxy_class
+        else:
+            from cre.tuple_fact import define_tuple_fact
+            mbr_t_ids = cre_obj_get_member_t_ids(self)
+            tf_mbr_types = [context.get_type(t_id=t_id) for t_id in mbr_t_ids]
+            tf_type,tf_proxy_type = define_tuple_fact(tf_mbr_types,context,return_proxy=True)
+            self.__class__ = tf_proxy_type
+            # print
+
+
         
         return self
 
@@ -356,7 +365,8 @@ def _resolve_t_id_helper(x):
 def _get_chr_mbrs_infos_from_attrs(typingctx, st_type, attrs_lit):
     '''get the base address of the struct pointed to by structref 'inst' '''
     # assert isinstance(attrs_lit, types.Literal)
-
+    from cre.context import CREContext
+    context = CREContext.get_default_context()
 
     # st_type = st_type_ref.instance_type
     # print(attrs_lit)
@@ -368,7 +378,7 @@ def _get_chr_mbrs_infos_from_attrs(typingctx, st_type, attrs_lit):
     # print(attrs)
     # print(ind)
     mbr_types = [v for k,v in st_type._fields if k in attrs]
-    t_ids = [_resolve_t_id_helper(x) for x in mbr_types]
+    t_ids = [context.get_t_id(_type=x) for x in mbr_types]
 
     count = len(mbr_types)
     member_infos_out_type = types.UniTuple(member_info_type, count)
@@ -428,6 +438,27 @@ def cre_obj_get_item(obj, item_type, index):
     _, item_ptr = cre_obj_get_item_t_id_ptr(obj,index)
     out = _load_ptr(item_type, item_ptr)
     return out
+
+
+@njit(cache=True)
+def cre_obj_iter_t_id_item_ptrs(x):
+    # x = _cast_structref(TupleFact,_x)
+    data_ptr = _struct_get_data_ptr(x)
+    member_info_ptr = data_ptr + x.chr_mbrs_infos_offset
+
+    for i in range(x.num_chr_mbrs):
+        t_id, member_offset = _load_ptr(member_info_type, member_info_ptr)
+        yield t_id, data_ptr + member_offset
+        member_info_ptr += _sizeof_type(member_info_type)
+
+@njit(cache=True)
+def cre_obj_get_member_t_ids(x):
+    t_ids = np.empty((x.num_chr_mbrs,),dtype=np.uint16)
+    for i, (t_id, _) in enumerate(cre_obj_iter_t_id_item_ptrs(x)):
+        t_ids[i] = t_id
+    return t_ids
+
+
 
 
 @generated_jit(cache=True,nopython=True)

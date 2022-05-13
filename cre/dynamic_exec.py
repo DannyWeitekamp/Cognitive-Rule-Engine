@@ -5,7 +5,7 @@ from numba.typed import List
 from numba.extending import  overload, overload_method
 from cre.utils import _load_ptr, _struct_from_ptr, _cast_structref, _raw_ptr_from_struct, _raw_ptr_from_struct_incref, CastFriendlyMixin, decode_idrec, _func_from_address, _incref_structref, _struct_get_data_ptr, _sizeof_type
 from cre.structref import define_structref
-from cre.cre_object import CREObjTypeTemplate, CREObjType, member_info_type
+from cre.cre_object import CREObjTypeTemplate, CREObjType, member_info_type, cre_obj_iter_t_id_item_ptrs
 from numba.core.datamodel import default_manager, models
 from numba.experimental.structref import define_attributes, StructRefProxy, new, define_boxing
 import operator
@@ -22,17 +22,7 @@ cast = _cast_structref
 
     
 
-@njit(cache=True)
-def cre_obj_iter_t_id_item_ptrs(_x):
-    x = _cast_structref(TupleFact,_x)
-    data_ptr = _struct_get_data_ptr(x)
-    # member_info_ptr = _struct_get_data_ptr(x.chr_mbrs_infos) + _struct_get_attr_offset(x.chr_mbrs_infos,"data")
-    member_info_ptr = data_ptr + x.chr_mbrs_infos_offset
 
-    for i in range(x.num_chr_mbrs):
-        t_id, member_offset = _load_ptr(member_info_type, member_info_ptr)
-        yield t_id, data_ptr + member_offset
-        member_info_ptr += _sizeof_type(member_info_type)
 
 ### __eq___ ###
 

@@ -97,10 +97,11 @@ def do_flatten(fl,mem):
     fl.update()
     return fl.out_mem
 
-def test_b_flatten(benchmark):
+def test_b_flatten_10000(benchmark):
     benchmark.pedantic(do_flatten,setup=setup_flatten, warmup_rounds=1, rounds=10)
 
 if(__name__ == "__main__"):
+
     test_flatten()
     # from cre.utils import PrintElapse
     # fl = setup_flatten()[0][0]

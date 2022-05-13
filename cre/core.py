@@ -125,14 +125,11 @@ def type_from_t_id(t_id):
                 tokens = line.split()
                 name, hash_code = tokens[0], tokens[1]
                 break
-    # if(hash_code == 'builtin'):
-    #     raise ImportError("Cannot import builtin.")
-    # else:
+
     fact_type = import_from_cached(name, hash_code, ['fact_type'])['fact_type']
     return fact_type
-    # raise ImportError(f"No type registered to t_id={t_id}")
 
-def t_id_from_type(typ, hash_code=None):
+def t_id_from_type_name(typ_name, hash_code=None):
     if(hash_code is None): hash_code = hash(typ)
     name = str(typ)
     with open(get_cache_path("type_registry",suffix=''),'r') as f:

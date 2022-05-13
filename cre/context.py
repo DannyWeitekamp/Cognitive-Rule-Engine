@@ -5,7 +5,7 @@ from numba import void,b1,u1,u2,u4,u8,i1,i2,i4,i8,f4,f8,c8,c16
 from numba.typed import List, Dict
 from numba.core.types import DictType, ListType, unicode_type, float64, NamedTuple, NamedUniTuple, UniTuple, Array
 from numba.cpython.unicode import  _set_code_point
-from cre.core import TYPE_ALIASES, DEFAULT_REGISTERED_TYPES, JITSTRUCTS, py_type_map, numba_type_map, numpy_type_map, type_from_t_id, t_id_from_type, add_to_type_registry
+from cre.core import TYPE_ALIASES, DEFAULT_REGISTERED_TYPES, JITSTRUCTS, py_type_map, numba_type_map, numpy_type_map, type_from_t_id, t_id_from_type_name, add_to_type_registry
 from cre.gensource import assert_gen_source
 from cre.caching import unique_hash, source_to_cache, import_from_cached, source_in_cache
 # from cre.struct_gen import gen_struct_code
@@ -158,11 +158,11 @@ class CREContext(object):
     def init(cls, name):
         ''' Builds a new context with 'name'.'''
         if(name not in cls._contexts):
-            from cre.tuple_fact import TupleFact
-            from cre.fact import BaseFact
+            # from cre.tuple_fact import TupleFact
+            # from cre.fact import BaseFact
             self = cls(name)
-            self._register_fact_type("BaseFact", BaseFact)
-            self._register_fact_type("TupleFact", TupleFact)
+            # self._register_fact_type("BaseFact", BaseFact)
+            # self._register_fact_type("TupleFact", TupleFact)
             cls._contexts[name] = self
 
         else:
@@ -230,8 +230,8 @@ class CREContext(object):
     def _assert_written_to_type_registry(self, typ):
         if(typ not in self.type_to_t_id):
             hash_code = getattr(typ,'_hash_code',unique_hash(typ.name))
-            t_id = t_id_from_type(typ, hash_code)
-            print(t_id, typ, hash_code)
+            t_id = t_id_from_type_name(str(typ), hash_code)
+            # print(t_id, typ, hash_code)
             name = str(typ)
             if(t_id == -1):
                 t_id = add_to_type_registry(name, hash_code)

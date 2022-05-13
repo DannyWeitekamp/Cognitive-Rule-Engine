@@ -211,6 +211,7 @@ op_fields_dict = {
 }
 
 class OpTypeTemplate(CREObjTypeTemplate):
+    t_id = T_ID_OP
     def preprocess_fields(self, fields):
         return tuple((name, types.unliteral(typ)) for name, typ in fields)
 
@@ -940,7 +941,7 @@ class Op(CREObjProxy,metaclass=OpMeta):
         optional check() method. 
     '''
     # @classmethod
-    
+    t_id = T_ID_OP
 
     @classmethod
     def _numba_box_(cls, ty, mi, py_cls=None):

@@ -899,6 +899,8 @@ def _struct_tuple_from_pointer_arr(typingctx, struct_types, ptr_arr):
     ''' Takes a tuple of fact types and a ptr_array i.e. an i8[::1] and outputs 
         the facts pointed to, casted to the appropriate types '''
     # print(">>",struct_types)
+    _struct_types = struct_types
+    if(isinstance(struct_types,types.TypeRef)): struct_types = struct_types.instance_type
     if(isinstance(struct_types, types.UniTuple)):
         typs = tuple([struct_types.dtype.instance_type] * struct_types.count)
         out_type =  types.UniTuple(struct_types.dtype.instance_type,struct_types.count)
@@ -906,9 +908,9 @@ def _struct_tuple_from_pointer_arr(typingctx, struct_types, ptr_arr):
         # print(struct_types.__dict__)
         typs = tuple([x.instance_type for x in struct_types.types])
         out_type =  Tuple(typs)
-    print(out_type)
+    # print(out_type)
     
-    sig = out_type(struct_types,i8[::1])
+    sig = out_type(_struct_types,i8[::1])
     def codegen(context, builder, sig, args):
         _,ptrs = args
 

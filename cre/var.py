@@ -69,6 +69,7 @@ var_fields_dict = {
 var_fields =  [(k,v) for k,v, in var_fields_dict.items()]
 
 class VarTypeClass(CREObjTypeTemplate):
+    t_id = T_ID_VAR
     def preprocess_fields(self, fields):
         f_dict = {k:v for k,v in fields}
         if(f_dict["head_type"] != types.Any):
@@ -102,6 +103,7 @@ def upcast(context, builder, fromty, toty, val):
     return _obj_cast_codegen(context, builder, val, fromty, toty,incref=False)
 
 class Var(CREObjProxy):
+    t_id = T_ID_VAR
     def __new__(cls, typ, alias=None, skip_assign_alias=False):
         # if(not isinstance(typ, types.StructRef)): typ = typ.fact_type
         typ = _standardize_type(typ, cre_context())
@@ -535,7 +537,6 @@ def get_head_type_name(self):
 @generated_jit
 @overload_method(VarTypeClass, "get_base_type_name")
 def get_base_type_name(self):
-    print(self)
     def impl(self):
         with objmode(base_type_name=unicode_type):
             context = cre_context()
@@ -654,7 +655,7 @@ def get_var_type(base_type, head_type=None):
 @njit(cache=True)
 def var_ctor(var_struct_type, base_t_id, alias=""):
     st = new(var_struct_type)
-    st.idrec = encode_idrec(T_ID_VAR,0,0)
+    st.idrec = encode_idrec(T_ID_VAR,0,0xFF)
     st.is_not = u1(0)
     st.conj_ptr = i8(0)
     st.base_t_id = base_t_id

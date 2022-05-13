@@ -759,8 +759,11 @@ class {typ}Proxy(FactProxy):
     def __new__(cls, *args,**kwargs):
         return ctor(*args,**kwargs)
 
-    def __str__(self):
+    def __repr__(self):
         return f'{typ}({str_temp})'
+
+    def __str__(self):
+        return self.__repr__()
 
 
 {properties}

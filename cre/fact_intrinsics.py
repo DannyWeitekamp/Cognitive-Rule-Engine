@@ -407,11 +407,14 @@ def _register_fact_structref(fact_type):
 
 @intrinsic
 def _fact_get_chr_mbrs_infos(typingctx, fact_type):
+    from cre.context import CREContext
     from cre.fact import base_fact_field_dict
+    
     '''get the base address of the struct pointed to by structref 'inst' '''
     
     # members_type = [v for k,v in fact_type._fields if k == 'members'][0]
-    t_ids = [_resolve_t_id_helper(x) for a,x in fact_type._fields if a not in base_fact_field_dict and a != "chr_mbrs_infos"]
+    context = CREContext.get_default_context()
+    t_ids = [context.get_t_id(_type=x)  for a,x in fact_type._fields if a not in base_fact_field_dict and a != "chr_mbrs_infos"]
 
     # count = members_type.count
     member_infos_out_type = types.UniTuple(member_info_type, len(t_ids))

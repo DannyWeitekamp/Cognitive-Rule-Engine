@@ -28,6 +28,20 @@ def new_vector(size):
     st.data = np.zeros(size,dtype=np.int64)
     return st
 
+@njit(cache=True)
+def _expand_to(self,size):
+    if(len(self.data) < size):
+        new_data = np.empty(size, dtype=np.int64)
+        new_data[:len(self.data)] = self.data
+        new_data[len(self.data):-1] = 0
+        self.data = new_data
+
+@overload_method(VectorTypeTemplate, "assert_size")
+def assert_size(self,size):
+    def impl(self,size):
+        _expand_to(self,size)
+    return impl
+
 @njit(inline='never')
 def _expand(self):
     '''
@@ -39,6 +53,22 @@ def _expand(self):
     new_data[len(self.data):-1] = 0
     self.data = new_data
 
+@overload_method(VectorTypeTemplate, "expand")
+def assert_size(self):
+    def impl(self):
+        _expand(self)
+    return impl
+
+@overload_method(VectorTypeTemplate, "set_item_safe")
+def vector_set_item_safe(self, i, x):
+    ''' 
+    Set's slot i to x. Ensures that data is large enough.
+    '''
+    def impl(self, i, x):
+        if(i >= self.head): self.head = i+1
+        _expand_to(self,self.head)
+        self.data[i] = x
+    return impl
 
 @overload_method(VectorTypeTemplate, "add")
 def vector_add(self, x):
@@ -74,6 +104,17 @@ def vector_clear(self):
         self.head = 0
     return impl
 
+@overload_method(VectorTypeTemplate, "copy")
+def vector_copy(self):
+    ''' 
+    Moves the head to zero, essentially clearing the vector.
+    '''
+    def impl(self):
+        st = new(VectorType)
+        st.head = self.head
+        st.data = self.data.copy()
+    return impl
+
 @overload(operator.getitem)
 def impl_getitem(self, i):
     if not isinstance(self, VectorTypeTemplate):
@@ -98,13 +139,7 @@ def impl_len(self):
         return self.head
     return impl
 
-@overload(len)
-def impl_len(self):
-    if not isinstance(self, VectorTypeTemplate):
-        return
-    def impl(self):
-        return self.head
-    return impl
+
 
 
 

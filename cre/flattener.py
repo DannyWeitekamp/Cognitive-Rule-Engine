@@ -50,10 +50,11 @@ flattener_fields = {
     **incr_processor_fields,    
     "out_mem" : MemoryType,
     "idrec_map" : DictType(u8,ListType(u8)),
-    "inv_idrec_map" : DictType(u8,ListType(u8)),
+    # "inv_idrec_map" : DictType(u8,ListType(u8)),
     "base_var_map" : DictType(Tuple((u2,unicode_type)), GenericVarType),
     "var_map" : DictType(Tuple((u2,unicode_type,unicode_type)), GenericVarType),
     "fact_visible_attr_pairs" : types.Any,
+    "id_attr" : types.Any,
 }
 
 @structref.register
@@ -80,12 +81,16 @@ t_id_identifier_alias_tup_type = Tuple((u2,unicode_type,unicode_type))
 t_id_alias_pair_type = Tuple((u2,unicode_type))
 u8_list = ListType(u8)
 
-def get_flattener_type(fact_types):
+def get_flattener_type(fact_types,id_attr):
     fact_visible_attr_pairs = get_semantic_visibile_fact_attrs(fact_types)
     fact_visible_attr_pairs_type = typeof(fact_visible_attr_pairs)
-    field_dict = {**flattener_fields, "fact_visible_attr_pairs" : fact_visible_attr_pairs_type}
+    field_dict = {**flattener_fields,
+                 "fact_visible_attr_pairs" : fact_visible_attr_pairs_type,
+                 "id_attr" : types.literal(id_attr)
+                 }
     f_type = FlattenerTypeClass([(k,v) for k,v in field_dict.items()])
     f_type._fact_visible_attr_pairs = fact_visible_attr_pairs
+    f_type._id_attr = id_attr
     return f_type
 
 
@@ -101,19 +106,19 @@ def flattener_ctor(flattener_type, in_mem, out_mem):
         st.base_var_map = Dict.empty(t_id_alias_pair_type, GenericVarType)
         st.var_map = Dict.empty(t_id_identifier_alias_tup_type, GenericVarType)
         st.idrec_map = Dict.empty(u8,u8_list)
-        st.inv_idrec_map = Dict.empty(u8,u8_list)
+        # st.inv_idrec_map = Dict.empty(u8,u8_list)
         st.out_mem = out_mem 
         return st
     return impl
 
 
 class Flattener(structref.StructRefProxy):
-    def __new__(cls, fact_types, in_mem=None, out_mem=None, context=None):
+    def __new__(cls, fact_types, id_attr, in_mem=None, out_mem=None, context=None):
         context = cre_context(context)
         if(in_mem is None): in_mem = Memory(context);
         if(out_mem is None): out_mem = Memory(context);
         
-        flattener_type = get_flattener_type(fact_types)
+        flattener_type = get_flattener_type(fact_types, id_attr)
         self = flattener_ctor(flattener_type, in_mem, out_mem)
         self._out_mem = out_mem
         return self
@@ -221,6 +226,8 @@ def flattener_update(self):
         args = (typ, tuple([*c.get_child_t_ids(_type=typ)]), typ.get_attr_a_id(attr.literal_value), attr)
         impl_args.append(args)
     impl_args = tuple(impl_args)
+
+    id_attr = self._id_attr
     # print([tuple(str(x) for x in y) for y in impl_args])
     def impl(self):
         # For each change event that occured since the last call to update() 
@@ -249,7 +256,7 @@ def flattener_update(self):
                                 continue
 
                         fact = _cast_structref(typ, self.in_mem.get_fact(change_event.idrec))
-                        flattener_update_for_attr(self,fact,"A", attr)
+                        flattener_update_for_attr(self,fact, id_attr, attr)
 
     return impl
 

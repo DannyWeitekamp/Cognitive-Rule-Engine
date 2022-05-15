@@ -42,7 +42,7 @@ def test_flatten():
         f_idrec = mem.declare(f)
         print("-------")
 
-        fl = Flattener((BOOP1, BOOP2, BOOP3), mem)
+        fl = Flattener((BOOP1, BOOP2, BOOP3), "A", mem)
         
         out_mem = fl.apply()
         values = flat_mem_vals(out_mem)
@@ -87,7 +87,7 @@ def setup_flatten():
     with cre_context("flatten_10000"):
         mem = Memory()
         mem.declare(BOOP("HI",-1))
-        fl = Flattener((BOOP,),mem)
+        fl = Flattener((BOOP,),id_attr="A",in_mem=mem)
         fl.update()
         _b_dec_10000(mem)
         
@@ -101,7 +101,7 @@ def test_b_flatten_10000(benchmark):
     benchmark.pedantic(do_flatten,setup=setup_flatten, warmup_rounds=1, rounds=10)
 
 if(__name__ == "__main__"):
-
+    import faulthandler; faulthandler.enable()
     test_flatten()
     # from cre.utils import PrintElapse
     # fl = setup_flatten()[0][0]

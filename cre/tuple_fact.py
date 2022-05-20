@@ -145,7 +145,6 @@ define_boxing(SpecializedTFClass,SpecializedTFProxy)
 # f'TupleFact({', '.join([repr_tf_item(self,member_types[i],i) for i in range()])})'
 
 def define_tuple_fact(member_types, context=None, return_proxy=False, return_type_class=False):   
-    
     if(len(member_types) > 0):
         typ_assigments = ", ".join([str(t) for t in member_types])
         specialization_name = f"TupleFact({typ_assigments})"
@@ -259,7 +258,7 @@ def upcast(context, builder, fromty, toty, val):
 
 
 
-from cre.cre_object import _resolve_t_id_helper
+# from cre.cre_object import _resolve_t_id_helper
 # def _resolve_t_id_helper(x):
 #     if(isinstance(x, types.Boolean)):
 #         return T_ID_BOOL
@@ -277,8 +276,11 @@ from numba.core import cgutils, utils as numba_utils
 
 @intrinsic
 def _tup_fact_get_chr_mbrs_infos(typingctx, tf_type):
+    from cre.context import CREContext
+    context = CREContext.get_default_context()
+
     members_type = [v for k,v in tf_type._fields if k == 'members'][0]
-    t_ids = [_resolve_t_id_helper(x) for x in members_type.types]
+    t_ids = [context.get_t_id(_type=x) for x in members_type.types]
 
     count = members_type.count
     member_infos_out_type = types.UniTuple(member_info_type, count)

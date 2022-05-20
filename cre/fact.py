@@ -843,8 +843,10 @@ def _fact_from_spec(name, spec, inherit_from=None, specialization_name=None, ret
 
 def define_fact(name : str, spec : dict = None, context=None, return_proxy=False, return_type_class=False):
     '''Defines a new fact.'''
+
     from cre.context import cre_context
     context = cre_context(context)
+    # print("DEFINE", name, context.name)
     specialization_name = name
     if(spec is not None):
         spec = _standardize_spec(spec,context,name)
@@ -860,7 +862,8 @@ def define_fact(name : str, spec : dict = None, context=None, return_proxy=False
         inherit_from = None
 
 
-    if(specialization_name in context.name_to_type):
+    if(specialization_name in context.name_to_type and
+       hasattr(context.name_to_type[specialization_name], 'attr')):
         assert str(context.name_to_type[specialization_name].spec) == str(spec), \
         f"Redefinition of fact '{specialization_name}' in context '{context.name}' not permitted"
         fact_type = context.name_to_type[specialization_name]        

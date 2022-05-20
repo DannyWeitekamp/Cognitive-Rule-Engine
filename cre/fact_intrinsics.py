@@ -22,7 +22,7 @@ from numba.experimental.structref import _Utils, imputils
 from numba.typed.typedobjectutils import _nonoptional
 
 from cre.utils import _raw_ptr_from_struct, _struct_from_ptr, _cast_structref, _ptr_from_struct_codegen, _list_from_ptr, _cast_list
-from cre.cre_object import _resolve_t_id_helper, member_info_type
+from cre.cre_object import member_info_type, resolve_member_id
 
 
 
@@ -405,6 +405,8 @@ def _register_fact_structref(fact_type):
 
 
 
+
+
 @intrinsic
 def _fact_get_chr_mbrs_infos(typingctx, fact_type):
     from cre.context import CREContext
@@ -414,7 +416,9 @@ def _fact_get_chr_mbrs_infos(typingctx, fact_type):
     
     # members_type = [v for k,v in fact_type._fields if k == 'members'][0]
     context = CREContext.get_default_context()
-    t_ids = [context.get_t_id(_type=x)  for a,x in fact_type._fields if a not in base_fact_field_dict and a != "chr_mbrs_infos"]
+    chr_mbr_fields = [(a,x) for a,x in fact_type._fields if a not in base_fact_field_dict and a != "chr_mbrs_infos"]
+    t_ids = [context.get_t_id(_type=x)  for a,x in chr_mbr_fields]
+    mbr_ids = [resolve_member_id(x) for a,x in chr_mbr_fields]
 
     # count = members_type.count
     member_infos_out_type = types.UniTuple(member_info_type, len(t_ids))
@@ -432,15 +436,17 @@ def _fact_get_chr_mbrs_infos(typingctx, fact_type):
 
         member_infos = []
         i = 0
-        for attr, typ in fact_type._fields:
-            if(attr not in base_fact_field_dict and attr != "chr_mbrs_infos"):
-                index_of_member = dataval._datamodel.get_field_position(attr)
-                member_ptr = builder.gep(baseptr, [cgutils.int32_t(0), cgutils.int32_t(index_of_member)], inbounds=True)
-                member_ptr = builder.ptrtoint(member_ptr, cgutils.intp_t)
-                offset = builder.trunc(builder.sub(member_ptr, baseptr_val), cgutils.ir.IntType(16))
-                t_id = context.get_constant(u2, t_ids[i])
-                member_infos.append(context.make_tuple(builder, member_info_type, (t_id, offset) ))
-                i += 1
+        for attr, typ in chr_mbr_fields:
+            #Get the offset
+            index_of_member = dataval._datamodel.get_field_position(attr)
+            member_ptr = builder.gep(baseptr, [cgutils.int32_t(0), cgutils.int32_t(index_of_member)], inbounds=True)
+            member_ptr = builder.ptrtoint(member_ptr, cgutils.intp_t)
+            offset = builder.trunc(builder.sub(member_ptr, baseptr_val), cgutils.ir.IntType(16))
+
+            t_id = context.get_constant(u2, t_ids[i])
+            mbr_id = context.get_constant(u2, mbr_ids[i])
+            member_infos.append(context.make_tuple(builder, member_info_type, (t_id, mbr_id, offset) ))
+            i += 1
         ret = context.make_tuple(builder,member_infos_out_type, member_infos)
         return ret
 

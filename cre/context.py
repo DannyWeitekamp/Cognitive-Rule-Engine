@@ -3,13 +3,14 @@ from numba.experimental import jitclass
 from numba import deferred_type, optional
 from numba import void,b1,u1,u2,u4,u8,i1,i2,i4,i8,f4,f8,c8,c16
 from numba.typed import List, Dict
-from numba.core.types import DictType, ListType, unicode_type, float64, NamedTuple, NamedUniTuple, UniTuple, Array
+from numba.core.types import DictType, ListType, unicode_type, float64, NamedTuple, NamedUniTuple, UniTuple, Array, boolean
 from numba.cpython.unicode import  _set_code_point
 from cre.core import TYPE_ALIASES, DEFAULT_REGISTERED_TYPES, JITSTRUCTS, py_type_map, numba_type_map, numpy_type_map, type_from_t_id, t_id_from_type_name, add_to_type_registry
 from cre.gensource import assert_gen_source
 from cre.caching import unique_hash, source_to_cache, import_from_cached, source_in_cache
 # from cre.struct_gen import gen_struct_code
 from cre.structref import define_structref
+from cre.utils import PrintElapse
 from numba.extending import overload_method
 from numba.experimental.structref import new
 from collections import namedtuple
@@ -20,7 +21,7 @@ import types as pytypes
 import sys
 import __main__
 import os
-import contextvars
+
 
 
 
@@ -35,7 +36,7 @@ Dict_Unicode_to_Flags = DictType(unicode_type,u1[:])
 
 context_data_fields = [
     # ("next_t_id", u2),
-    ("has_unhandled_retro_register", u1),
+    ("has_unhandled_retro_register", boolean),
     # ("string_enums" , DictType(unicode_type,i8)),
     # ("number_enums" , DictType(f8,i8)),
     # ("string_backmap" , DictType(i8,unicode_type)),
@@ -141,7 +142,7 @@ def clear_unhandled_retro_register(self):
 
 @njit(cache=True)
 def get_has_unhandled_retro_register(self):
-    self.has_unhandled_retro_register = False
+    return self.has_unhandled_retro_register
 
 class CREContext(object):
     _contexts = {}
@@ -209,6 +210,7 @@ class CREContext(object):
 
     def _ensure_retro_registers(self):
         from cre.core import DEFAULT_REGISTERED_TYPES
+
         cd = self.context_data
         if(cd.has_unhandled_retro_register):
             child_t_ids = cd.child_t_ids
@@ -225,7 +227,7 @@ class CREContext(object):
 
     @property
     def has_unhandled_retro_register(self):
-        get_has_unhandled_retro_register(self)
+        return get_has_unhandled_retro_register(self)
 
     def _assert_written_to_type_registry(self, typ):
         if(typ not in self.type_to_t_id):
@@ -310,7 +312,8 @@ class CREContext(object):
             typ = None
             if(t_id < len(self.t_id_to_type)):
                 typ = self.t_id_to_type[t_id]
-            if(typ is None): self._retroactive_register(t_id)
+                if(typ is types.undefined): typ = None
+            if(typ is None): typ = self._retroactive_register(t_id)
             if(typ is None): 
                 raise ValueError(f"No type with t_id={t_id} registered in cre_context {self.name}.")
             return typ
@@ -319,7 +322,7 @@ class CREContext(object):
 
     def _retroactive_register(self, t_id):
         try:
-            ft = _type = type_from_t_id(t_id)
+            ft = ret_typ = _type = type_from_t_id(t_id)
         except ImportError:
             return
 
@@ -331,6 +334,7 @@ class CREContext(object):
         for ft in reversed(types):
             # print(ft)
             self._register_fact_type(ft._fact_name, ft, getattr(ft,'parent_type', None))
+        return ret_typ
 
     def get_t_id(self, _type=None, name:str=None, retro_register:bool=True):
         if(name is not None):
@@ -540,6 +544,4 @@ class _BaseContextful(object):
         self.attr_inds_by_type = cd.attr_inds_by_type
         self.spec_flags = cd.spec_flags
         
-        
-cre_context_ctxvar = contextvars.ContextVar("cre_context",
-        default=CREContext.get_default_context()) 
+# global var 'cre_context_ctxvar' defined in __init__.py 

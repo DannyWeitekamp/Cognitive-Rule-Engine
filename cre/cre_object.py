@@ -2,7 +2,7 @@ import numpy as np
 from numba import i8, u8, u2, u1, types, njit, generated_jit, literal_unroll
 from numba.types import FunctionType, unicode_type, Tuple
 from numba.extending import  overload, lower_getattr, overload_method
-from cre.core import register_global_default
+from cre.core import register_global_default, T_ID_UNDEFINED, T_ID_BOOL, T_ID_INT, T_ID_FLOAT, T_ID_STR, T_ID_TUPLE_FACT 
 from cre.utils import _obj_cast_codegen, ptr_t, _raw_ptr_from_struct, _raw_ptr_from_struct_incref, CastFriendlyMixin, decode_idrec, _func_from_address, _cast_structref, _get_member_offset, _struct_get_data_ptr, _sizeof_type, _load_ptr, _struct_from_ptr
 from cre.structref import define_structref
 from numba.core.datamodel import default_manager, models
@@ -26,7 +26,8 @@ from numba.core.extending import (
 
 import operator
 
-member_info_type = types.Tuple((u2,u2))
+
+member_info_type = types.Tuple((u2,u2,u2))
 
 # identity_members_info_type = {
 #     "data" : types.UniTuple(member_info_type,1),
@@ -88,9 +89,9 @@ from numba.cpython.hashing import _Py_hash_t
 cre_obj_field_dict = {
     "idrec" : u8,
     # The number of members in the CREObj 
+    "hash_val" : _Py_hash_t,
     "num_chr_mbrs": u1,
     "chr_mbrs_infos_offset" : u2,
-    "hash_val" : i8,
     # The data offset of the "members" attribute (unpredictable because of layout alignment)
     # "chr_mbrs_infos" : BaseIdentityMemberInfosType,#types.UniTuple(member_info_type,1),
 }
@@ -144,14 +145,9 @@ def get_t_id(ptr):
     cre_obj =  _struct_from_ptr(CREObjType,ptr)
     t_id, _, _ = decode_idrec(cre_obj.idrec)
     return t_id
-# @njit(cache=True)
-# def cre_obj_ctor(idrec):
-#     st = new(CREObjType)
-#     st.idrec = idrec
-#     return st
 
 
-
+from cre.utils import PrintElapse
 class CREObjProxy(StructRefProxy):
     @classmethod
     def _numba_box_(cls, ty, mi):
@@ -186,8 +182,12 @@ class CREObjProxy(StructRefProxy):
         context = cre_context(context)
         t_id = get_t_id(self._meminfo)
 
+        if(getattr(self._type,'t_id',0) == t_id):
+            return self
+
         if(t_id != T_ID_TUPLE_FACT):
             # The type associated with the object's t_id in 'context'
+
             t_id_type = context.get_type(t_id=t_id)
             if(self.__class__ is not t_id_type and hasattr(t_id_type,"_proxy_class")):
                 self._type = t_id_type
@@ -198,10 +198,7 @@ class CREObjProxy(StructRefProxy):
             tf_mbr_types = [context.get_type(t_id=t_id) for t_id in mbr_t_ids]
             tf_type,tf_proxy_type = define_tuple_fact(tf_mbr_types,context,return_proxy=True)
             self.__class__ = tf_proxy_type
-            # print
 
-
-        
         return self
 
     def recover_type_safe(self,context=None):
@@ -346,20 +343,33 @@ def get_cre_obj_idrec(self):
 
 
 
-from cre.core import T_ID_UNDEFINED, T_ID_BOOL, T_ID_INT, T_ID_FLOAT, T_ID_STR, T_ID_TUPLE_FACT 
-
-def _resolve_t_id_helper(x):
-    if(isinstance(x, types.Boolean)):
-        return T_ID_BOOL
-    elif(isinstance(x, types.Integer)):
-        return T_ID_INT
-    elif(isinstance(x, types.Float)):
-        return T_ID_FLOAT
-    elif(x is types.unicode_type):
-        return T_ID_STR
-    return T_ID_UNDEFINED
 
 
+# def _resolve_t_id_helper(x):
+#     if(isinstance(x, types.Boolean)):
+#         return T_ID_BOOL
+#     elif(isinstance(x, types.Integer)):
+#         return T_ID_INT
+#     elif(isinstance(x, types.Float)):
+#         return T_ID_FLOAT
+#     elif(x is types.unicode_type):
+#         return T_ID_STR
+#     return T_ID_UNDEFINED
+
+PRIMITIVE_MBR_ID = 0
+OBJECT_MBR_ID = 1
+LIST_MBR_ID = 2
+DICT_MBR_ID = 3
+
+def resolve_member_id(x):
+    if(isinstance(x, types.StructRef)):
+        return OBJECT_MBR_ID
+    elif(isinstance(x, types.ListType)):
+        return LIST_MBR_ID
+    elif(isinstance(x, types.DictType)):
+        return DICT_MBR_ID
+    else:
+        return PRIMITIVE_MBR_ID
 
 @intrinsic
 def _get_chr_mbrs_infos_from_attrs(typingctx, st_type, attrs_lit):
@@ -379,6 +389,7 @@ def _get_chr_mbrs_infos_from_attrs(typingctx, st_type, attrs_lit):
     # print(ind)
     mbr_types = [v for k,v in st_type._fields if k in attrs]
     t_ids = [context.get_t_id(_type=x) for x in mbr_types]
+    m_ids = [resolve_member_id(x) for x in mbr_types]
 
     count = len(mbr_types)
     member_infos_out_type = types.UniTuple(member_info_type, count)
@@ -404,7 +415,8 @@ def _get_chr_mbrs_infos_from_attrs(typingctx, st_type, attrs_lit):
             member_ptr = builder.ptrtoint(member_ptr, cgutils.intp_t)
             offset = builder.trunc(builder.sub(member_ptr, baseptr_val), cgutils.ir.IntType(16))
             t_id = context.get_constant(u2, t_ids[i])
-            member_infos.append(context.make_tuple(builder, member_info_type, (t_id, offset)))
+            m_id = context.get_constant(u2, m_ids[i])
+            member_infos.append(context.make_tuple(builder, member_info_type, (t_id, m_id, offset)))
             # i += 1
 
         ret = context.make_tuple(builder,member_infos_out_type, member_infos)
@@ -426,16 +438,16 @@ def set_chr_mbrs(st, chr_mbr_attrs):
         st.chr_mbrs_infos = ()
     st.hash_val = 0 
         
-@njit(Tuple((u2,i8))(CREObjType, i8),cache=True)
+@njit(Tuple((u2,u2,i8))(CREObjType, i8),cache=True)
 def cre_obj_get_item_t_id_ptr(x, index):
     data_ptr = _struct_get_data_ptr(x)
     member_info_ptr = data_ptr + x.chr_mbrs_infos_offset + index*_sizeof_type(member_info_type)
-    t_id, member_offset = _load_ptr(member_info_type, member_info_ptr)
-    return t_id, data_ptr + member_offset
+    t_id, m_id, member_offset = _load_ptr(member_info_type, member_info_ptr)
+    return t_id, m_id, data_ptr + member_offset
 
 @njit(cache=True)
 def cre_obj_get_item(obj, item_type, index):
-    _, item_ptr = cre_obj_get_item_t_id_ptr(obj,index)
+    _, _, item_ptr = cre_obj_get_item_t_id_ptr(obj,index)
     out = _load_ptr(item_type, item_ptr)
     return out
 
@@ -447,14 +459,14 @@ def cre_obj_iter_t_id_item_ptrs(x):
     member_info_ptr = data_ptr + x.chr_mbrs_infos_offset
 
     for i in range(x.num_chr_mbrs):
-        t_id, member_offset = _load_ptr(member_info_type, member_info_ptr)
-        yield t_id, data_ptr + member_offset
+        t_id, m_id, member_offset = _load_ptr(member_info_type, member_info_ptr)
+        yield t_id, m_id, data_ptr + member_offset
         member_info_ptr += _sizeof_type(member_info_type)
 
 @njit(cache=True)
 def cre_obj_get_member_t_ids(x):
     t_ids = np.empty((x.num_chr_mbrs,),dtype=np.uint16)
-    for i, (t_id, _) in enumerate(cre_obj_iter_t_id_item_ptrs(x)):
+    for i, (t_id,_, _) in enumerate(cre_obj_iter_t_id_item_ptrs(x)):
         t_ids[i] = t_id
     return t_ids
 

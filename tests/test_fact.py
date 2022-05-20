@@ -768,6 +768,12 @@ with cre_context("_b_boop_ctor_10000"):
         for i in range(10000):
             b = BOOP("HI",i)
 
+    def py_b_boop_ctor_100():
+        for i in range(100):
+            b = BOOP("HI",i)
+
+
+
 def test_b_boop_ctor_10000(benchmark):
     benchmark.pedantic(_b_boop_ctor_10000, warmup_rounds=1, rounds=10)
 
@@ -780,6 +786,10 @@ def _b_py_dict_boop_10000():
 def test_b_py_dict_boop_10000(benchmark):
     benchmark.pedantic(_b_py_dict_boop_10000, warmup_rounds=1, rounds=10)
 
+
+
+def test_b_py_dict_boop_100(benchmark):
+    benchmark.pedantic(py_b_boop_ctor_100, warmup_rounds=1, rounds=10)
 
 
 
@@ -807,11 +817,11 @@ if __name__ == "__main__":
     # test_as_conditions()
 
     # _test_reference_type()
-    # test_hash()
-    # test_eq()
+    test_hash()
+    test_eq()
     # test_inheritence()
     # test_inheritence_bytes()
-    test_context_retroactive_register()
+    # test_context_retroactive_register()
 
 
 

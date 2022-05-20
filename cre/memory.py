@@ -255,10 +255,10 @@ class Memory(structref.StructRefProxy):
 
     def _repr_helper(self,rfunc,ind="    ",sep="\n",pad='\n'):
         strs = []
-        for typ in self.context.registered_types:
-            if(isinstance(typ,Fact)):
-                for fact in self.get_facts(typ, no_subtypes=True):
-                    strs.append(str(fact))
+        # for typ in np.nonzero(self.mem_data.facts)[0]:
+        #     if(isinstance(typ,Fact)):
+        for fact in self.get_facts():
+            strs.append(str(fact))
         nl = "\n"
         return f'''Memory(facts=({pad}{ind}{f"{sep}{ind}".join(strs)}{pad})'''
 
@@ -363,6 +363,7 @@ def facts_for_t_id(mem_data,t_id):
     L = len(mem_data.facts)
     if(t_id >= L):
         expand_mem_data_types(mem_data, (t_id+1)-L)
+    # print("Declare", t_id, mem_data.facts[t_id])
     return _struct_from_ptr(VectorType, mem_data.facts[t_id])
 
 @njit(cache=True)
@@ -454,7 +455,7 @@ def resolve_t_id(mem, fact):
             parent_t_id = i8(_t_id)
 
     # mem.context_data.fact_num_to_t_id[fact_num] = t_id
-    cd.has_unhandled_retro_register = True
+        cd.has_unhandled_retro_register = True
 
     # Ensure that the data structures in mem_data are long enough to index t_id.
     L = len(mem.mem_data.facts)
@@ -534,8 +535,7 @@ def declare_fact(mem, fact):
         # mem.mem_data.grow_queue.add(idrec)
         # signal_subscribers_grow(mem, idrec)
     mem.mem_data.change_queue.add(idrec)
-    # return idrec
-    
+
     return idrec
 
 
@@ -943,7 +943,7 @@ def get_facts(mem, fact_type=None, no_subtypes=False):
                 t_ids = np.array((fact_t_id,),dtype=np.int64)
             else:                
                 t_ids = cd.child_t_ids[fact_t_id]
-
+        # print("<< t_ids", t_ids)
         out = List.empty_list(_fact_type)
         curr_t_id_ind = 0
         curr_ind = 0
@@ -953,8 +953,10 @@ def get_facts(mem, fact_type=None, no_subtypes=False):
 
             if(t_id < len(mem.mem_data.facts)):                
                 facts_ptr = mem.mem_data.facts[i8(t_id)]
+                # print("facts_ptr", facts_ptr)
                 if(facts_ptr != 0):
                     facts = _struct_from_ptr(VectorType, facts_ptr)
+                    # print("facts", t_id, facts.head, facts.data)
                     if(curr_ind < len(facts)):
                         ptr = facts[curr_ind]
                         curr_ind +=1

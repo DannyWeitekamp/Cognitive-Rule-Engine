@@ -1,4 +1,5 @@
-from setuptools import setup, find_packages 
+from setuptools import setup, find_packages, Extension 
+
   
 with open('requirements.txt') as f: 
     requirements = f.readlines() 
@@ -10,6 +11,17 @@ dev_requirements = [
     "pytest",
     "pytest-benchmark"
 ]
+
+def get_ext_modules():
+    import numba
+    numba_path = numba.extending.include_path()
+    cre_c_funcs = Extension(
+        name='cre_cfuncs', 
+        sources=['cre/cfuncs/cre_cfuncs.c'],
+        include_dirs=[numba_path]
+    )
+    return [cre_c_funcs]
+
   
 setup( 
         name ='cre', 
@@ -28,17 +40,20 @@ setup(
         # }, 
         entry_points={
             "console_scripts": [
-                "cre = cre.command_line:main"
+                "cre = command_line.command_line:main"
             ]
         },
+        ext_modules = get_ext_modules(),
 
-        classifiers =( 
+
+        classifiers =[ 
             "Programming Language :: Python :: 3", 
             "License :: OSI Approved :: MIT License", 
             "Operating System :: OS Independent", 
-        ), 
+        ], 
         keywords ='expert system production rules', 
         install_requires = requirements, 
+        setup_requires = ['numba'],
         extras_require={
             'dev' : dev_requirements
         }

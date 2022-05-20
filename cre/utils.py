@@ -563,6 +563,27 @@ def _load_ptr(typingctx, typ, ptr):
     sig = inst_type(typ,ptr)
     return sig, codegen
 
+@intrinsic
+def _store(typingctx, typ, ptr, val):
+    '''Get the value pointed to by 'ptr' assuming it has type 'typ' 
+    '''
+    inst_type = typ.instance_type
+    print(typ)
+    def codegen(context, builder, sig, args):
+        _,ptr,val = args
+        llrtype = context.get_value_type(inst_type)
+        ptr = builder.inttoptr(ptr, ll_types.PointerType(llrtype))
+        builder.store(val, ptr)
+        print("A")
+        
+        # if context.enable_nrt:
+        #     context.nrt.incref(builder, llrtype, val)
+        print("A")
+        
+
+    sig = types.void(typ,ptr,val)
+    return sig, codegen
+
 
 @intrinsic
 def _func_from_address(typingctx, func_type_ref, addr):

@@ -213,6 +213,7 @@ op_fields_dict = {
 class OpTypeTemplate(CREObjTypeTemplate):
     t_id = T_ID_OP
     def preprocess_fields(self, fields):
+        self.t_id = T_ID_OP
         return tuple((name, types.unliteral(typ)) for name, typ in fields)
 
     def __str__(self):

@@ -9,7 +9,7 @@ from cre.fact import define_fact#TupleFact, assert_cre_obj, TupleFact
 from cre.cre_object import CREObjType
 from cre.utils import PrintElapse, decode_idrec
 
-from numba import njit, u8, i8, bool_
+from numba import njit, f8, u8, i8, bool_
 from numba.types import unicode_type
 from numba.typed import List, Dict
 import pytest
@@ -139,6 +139,53 @@ def test_hash():
     assert hsh(a1) != hsh(b3)
     assert hsh(a1) != hsh(b4)
 
+def test_hash_obj_builtin_members():
+    from cre.default_ops import Equals
+    from cre.var import Var
+    eq_f8 = Equals(f8,f8)
+    eq_str = Equals(unicode_type,unicode_type)
+    a_f8 = Var(f8,'a')
+    b_f8 = Var(f8,'b')
+    a_str = Var(unicode_type,'a')
+    b_str = Var(unicode_type,'b')
+    
+    a1 = TF(eq_f8, a_f8, b_f8)
+    a2 = TF(eq_f8, a_f8, b_f8)
+    b1 = TF(eq_str, a_str, b_str)
+
+    a1_hash = hsh(a1)
+    a2_hash = hsh(a1)
+
+    print(hsh(a1), hsh(a2))
+    print(hsh(a1), hsh(b1))
+
+    assert hsh(a1) == hsh(a2)
+    assert hsh(a1) != hsh(b1)
+
+def test_eq_obj_builtin_members():
+    from cre.default_ops import Equals
+    from cre.var import Var
+    eq_f8 = Equals(f8,f8)
+    eq_str = Equals(unicode_type,unicode_type)
+    a_f8 = Var(f8,'a')
+    b_f8 = Var(f8,'b')
+    a_str = Var(unicode_type,'a')
+    b_str = Var(unicode_type,'b')
+    
+    a1 = TF(eq_f8, a_f8, b_f8)
+    a2 = TF(eq_f8, a_f8, b_f8)
+    b1 = TF(eq_str, a_str, b_str)
+
+    a1_hash = hsh(a1)
+    a2_hash = hsh(a1)
+
+    assert eq(a1, a2)
+    assert not eq(a1, b1)
+    
+
+    # print(a1, a2)
+
+
 N = 10000
 
 
@@ -161,11 +208,6 @@ def test_str():
         print(b)
 
         print(str(TF(b, 1)))
-
-
-
-
-
 
 
 @njit(cache=True)
@@ -225,6 +267,8 @@ if __name__ == "__main__":
     test_init()
     test_eq()
     test_hash()
+    test_hash_obj_builtin_members()
+    test_eq_obj_builtin_members()
     test_str()
     # p = init_prim()
     # print(type(p), p)

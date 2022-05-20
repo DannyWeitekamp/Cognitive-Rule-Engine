@@ -40,12 +40,15 @@ def boop_Bs_from_ptrs(ptr_matches):
 def get_ptr(fact):
     return _raw_ptr_from_struct(fact)
 
-
-def mem_w_n_boops(n,BOOP):
-    mem = Memory()
+@njit(cache=True)
+def declare_n_BOOPS(n,BOOP,mem):
     for i in range(n):
         boop = BOOP(str(i), i)
         mem.declare(boop)
+
+def mem_w_n_boops(n,BOOP):
+    mem = Memory()
+    declare_n_BOOPS(n,BOOP,mem)
     return mem
 
 
@@ -306,12 +309,12 @@ def test_multiple_types():
         BOOP = define_fact("BOOP",{"name": "string", "B" : "number"})
         TList = define_fact("TList",{"name" : "string", "items" : "ListType(string)"})
 
-        print("THE ACTUAL T_IDS",BOOP.t_id,TList.t_id)
+        # print("THE ACTUAL T_IDS",BOOP.t_id,TList.t_id)
 
         b = Var(BOOP,"b")
         t = Var(TList,"t")
 
-        print(c.context_data.fact_to_t_id["BOOP"], c.context_data.fact_to_t_id["TList"])
+        # print(c.context_data.fact_to_t_id["BOOP"], c.context_data.fact_to_t_id["TList"])
 
         mem = Memory()
         mem.declare(BOOP("A", 0))
@@ -579,17 +582,16 @@ if(__name__ == "__main__"):
     # print(alloc_stats1.alloc-alloc_stats1.free, alloc_stats2.alloc-alloc_stats2.free)
 
 
-    # test_ref_matching()
-    # test_multiple_deref()
-    # test_matching()
+    test_ref_matching()
+    test_multiple_deref()
     # test_matching_unconditioned()
-    # test_ref_matching()
-    # test_list()
+    test_ref_matching()
     test_list()
-    # test_multiple_types()
-    # test_ref_matching()
+    test_multiple_types()
+    test_ref_matching()
     # import pytest.__main__.benchmark
     # matching_1_t_4_lit_setup()
-    # test_NOT()
+    # _test_NOT()
     # test_b_matching_1_t_4_lit()
-    # test_multiple_types()
+    test_multiple_types()
+    test_mem_leaks()

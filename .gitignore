@@ -1,1 +1,7 @@
 __pycache__/
+garbag*
+*.so
+*.dll
+.zshrc
+*.egg-info
+build

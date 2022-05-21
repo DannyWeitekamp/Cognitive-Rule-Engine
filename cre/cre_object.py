@@ -3,7 +3,11 @@ from numba import i8, u8, u2, u1, types, njit, generated_jit, literal_unroll
 from numba.types import FunctionType, unicode_type, Tuple
 from numba.extending import  overload, lower_getattr, overload_method
 from cre.core import register_global_default, T_ID_UNDEFINED, T_ID_BOOL, T_ID_INT, T_ID_FLOAT, T_ID_STR, T_ID_TUPLE_FACT 
-from cre.utils import _obj_cast_codegen, ptr_t, _raw_ptr_from_struct, _raw_ptr_from_struct_incref, CastFriendlyMixin, decode_idrec, _func_from_address, _cast_structref, _get_member_offset, _struct_get_data_ptr, _sizeof_type, _load_ptr, _struct_from_ptr
+from cre.utils import (_memcpy_structref, _obj_cast_codegen, ptr_t,
+    _raw_ptr_from_struct, _raw_ptr_from_struct_incref, _incref_ptr,
+    CastFriendlyMixin, decode_idrec, _func_from_address,
+    _cast_structref, _get_member_offset, _struct_get_data_ptr,
+    _sizeof_type, _load_ptr, _struct_from_ptr, encode_idrec)
 from cre.structref import define_structref
 from numba.core.datamodel import default_manager, models
 from numba.core import cgutils
@@ -210,6 +214,9 @@ class CREObjProxy(StructRefProxy):
 
 
 define_boxing(CREObjTypeTemplate, CREObjProxy)
+
+
+
 
 # @njit(u2(i8),cache=False)
 
@@ -478,4 +485,26 @@ def cre_obj_get_member_t_ids(x):
 def asa(self, typ):
     def impl(self, typ):
         return _cast_structref(typ, self)
+    return impl
+
+
+# from cre.utils import _raw_ptr_from_struct, _struct_from_ptr, _store, _cast_structref, decode_idrec, encode_idrec, _incref_ptr, _load_ptr
+@generated_jit(cache=True)
+def copy_cre_obj(fact):
+    fact_type = fact
+    def impl(fact):
+        new_fact = _memcpy_structref(fact)
+        a,b = _cast_structref(CREObjType, fact), _cast_structref(CREObjType, new_fact)
+
+        t_id, _, a_id = decode_idrec(a.idrec)
+        b.idrec = encode_idrec(t_id,0,a_id)
+        for info_a, info_b in zip(cre_obj_iter_t_id_item_ptrs(a),cre_obj_iter_t_id_item_ptrs(b)):
+            t_id_a, m_id_a, data_ptr_a = info_a
+            t_id_b, m_id_b, data_ptr_b = info_b
+
+            if(m_id_b != 0):
+                obj_ptr = _load_ptr(i8, data_ptr_a)
+                _incref_ptr(obj_ptr)
+
+        return new_fact
     return impl

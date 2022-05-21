@@ -218,6 +218,7 @@ SHORT_NAMES = {
     types.undefined : "undf",
     types.bool_ : "bool",
     i8 : "i8",
+    
     f8 : "f8",
     unicode_type : "str",
 }

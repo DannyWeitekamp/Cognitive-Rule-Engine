@@ -434,6 +434,33 @@ def _ptr_to_data_ptr(typingctx, raw_ptr):
     sig = i8(raw_ptr, )
     return sig, codegen
 
+
+def _meminfo_copy_unsafe(builder, nrt, meminfo):
+    mod = builder.module
+    fnty = ir.FunctionType(cgutils.voidptr_t, [cgutils.voidptr_t, cgutils.voidptr_t])
+    fn = cgutils.get_or_insert_function(mod, fnty, "meminfo_copy_unsafe")
+    fn.return_value.add_attribute("noalias")
+    return builder.call(fn, [builder.bitcast(nrt, cgutils.voidptr_t), builder.bitcast(meminfo, cgutils.voidptr_t)])
+
+@intrinsic
+def _memcpy_structref(typingctx, inst_type):    
+    def codegen(context, builder, signature, args):
+        val = args[0]
+        ctor = cgutils.create_struct_proxy(inst_type)
+    
+        dstruct = ctor(context, builder, value=val)
+        meminfo = dstruct.meminfo
+        nrt = context.nrt.get_nrt_api(builder)
+        new_meminfo = _meminfo_copy_unsafe(builder, nrt, meminfo)
+
+        inst_struct = context.make_helper(builder, inst_type)
+        inst_struct.meminfo = new_meminfo
+
+        return impl_ret_borrowed(context, builder, inst_type, inst_struct._getvalue())
+
+    sig = inst_type(inst_type)
+    return sig, codegen
+
 #### Refcounting Utils #### 
 
 

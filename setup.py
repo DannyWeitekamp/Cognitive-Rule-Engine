@@ -33,14 +33,14 @@ setup(
         long_description = long_description, 
         long_description_content_type ="text/markdown", 
         license ='MIT', 
-        packages = find_packages(), 
+        packages = find_packages(include=['cre']), 
         # scripts=['bin/altrain'],
         # entry_points ={ 
             
         # }, 
         entry_points={
             "console_scripts": [
-                "cre = command_line.command_line:main"
+                "cre = console.cre_exec:main"
             ]
         },
         ext_modules = get_ext_modules(),

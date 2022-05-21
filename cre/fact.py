@@ -1039,6 +1039,9 @@ def asa(self, typ):
             return _cast_structref(typ, self)
     return impl
 
+
+
+
 #### Hashing ####
 
 # @njit(cache=True)

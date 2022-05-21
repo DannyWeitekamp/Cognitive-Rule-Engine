@@ -452,3 +452,5 @@ def _fact_get_chr_mbrs_infos(typingctx, fact_type):
 
     sig = member_infos_out_type(fact_type)
     return sig, codegen
+
+

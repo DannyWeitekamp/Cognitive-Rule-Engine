@@ -5,6 +5,7 @@ skip = contextvars.ContextVar("cre_skip_package_level_imports",default=False)
 print("<<", skip.get())
 if(not skip.get()):
     print("NOT THIS FIRST", __name__)
+    import cre.cfuncs
 
     # Necessary to import these at package level to ensure that they are defined
     #  before a context is created

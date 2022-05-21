@@ -4,7 +4,7 @@ from cre.fact import (_fact_from_spec, _standardize_spec, _merge_spec_inheritanc
       uint_to_inheritance_bytes, get_inheritance_bytes_len_ptr, get_inheritance_t_ids)
 from cre.context import cre_context
 from cre.memory import Memory
-from cre.cre_object import CREObjType
+from cre.cre_object import CREObjType, copy_cre_obj
 from numba import njit, u8, u1
 from numba.typed import List
 from numba.types import ListType
@@ -756,6 +756,59 @@ def test_hash():
         a3_boop.B = 7
         assert hsh(a3) != hsh(a1)
 
+
+
+def test_copy():
+    with cre_context("test_copy"):
+        spec = {"A" : "string", "B" : "number"}
+        BOOP = define_fact("BOOP", spec)
+        MOOP = define_fact("MOOP", {'boop1' : BOOP, 'boop2' :BOOP})
+
+        
+        b = BOOP("1",2)
+        a = copy_cre_obj(b)
+
+            
+        @njit(cache=True)
+        def do_primitive_copy():
+            a1 = BOOP("HI",2)
+            a2 = copy_cre_obj(a1)
+            a1.A = "NOT HI"
+            a2.B = 0
+            return a1, a2
+
+        a1, a2 = do_primitive_copy()
+        assert a2.A == "HI" and a2.B == 0
+        assert a1.A != a2.A and a1.B != a2.B
+
+        a1, a2 = do_primitive_copy.py_func()
+        assert a2.A == "HI" and a2.B == 0
+        assert a1.A != a2.A and a1.B != a2.B
+
+        @njit(cache=True)
+        def do_obj_copy():
+            b1 = BOOP("HI",2)
+            b2 = BOOP("HO",3)
+            m1 = MOOP(b1,b2)
+            m2 = copy_cre_obj(m1)
+            m2.boop2 = BOOP("HE",4)
+            b1,b2 = None, None
+            return m1, m2
+
+        m1, m2 = do_obj_copy()
+        assert m2.boop1.B == 2
+        assert m1.boop2.B == 3
+        assert m2.boop2.B == 4
+
+        m1, m2 = do_obj_copy.py_func()
+        assert m2.boop1.B == 2
+        assert m1.boop2.B == 3
+        assert m2.boop2.B == 4
+
+
+
+
+
 with cre_context("_b_boop_ctor_10000"):
     # def _define_boop():
     #     with cre_context("_b_boop_ctor_1000"):
@@ -768,9 +821,7 @@ with cre_context("_b_boop_ctor_10000"):
         for i in range(10000):
             b = BOOP("HI",i)
 
-    def py_b_boop_ctor_100():
-        for i in range(100):
-            b = BOOP("HI",i)
+    
 
 
 
@@ -817,8 +868,9 @@ if __name__ == "__main__":
     # test_as_conditions()
 
     # _test_reference_type()
-    test_hash()
-    test_eq()
+    # test_hash()
+    # test_eq()
+    test_copy()
     # test_inheritence()
     # test_inheritence_bytes()
     # test_context_retroactive_register()

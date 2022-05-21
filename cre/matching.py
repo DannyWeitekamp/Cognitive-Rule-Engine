@@ -8,7 +8,7 @@ from numba.experimental import structref
 from numba.experimental.structref import new, define_boxing, define_attributes, _Utils
 from numba.extending import overload_method, intrinsic, overload_attribute, intrinsic, lower_getattr_generic, overload, infer_getattr, lower_setattr_generic
 from numba.core.typing.templates import AttributeTemplate
-from cre.utils import _struct_from_meminfo, _meminfo_from_struct, _cast_structref, cast_structref, decode_idrec, lower_getattr, _struct_from_ptr,  lower_setattr, lower_getattr, _ptr_from_struct
+from cre.utils import _struct_from_meminfo, _meminfo_from_struct, _cast_structref, cast_structref, decode_idrec, lower_getattr, _struct_from_ptr,  lower_setattr, lower_getattr, _ptr_from_struct, _struct_tuple_from_pointer_arr
 from cre.caching import gen_import_str, unique_hash,import_from_cached, source_to_cache, source_in_cache
 from cre.conditions import Conditions, ConditionsType, initialize_conditions, get_linked_conditions_instance
 
@@ -273,45 +273,7 @@ def get_ptr_matches(conds, mem=None):
 
 
 
-@intrinsic
-def _struct_tuple_from_pointer_arr(typingctx, struct_types, ptr_arr):
-    ''' Takes a tuple of fact types and a ptr_array i.e. an i8[::1] and outputs 
-        the facts pointed to, casted to the appropriate types '''
-    # print(">>",struct_types)
-    if(isinstance(struct_types, UniTuple)):
-        typs = tuple([struct_types.dtype.instance_type] * struct_types.count)
-        out_type =  UniTuple(struct_types.dtype.instance_type,struct_types.count)
-    else:
-        # print(struct_types.__dict__)
-        typs = tuple([x.instance_type for x in struct_types.types])
-        out_type =  Tuple(typs)
-    # print(out_type)
-    
-    sig = out_type(struct_types,i8[::1])
-    def codegen(context, builder, sig, args):
-        _,ptrs = args
 
-        vals = []
-        ary = make_array(i8[::1])(context, builder, value=ptrs)
-        for i, inst_type in enumerate(typs):
-            i_val = context.get_constant(types.intp, i)
-
-            # Same as _struct_from_ptr
-            raw_ptr = _getitem_array_single_int(context,builder,i8,i8[::1],ary,i_val)
-            meminfo = builder.inttoptr(raw_ptr, cgutils.voidptr_t)
-
-            st = cgutils.create_struct_proxy(inst_type)(context, builder)
-            st.meminfo = meminfo
-
-            context.nrt.incref(builder, types.MemInfoPointer(types.voidptr), meminfo)
-
-            vals.append(st._getvalue())
-
-
-        
-        return context.make_tuple(builder,out_type,vals)
-
-    return sig,codegen
 
 # @generated_jit(cache=True,nopython=True)
 # def _get_matches(conds, struct_types, mem=None):

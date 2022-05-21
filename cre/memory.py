@@ -454,7 +454,6 @@ def resolve_t_id(mem, fact):
             ensure_inheritance(cd, _t_id, parent_t_id)
             parent_t_id = i8(_t_id)
 
-    # mem.context_data.fact_num_to_t_id[fact_num] = t_id
         cd.has_unhandled_retro_register = True
 
     # Ensure that the data structures in mem_data are long enough to index t_id.

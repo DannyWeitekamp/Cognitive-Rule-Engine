@@ -111,10 +111,10 @@ class CastFriendlyMixin():
             return other
 
 
-#### deref_type ####
+#### deref_info_type ####
 
-_deref_type = np.dtype([('type', np.uint8),  ('a_id', np.uint32), ('t_id', np.uint16), ('offset', np.int32)])
-deref_type = numba.from_dtype(_deref_type)
+np_deref_info_type = np.dtype([('type', np.uint8),  ('a_id', np.uint32), ('t_id', np.uint16), ('offset', np.int32)])
+deref_info_type = numba.from_dtype(np_deref_info_type)
 
 DEREF_TYPE_ATTR = 0
 DEREF_TYPE_LIST = 1 

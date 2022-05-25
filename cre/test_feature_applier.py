@@ -9,6 +9,7 @@ import pytest_benchmark
 from cre.default_ops import Equals
 from cre.feature_applier import FeatureApplier
 
+
 eq_f8 = Equals(f8, f8)
 eq_str = Equals(unicode_type, unicode_type)
 
@@ -21,7 +22,7 @@ def count_true_false(flat_mem):
     t_ids = set([decode_idrec(x.idrec)[0] for x in flat_mem.get_facts(gval)])
     t_count, f_count = 0, 0
     for x in flat_mem.get_facts(gval):
-        if(x.val):
+        if(isinstance(x.val,bool) and x.val):
             t_count += 1
         else:
             f_count += 1
@@ -61,7 +62,7 @@ def test_feature_apply():
         f_idrec = mem.declare(f)
         print("-------")
 
-        fl = Flattener((BOOP1, BOOP2, BOOP3), "id", mem)
+        fl = Flattener((BOOP1, BOOP2, BOOP3), mem, id_attr="id")
         flat_mem = fl.apply()
 
         fa = FeatureApplier([eq_f8, eq_str],flat_mem)
@@ -72,7 +73,7 @@ def test_feature_apply():
         print(count_true_false(feat_mem))
 
         # 5*5 .u, 2*5 .v, 2*5 .x
-        assert len(feat_mem.get_facts()) == ((5*6) + (5*6))
+        assert len(feat_mem.get_facts()) == ((5*6) + (5*6)) + (6+6)
         assert count_true_false(feat_mem)[0] == 10
 
         mem.retract(c)
@@ -86,7 +87,7 @@ def test_feature_apply():
         print(count_true_false(feat_mem))
 
 
-        assert len(feat_mem.get_facts()) == ((3*4) + (3*4))
+        assert len(feat_mem.get_facts()) == ((3*4) + (3*4)) + (4+4)
         assert count_true_false(feat_mem)[0] == 4
 
         mem.modify(e, "x", 777)
@@ -99,7 +100,7 @@ def test_feature_apply():
         print(len(feat_mem.get_facts()))
 
         print()
-        assert len(feat_mem.get_facts()) == ((3*4) + (3*4))
+        assert len(feat_mem.get_facts()) == ((3*4) + (3*4)) + (4+4)
         assert count_true_false(feat_mem)[0] == 2
 
 
@@ -120,7 +121,7 @@ def setup_feat_apply_100x100():
     with cre_context("feat_apply_100x100"):
         mem = Memory()
         _b_dec_100(mem)
-        fl = Flattener((BOOP,),"A",mem)
+        fl = Flattener((BOOP,),mem,id_attr="A")
         flat_mem = fl.apply()
         fa = FeatureApplier([eq_f8,eq_str],flat_mem)
         feat_mem = fa.apply()
@@ -130,7 +131,7 @@ def do_feat_apply(fa,mem):
     fa.update()
     return fa.out_mem
 
-def test_b_feat_apply(benchmark):
+def test_b_feat_apply_100x100(benchmark):
     benchmark.pedantic(do_feat_apply,setup=setup_feat_apply_100x100, warmup_rounds=1, rounds=10)
 
 

@@ -42,7 +42,7 @@ def test_flatten():
         f_idrec = mem.declare(f)
         print("-------")
 
-        fl = Flattener((BOOP1, BOOP2, BOOP3), "A", mem)
+        fl = Flattener((BOOP1, BOOP2, BOOP3), mem, id_attr="A")
         
         out_mem = fl.apply()
         values = flat_mem_vals(out_mem)
@@ -87,7 +87,7 @@ def setup_flatten():
     with cre_context("flatten_10000"):
         mem = Memory()
         mem.declare(BOOP("HI",-1))
-        fl = Flattener((BOOP,),id_attr="A",in_mem=mem)
+        fl = Flattener((BOOP,),in_mem=mem,id_attr="A",)
         fl.update()
         _b_dec_10000(mem)
         

@@ -9,6 +9,7 @@ import pytest_benchmark
 from cre.default_ops import Equals
 from cre.feature_applier import FeatureApplier
 from cre.vectorizer import Vectorizer
+from pprint import pprint
 
 
 eq_f8 = Equals(f8, f8)
@@ -47,7 +48,7 @@ def test_vectorizer():
         f_idrec = mem.declare(f)
         print("-------")
 
-        fl = Flattener((BOOP1, BOOP2, BOOP3), "id", mem)
+        fl = Flattener((BOOP1, BOOP2, BOOP3), mem, id_attr="id")
         flat_mem = fl.apply()
 
         fa = FeatureApplier([eq_f8, eq_str],flat_mem)
@@ -59,10 +60,19 @@ def test_vectorizer():
         #     print(fact)
         print("LEN", len(facts))
         # print(feat_mem)    
-        vr.apply(feat_mem)
+        print()
+
+        floats, noms = vr.apply(feat_mem)
+
+        assert len(noms) == 
+        inv_map = vr.get_inv_map()
+
+        # pprint({k:v for k,v in inv_map.items()})
+
+
         # continuous, nominal = vr.apply(feat_mem)
         # print(continuous, nominal)
-        return
+        # return
 
         # mem.retract(c)
         # mem.retract(d)

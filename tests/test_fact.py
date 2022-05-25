@@ -822,7 +822,7 @@ with cre_context("_b_boop_ctor_10000"):
             b = BOOP("HI",i)
 
     
-
+    # py_b_boop_ctor_100 = py_b_boop_ctor_100.py_func
 
 
 def test_b_boop_ctor_10000(benchmark):
@@ -839,8 +839,8 @@ def test_b_py_dict_boop_10000(benchmark):
 
 
 
-def test_b_py_dict_boop_100(benchmark):
-    benchmark.pedantic(py_b_boop_ctor_100, warmup_rounds=1, rounds=10)
+# def test_b_py_dict_boop_100(benchmark):
+#     benchmark.pedantic(_b_py_dict_boop(100), warmup_rounds=1, rounds=10)
 
 
 

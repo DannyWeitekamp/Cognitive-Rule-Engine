@@ -27,7 +27,7 @@ from numba.core.datamodel import default_manager, models
 from operator import itemgetter
 from copy import copy
 from os import getenv
-from cre.utils import deref_type, DEREF_TYPE_ATTR, DEREF_TYPE_LIST, listtype_sizeof_item, _obj_cast_codegen
+from cre.utils import deref_info_type, DEREF_TYPE_ATTR, DEREF_TYPE_LIST, listtype_sizeof_item, _obj_cast_codegen
 from cre.core import T_ID_VAR, register_global_default
 # import inspect
 
@@ -50,8 +50,8 @@ var_fields_dict = {
 
     # The byte offsets for each attribute relative to the previous resolved
     #  fact. E.g.  if attr "B" is at offset 10 in the type assigned to "B"
-    #  then v.B.B.deref_offsets = [10,10]
-    'deref_offsets': deref_type[::1],
+    #  then v.B.B.deref_infos = [10,10]
+    'deref_infos': deref_info_type[::1],
 
     # The t_ids of the fact that the base Var is meant to match.
     'base_t_id' : u2,
@@ -156,7 +156,7 @@ class Var(CREObjProxy):
                 head_type = cre_context().name_to_type[head_type._fact_name]
             a_id = curr_head_type.get_attr_a_id(attr) #list(fd.keys()).index(attr)
             offset = curr_head_type.get_attr_offset(attr)#curr_head_type._attr_offsets[a_id]
-            deref_type = DEREF_TYPE_ATTR
+            deref_info_type = DEREF_TYPE_ATTR
             # _derefs_str += f".{attr}"
         else:
             # LIST case
@@ -170,7 +170,7 @@ class Var(CREObjProxy):
             item_size = listtype_sizeof_item(self.head_type)
             offset = int(attr_or_ind)*item_size
             # print(int(attr_or_ind), item_size)
-            deref_type = DEREF_TYPE_LIST
+            deref_info_type = DEREF_TYPE_LIST
             # _derefs_str += f"[{attr_or_ind}]"
 
 
@@ -179,17 +179,17 @@ class Var(CREObjProxy):
 
         # with PrintElapse("new"):
         if(getenv("CRE_SPECIALIZE_VAR_TYPE",default=False)):
-            if(deref_type == DEREF_TYPE_ATTR):
+            if(deref_info_type == DEREF_TYPE_ATTR):
                 struct_type = get_var_type(base_type, head_type)
             else:
                 raise NotImplemented("Haven't implemented getitem() when CRE_SPECIALIZE_VAR_TYPE=true.")
-            new_var = var_append_deref(self, attr_or_ind)#self, attr, a_id, offset, head_type_name, t_id, deref_type)
+            new_var = var_append_deref(self, attr_or_ind)#self, attr, a_id, offset, head_type_name, t_id, deref_info_type)
         else:
             head_t_id = cre_context().get_t_id(_type=head_type)
             # head_t_id = getattr(head_type, "t_id", -1)
-            # print("type, a_id, offset, head_t_id", deref_type, a_id, offset, head_t_id)
-            new_var = generic_var_append_deref(self, a_id, offset, head_t_id, typ=deref_type)
-            # new = generic_var_append_deref(self, attr, a_id, offset, head_type_name, t_id, deref_type)
+            # print("type, a_id, offset, head_t_id", deref_info_type, a_id, offset, head_t_id)
+            new_var = generic_var_append_deref(self, a_id, offset, head_t_id, typ=deref_info_type)
+            # new = generic_var_append_deref(self, attr, a_id, offset, head_type_name, t_id, deref_info_type)
             # struct_type = GenericVarType
         #CHECK THAT PTRS ARE SAME HERE
             
@@ -237,8 +237,8 @@ class Var(CREObjProxy):
                 self._deref_attrs = resolve_deref_attrs(self)
             return self._deref_attrs
         #     return var_get_deref_attrs(self)
-        elif(attr == 'deref_offsets'):
-            return var_get_deref_offsets(self)
+        elif(attr == 'deref_infos'):
+            return var_get_deref_infos(self)
         elif(attr == 'alias'):
             return var_get_alias(self)
         elif(attr == 'base_t_id'):
@@ -265,7 +265,7 @@ class Var(CREObjProxy):
         deref_strs = [f"[{a}]" if a.isdigit() else "." + a 
                 for a in self.deref_attrs]
         s = base + "".join(deref_strs)
-        # print("$$", s, self.deref_offsets)
+        # print("$$", s, self.deref_infos)
          # s = f'NOT({s})'
         return s
     def __repr__(self):
@@ -506,12 +506,12 @@ def resolve_deref_attrs(self):
     '''Gets the chain of attribute strings for a Var e.g. x.A.B.C -> ['A','B','C']
     '''
     context = cre_context()
-    deref_offsets = var_get_deref_offsets(self)
-    # print(deref_offsets)
+    deref_infos = var_get_deref_infos(self)
+    # print(deref_infos)
     deref_attrs = []
     typ = self.base_type
     # print("base_t_id", self.base_t_id)
-    for i,x in enumerate(deref_offsets):
+    for i,x in enumerate(deref_infos):
         # print(i, typ, x['a_id'])
         if(isinstance(typ, ListType)):
             deref_attrs.append(str(x['a_id']))
@@ -553,7 +553,7 @@ def get_deref_attrs(self):
             context = cre_context()
             deref_attrs = List.empty_list(unicode_type)
             typ = self.base_type
-            for i,x in enumerate(self.deref_offsets):
+            for i,x in enumerate(self.deref_infos):
                 if(isinstance(typ, ListType)):
                     deref_attrs.append(f"{x['a_id']}")
                 else:
@@ -615,8 +615,8 @@ def var_get_is_not(self):
     # return self.deref_attrs
 
 @njit(cache=True)
-def var_get_deref_offsets(self):
-    return self.deref_offsets
+def var_get_deref_infos(self):
+    return self.deref_infos
 
 @njit(cache=True)
 def var_get_alias(self):
@@ -664,7 +664,7 @@ def var_ctor(var_struct_type, base_t_id, alias=""):
     st.base_ptr_ref = ptr_t(0)
     st.alias =  "" if(alias is  None) else alias
     # st.deref_attrs = List.empty_list(unicode_type)
-    st.deref_offsets = np.empty(0,dtype=deref_type)
+    st.deref_infos = np.empty(0,dtype=deref_info_type)
     return st
 
 
@@ -695,9 +695,9 @@ def overload_Var(typ,alias=None):
 # @njit(cache=True)
 # def str_var_derefs(self):
 #     s = ""
-#     for i in range(len(self.deref_offsets)):
+#     for i in range(len(self.deref_infos)):
 #         attr = self.deref_attrs[i]
-#         deref = self.deref_offsets[i]
+#         deref = self.deref_infos[i]
 #         if(deref.type == DEREF_TYPE_ATTR):
 #             s += f".{attr}"
 #         else:
@@ -737,19 +737,19 @@ def overload_Var(typ,alias=None):
 @njit(types.void(GenericVarType, GenericVarType),cache=True)
 def var_memcopy(self,st):
     # new_deref_attrs = List.empty_list(unicode_type)
-    # new_deref_offsets = np.empty(len(),dtype=deref_type)
+    # new_deref_infos = np.empty(len(),dtype=deref_info_type)
     # for x in lower_getattr(self,"deref_attrs"):
     #     new_deref_attrs.append(x)
-    # old_deref_offsets
-    # for i,y in enumerate(lower_getattr(self,"deref_offsets")):
-    #     new_deref_offsets[i] = y
+    # old_deref_infos
+    # for i,y in enumerate(lower_getattr(self,"deref_infos")):
+    #     new_deref_infos[i] = y
     lower_setattr(st,'idrec', lower_getattr(self,"idrec"))
     lower_setattr(st,'is_not', lower_getattr(self,"is_not"))
     lower_setattr(st,'base_ptr', lower_getattr(self,"base_ptr"))
     lower_setattr(st,'base_ptr_ref', lower_getattr(self,"base_ptr_ref"))
     lower_setattr(st,'alias', lower_getattr(self,"alias"))
     # lower_setattr(st,'deref_attrs',new_deref_attrs)
-    lower_setattr(st,'deref_offsets', lower_getattr(self,"deref_offsets").copy())
+    lower_setattr(st,'deref_infos', lower_getattr(self,"deref_infos").copy())
     # base_type_name = lower_getattr(self,"base_type_name")
     lower_setattr(st,'base_t_id',lower_getattr(self,"base_t_id"))
     lower_setattr(st,'head_t_id',lower_getattr(self,"head_t_id"))
@@ -763,20 +763,20 @@ def var_memcopy(self,st):
 @njit(types.void(GenericVarType, u4, i4, u2, u1), cache=True)
 def _var_append_deref(self, a_id, offset, head_t_id, typ):
     # lower_getattr(self,"deref_attrs").append(attr)
-    old_deref_offsets = lower_getattr(self,"deref_offsets")
-    L = len(old_deref_offsets)
-    new_deref_offsets = np.empty(L+1,dtype=deref_type)
-    new_deref_offsets[:L] = old_deref_offsets
+    old_deref_infos = lower_getattr(self,"deref_infos")
+    L = len(old_deref_infos)
+    new_deref_infos = np.empty(L+1,dtype=deref_info_type)
+    new_deref_infos[:L] = old_deref_infos
     if(typ == DEREF_TYPE_ATTR):
-        new_deref_offsets[L].type = u1(DEREF_TYPE_ATTR)
+        new_deref_infos[L].type = u1(DEREF_TYPE_ATTR)
     elif(typ == DEREF_TYPE_LIST):
-        new_deref_offsets[L].type = u1(DEREF_TYPE_LIST)
+        new_deref_infos[L].type = u1(DEREF_TYPE_LIST)
 
-    new_deref_offsets[L].a_id = u4(a_id)
-    new_deref_offsets[L].offset = i4(offset)
-    new_deref_offsets[L].t_id = u2(head_t_id)
+    new_deref_infos[L].a_id = u4(a_id)
+    new_deref_infos[L].offset = i4(offset)
+    new_deref_infos[L].t_id = u2(head_t_id)
 
-    lower_setattr(self,'deref_offsets', new_deref_offsets)
+    lower_setattr(self,'deref_infos', new_deref_infos)
     lower_setattr(self,'head_t_id', head_t_id)
     # lower_setattr(self,'base_ptr_ref', ptr_t(lower_getattr(self,"base_ptr")))
 

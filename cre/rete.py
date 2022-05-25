@@ -7,7 +7,7 @@ from numba.experimental.structref import new, define_boxing
 import numba.experimental.structref as structref
 from cre.utils import (wptr_t, ptr_t, _dict_from_ptr, _raw_ptr_from_struct, _get_array_raw_data_ptr,
          _ptr_from_struct_incref, _struct_from_ptr, decode_idrec, CastFriendlyMixin,
-        encode_idrec, deref_type, DEREF_TYPE_ATTR, DEREF_TYPE_LIST, _obj_cast_codegen,
+        encode_idrec, deref_info_type, DEREF_TYPE_ATTR, DEREF_TYPE_LIST, _obj_cast_codegen,
          _ptr_to_data_ptr, _list_base_from_ptr, _load_ptr, PrintElapse, meminfo_type,
          _decref_structref, _decref_ptr, cast_structref, _struct_tuple_from_pointer_arr, _meminfo_from_struct)
 from cre.structref import define_structref
@@ -270,17 +270,17 @@ def node_ctor(mem, t_ids, var_inds,lit=None):
     return st
 
 
-@njit(i8(i8, deref_type[::1]), cache=True,locals={"data_ptr":i8, "inst_ptr":i8})
-def deref_head_and_relevant_idrecs(inst_ptr, deref_offsets):
+@njit(i8(i8, deref_info_type[::1]), cache=True,locals={"data_ptr":i8, "inst_ptr":i8})
+def deref_head_and_relevant_idrecs(inst_ptr, deref_infos):
     ''' '''
     
-    # relevant_idrecs = np.zeros((max((len(deref_offsets)-1)*2+1,0),), dtype=np.uint64)
+    # relevant_idrecs = np.zeros((max((len(deref_infos)-1)*2+1,0),), dtype=np.uint64)
     # print("N", len(relevant_idrecs))
     k = -1
 
     # ok = True
 
-    for deref in deref_offsets[:-1]:
+    for deref in deref_infos[:-1]:
         # print("ENTERED")
         if(inst_ptr == 0): break;
         if(deref.type == u1(DEREF_TYPE_ATTR)):
@@ -297,7 +297,7 @@ def deref_head_and_relevant_idrecs(inst_ptr, deref_offsets):
     
     # print(inst_ptr)
     if(inst_ptr != 0):
-        deref = deref_offsets[-1]
+        deref = deref_infos[-1]
         if(deref.type == u1(DEREF_TYPE_ATTR)):
             data_ptr = _ptr_to_data_ptr(inst_ptr)
         else:
@@ -339,7 +339,7 @@ def make_deref_record_parent(deref_depends, idrec, r_ptr):
     p[r_ptr] = u1(1)
     return _raw_ptr_from_struct(p)
 
-@njit(i8(deref_type,i8),inline='never',cache=True)
+@njit(i8(deref_info_type,i8),inline='never',cache=True)
 def deref_once(deref,inst_ptr):
     if(deref.type == u1(DEREF_TYPE_ATTR)):
         return _ptr_to_data_ptr(inst_ptr)
@@ -347,21 +347,21 @@ def deref_once(deref,inst_ptr):
         return _list_base_from_ptr(inst_ptr)
 
 
-# @njit(i8(BaseReteNodeType, u2, u8, deref_type[::1]),cache=True)
+# @njit(i8(BaseReteNodeType, u2, u8, deref_info_type[::1]),cache=True)
 @njit(cache=True)
-def resolve_head_ptr(self, arg_ind, base_t_id, f_id, deref_offsets):
+def resolve_head_ptr(self, arg_ind, base_t_id, f_id, deref_infos):
     '''Try to get the head_ptr of 'f_id' in input 'arg_ind'. Inject a DerefRecord regardless of the result 
         Keep in mind that a head_ptr is the pointer to the address where the data is stored not the data itself.
     '''
     facts = _struct_from_ptr(VectorType, self.mem.mem_data.facts[base_t_id])
-    # print(deref_offsets)
-    if(len(deref_offsets) > 0):
+    # print(deref_infos)
+    if(len(deref_infos) > 0):
         inst_ptr = facts.data[f_id]
-        if(len(deref_offsets) > 1):
-            rel_idrecs = np.empty(len(deref_offsets)-1, dtype=np.uint64)
-            for k in range(len(deref_offsets)-1):
+        if(len(deref_infos) > 1):
+            rel_idrecs = np.empty(len(deref_infos)-1, dtype=np.uint64)
+            for k in range(len(deref_infos)-1):
                 if(inst_ptr == 0): break;
-                deref = deref_offsets[k]
+                deref = deref_infos[k]
                 data_ptr = deref_once(deref, inst_ptr)
                 # print(f"{deref.type} inst_ptr {inst_ptr} -> {data_ptr+deref.offset}")
                 # print("data_ptr", k, data_ptr)
@@ -380,7 +380,7 @@ def resolve_head_ptr(self, arg_ind, base_t_id, f_id, deref_offsets):
                 parent_ptrs[i] = i8(make_deref_record_parent(self.deref_depends, idrec, r_ptr))            
 
         if(inst_ptr != 0):
-            deref = deref_offsets[-1]
+            deref = deref_infos[-1]
             data_ptr = deref_once(deref, inst_ptr)
             # print(f"{deref.type} inst_ptr {inst_ptr} -> {data_ptr+deref.offset}")
             # print("data_ptr", -1, data_ptr,data_ptr+deref.offset)
@@ -413,10 +413,10 @@ def validate_head_or_retract(self, arg_ind, idrec, head_ptrs, r):
         for i in range(r.length):
             # continue 
             head_var = _struct_from_ptr(GenericVarType,self.op.head_var_ptrs[r.start+i])
-            deref_offsets = head_var.deref_offsets
+            deref_infos = head_var.deref_infos
             # continue
             # print("--start resolve_head_ptr",)
-            head_ptr = resolve_head_ptr(self, arg_ind, t_id, f_id, deref_offsets)
+            head_ptr = resolve_head_ptr(self, arg_ind, t_id, f_id, deref_infos)
             # print("resolve_head_ptr", f_id, head_ptr)
             if(head_ptr == 0): 
                 is_valid=False;
@@ -1327,7 +1327,7 @@ def _make_rete_nodes(mem, c, index_map):
                     ind = np.min(np.nonzero(lit.var_base_ptrs==i8(head_var.base_ptr))[0])
                     t_id = t_ids[ind]
                     # print("START")
-                    for d_offset in head_var.deref_offsets:
+                    for d_offset in head_var.deref_infos:
                         idrec1 = encode_idrec(u2(t_id),0,u1(d_offset.a_id))
                         _global_map_insert(idrec1, global_deref_idrec_map, node)
                         # print("-idrec1", decode_idrec(idrec1))

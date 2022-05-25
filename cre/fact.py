@@ -62,6 +62,27 @@ class Fact(CREObjTypeTemplate):
             self._field_dict_keys = list(self.field_dict.keys())
         return self._field_dict_keys
 
+    def get_attr_deref_info(self, attr):
+        from cre.context import cre_context
+        from cre.utils import deref_info_type, DEREF_TYPE_ATTR, DEREF_TYPE_LIST
+        priv_var_name = f"_{attr}_deref_info"
+        if(not hasattr(self, priv_var_name)):
+            a_id = self.get_attr_a_id(attr)
+            offset = self.get_attr_offset(attr)
+            head_type = self.field_dict[attr]
+            head_t_id = cre_context().get_t_id(_type=head_type)
+            # deref_type = DEREF_TYPE_LIST if isinstance(head_type,types.ListType) else DEREF_TYPE_ATTR
+
+            deref_info = np.zeros((),dtype=deref_info_type)
+            deref_info['type'] = DEREF_TYPE_ATTR
+            deref_info['a_id'] = a_id
+            deref_info['t_id'] = head_t_id
+            deref_info['offset'] = offset
+
+            setattr(self, priv_var_name, deref_info)
+        return getattr(self, priv_var_name)
+        
+
     def get_attr_offset(self,attr):
         return self._attr_offsets[self.get_attr_a_id(attr)]
 
@@ -174,12 +195,16 @@ class DeferredFactRefType():
     def __repr__(self):
         return f"DeferredFactRefType({self._fact_name!r})"
 
+    @property
+    def instance_type(self):
+        return getattr(self,'_definition', None)
+
     def define(self,x):
-        self._define = x
+        self._definition = x
 
     def get(self):
-        if(not hasattr(self,"_define")): raise TypeError(f"Attempt to use {str(self)} without definition")
-        return self._define
+        if(not hasattr(self,"_definition")): raise TypeError(f"Attempt to use {str(self)} without definition")
+        return self._definition
 
     def __hash__(self):
         return hash(self._fact_name)

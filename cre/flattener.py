@@ -18,11 +18,13 @@ from cre.structref import define_structref
 from cre.incr_processor import incr_processor_fields, IncrProcessorType, init_incr_processor
 from cre.memory import Memory, MemoryType
 from cre.structref import CastFriendlyStructref, define_boxing
+from cre.enumerizer import Enumerizer, EnumerizerType
 from numba.experimental import structref
 from numba.extending import overload_method, overload, lower_cast, SentryLiteralArgs
 from numba.experimental.function_type import _get_wrapper_address
 import cloudpickle
 from cre.gval import get_gval_type, new_gval, gval as gval_type
+from cre.fact import DeferredFactRefType
 
 def get_semantic_visibile_fact_attrs(fact_types):
     ''' Takes in a set of fact types and returns all (fact, attribute) pairs
@@ -32,7 +34,7 @@ def get_semantic_visibile_fact_attrs(fact_types):
 
     sem_vis_fact_attrs = {}
     for ft in fact_types:
-        ft = ft.instance_type if (isinstance(ft, types.TypeRef)) else ft
+        ft = ft.instance_type if (isinstance(ft, (types.TypeRef,))) else ft
         parents = context.parents_of.get(ft._fact_name,[])
         for attr, d in ft.spec.items():
             if(d.get("is_semantic_visible", False)):
@@ -55,6 +57,7 @@ flattener_fields = {
     "var_map" : DictType(Tuple((u2,unicode_type,unicode_type)), GenericVarType),
     "fact_visible_attr_pairs" : types.Any,
     "id_attr" : types.Any,
+    "enumerizer" : EnumerizerType,
 }
 
 @structref.register
@@ -97,9 +100,9 @@ def get_flattener_type(fact_types,id_attr):
 
 from numba.core.typing.typeof import typeof
 @generated_jit(cache=True, nopython=True)    
-def flattener_ctor(flattener_type, in_mem, out_mem):
+def flattener_ctor(flattener_type, in_mem, out_mem, enumerizer=None):
     fact_visible_attr_pairs = flattener_type.instance_type._fact_visible_attr_pairs
-    def impl(flattener_type, in_mem, out_mem):
+    def impl(flattener_type, in_mem, out_mem, enumerizer=None):
         st = new(flattener_type)
         init_incr_processor(st, in_mem)
         st.fact_visible_attr_pairs = fact_visible_attr_pairs
@@ -108,18 +111,31 @@ def flattener_ctor(flattener_type, in_mem, out_mem):
         st.idrec_map = Dict.empty(u8,u8_list)
         # st.inv_idrec_map = Dict.empty(u8,u8_list)
         st.out_mem = out_mem 
+        st.enumerizer = enumerizer
         return st
     return impl
 
 
 class Flattener(structref.StructRefProxy):
-    def __new__(cls, fact_types, id_attr, in_mem=None, out_mem=None, context=None):
+    def __new__(cls, fact_types, in_mem=None, id_attr="id",
+                 out_mem=None, enumerizer=None, context=None):
         context = cre_context(context)
+
+        # Make new in_mem and out_mem if they are not provided.
         if(in_mem is None): in_mem = Memory(context);
         if(out_mem is None): out_mem = Memory(context);
-        
+
+        # Inject an enumerizer instance into the context object
+        #  if one does not exist. So it is shared across various
+        #  processing steps.
+        if(enumerizer is None):
+            enumerizer = getattr(context,'enumerizer', Enumerizer()) 
+            context.enumerizer = enumerizer
+
+        # Make a flattener_type from fact_types + id_attr and instantiate
+        #  the flattener. Keep a reference to out_mem around.
         flattener_type = get_flattener_type(fact_types, id_attr)
-        self = flattener_ctor(flattener_type, in_mem, out_mem)
+        self = flattener_ctor(flattener_type, in_mem, out_mem, enumerizer)
         self._out_mem = out_mem
         return self
 
@@ -193,8 +209,10 @@ def flattener_update_for_attr(self, fact, id_attr, attr):
 
         ###### End Var(...).attr #####
 
+        nom = self.enumerizer.enumerize(v)
+
         # Make the gval.
-        g = new_gval(head=self.var_map[tup], val=v)
+        g = new_gval(head=self.var_map[tup], val=v, nom=nom)
         idrec = self.out_mem.declare(g)
 
         # Map the fact's idrec in 'in_mem' to the gval's idrec in 'out_mem' 
@@ -211,7 +229,7 @@ def clean_a_id(self, change_idrec, a_id):
         for idrec in self.idrec_map[change_idrec]:
             gval = self.out_mem.get_fact(idrec).asa(gval_type)
             var = _cast_structref(GenericVarType, gval.head)
-            if(var.deref_offsets[0].a_id == a_id):
+            if(var.deref_infos[0].a_id == a_id):
                 self.out_mem.retract(idrec)
                 self.idrec_map[change_idrec].remove(idrec)
                 break

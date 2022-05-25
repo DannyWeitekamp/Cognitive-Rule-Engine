@@ -55,9 +55,9 @@ def var_eq(a, b):
 
     if(va.base_ptr != vb.base_ptr): return False
 
-    if(len(va.deref_offsets) != len(vb.deref_offsets)): return False
-    for deref_offset_a, deref_offset_b in zip(va.deref_offsets, vb.deref_offsets):
-        if(deref_offset_a.offset != deref_offset_b.offset): return False
+    if(len(va.deref_infos) != len(vb.deref_infos)): return False
+    for deref_info_a, deref_info_b in zip(va.deref_infos, vb.deref_infos):
+        if(deref_info_a.offset != deref_info_b.offset): return False
 
     
     return True
@@ -272,10 +272,10 @@ def var_hash(x):
 
         acc = _PyHASH_XXPRIME_5
         acc = accum_item_hash(acc,  vx.base_ptr) 
-        acc = accum_item_hash(acc, len(vx.deref_offsets))
+        acc = accum_item_hash(acc, len(vx.deref_infos))
         
-        for deref_offset in vx.deref_offsets:
-            acc = accum_item_hash(acc, deref_offset.offset) 
+        for deref_info in vx.deref_infos:
+            acc = accum_item_hash(acc, deref_info.offset) 
         x.hash_val = _Py_hash_t(acc)
 
     

@@ -27,7 +27,7 @@ from cre.incr_processor import incr_processor_fields, IncrProcessorType, init_in
 from itertools import chain
 
 vectorizer_fields = {
-    "pattern_to_slot_ind" : DictType(CREObjType, i8),
+    "head_to_slot_ind" : DictType(CREObjType, i8),
     "val_types" : types.Any
 }
 
@@ -54,38 +54,44 @@ class Vectorizer(structref.StructRefProxy):
     def apply(self,mem):
         return vectorizer_apply(self, mem)
 
+    def get_inv_map(self):
+        return get_inv_map(self)
 
 define_boxing(VectorizerTypeClass, Vectorizer)
-
 
 @generated_jit(cache=True)    
 def vectorizer_ctor(struct_type):
     def impl(struct_type):    
         st = new(struct_type)
-        st.pattern_to_slot_ind = Dict.empty(CREObjType,i8)
+        st.head_to_slot_ind = Dict.empty(CREObjType,i8)
         return st
     return impl
 
-
-
-# @njit(Tuple(f8[:,::1],i8[:,::1])(VectorizerType, MemoryType),cache=True)
 @generated_jit(cache=True)
+@overload_method(VectorizerTypeClass, "apply")
 def vectorizer_apply(self, mem):
     context = cre_context()
     val_types = self._val_types
-    # print(val_types)
-    gval_types = tuple([get_gval_type(t) for t in val_types])
-    # print(gval_types)
-    # print([context.get_t_id(_type=t) for t in gval_types])
+    # gval_types = tuple([get_gval_type(t) for t in val_types])
     def impl(self, mem):
-        for gval_type in literal_unroll(gval_types):
-            # print("HI")
-            for i, fact in enumerate(mem.get_facts(gval_type)):
-                if(fact.head not in self.pattern_to_slot_ind):
-                    self.pattern_to_slot_ind[fact.head] = len(self.pattern_to_slot_ind)
-                print(hash(fact.head), fact.head==fact.head, fact.head in self.pattern_to_slot_ind)
-                # print()
-                # print(i, fact.head)
+        # Ensure all heads are in head_to_slot_ind
+        for i, fact in enumerate(mem.get_facts(gval_type)):
+            if(not(fact.head in self.head_to_slot_ind)):
+                self.head_to_slot_ind[fact.head] = len(self.head_to_slot_ind)
+
+        # Build the numpy arrays 
+        flt_vals = np.empty((len(self.head_to_slot_ind),),dtype=np.float64)
+        nom_vals = np.empty((len(self.head_to_slot_ind),),dtype=np.uint64)
+        for i, fact in enumerate(mem.get_facts(gval_type)):
+            flt_vals[self.head_to_slot_ind[fact.head]] = fact.flt
+            nom_vals[self.head_to_slot_ind[fact.head]] = fact.nom
+        return flt_vals, nom_vals
     return impl
 
 
+@njit(cache=True)
+def get_inv_map(self):
+    d = Dict.empty(i8,CREObjType)
+    for head, ind, in self.head_to_slot_ind.items():
+        d[ind] = head
+    return d

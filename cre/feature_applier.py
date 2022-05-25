@@ -4,7 +4,7 @@ from numba.types import unicode_type,  intp, Tuple,  Tuple, DictType, ListType
 from numba.typed import Dict, List
 from numba.experimental.structref import new
 from cre.caching import unique_hash, source_to_cache, import_from_cached, source_in_cache, get_cache_path
-from cre.cre_object import CREObjType
+from cre.cre_object import copy_cre_obj, CREObjType
 from cre.fact import define_fact, UntypedFact, call_untyped_fact, BaseFact
 from cre.fact_intrinsics import fact_lower_getattr, resolve_fact_getattr_type
 from cre.context import cre_context
@@ -24,43 +24,21 @@ import cloudpickle
 from cre.gval import get_gval_type, new_gval, gval as gval_type
 from cre.vector import VectorType, new_vector
 from cre.incr_processor import incr_processor_fields, IncrProcessorType, init_incr_processor, ChangeEventType
+from cre.enumerizer import Enumerizer, EnumerizerType
 from itertools import chain
-
-enumerizer_fields = {
-    **incr_processor_fields,
-    # "ops" 
-    "head_to_inds" : types.Any,
-    # "float_to_enum" : DictType(f8,i8),
-    # "string_to_enum" : DictType(f8,i8),
-    # "obj_to_enum" : DictType(CREObjType,i8),
-    "num_noms" : i8
-}
-
-Enumerizer, EnumerizerType, EnumerizerTypeClass  = define_structref("Enumerizer", enumerizer_fields, return_type_class=True) 
-
-print(ListType(u2[::1]))
 
 # Flattener Struct Definition
 feature_applier_fields = {
     **incr_processor_fields,    
     "out_mem" : MemoryType,
     "idrec_map" : DictType(u8,ListType(u8)),
-    # "inv_idrec_map" : DictType(u8,ListType(u8)),
     "ops" : ListType(GenericOpType),
 
-
-    # "fact_vecs" : ListType(ListType(VectorType)),
     "fact_vecs" : DictType(u2, Tuple((VectorType,VectorType, VectorType))),
 
     "gval_t_ids" : ListType(u2[::1]),
     "current_change_events" : ListType(ChangeEventType),
-    # "fact_vecs_needs_update" : types.bool_
-    # "unq_arg_types":  types.Any,
-    # "unq_return_types":  types.Any,
-
-    # "base_var_map" : DictType(Tuple((u2,unicode_type)), GenericVarType),
-    # "var_map" : DictType(Tuple((u2,unicode_type,unicode_type)), GenericVarType),
-    # "fact_visible_attr_pairs" : types.Any,
+    "enumerizer" : EnumerizerType,
 }
 
 @structref.register
@@ -88,29 +66,22 @@ vec_list_type = ListType(VectorType)
 list_vec_list_type = ListType(ListType(VectorType))
 op_list_type = ListType(GenericOpType)
 
-# def get_feature_applier_type(ops):
-    # unq_return_types = Tuple(tuple(set([op.signature.return_type for op in ops])))
-    # unq_arg_types = Tuple(tuple(set(chain(*[op.signature.args for op in ops]))))
-    # print(unq_return_types, unq_arg_types)
-    # field_dict = {**feature_applier_fields, "unq_arg_types" : unq_arg_types,  "unq_return_types" : unq_return_types}
-    # f_type = FeatureApplierTypeClass([(k,v) for k,v in feature_applier_fields.items()])
-    # f_type._unq_return_types = unq_return_types
-    # f_type._unq_arg_types = unq_arg_types
-    # return f_type
-
-
-
-
 
 class FeatureApplier(structref.StructRefProxy):
-    def __new__(cls, ops, in_mem=None, out_mem=None, context=None):
+    def __new__(cls, ops, in_mem=None, out_mem=None,
+                 enumerizer=None, context=None):
         context = cre_context(context)
         if(in_mem is None): in_mem = Memory(context);
         if(out_mem is None): out_mem = Memory(context);
 
-        # feature_applier_type = get_feature_applier_type(ops)
-        self = feature_applier_ctor(in_mem, out_mem)
-        # raise ValueError()
+        # Inject an enumerizer instance into the context object
+        #  if one does not exist. So it is shared across various
+        #  processing steps.
+        if(enumerizer is None):
+            enumerizer = getattr(context,'enumerizer', Enumerizer()) 
+            context.enumerizer = enumerizer
+
+        self = feature_applier_ctor(in_mem, out_mem, enumerizer)
         self.ops = []
         self.update_impls = []
         for op in ops:
@@ -125,10 +96,6 @@ class FeatureApplier(structref.StructRefProxy):
     @property
     def out_mem(self):
         return self._out_mem
-
-    # @property
-    # def fact_vecs_needs_update(self):
-    #     return get_fact_vecs_needs_update(self)
 
     def get_changes(self):
         return feature_applier_get_changes(self)
@@ -158,7 +125,7 @@ class FeatureApplier(structref.StructRefProxy):
         
         @njit(types.void(GenericFeatureApplierType, i8),cache=True)
         def update_impl(self,op_ind):
-            update_op_ind(self, ret_type, arg_types, op_ind)
+            update_op(self, ret_type, arg_types, op_ind)
 
         self.update_impls.append(update_impl)
 
@@ -167,67 +134,29 @@ define_boxing(FeatureApplierTypeClass, FeatureApplier)
 
 vec_triple_type = Tuple((VectorType,VectorType,VectorType))
 
-@njit(GenericFeatureApplierType(MemoryType,MemoryType),cache=True)    
-def feature_applier_ctor(in_mem, out_mem):    
+@njit(GenericFeatureApplierType(MemoryType,MemoryType,EnumerizerType),cache=True)    
+def feature_applier_ctor(in_mem, out_mem, enumerizer):    
     st = new(GenericFeatureApplierType)
     init_incr_processor(st, in_mem)
     st.ops = List.empty_list(GenericOpType)
-
-    # Holds 
     st.fact_vecs = Dict.empty(u2, vec_triple_type)
-    # st.fact_vecs_needs_update = False
     st.idrec_map = Dict.empty(u8, u8_list)
-    # st.inv_idrec_map = Dict.empty(u8, u8_list)
     st.out_mem = out_mem 
     st.gval_t_ids = List.empty_list(u2_arr)
     st.current_change_events = List.empty_list(ChangeEventType)
+    st.enumerizer = enumerizer
 
     return st
 
-# @njit(cache=True)
-# def get_op_fact_vecs(self, op_ind):
-#     op = self.ops[op_ind]
-#     gval_t_ids = self.gval_t_ids[op_ind]
-#     fact_vecs = List.empty_list(VectorType)
-#     for i,v in enumerate(op.base_vars):
-#         # gval_t_id = self.val_t_id_to_gval_t_id[u2(v.base_t_id)]
-#         ptr = self.in_mem.mem_data.facts[gval_t_ids[i]]
-#         # print(gval_t_id, ptr)
-#         # Skip if any of the argument vectors are uninitialized
-#         if(ptr == 0): 
-#             self.fact_vecs_needs_update = True
-#             return fact_vecs
-#         fact_vec = _struct_from_ptr(VectorType,ptr)
-#         fact_vecs.append(fact_vec)
-#     return fact_vecs
-
-# @njit(cache=True)
-# def update_fact_vecs(self):
-#     for op_ind in range(len(self.ops)):
-#         self.fact_vecs[op_ind] = get_op_fact_vecs(self,op_ind)
 
 @njit(types.void(GenericFeatureApplierType, GenericOpType, u2[::1]), cache=True)
 def add_op(self, op, gval_t_ids):
-    print("add_op", gval_t_ids)
     self.ops.append(op)
     self.gval_t_ids.append(gval_t_ids)
     for t_id in gval_t_ids:
         if(t_id not in self.fact_vecs):
-            print("add", t_id)
             self.fact_vecs[t_id] = (new_vector(1),new_vector(1), new_vector(1))
 
-    # if()
-    # self.fact_vecs.append(get_op_fact_vecs(self,len(self.ops)-1))
-
-# @njit(cache=True)
-# def assign_current_change_events(self):
-#     self.current_change_events = self.get_changes()
-
-# @njit(cache=True)
-# def get_fact_vecs_needs_update(self):
-#     return self.fact_vecs_needs_update
-
-# @njit(types.void(GenericFeatureApplierType, MemoryType),cache=True)
 @njit(cache=True)
 def set_in_mem(self, x):
     self.in_mem = x
@@ -269,7 +198,7 @@ head_offset = gval_type.get_attr_offset('head')
 val_offset = gval_type.get_attr_offset('val')
 
 
-@njit(nopython=True)
+@njit(cache=True)
 def update_fact_vecs(self):
     for change_event in self.get_changes():
         t_id, f_id = change_event.t_id, change_event.f_id
@@ -277,25 +206,33 @@ def update_fact_vecs(self):
         new_f_ids, new_fact_ptrs, old_fact_ptrs = self.fact_vecs[t_id]
 
         if(change_event.was_retracted):
-            print("RETRACTED", t_id, f_id)
+            # Remove any facts in out_mem derived from the retracted fact.
             old_fact_ptrs[f_id] = 0
-
             if(change_event.idrec in self.idrec_map):
                 for idrec in self.idrec_map[change_event.idrec]:
                     self.out_mem.retract(idrec)
                 del self.idrec_map[change_event.idrec]
 
-        if(change_event.was_declared or change_event.was_modified):
             
+        if(change_event.was_declared or change_event.was_modified):
+            # Prepare new_f_ids and new_fact_ptrs for update_op.
             if(change_event.was_modified):
                 for idrec in self.idrec_map[change_event.idrec]:
                     self.out_mem.retract(idrec)
                 self.idrec_map[change_event.idrec] = ListType.empty_list(u8)
 
-            in_mem_facts = _struct_from_ptr(VectorType, self.in_mem.mem_data.facts[t_id])
+            in_mem_facts = _struct_from_ptr(VectorType, self.in_mem.mem_data.facts[i8(t_id)])
             new_f_ids.add(f_id)
             new_fact_ptrs.add(in_mem_facts[f_id])
-            print("DECLARED", t_id, f_id, in_mem_facts[f_id])
+
+            
+            # Copy any of the contents of in_mem to out_mem
+            fact = self.in_mem.get_fact(change_event.idrec)
+            copy_idrec = self.out_mem.declare(copy_cre_obj(fact))
+            if(change_event.idrec not in self.idrec_map):
+                self.idrec_map[change_event.idrec] = ListType.empty_list(u8)
+            self.idrec_map[change_event.idrec].append(copy_idrec)
+            
 
 
 
@@ -321,7 +258,7 @@ def iter_arg_gval_ptrs(self, arg_gval_t_ids):
         for i in range(n_args):
             facts_lists[i] = new_fact_ptrs_list[i] if is_new[i] else olds_facts_list[i]
             lengths[i] = len(facts_lists[i])
-        print("::",is_new,lengths)
+        # print("::",is_new,lengths)
         for inds in range_product(lengths):
             okay = True
             for i, ind in enumerate(inds):
@@ -329,13 +266,13 @@ def iter_arg_gval_ptrs(self, arg_gval_t_ids):
                 if(ptr == 0): okay = False; break;
                 gval_ptrs[i] = ptr
 
-            print(is_new, inds, lengths, gval_ptrs, okay, arr_is_unique(gval_ptrs))
+            # print(is_new, inds, lengths, gval_ptrs, okay, arr_is_unique(gval_ptrs))
             if(okay and arr_is_unique(gval_ptrs)):
                 yield gval_ptrs
 
 
 @generated_jit(nopython=True)
-def update_op_ind(self, return_type, arg_types, op_ind):
+def update_op(self, return_type, arg_types, op_ind):
     '''Updates the FeatureApplier for the op at 'op_ind'. Goes through
         if one of op's arguments is associated with t_id, '''
     context = cre_context()
@@ -350,12 +287,13 @@ def update_op_ind(self, return_type, arg_types, op_ind):
     range_n_args = tuple([x for x in range(n_args)])
     n_var_tup_type = tuple([GenericVarType for x in range(n_args)])
 
-
     def impl(self, return_type, arg_types, op_ind):
         op = self.ops[op_ind]
         val_ptrs = np.empty((n_args,),dtype=np.int64)
         var_ptrs = np.empty((n_args,),dtype=np.int64)
         call_head_ptrs = _func_from_address(call_head_ptrs_func_type, op.call_head_ptrs_addr)
+        enum_d = self.enumerizer.dict_for_type(return_type)
+
         for gval_ptrs in iter_arg_gval_ptrs(self, arg_gval_t_ids):
             # For each gval get the address for 'head' and val' slot
             for i in literal_unroll(range_n_args):
@@ -365,7 +303,8 @@ def update_op_ind(self, return_type, arg_types, op_ind):
             # Make a gval with head=TupleFact(op,*vars) and val=call(*vals)
             tf = TF(op,*_struct_tuple_from_pointer_arr(n_var_tup_type, var_ptrs))
             v = call_head_ptrs(val_ptrs)
-            gval = new_gval(head=tf,val=v)
+            nom = self.enumerizer.enumerize(v,enum_d)
+            gval = new_gval(head=tf,val=v,nom=nom)
             idrec = self.out_mem.declare(gval)
 
             # Map each arg's idrecs in 'in_mem' to the gval's idrec in 'out_mem' 
@@ -378,19 +317,15 @@ def update_op_ind(self, return_type, arg_types, op_ind):
     return impl
 
 
-
-
-@njit(nopython=True)
+@njit(cache=True)
 def assign_new_f_ids(self):
     for t_id in self.fact_vecs:
         new_f_ids, new_fact_ptrs, old_fact_ptrs = self.fact_vecs[t_id]
         for i in range(len(new_f_ids)):
             f_id = new_f_ids[i]
             old_fact_ptrs.set_item_safe(f_id,new_fact_ptrs[i])
-            # if(len(old_fact_ptrs.data) < f_id): old_fact_ptrs.expand()
 
         self.fact_vecs[t_id] = (new_vector(1),new_vector(1), old_fact_ptrs)
-        print("<<", t_id, len(old_fact_ptrs))
 
 
 
@@ -410,71 +345,71 @@ def assign_new_f_ids(self):
             
 
 
-if(__name__ == "__main__"):
-    import faulthandler; faulthandler.enable()
-    from cre.flattener import Flattener
-    from cre.default_ops import Equals
-    with cre_context("test_feature_applier") as context:
-        spec1 = {"A" : {"type" : "string", "is_semantic_visible" : True}, 
-                 "B" : {"type" : "number", "is_semantic_visible" : False}}
-        BOOP1 = define_fact("BOOP1", spec1)
-        spec2 = {"inherit_from" : BOOP1,
-                 "C" : {"type" : "number", "is_semantic_visible" : True}}
-        BOOP2 = define_fact("BOOP2", spec2)
-        spec3 = {"inherit_from" : BOOP2,
-                 "D" : {"type" : "number", "is_semantic_visible" : True}}
-        BOOP3 = define_fact("BOOP3", spec3)
+# if(__name__ == "__main__"):
+#     import faulthandler; faulthandler.enable()
+#     from cre.flattener import Flattener
+#     from cre.default_ops import Equals
+#     with cre_context("test_feature_applier") as context:
+#         spec1 = {"A" : {"type" : "string", "is_semantic_visible" : True}, 
+#                  "B" : {"type" : "number", "is_semantic_visible" : False}}
+#         BOOP1 = define_fact("BOOP1", spec1)
+#         spec2 = {"inherit_from" : BOOP1,
+#                  "C" : {"type" : "number", "is_semantic_visible" : True}}
+#         BOOP2 = define_fact("BOOP2", spec2)
+#         spec3 = {"inherit_from" : BOOP2,
+#                  "D" : {"type" : "number", "is_semantic_visible" : True}}
+#         BOOP3 = define_fact("BOOP3", spec3)
 
-        eq_f8 = Equals(f8, f8)
-        eq_str = Equals(unicode_type, unicode_type)
-        fa = FeatureApplier([eq_f8,eq_str],Memory())
-        fa.apply()
+#         eq_f8 = Equals(f8, f8)
+#         eq_str = Equals(unicode_type, unicode_type)
+#         fa = FeatureApplier([eq_f8,eq_str],Memory())
+#         fa.apply()
 
 
-        mem = Memory()
-        a = BOOP1("A", 1)
-        b = BOOP1("B", 2)
-        c = BOOP2("C", 3, 13)
-        d = BOOP2("D", 4, 13)
-        e = BOOP3("E", 5, 14, 106)
-        f = BOOP3("A", 6, 16, 106)
+#         mem = Memory()
+#         a = BOOP1("A", 1)
+#         b = BOOP1("B", 2)
+#         c = BOOP2("C", 3, 13)
+#         d = BOOP2("D", 4, 13)
+#         e = BOOP3("E", 5, 14, 106)
+#         f = BOOP3("A", 6, 16, 106)
 
-        a_idrec = mem.declare(a)
-        b_idrec = mem.declare(b)
-        c_idrec = mem.declare(c)
-        d_idrec = mem.declare(d)
-        e_idrec = mem.declare(e)
-        f_idrec = mem.declare(f)
-        print("-------")
+#         a_idrec = mem.declare(a)
+#         b_idrec = mem.declare(b)
+#         c_idrec = mem.declare(c)
+#         d_idrec = mem.declare(d)
+#         e_idrec = mem.declare(e)
+#         f_idrec = mem.declare(f)
+#         print("-------")
 
-        fl = Flattener((BOOP1, BOOP2, BOOP3), mem)
+#         fl = Flattener((BOOP1, BOOP2, BOOP3), mem, id_attr="A")
         
-        flat_mem = fl.apply()
+#         flat_mem = fl.apply()
 
         
 
-        fa = FeatureApplier([eq_f8,eq_str],flat_mem)
-        with PrintElapse("POOP"):
-            feat_mem = fa.apply()
-        with PrintElapse("POOP"):
-            feat_mem = fa.apply()
-        print(feat_mem)
+#         fa = FeatureApplier([eq_f8,eq_str],flat_mem)
+#         with PrintElapse("POOP"):
+#             feat_mem = fa.apply()
+#         with PrintElapse("POOP"):
+#             feat_mem = fa.apply()
+#         print(feat_mem)
 
 
-        mem = Memory()
-        for i in range(3):
-            mem.declare(BOOP2(str(i),i,i))
+#         mem = Memory()
+#         for i in range(3):
+#             mem.declare(BOOP2(str(i),i,i))
 
-        fl = Flattener((BOOP1, BOOP2, BOOP3), mem)
-        flat_mem = fl.apply()
+#         fl = Flattener((BOOP1, BOOP2, BOOP3), mem, id_attr="A")
+#         flat_mem = fl.apply()
 
-        fa = FeatureApplier([eq_str,eq_f8],flat_mem)
-        with PrintElapse("100x100 str"):
-            feat_mem = fa.apply()
+#         fa = FeatureApplier([eq_str,eq_f8],flat_mem)
+#         with PrintElapse("100x100 str"):
+#             feat_mem = fa.apply()
 
-        fa = FeatureApplier([eq_f8],flat_mem)
-        with PrintElapse("100x100 f8"):
-            feat_mem = fa.apply()
+#         fa = FeatureApplier([eq_f8],flat_mem)
+#         with PrintElapse("100x100 f8"):
+#             feat_mem = fa.apply()
 
 
 
@@ -539,9 +474,9 @@ if(__name__ == "__main__"):
 
 
 
-if __name__ == "__main__":
-    for inds in range_product(np.array([3,3,3],dtype=np.int64)):
-        print(inds)
+# if __name__ == "__main__":
+#     for inds in range_product(np.array([3,3,3],dtype=np.int64)):
+#         print(inds)
 
 #     import faulthandler; faulthandler.enable()
 #     g = ground_op(Add(Var(f8),Var(f8)), 1., 7.)

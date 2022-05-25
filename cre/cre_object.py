@@ -496,8 +496,8 @@ def copy_cre_obj(fact):
         new_fact = _memcpy_structref(fact)
         a,b = _cast_structref(CREObjType, fact), _cast_structref(CREObjType, new_fact)
 
-        t_id, _, a_id = decode_idrec(a.idrec)
-        b.idrec = encode_idrec(t_id,0,a_id)
+        t_id, _, _ = decode_idrec(a.idrec)
+        b.idrec = encode_idrec(t_id,0,u1(-1))
         for info_a, info_b in zip(cre_obj_iter_t_id_item_ptrs(a),cre_obj_iter_t_id_item_ptrs(b)):
             t_id_a, m_id_a, data_ptr_a = info_a
             t_id_b, m_id_b, data_ptr_b = info_b

@@ -32,7 +32,6 @@ from numba.experimental.function_type import _get_wrapper_address
 from operator import itemgetter
 from copy import copy
 from os import getenv
-from cre.utils import deref_type, DEREF_TYPE_ATTR, DEREF_TYPE_LIST, listtype_sizeof_item
 import inspect, cloudpickle, pickle
 from textwrap import dedent, indent
 from collections.abc import Iterable
@@ -338,7 +337,7 @@ class UntypedOp():
                 all_const = False
                 any_not_var = True
             elif(isinstance(x,(Var))):
-                if(len(x.deref_offsets) > 0):
+                if(len(x.deref_infos) > 0):
                     any_deref_vars = True
                 all_const = False
             else:
@@ -1574,7 +1573,7 @@ class OpComp():
                         base_vars[b_ptr] = (x,len(arg_types),t)
                         arg_types.append(t)
                     
-                    if(len(x.deref_offsets) > 0):
+                    if(len(x.deref_infos) > 0):
                         d_instr = DerefInstr(x)
                         if(d_instr not in head_vars): 
                             arg_ind = base_vars[b_ptr][1]

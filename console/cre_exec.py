@@ -12,7 +12,7 @@ def parse_args(argv):
         sys.exit()
 
     if(args.clear_cache):
-        from cre.caching import clear_cache
+        from cre_caching import clear_cache
         clear_cache()
     else:
         parser.print_usage()

@@ -33,7 +33,7 @@ setup(
         long_description = long_description, 
         long_description_content_type ="text/markdown", 
         license ='MIT', 
-        packages = find_packages(include=['cre']), 
+        packages = find_packages(include=['cre','cre_caching']), 
         # scripts=['bin/altrain'],
         # entry_points ={ 
             

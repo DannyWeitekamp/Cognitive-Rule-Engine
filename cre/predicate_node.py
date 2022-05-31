@@ -24,7 +24,7 @@ from numba.extending import overload_method, intrinsic, overload
 from cre.caching import gen_import_str, unique_hash,import_from_cached, source_to_cache, source_in_cache
 from cre.context import cre_context
 from cre.structref import define_structref, define_structref_template
-from cre.memory import MemoryType, Memory, facts_for_t_id, fact_at_f_id
+from cre.memset import MemoryType, Memory, facts_for_t_id, fact_at_f_id
 from cre.fact import define_fact, BaseFact, cast_fact
 from cre.utils import _struct_from_meminfo, _meminfo_from_struct, _cast_structref, \
  decode_idrec, lower_getattr, _struct_from_ptr, struct_get_attr_offset, _struct_get_data_pointer, \

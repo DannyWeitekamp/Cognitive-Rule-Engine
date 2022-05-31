@@ -3,7 +3,7 @@ import numba
 from numba import f8, i8, njit
 from numba.typed import List, Dict
 from numba.types import ListType, DictType, unicode_type
-from cre.memory import MemSet
+from cre.memset import MemSet
 from cre.var import Var
 from cre.flattener import Flattener
 from cre.feature_applier import FeatureApplier

@@ -6,7 +6,7 @@ from numba.types import ListType, DictType
 from cre.structref import define_structref, define_structref_template
 from numba.experimental.structref import new, define_attributes
 from numba.extending import lower_cast, overload_method
-from cre.memory import MemSet,MemSetType
+from cre.memset import MemSet,MemSetType
 from cre.utils import _cast_structref, _obj_cast_codegen
 from cre.vector import VectorType
 

@@ -3,7 +3,7 @@ from numba import njit, f8, i8, generated_jit
 from numba.typed import List, Dict
 from numba.types import DictType, ListType, unicode_type, Tuple
 from cre.op import Op
-from cre.sc_planner2 import (gen_apply_multi_source, search_for_explanations,
+from cre.sc_planner import (gen_apply_multi_source, search_for_explanations,
                      apply_multi, SetChainingPlanner, insert_record,
                      join_records_of_type, forward_chain_one, extract_rec_entry,
                      retrace_goals_back_one, expl_tree_ctor, planner_declare,
@@ -348,7 +348,6 @@ def test_mem_leaks(n=5):
                 assert used_bytes() == init_used
 
 
-from cre.sc_planner2 import get_planner_declare_fact_impl
 def test_declare_fact():
     with cre_context("test_declare_fact"):
         BOOP = define_fact("BOOP", {"A" : "string", "B" : {"type": "number", "visible_to_planner" : True}})

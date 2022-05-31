@@ -1,7 +1,7 @@
 from cre.context import cre_context
 from cre.fact import define_fact
 from cre.tuple_fact import TF, TupleFact
-from cre.memory import MemSet, MemSetType, decode_idrec, encode_idrec, next_empty_f_id, make_f_id_empty, retracted_f_ids_for_t_id
+from cre.memset import MemSet, MemSetType, decode_idrec, encode_idrec, next_empty_f_id, make_f_id_empty, retracted_f_ids_for_t_id
 from numba import njit
 from numba.types import unicode_type, NamedTuple
 from numba.typed import List

@@ -3,7 +3,7 @@ from cre.fact import (_fact_from_spec, _standardize_spec, _merge_spec_inheritanc
      define_fact, cast_fact, _cast_structref, BaseFact, DeferredFactRefType, isa,
       uint_to_inheritance_bytes, get_inheritance_bytes_len_ptr, get_inheritance_t_ids)
 from cre.context import cre_context
-from cre.memory import MemSet
+from cre.memset import MemSet
 from cre.cre_object import CREObjType, copy_cre_obj
 from numba import njit, u8, u1
 from numba.typed import List

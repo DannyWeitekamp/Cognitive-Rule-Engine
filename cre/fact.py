@@ -30,7 +30,7 @@ from cre.structref import gen_structref_code, define_structref
 from cre.utils import (_struct_from_ptr, _cast_structref, struct_get_attr_offset, _obj_cast_codegen,
                        _ptr_from_struct_codegen, _raw_ptr_from_struct, CastFriendlyMixin, _obj_cast_codegen,
                         PrintElapse, _struct_get_data_ptr)
-from cre.cre_object import CREObjTypeTemplate, cre_obj_field_dict, CREObjModel, CREObjType, member_info_type, CREObjProxy
+from cre.cre_object import CREObjTypeClass, cre_obj_field_dict, CREObjModel, CREObjType, member_info_type, CREObjProxy
 
 from numba.core.typeconv import Conversion
 import operator
@@ -41,7 +41,7 @@ import numpy as np
 
 SPECIAL_SPEC_ATTRIBUTES = ["inherit_from"]
 
-class Fact(CREObjTypeTemplate):
+class Fact(CREObjTypeClass):
     def __init__(self, fields):
         super(Fact, self).__init__(fields)        
 

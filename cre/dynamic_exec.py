@@ -5,7 +5,7 @@ from numba.typed import List
 from numba.extending import  overload, overload_method
 from cre.utils import _load_ptr, _struct_from_ptr, _cast_structref, _raw_ptr_from_struct, _raw_ptr_from_struct_incref, CastFriendlyMixin, decode_idrec, _func_from_address, _incref_structref, _struct_get_data_ptr, _sizeof_type
 from cre.structref import define_structref
-from cre.cre_object import CREObjTypeTemplate, CREObjType, member_info_type, cre_obj_iter_t_id_item_ptrs
+from cre.cre_object import CREObjTypeClass, CREObjType, member_info_type, cre_obj_iter_t_id_item_ptrs
 from numba.core.datamodel import default_manager, models
 from numba.experimental.structref import define_attributes, StructRefProxy, new, define_boxing
 import operator
@@ -214,8 +214,8 @@ def tuple_fact_eq(a, b):
 
 @overload(operator.eq)
 def _cre_obj_eq(a,b):
-    # print(a,b, isinstance(a,CREObjTypeTemplate) and isinstance(b,CREObjTypeTemplate))
-    if(isinstance(a,CREObjTypeTemplate) and isinstance(b,CREObjTypeTemplate)):
+    # print(a,b, isinstance(a,CREObjTypeClass) and isinstance(b,CREObjTypeClass))
+    if(isinstance(a,CREObjTypeClass) and isinstance(b,CREObjTypeClass)):
         def impl(a, b):
             t_id,_, _ = decode_idrec(a.idrec)
             if(t_id==T_ID_TUPLE_FACT):
@@ -432,9 +432,9 @@ def tuple_fact_hash(x):
 #     return process_return(hsh)
 
 @overload(hash)
-@overload_method(CREObjTypeTemplate, '__hash__')
+@overload_method(CREObjTypeClass, '__hash__')
 def _cre_obj_hash(x):
-    if(isinstance(x,CREObjTypeTemplate)):
+    if(isinstance(x,CREObjTypeClass)):
         def impl(x):
             t_id,_, _ = decode_idrec(x.idrec)
             if(t_id==T_ID_TUPLE_FACT):
@@ -458,7 +458,7 @@ def _cre_obj_hash(x):
 
 
 # def __cre_obj_hash(x):
-#     if(isinstance(x,CREObjTypeTemplate)):
+#     if(isinstance(x,CREObjTypeClass)):
 #         def impl(x):
 #             return cre_obj_hash(x)
 #         return impl

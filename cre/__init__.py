@@ -17,7 +17,7 @@ if(not skip.get()):
 
     # Other helpful things exposed at the package level
     from cre.context import cre_context
-    from cre.memory import MemSet
+    from cre.memset import MemSet
     from cre.ptrop import PtrOp
 
     # Instantiate the default context at the package level

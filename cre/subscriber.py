@@ -5,7 +5,7 @@ from numba.types import ListType, unicode_type, void
 from numba.experimental.structref import new
 from numba.extending import overload_method, intrinsic
 from cre.structref import define_structref, define_structref_template
-# from cre.memory import MemoryType, Memory
+# from cre.memset import MemoryType, Memory
 from cre.fact import define_fact
 from cre.utils import _struct_from_meminfo, _meminfo_from_struct, _cast_structref
 from cre.vector import new_vector, VectorType

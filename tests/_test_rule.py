@@ -6,7 +6,7 @@ import numpy as np
 from numba import njit
 from cre.fact import define_fact
 from cre.rule import Rule, RuleEngine
-from cre.memory import Memory
+from cre.memset import MemSet
 from cre.var import Var
 from cre.utils import _pointer_from_struct,_pointer_from_struct_incref
 
@@ -59,11 +59,11 @@ print("Def Rules time",(t3-t2)/1e6)
 
 # @njit(cache=True)
 def start_up():
-    mem = Memory()
+    mem = MemSet()
     mem.declare(StopLight("green"))
     return mem
 
-mem = Memory()
+mem = MemSet()
 
 t4 = time.time_ns()
 print("Inst mem",(t4-t3)/1e6)

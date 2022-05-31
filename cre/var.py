@@ -16,7 +16,7 @@ from cre.utils import PrintElapse, ptr_t, _struct_from_meminfo, _meminfo_from_st
 from cre.utils import assign_to_alias_in_parent_frame, encode_idrec, _obj_cast_codegen
 from cre.subscriber import base_subscriber_fields, BaseSubscriber, BaseSubscriberType, init_base_subscriber, link_downstream
 from cre.vector import VectorType
-from cre.cre_object import cre_obj_field_dict,CREObjType, CREObjTypeTemplate, CREObjProxy, set_chr_mbrs
+from cre.cre_object import cre_obj_field_dict,CREObjType, CREObjTypeClass, CREObjProxy, set_chr_mbrs
 # from cre.predicate_node import BasePredicateNode,BasePredicateNodeType, get_alpha_predicate_node_definition, \
  # get_beta_predicate_node_definition, deref_attrs, define_alpha_predicate_node, define_beta_predicate_node, AlphaPredicateNode, BetaPredicateNode
 from numba.core import imputils, cgutils
@@ -67,7 +67,7 @@ var_fields_dict = {
 
 var_fields =  [(k,v) for k,v, in var_fields_dict.items()]
 
-class VarTypeClass(CREObjTypeTemplate):
+class VarTypeClass(CREObjTypeClass):
     t_id = T_ID_VAR
     def preprocess_fields(self, fields):
         f_dict = {k:v for k,v in fields}

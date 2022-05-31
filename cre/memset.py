@@ -460,7 +460,7 @@ def gen_fact_iter_source(fact_type):
     return f'''import cloudpickle
 from numba import njit, u2, types
 from numba.experimental.structref import new
-from cre.memory import FactIterator, FactIteratorType, fact_iterator_field_dict, fact_iter_next_raw_ptr, GenericFactIteratorType
+from cre.memset import FactIterator, FactIteratorType, fact_iterator_field_dict, fact_iter_next_raw_ptr, GenericFactIteratorType
 from cre.utils import _struct_from_ptr, _cast_structref
 fact_type = cloudpickle.loads({cloudpickle.dumps(fact_type)})
 f_iter_type = FactIteratorType([(k,v) for k,v in {{**fact_iterator_field_dict ,"fact_type": types.TypeRef(fact_type)}}.items()])

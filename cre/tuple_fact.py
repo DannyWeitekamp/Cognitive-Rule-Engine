@@ -4,7 +4,7 @@ from numba.types import ListType, unicode_type
 from cre.caching import unique_hash, source_to_cache, import_from_cached, source_in_cache, get_cache_path
 from cre.fact import base_fact_field_dict, BaseFact, FactProxy, Fact, lines_in_type_registry, add_to_type_registry, add_type_pickle
 from cre.fact_intrinsics import fact_lower_setattr, _register_fact_structref
-from cre.cre_object import cre_obj_get_item, CREObjType, CREObjProxy, CREObjTypeTemplate, member_info_type
+from cre.cre_object import cre_obj_get_item, CREObjType, CREObjProxy, CREObjTypeClass, member_info_type
 from cre.utils import _struct_get_attr_offset, _sizeof_type, _struct_get_data_ptr, _load_ptr, _struct_get_attr_offset, _struct_from_ptr, _cast_structref, _obj_cast_codegen, encode_idrec, decode_idrec, _incref_structref, _get_member_offset
 # from cre.primitive import Primitive
 from cre.context import cre_context
@@ -26,7 +26,7 @@ import cloudpickle
 # tup_fact_fields = [(k,v) for k,v in tup_fact_field_dict.items()]
 
 def _up_cast_helper(x):
-    if(isinstance(x, CREObjTypeTemplate)):
+    if(isinstance(x, CREObjTypeClass)):
         return CREObjType
     else:
         return x
@@ -387,7 +387,7 @@ register_global_default("TupleFact", TupleFact)
 @generated_jit(cache=True)
 def assert_cre_obj(x):
     if(isinstance(x, types.Literal)): return
-    if(isinstance(x, CREObjTypeTemplate)):
+    if(isinstance(x, CREObjTypeClass)):
         def impl(x):
             return _cast_structref(CREObjType, x)
         return impl

@@ -16,7 +16,7 @@ from cre.op import GenericOpType
 from cre.utils import _func_from_address, _cast_structref, _obj_cast_codegen, _func_from_address, _incref_structref
 from cre.structref import define_structref
 from cre.incr_processor import incr_processor_fields, IncrProcessorType, init_incr_processor
-from cre.memory import MemSet, MemSetType
+from cre.memset import MemSet, MemSetType
 from cre.structref import CastFriendlyStructref, define_boxing
 from cre.enumerizer import Enumerizer, EnumerizerType
 from numba.experimental import structref

@@ -20,7 +20,7 @@ from cre.subscriber import base_subscriber_fields, BaseSubscriber, BaseSubscribe
 from cre.vector import VectorType
 from cre.fact import Fact, gen_fact_import_str, get_offsets_from_member_types
 from cre.var import Var, var_memcopy, GenericVarType
-from cre.cre_object import CREObjType, cre_obj_field_dict, CREObjTypeTemplate, CREObjProxy
+from cre.cre_object import CREObjType, cre_obj_field_dict, CREObjTypeClass, CREObjProxy
 from cre.core import T_ID_OP, register_global_default
 from cre.make_source import make_source, gen_def_func, gen_assign, gen_if, gen_not, resolve_template, gen_def_class
 from numba.core import imputils, cgutils
@@ -80,7 +80,7 @@ from numba import njit, void, i8, boolean, objmode
 from numba.experimental.function_type import _get_wrapper_address
 from numba.core.errors import NumbaError, NumbaPerformanceWarning
 from cre.utils import _func_from_address, _load_ptr
-from cre.op import op_fields_dict, OpTypeTemplate, warn_cant_compile
+from cre.op import op_fields_dict, OpTypeClass, warn_cant_compile
 import cloudpickle
 
 nopython_call = {cls.nopython_call} 
@@ -161,7 +161,7 @@ method_addrs[4] = _get_wrapper_address(match_head_ptrs, boolean(i8[::1],))
 method_addrs[5] = method_addrs[3] # match is match_heads
 
 field_dict = {{**op_fields_dict,**{{f"arg{{i}}" : t for i,t in enumerate(call_sig.args)}}}}
-{cls.__name__+'Type'} = OpTypeTemplate([(k,v) for k,v in field_dict.items()]) 
+{cls.__name__+'Type'} = OpTypeClass([(k,v) for k,v in field_dict.items()]) 
 '''
     return source
 
@@ -208,7 +208,7 @@ op_fields_dict = {
     # "is_const" : i8[::1]
 }
 
-class OpTypeTemplate(CREObjTypeTemplate):
+class OpTypeClass(CREObjTypeClass):
     t_id = T_ID_OP
     def preprocess_fields(self, fields):
         self.t_id = T_ID_OP
@@ -217,10 +217,10 @@ class OpTypeTemplate(CREObjTypeTemplate):
     def __str__(self):
         return f"cre.GenericOpType"
 
-# lower_cast(OpTypeTemplate, CREObjType)(impl_cre_obj_upcast)
+# lower_cast(OpTypeClass, CREObjType)(impl_cre_obj_upcast)
 
 
-@register_default(OpTypeTemplate)
+@register_default(OpTypeClass)
 class OpModel(models.StructModel):
     """Model for cre.Op. A reference to the structref payload, and the Op class.
     """
@@ -235,8 +235,8 @@ class OpModel(models.StructModel):
 
 # @structref.register
 
-default_manager.register(OpTypeTemplate, OpModel)
-define_attributes(OpTypeTemplate)
+default_manager.register(OpTypeClass, OpModel)
+define_attributes(OpTypeClass)
 
 
 def op_define_boxing(struct_type, obj_class):
@@ -293,7 +293,7 @@ def op_define_boxing(struct_type, obj_class):
         return NativeValue(out)
 
 
-GenericOpType = OpTypeTemplate([(k,v) for k,v in op_fields_dict.items()])
+GenericOpType = OpTypeClass([(k,v) for k,v in op_fields_dict.items()])
 register_global_default("Op", GenericOpType)
 
 
@@ -1427,7 +1427,7 @@ def set_shorthand_template(self, expr):
 
 
 
-op_define_boxing(OpTypeTemplate,Op)   
+op_define_boxing(OpTypeClass,Op)   
 
 def str_deref_attrs(deref_attrs):
     s = ""

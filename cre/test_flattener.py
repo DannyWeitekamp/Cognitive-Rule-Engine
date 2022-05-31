@@ -1,7 +1,7 @@
 from numba import njit
 from cre.utils import decode_idrec 
 from cre.context import cre_context 
-from cre.memory import MemSet 
+from cre.memset import MemSet 
 from cre.flattener import Flattener, get_semantic_visibile_fact_attrs, flattener_update
 from cre.fact import define_fact
 import pytest_benchmark

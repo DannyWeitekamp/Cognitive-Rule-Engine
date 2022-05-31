@@ -2,7 +2,7 @@ from numba import njit, f8
 from numba.types import unicode_type, boolean
 from cre.utils import decode_idrec 
 from cre.context import cre_context 
-from cre.memory import Memory 
+from cre.memset import Memory 
 from cre.flattener import Flattener, get_semantic_visibile_fact_attrs, flattener_update
 from cre.fact import define_fact
 import pytest_benchmark

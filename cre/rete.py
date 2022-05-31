@@ -12,7 +12,7 @@ from cre.utils import (wptr_t, ptr_t, _dict_from_ptr, _raw_ptr_from_struct, _get
          _decref_structref, _decref_ptr, cast_structref, _struct_tuple_from_pointer_arr, _meminfo_from_struct)
 from cre.structref import define_structref
 from cre.caching import gen_import_str, unique_hash,import_from_cached, source_to_cache, source_in_cache, cache_safe_exec, get_cache_path
-from cre.memory import MemSetType
+from cre.memset import MemSetType
 from cre.vector import VectorType
 from cre.var import GenericVarType
 from cre.op import GenericOpType

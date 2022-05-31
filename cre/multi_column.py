@@ -3,7 +3,7 @@ from numba import njit
 from numba.typed import List
 from cre.fact import define_fact
 from cre.rule import Rule, RuleEngine
-from cre.memory import Memory
+from cre.memset import Memory
 from cre.var import Var
 from cre.conditions import NOT
 from cre.utils import _ptr_from_struct

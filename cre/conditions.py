@@ -16,7 +16,7 @@ from cre.utils import assign_to_alias_in_parent_frame, meminfo_type
 from cre.subscriber import base_subscriber_fields, BaseSubscriber, BaseSubscriberType, init_base_subscriber, link_downstream
 from cre.vector import VectorType
 from cre.op import GenericOpType, op_str, op_repr, Op, op_copy
-from cre.cre_object import CREObjType, CREObjTypeTemplate
+from cre.cre_object import CREObjType, CREObjTypeClass
 from cre.core import T_ID_CONDITIONS, T_ID_LITERAL, register_global_default
 from numba.core import imputils, cgutils
 from numba.core.datamodel import default_manager, models
@@ -98,12 +98,12 @@ literal_fields_dict = {
 literal_fields =  [(k,v) for k,v, in literal_fields_dict.items()]
 
 @structref.register
-class LiteralTypeTemplate(CREObjTypeTemplate):
+class LiteralTypeClass(CREObjTypeClass):
     def __str__(self):
         return f"cre.LiteralType"
 
 
-# @lower_cast(LiteralTypeTemplate, CREObjType)
+# @lower_cast(LiteralTypeClass, CREObjType)
 # def upcast(context, builder, fromty, toty, val):
 #     return _obj_cast_codegen(context, builder, val, fromty, toty,incref=False)
 
@@ -129,8 +129,8 @@ def literal_str(self):
 def literal_get_op(self):
     return self.op
 
-define_boxing(LiteralTypeTemplate, Literal)
-LiteralType = LiteralTypeTemplate(literal_fields)
+define_boxing(LiteralTypeClass, Literal)
+LiteralType = LiteralTypeClass(literal_fields)
 register_global_default("Literal", LiteralType)
 
 @njit(LiteralType(GenericOpType),cache=True)
@@ -151,7 +151,7 @@ def literal_ctor(op):
 #TODO: STR
 @overload(str)
 def _literal_str(self):
-    if(not isinstance(self, LiteralTypeTemplate)): return
+    if(not isinstance(self, LiteralTypeClass)): return
     def impl(self):
         return literal_str(self)
     return impl
@@ -247,15 +247,15 @@ conditions_fields_dict = {
 conditions_fields =  [(k,v) for k,v, in conditions_fields_dict.items()]
 
 @structref.register
-class ConditionsTypeTemplate(CREObjTypeTemplate):
+class ConditionsTypeClass(CREObjTypeClass):
     def __str__(self):
         return f"cre.ConditionsType"
 
 
-ConditionsType = ConditionsTypeTemplate(conditions_fields)
+ConditionsType = ConditionsTypeClass(conditions_fields)
 register_global_default("Conditions", ConditionsType)
 
-# lower_cast(ConditionsTypeTemplate, CREObjType)(impl_cre_obj_upcast)
+# lower_cast(ConditionsTypeClass, CREObjType)(impl_cre_obj_upcast)
 
 # Manually register the type to avoid automatic getattr overloading 
 # default_manager.register(VarTypeClass, models.StructRefModel)
@@ -349,7 +349,7 @@ class Conditions(structref.StructRefProxy):
     def __repr__(self):
         return conditions_repr(self)
 
-define_boxing(ConditionsTypeTemplate,Conditions)
+define_boxing(ConditionsTypeClass,Conditions)
 
 
 @njit(u2[::1](ConditionsType))
@@ -465,7 +465,7 @@ def conds_get_distr_dnf(self):
 
 
 
-@overload_method(ConditionsTypeTemplate,'get_matches')
+@overload_method(ConditionsTypeClass,'get_matches')
 def impl_get_matches(self,ms=None):
     from cre.matching import get_matches
     def impl(self,ms=None):
@@ -638,7 +638,7 @@ def conditions_str(self,add_non_conds=False):
 
 @overload(str)
 def overload_conds_str(self):
-    if(not isinstance(self, ConditionsTypeTemplate)): return
+    if(not isinstance(self, ConditionsTypeClass)): return
     def impl(self):
         return conds_str(self)
         
@@ -892,7 +892,7 @@ def _conditions_NOT(c):
 
 def NOT(c, alias=None):
     ''' Applies existential NOT in python context)''' 
-    if(isinstance(c, (ConditionsTypeTemplate, Conditions))):
+    if(isinstance(c, (ConditionsTypeClass, Conditions))):
         # When NOT() is applied to a Conditions object
         #  apply NOT() to all vars and make sure the pointers
         #  for the new vars are tracked in the dnf
@@ -919,7 +919,7 @@ def NOT(c, alias=None):
 @overload(NOT)
 def overload_NOT(c, alias=None):
     ''' Applies existential NOT in numba context -- works same as above''' 
-    if(isinstance(c,ConditionsTypeTemplate)):
+    if(isinstance(c,ConditionsTypeClass)):
         def impl(c,alias=None):
             return _conditions_NOT(c)
         return impl
@@ -941,7 +941,7 @@ def overload_NOT(c, alias=None):
 @generated_jit(cache=True)
 def conditions_not(c):
     '''Defines ~x for Var and Conditions''' 
-    if(isinstance(c,ConditionsTypeTemplate)):
+    if(isinstance(c,ConditionsTypeClass)):
         # ~ operation inverts the qualifiers and terms like
         #  ~(ab+c) = ~(ab)c' = (a'+b')c' = a'c'+b'c'
         def impl(c):
@@ -968,22 +968,22 @@ def conditions_not(c):
 @generated_jit(cache=True)
 @overload(operator.and_)
 def cond_and(l, r):
-    if(not isinstance(l,ConditionsTypeTemplate)): return
-    if(not isinstance(r,ConditionsTypeTemplate)): return
+    if(not isinstance(l,ConditionsTypeClass)): return
+    if(not isinstance(r,ConditionsTypeClass)): return
     return lambda l,r : conditions_and(l, r)
 
 @generated_jit(cache=True)
 @overload(operator.or_)
 def cond_or(l, r):
-    if(not isinstance(l,ConditionsTypeTemplate)): return
-    if(not isinstance(r,ConditionsTypeTemplate)): return
+    if(not isinstance(l,ConditionsTypeClass)): return
+    if(not isinstance(r,ConditionsTypeClass)): return
     return lambda l,r : conditions_or(l, r)
 
 @generated_jit(cache=True)
 @overload(operator.not_)
 @overload(operator.invert)
 def cond_not(c):
-    if(not isinstance(c,ConditionsTypeTemplate)): return
+    if(not isinstance(c,ConditionsTypeClass)): return
     return lambda c : conditions_not(c)
 
 

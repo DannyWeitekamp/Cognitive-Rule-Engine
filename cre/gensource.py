@@ -321,7 +321,7 @@ def gen_apply_inf_history_aot_funcs(typ,hsh,custom_type=False,ind='   '):
 
 # def gen_apply_knowledge_store_aot_funcs(typ,hsh,custom_type=False,ind='   '):
 #     typ_v = "NB_"+typ if custom_type else typ    
-#     s = "from cre.memory import gen_knowledge_store_aot_funcs\n"
+#     s = "from cre.memset import gen_knowledge_store_aot_funcs\n"
 #     s += "gen_knowledge_store_aot_funcs(cc, '{}', {})\n\n".format(typ,typ_v)
 #     return s
 

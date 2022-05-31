@@ -2,7 +2,7 @@ import numpy as np
 from numba import types, njit, i8, u8, i4, u1, i8, f8, literally, generated_jit
 from numba.typed import Dict, List
 from numba.types import DictType, ListType
-from cre.memory import Memory
+from cre.memset import Memory
 from cre.fact import define_fact
 from cre.var import Var, GenericVarType
 from cre.utils import pointer_from_struct, decode_idrec, encode_idrec, _struct_from_pointer, _pointer_from_struct, _load_pointer

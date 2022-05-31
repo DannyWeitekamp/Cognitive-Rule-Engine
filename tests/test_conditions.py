@@ -1,6 +1,6 @@
 from numba import f8
 from cre.conditions import *
-from cre.memory import MemSet
+from cre.memset import MemSet
 from cre.context import cre_context
 from cre.cre_object import CREObjType
 from time import time_ns

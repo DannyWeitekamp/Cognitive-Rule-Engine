@@ -109,7 +109,7 @@ class CREObjModel(models.StructRefModel):
 def impl_cre_obj_upcast(context, builder, fromty, toty, val):
     return _obj_cast_codegen(context, builder, val, fromty, toty,incref=False)
 
-class CREObjTypeTemplate(CastFriendlyMixin, types.StructRef):
+class CREObjTypeClass(CastFriendlyMixin, types.StructRef):
     def __init__(self, fields):
         types.StructRef.__init__(self,fields)
 
@@ -137,9 +137,9 @@ class CREObjTypeTemplate(CastFriendlyMixin, types.StructRef):
 #     return builder.ptrtoint(val, cgutils.intp_t)
 
 
-CREObjType = CREObjTypeTemplate(cre_obj_fields) 
+CREObjType = CREObjTypeClass(cre_obj_fields) 
 register_global_default("CREObj", CREObjType)
-default_manager.register(CREObjTypeTemplate, CREObjModel)
+default_manager.register(CREObjTypeClass, CREObjModel)
 define_attributes(CREObjType)
 
 
@@ -215,7 +215,7 @@ class CREObjProxy(StructRefProxy):
             return self
 
 
-define_boxing(CREObjTypeTemplate, CREObjProxy)
+define_boxing(CREObjTypeClass, CREObjProxy)
 
 
 

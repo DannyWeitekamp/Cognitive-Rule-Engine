@@ -2,7 +2,7 @@ import numpy as np
 from numba import njit, f8
 from numba.typed import List
 from cre.conditions import *
-from cre.memory import MemSet
+from cre.memset import MemSet
 from cre.context import cre_context
 # from cre.matching import get_ptr_matches,_get_matches
 from cre.utils import _struct_from_ptr, _list_base,_list_base_from_ptr,_load_ptr, _incref_structref, _raw_ptr_from_struct
@@ -426,7 +426,7 @@ def test_mem_leaks():
     (c,ms),_ = matching_alphas_setup()
     print("c", c._meminfo.refcount)
 
-    from cre.rete import update_graph, build_rete_graph
+    # from cre.rete import update_graph, build_rete_graph
     # rete_graph = build_rete_graph(ms, c)
     # update_graph(rete_graph)
     with cre_context("test_matching_benchmarks") as ctxt:

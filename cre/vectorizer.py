@@ -16,7 +16,7 @@ from cre.utils import PrintElapse,encode_idrec, _func_from_address, _cast_struct
 from cre.structref import define_structref
 from numba.experimental import structref
 from cre.incr_processor import incr_processor_fields, IncrProcessorType, init_incr_processor
-from cre.memory import Memory, MemoryType
+from cre.memset import Memory, MemoryType
 from cre.structref import CastFriendlyStructref, define_boxing
 from numba.extending import overload_method, overload, lower_cast, SentryLiteralArgs
 from numba.experimental.function_type import _get_wrapper_address

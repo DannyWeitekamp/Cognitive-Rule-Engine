@@ -15,8 +15,8 @@ vector_fields = [
     ("data", i8[::1])
 ]
 
-Vector, VectorTypeTemplate = define_structref_template("Vector",vector_fields)
-VectorType = VectorTypeTemplate(fields=vector_fields)
+Vector, VectorTypeClass = define_structref_template("Vector",vector_fields)
+VectorType = VectorTypeClass(fields=vector_fields)
 
 @njit(cache=True)
 def new_vector(size):
@@ -36,7 +36,7 @@ def _expand_to(self,size):
         new_data[len(self.data):-1] = 0
         self.data = new_data
 
-@overload_method(VectorTypeTemplate, "assert_size")
+@overload_method(VectorTypeClass, "assert_size")
 def assert_size(self,size):
     def impl(self,size):
         _expand_to(self,size)
@@ -53,13 +53,13 @@ def _expand(self):
     new_data[len(self.data):-1] = 0
     self.data = new_data
 
-@overload_method(VectorTypeTemplate, "expand")
+@overload_method(VectorTypeClass, "expand")
 def assert_size(self):
     def impl(self):
         _expand(self)
     return impl
 
-@overload_method(VectorTypeTemplate, "set_item_safe")
+@overload_method(VectorTypeClass, "set_item_safe")
 def vector_set_item_safe(self, i, x):
     ''' 
     Set's slot i to x. Ensures that data is large enough.
@@ -70,7 +70,7 @@ def vector_set_item_safe(self, i, x):
         self.data[i] = x
     return impl
 
-@overload_method(VectorTypeTemplate, "add")
+@overload_method(VectorTypeClass, "add")
 def vector_add(self, x):
     ''' 
     Adds an item to the vector and increments the head.
@@ -81,7 +81,7 @@ def vector_add(self, x):
         self.head += 1
     return impl
 
-@overload_method(VectorTypeTemplate, "pop")
+@overload_method(VectorTypeClass, "pop")
 def vector_pop(self):
     ''' 
     Returns the last item from the end of the vector and decrements the head.
@@ -95,7 +95,7 @@ def vector_pop(self):
 
 
 
-@overload_method(VectorTypeTemplate, "clear")
+@overload_method(VectorTypeClass, "clear")
 def vector_clear(self):
     ''' 
     Moves the head to zero, essentially clearing the vector.
@@ -104,7 +104,7 @@ def vector_clear(self):
         self.head = 0
     return impl
 
-@overload_method(VectorTypeTemplate, "copy")
+@overload_method(VectorTypeClass, "copy")
 def vector_copy(self):
     ''' 
     Moves the head to zero, essentially clearing the vector.
@@ -117,7 +117,7 @@ def vector_copy(self):
 
 @overload(operator.getitem)
 def impl_getitem(self, i):
-    if not isinstance(self, VectorTypeTemplate):
+    if not isinstance(self, VectorTypeClass):
         return
     def impl(self,i):
         return self.data[i]
@@ -125,7 +125,7 @@ def impl_getitem(self, i):
 
 @overload(operator.setitem)
 def impl_setitem(self, i, x):
-    if not isinstance(self, VectorTypeTemplate):
+    if not isinstance(self, VectorTypeClass):
         return
     def impl(self,i,x):
         self.data[i] = x
@@ -133,7 +133,7 @@ def impl_setitem(self, i, x):
 
 @overload(len)
 def impl_len(self):
-    if not isinstance(self, VectorTypeTemplate):
+    if not isinstance(self, VectorTypeClass):
         return
     def impl(self):
         return self.head

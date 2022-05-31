@@ -3,7 +3,7 @@ import numba
 from numba import f8, i8, njit
 from numba.typed import List, Dict
 from numba.types import ListType, DictType, unicode_type
-from cre.memory import Memory
+from cre.memory import MemSet
 from cre.var import Var
 from cre.flattener import Flattener
 from cre.feature_applier import FeatureApplier
@@ -109,15 +109,15 @@ def test_relative_encoder():
     # print(p1)
     # print(p2)
 
-    mem = Memory()
-    mem.declare(a)
-    mem.declare(b)
-    mem.declare(c)
-    mem.declare(p1)
-    mem.declare(p2)
-    mem.declare(p3)
+    ms = MemSet()
+    ms.declare(a)
+    ms.declare(b)
+    ms.declare(c)
+    ms.declare(p1)
+    ms.declare(p2)
+    ms.declare(p3)
 
-    re = RelativeEncoder((Component,Container),mem)
+    re = RelativeEncoder((Component,Container),ms)
 
     @njit(cache=True)
     def get_changes(re):
@@ -125,15 +125,15 @@ def test_relative_encoder():
 
     _check_needs_rebuild(re, get_changes(re))
 
-    fl = Flattener((Component,Container,), mem, id_attr="id")
-    flat_mem = fl.apply()
-    fa = FeatureApplier([eq_f8,eq_str], flat_mem)
-    feat_mem = fa.apply()
+    fl = Flattener((Component,Container,), ms, id_attr="id")
+    flat_ms = fl.apply()
+    fa = FeatureApplier([eq_f8,eq_str], flat_ms)
+    feat_ms = fa.apply()
 
 
 
     
-    # rel_mem = re.encode_relative_to(feat_mem,[p1])
+    # rel_ms = re.encode_relative_to(feat_ms,[p1])
 
     ### Revise Structure ### 
     #     p4
@@ -144,8 +144,8 @@ def test_relative_encoder():
 
     p4 = Container(id="P4", children=List([p3]))
     p4.parents = List([p3])
-    mem.declare(p4)
-    mem.modify(p3,'parents', List([p4]))
+    ms.declare(p4)
+    ms.modify(p3,'parents', List([p4]))
     print()
     print("-----------4-------------")
     print()
@@ -158,13 +158,13 @@ def test_relative_encoder():
     print("-----------5-------------")
     print()
 
-    # print(flat_mem)
+    # print(flat_ms)
 
 
     src_vars = [Var(Container,'p1')]
     print(src_vars)
-    re.encode_relative_to(feat_mem,[p1], src_vars)
-    # l = re.encode_relative_to(mem,[p1], src_vars)
+    re.encode_relative_to(feat_ms,[p1], src_vars)
+    # l = re.encode_relative_to(ms,[p1], src_vars)
     # print("<<", l)
 
 
@@ -172,11 +172,11 @@ def test_relative_encoder():
     print("-----------6-------------")
     print()
 
-    # re.encode_relative_to(feat_mem,[p1,p2,p3,p4])
+    # re.encode_relative_to(feat_ms,[p1,p2,p3,p4])
 
     src_vars = [Var(Container,'p1'),Var(Container,'p2'),Var(Container,'p3'),Var(Container,'p4')]
-    re.encode_relative_to(feat_mem,[p1,p2,p3,p4], src_vars)
-    # l = re.encode_relative_to(mem,[p1,p2,p3,p4],src_vars)
+    re.encode_relative_to(feat_ms,[p1,p2,p3,p4], src_vars)
+    # l = re.encode_relative_to(ms,[p1,p2,p3,p4],src_vars)
     # print("<<", l)
 
 if __name__ == "__main__":

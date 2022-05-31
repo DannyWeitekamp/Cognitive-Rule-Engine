@@ -2,7 +2,7 @@ from numba import njit, f8, types
 from numba.types import unicode_type
 from cre.utils import decode_idrec, PrintElapse
 from cre.context import cre_context 
-from cre.memory import Memory 
+from cre.memory import MemSet 
 from cre.flattener import Flattener, get_semantic_visibile_fact_attrs, flattener_update
 from cre.fact import define_fact
 import pytest_benchmark
@@ -42,11 +42,11 @@ def test_feature_apply():
                  "x" : {"type" : "number", "is_semantic_visible" : True}}
         BOOP3 = define_fact("BOOP3", spec3)
    
-        fa = FeatureApplier([eq_f8,eq_str],Memory())
+        fa = FeatureApplier([eq_f8,eq_str],MemSet())
         fa.apply()
 
 
-        mem = Memory()
+        ms = MemSet()
         a = BOOP1(id="A",u="1", v=1)
         b = BOOP1(id="B",u="2", v=2)
         c = BOOP2(id="C",u="3", v=3, q=13)
@@ -54,54 +54,54 @@ def test_feature_apply():
         e = BOOP3(id="E",u="2", v=5, q=14, x=106)
         f = BOOP3(id="F",u="3", v=6, q=16, x=106)
 
-        a_idrec = mem.declare(a)
-        b_idrec = mem.declare(b)
-        c_idrec = mem.declare(c)
-        d_idrec = mem.declare(d)
-        e_idrec = mem.declare(e)
-        f_idrec = mem.declare(f)
+        a_idrec = ms.declare(a)
+        b_idrec = ms.declare(b)
+        c_idrec = ms.declare(c)
+        d_idrec = ms.declare(d)
+        e_idrec = ms.declare(e)
+        f_idrec = ms.declare(f)
         print("-------")
 
-        fl = Flattener((BOOP1, BOOP2, BOOP3), mem, id_attr="id")
-        flat_mem = fl.apply()
+        fl = Flattener((BOOP1, BOOP2, BOOP3), ms, id_attr="id")
+        flat_ms = fl.apply()
 
-        fa = FeatureApplier([eq_f8, eq_str],flat_mem)
-        feat_mem = fa.apply()
-        print(flat_mem)
-        print(feat_mem)
-        print(len(feat_mem.get_facts()))
-        print(count_true_false(feat_mem))
+        fa = FeatureApplier([eq_f8, eq_str],flat_ms)
+        feat_ms = fa.apply()
+        print(flat_ms)
+        print(feat_ms)
+        print(len(feat_ms.get_facts()))
+        print(count_true_false(feat_ms))
 
         # 5*5 .u, 2*5 .v, 2*5 .x
-        assert len(feat_mem.get_facts()) == ((5*6) + (5*6)) + (6+6)
-        assert count_true_false(feat_mem)[0] == 10
+        assert len(feat_ms.get_facts()) == ((5*6) + (5*6)) + (6+6)
+        assert count_true_false(feat_ms)[0] == 10
 
-        mem.retract(c)
-        mem.retract(d)
+        ms.retract(c)
+        ms.retract(d)
 
-        flat_mem = fl.apply()
-        feat_mem = fa.apply()
-        print(flat_mem)
-        print(feat_mem)
-        print(len(feat_mem.get_facts()))
-        print(count_true_false(feat_mem))
+        flat_ms = fl.apply()
+        feat_ms = fa.apply()
+        print(flat_ms)
+        print(feat_ms)
+        print(len(feat_ms.get_facts()))
+        print(count_true_false(feat_ms))
 
 
-        assert len(feat_mem.get_facts()) == ((3*4) + (3*4)) + (4+4)
-        assert count_true_false(feat_mem)[0] == 4
+        assert len(feat_ms.get_facts()) == ((3*4) + (3*4)) + (4+4)
+        assert count_true_false(feat_ms)[0] == 4
 
-        mem.modify(e, "x", 777)
-        mem.modify(f, "u", "Z")
+        ms.modify(e, "x", 777)
+        ms.modify(f, "u", "Z")
 
-        flat_mem = fl.apply()
-        feat_mem = fa.apply()
-        print(flat_mem)
-        print(feat_mem)
-        print(len(feat_mem.get_facts()))
+        flat_ms = fl.apply()
+        feat_ms = fa.apply()
+        print(flat_ms)
+        print(feat_ms)
+        print(len(feat_ms.get_facts()))
 
         print()
-        assert len(feat_mem.get_facts()) == ((3*4) + (3*4)) + (4+4)
-        assert count_true_false(feat_mem)[0] == 2
+        assert len(feat_ms.get_facts()) == ((3*4) + (3*4)) + (4+4)
+        assert count_true_false(feat_ms)[0] == 2
 
 
 with cre_context("feat_apply_100x100"):
@@ -112,24 +112,24 @@ with cre_context("feat_apply_100x100"):
             # return (BOOP,), {}
 
     @njit(cache=True)
-    def _b_dec_100(mem):
+    def _b_dec_100(ms):
         for i in range(100):
             b = BOOP(str(i%10),i%5)
-            mem.declare(b)
+            ms.declare(b)
 
 def setup_feat_apply_100x100():
     with cre_context("feat_apply_100x100"):
-        mem = Memory()
-        _b_dec_100(mem)
-        fl = Flattener((BOOP,),mem,id_attr="A")
-        flat_mem = fl.apply()
-        fa = FeatureApplier([eq_f8,eq_str],flat_mem)
-        feat_mem = fa.apply()
-    return (fa, feat_mem), {}
+        ms = MemSet()
+        _b_dec_100(ms)
+        fl = Flattener((BOOP,),ms,id_attr="A")
+        flat_ms = fl.apply()
+        fa = FeatureApplier([eq_f8,eq_str],flat_ms)
+        feat_ms = fa.apply()
+    return (fa, feat_ms), {}
 
-def do_feat_apply(fa,mem):
+def do_feat_apply(fa,ms):
     fa.update()
-    return fa.out_mem
+    return fa.out_memset
 
 def test_b_feat_apply_100x100(benchmark):
     benchmark.pedantic(do_feat_apply,setup=setup_feat_apply_100x100, warmup_rounds=1, rounds=10)
@@ -149,7 +149,7 @@ if(__name__ == "__main__"):
     
     
 
-#         mem = Memory()
+#         mem = MemSet()
 #         for i in range(100):
 #             mem.declare(BOOP2(str(i),i,i))
 

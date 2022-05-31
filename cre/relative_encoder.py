@@ -8,7 +8,7 @@ from cre.structref import define_structref, define_structref_template
 from numba.experimental import structref
 from numba.experimental.structref import new, define_attributes
 from numba.extending import lower_cast, overload, overload_method
-from cre.memory import Memory,MemoryType
+from cre.memory import MemSet,MemSetType
 from cre.utils import  lower_setattr, _ptr_from_struct_incref, decode_idrec, listtype_sizeof_item, _cast_structref, _obj_cast_codegen, DEREF_TYPE_ATTR, DEREF_TYPE_LIST, _memcpy_structref
 from cre.vector import VectorType
 from cre.incr_processor import IncrProcessorType, ChangeEventType, incr_processor_fields, init_incr_processor
@@ -121,14 +121,14 @@ def get_relative_encoder_type(fact_types, id_attr):
     return re_type
 
 class RelativeEncoder(structref.StructRefProxy):
-    def __new__(cls, fact_types, in_mem=None, id_attr='id', context=None):
-        # Make new in_mem and out_mem if they are not provided.
-        if(in_mem is None): in_mem = Memory(context);
+    def __new__(cls, fact_types, in_ms=None, id_attr='id', context=None):
+        # Make new in_ms and out_ms if they are not provided.
+        if(in_ms is None): in_ms = MemSet(context);
         re_type = get_relative_encoder_type(fact_types,id_attr)
-        self = RelativeEncoder_ctor(re_type, in_mem)
+        self = RelativeEncoder_ctor(re_type, in_ms)
         return self
 
-    def encode_relative_to(self, mem, sources, source_vars):
+    def encode_relative_to(self, ms, sources, source_vars):
         if(isinstance(source_vars,list)):
             _source_vars = List.empty_list(GenericVarType)
             for v in source_vars:
@@ -136,7 +136,7 @@ class RelativeEncoder(structref.StructRefProxy):
             source_vars = _source_vars
         source_idrecs = np.array([u8(x.idrec) for x in sources],dtype=np.uint64)
         # print("source_idrecs", [decode_idrec(x) for x in source_idrecs])
-        return encode_relative_to(self, mem, source_idrecs, source_vars)
+        return encode_relative_to(self, ms, source_idrecs, source_vars)
 
     def update(self):
         RelativeEncoder_update(self)
@@ -249,10 +249,10 @@ def RelativeEncoder_reinit(self,size=32):
 
 # print("A")
 @njit(cache=True, nopython=True)
-def RelativeEncoder_ctor(re_type, in_mem):
-    # def impl(re_type, in_mem):
+def RelativeEncoder_ctor(re_type, in_ms):
+    # def impl(re_type, in_ms):
     st = new(re_type)
-    init_incr_processor(st, in_mem)
+    init_incr_processor(st, in_ms)
     RelativeEncoder_reinit(st)
     st.lateral_w = f8(1.0)
     st.deref_info_matrix = _new_deref_info_matrix(st)
@@ -488,7 +488,7 @@ def _check_needs_rebuild(self, change_events):
             if(ce.was_retracted): 
                 need_rebuild = True; break;
             if(ce.was_modified):
-                fact = self.in_mem.get_fact(ce.idrec, self.base_fact_type)
+                fact = self.in_memset.get_fact(ce.idrec, self.base_fact_type)
                 for tup in literal_unroll(base_a_id_pairs):
                     base_t, a_id = tup
                     if(a_id in ce.a_ids and fact.isa(base_t)):
@@ -516,7 +516,7 @@ def RelativeEncoder_update(self):
     if(need_rebuild):
         # If need_rebuild start bellman-ford shortest path from scratch
         RelativeEncoder_reinit(self)
-        sources = self.in_mem.get_facts(self.base_fact_type)
+        sources = self.in_memset.get_facts(self.base_fact_type)
         for fact in sources:
             _insert_fact(self, fact)
         update_relative_to(self, sources)    
@@ -525,7 +525,7 @@ def RelativeEncoder_update(self):
         sources = List.empty_list(self.base_fact_type)
         for change_event in change_events:
             if(change_event.was_declared or change_event.was_modified):
-                fact = self.in_mem.get_fact(change_event.idrec, self.base_fact_type)
+                fact = self.in_memset.get_fact(change_event.idrec, self.base_fact_type)
                 if(change_event.was_declared): _insert_fact(self,fact)
                 sources.append(fact)
         update_relative_to(self, sources)    
@@ -644,18 +644,18 @@ from cre.tuple_fact import TupleFact
 from cre.utils import _load_ptr, _struct_from_ptr
 
 @njit(cache=True, locals={"source_idrecs" : u8[::1]})
-def encode_relative_to(self, mem, source_idrecs, source_vars):
+def encode_relative_to(self, ms, source_idrecs, source_vars):
     # Get the inds associated with the source_idrecs
     s_inds = np.empty((len(source_idrecs,)),dtype=np.int32)
     for i, s_idrec in enumerate(source_idrecs):
         s_inds[i] = self.idrec_to_ind[s_idrec]
 
-    # mem = Memory()
+    # mem = MemSet()
 
     # l = List.empty_list(GenericVarType)
     # seq_buffer = np.empty((len(self.dist_matrix),),dtype=np.int64)
     # deref_info_buffer = np.empty((2*len(self.dist_matrix),),dtype=deref_info_type)
-    for fact in mem.get_facts(gval_type):
+    for fact in ms.get_facts(gval_type):
         fact_copy = copy_cre_obj(fact)
 
         head = fact.head

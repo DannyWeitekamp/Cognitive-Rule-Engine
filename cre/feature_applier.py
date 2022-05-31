@@ -16,7 +16,7 @@ from cre.utils import PrintElapse,encode_idrec, _func_from_address, _cast_struct
 from cre.structref import define_structref
 from numba.experimental import structref
 from cre.incr_processor import incr_processor_fields, IncrProcessorType, init_incr_processor
-from cre.memory import Memory, MemoryType
+from cre.memory import MemSet, MemSetType
 from cre.structref import CastFriendlyStructref, define_boxing
 from numba.extending import overload_method, overload, lower_cast, SentryLiteralArgs
 from numba.experimental.function_type import _get_wrapper_address
@@ -30,7 +30,7 @@ from itertools import chain
 # Flattener Struct Definition
 feature_applier_fields = {
     **incr_processor_fields,    
-    "out_mem" : MemoryType,
+    "out_memset" : MemSetType,
     "idrec_map" : DictType(u8,ListType(u8)),
     "ops" : ListType(GenericOpType),
 
@@ -68,11 +68,11 @@ op_list_type = ListType(GenericOpType)
 
 
 class FeatureApplier(structref.StructRefProxy):
-    def __new__(cls, ops, in_mem=None, out_mem=None,
+    def __new__(cls, ops, in_memset=None, out_memset=None,
                  enumerizer=None, context=None):
         context = cre_context(context)
-        if(in_mem is None): in_mem = Memory(context);
-        if(out_mem is None): out_mem = Memory(context);
+        if(in_memset is None): in_memset = MemSet(context);
+        if(out_memset is None): out_memset = MemSet(context);
 
         # Inject an enumerizer instance into the context object
         #  if one does not exist. So it is shared across various
@@ -81,30 +81,30 @@ class FeatureApplier(structref.StructRefProxy):
             enumerizer = getattr(context,'enumerizer', Enumerizer()) 
             context.enumerizer = enumerizer
 
-        self = feature_applier_ctor(in_mem, out_mem, enumerizer)
+        self = feature_applier_ctor(in_memset, out_memset, enumerizer)
         self.ops = []
         self.update_impls = []
         for op in ops:
             self.add_op(op)
-        self._out_mem = out_mem
+        self._out_memset = out_memset
         return self
 
     @property
-    def in_mem(self):
-        return get_in_mem(self)
+    def in_memset(self):
+        return get_in_memset(self)
 
     @property
-    def out_mem(self):
-        return self._out_mem
+    def out_memset(self):
+        return self._out_memset
 
     def get_changes(self):
         return feature_applier_get_changes(self)
 
-    def apply(self, in_mem=None):
-        if(in_mem is not None):
-            set_in_mem(self, in_mem)
+    def apply(self, in_memset=None):
+        if(in_memset is not None):
+            set_in_memset(self, in_memset)
         self.update()
-        return self._out_mem
+        return self._out_memset
 
     def update(self):
         ''' The main FeatureApplier update function. Update one op at a time
@@ -134,14 +134,14 @@ define_boxing(FeatureApplierTypeClass, FeatureApplier)
 
 vec_triple_type = Tuple((VectorType,VectorType,VectorType))
 
-@njit(GenericFeatureApplierType(MemoryType,MemoryType,EnumerizerType),cache=True)    
-def feature_applier_ctor(in_mem, out_mem, enumerizer):    
+@njit(GenericFeatureApplierType(MemSetType,MemSetType,EnumerizerType),cache=True)    
+def feature_applier_ctor(in_memset, out_memset, enumerizer):    
     st = new(GenericFeatureApplierType)
-    init_incr_processor(st, in_mem)
+    init_incr_processor(st, in_memset)
     st.ops = List.empty_list(GenericOpType)
     st.fact_vecs = Dict.empty(u2, vec_triple_type)
     st.idrec_map = Dict.empty(u8, u8_list)
-    st.out_mem = out_mem 
+    st.out_memset = out_memset 
     st.gval_t_ids = List.empty_list(u2_arr)
     st.current_change_events = List.empty_list(ChangeEventType)
     st.enumerizer = enumerizer
@@ -158,8 +158,8 @@ def add_op(self, op, gval_t_ids):
             self.fact_vecs[t_id] = (new_vector(1),new_vector(1), new_vector(1))
 
 @njit(cache=True)
-def set_in_mem(self, x):
-    self.in_mem = x
+def set_in_memset(self, x):
+    self.in_memset = x
     update_fact_vecs(self)
 
 
@@ -206,11 +206,11 @@ def update_fact_vecs(self):
         new_f_ids, new_fact_ptrs, old_fact_ptrs = self.fact_vecs[t_id]
 
         if(change_event.was_retracted):
-            # Remove any facts in out_mem derived from the retracted fact.
+            # Remove any facts in out_memset derived from the retracted fact.
             old_fact_ptrs[f_id] = 0
             if(change_event.idrec in self.idrec_map):
                 for idrec in self.idrec_map[change_event.idrec]:
-                    self.out_mem.retract(idrec)
+                    self.out_memset.retract(idrec)
                 del self.idrec_map[change_event.idrec]
 
             
@@ -218,17 +218,17 @@ def update_fact_vecs(self):
             # Prepare new_f_ids and new_fact_ptrs for update_op.
             if(change_event.was_modified):
                 for idrec in self.idrec_map[change_event.idrec]:
-                    self.out_mem.retract(idrec)
+                    self.out_memset.retract(idrec)
                 self.idrec_map[change_event.idrec] = ListType.empty_list(u8)
 
-            in_mem_facts = _struct_from_ptr(VectorType, self.in_mem.mem_data.facts[i8(t_id)])
+            in_memset_facts = _struct_from_ptr(VectorType, self.in_memset.facts[i8(t_id)])
             new_f_ids.add(f_id)
-            new_fact_ptrs.add(in_mem_facts[f_id])
+            new_fact_ptrs.add(in_memset_facts[f_id])
 
             
-            # Copy any of the contents of in_mem to out_mem
-            fact = self.in_mem.get_fact(change_event.idrec)
-            copy_idrec = self.out_mem.declare(copy_cre_obj(fact))
+            # Copy any of the contents of in_memset to out_memset
+            fact = self.in_memset.get_fact(change_event.idrec)
+            copy_idrec = self.out_memset.declare(copy_cre_obj(fact))
             if(change_event.idrec not in self.idrec_map):
                 self.idrec_map[change_event.idrec] = ListType.empty_list(u8)
             self.idrec_map[change_event.idrec].append(copy_idrec)
@@ -305,9 +305,9 @@ def update_op(self, return_type, arg_types, op_ind):
             v = call_head_ptrs(val_ptrs)
             nom = self.enumerizer.enumerize(v,enum_d)
             gval = new_gval(head=tf,val=v,nom=nom)
-            idrec = self.out_mem.declare(gval)
+            idrec = self.out_memset.declare(gval)
 
-            # Map each arg's idrecs in 'in_mem' to the gval's idrec in 'out_mem' 
+            # Map each arg's idrecs in 'in_memset' to the gval's idrec in 'out_memset' 
             for ptr in gval_ptrs:
                 fact = _struct_from_ptr(BaseFact, ptr)
                 if(fact.idrec not in self.idrec_map):
@@ -362,11 +362,11 @@ def assign_new_f_ids(self):
 
 #         eq_f8 = Equals(f8, f8)
 #         eq_str = Equals(unicode_type, unicode_type)
-#         fa = FeatureApplier([eq_f8,eq_str],Memory())
+#         fa = FeatureApplier([eq_f8,eq_str],MemSet())
 #         fa.apply()
 
 
-#         mem = Memory()
+#         mem = MemSet()
 #         a = BOOP1("A", 1)
 #         b = BOOP1("B", 2)
 #         c = BOOP2("C", 3, 13)
@@ -396,7 +396,7 @@ def assign_new_f_ids(self):
 #         print(feat_mem)
 
 
-#         mem = Memory()
+#         mem = MemSet()
 #         for i in range(3):
 #             mem.declare(BOOP2(str(i),i,i))
 
@@ -425,7 +425,7 @@ def assign_new_f_ids(self):
 
 
 # @generated_jit(cache=True)
-# def update_gval_multi(return_type, arg_types, call_addr, check_addr, arg_ind, in_mem, out_mem):
+# def update_gval_multi(return_type, arg_types, call_addr, check_addr, arg_ind, in_memset, out_memset):
 #     nargs = len(arg_types)
 #     gval_argtypes = tuple([get_gval_type(t) for t in arg_types])
 
@@ -433,7 +433,7 @@ def assign_new_f_ids(self):
 #     # def impl():
 #     #     # literal_unroll
 
-#     in_mem.get_facts(arg_types)
+#     in_memset.get_facts(arg_types)
 
 
 

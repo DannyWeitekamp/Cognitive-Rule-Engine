@@ -16,7 +16,7 @@ from cre.op import GenericOpType
 from cre.utils import _func_from_address, _cast_structref, _obj_cast_codegen, _func_from_address, _incref_structref
 from cre.structref import define_structref
 from cre.incr_processor import incr_processor_fields, IncrProcessorType, init_incr_processor
-from cre.memory import Memory, MemoryType
+from cre.memory import MemSet, MemSetType
 from cre.structref import CastFriendlyStructref, define_boxing
 from cre.enumerizer import Enumerizer, EnumerizerType
 from numba.experimental import structref
@@ -50,7 +50,7 @@ def get_semantic_visibile_fact_attrs(fact_types):
 # Flattener Struct Definition
 flattener_fields = {
     **incr_processor_fields,    
-    "out_mem" : MemoryType,
+    "out_memset" : MemSetType,
     "idrec_map" : DictType(u8,ListType(u8)),
     # "inv_idrec_map" : DictType(u8,ListType(u8)),
     "base_var_map" : DictType(Tuple((u2,unicode_type)), GenericVarType),
@@ -101,30 +101,30 @@ def get_flattener_type(fact_types,id_attr):
 
 from numba.core.typing.typeof import typeof
 @generated_jit(cache=True, nopython=True)    
-def flattener_ctor(flattener_type, in_mem, out_mem, enumerizer=None):
+def flattener_ctor(flattener_type, in_memset, out_memset, enumerizer=None):
     fact_visible_attr_pairs = flattener_type.instance_type._fact_visible_attr_pairs
-    def impl(flattener_type, in_mem, out_mem, enumerizer=None):
+    def impl(flattener_type, in_memset, out_memset, enumerizer=None):
         st = new(flattener_type)
-        init_incr_processor(st, in_mem)
+        init_incr_processor(st, in_memset)
         st.fact_visible_attr_pairs = fact_visible_attr_pairs
         st.base_var_map = Dict.empty(t_id_alias_pair_type, GenericVarType)
         st.var_map = Dict.empty(t_id_identifier_alias_tup_type, GenericVarType)
         st.idrec_map = Dict.empty(u8,u8_list)
         # st.inv_idrec_map = Dict.empty(u8,u8_list)
-        st.out_mem = out_mem 
+        st.out_memset = out_memset 
         st.enumerizer = enumerizer
         return st
     return impl
 
 
 class Flattener(structref.StructRefProxy):
-    def __new__(cls, fact_types, in_mem=None, id_attr="id",
-                 out_mem=None, enumerizer=None, context=None):
+    def __new__(cls, fact_types, in_memset=None, id_attr="id",
+                 out_memset=None, enumerizer=None, context=None):
         context = cre_context(context)
 
-        # Make new in_mem and out_mem if they are not provided.
-        if(in_mem is None): in_mem = Memory(context);
-        if(out_mem is None): out_mem = Memory(context);
+        # Make new in_memset and out_memset if they are not provided.
+        if(in_memset is None): in_memset = MemSet(context);
+        if(out_memset is None): out_memset = MemSet(context);
 
         # Inject an enumerizer instance into the context object
         #  if one does not exist. So it is shared across various
@@ -134,38 +134,38 @@ class Flattener(structref.StructRefProxy):
             context.enumerizer = enumerizer
 
         # Make a flattener_type from fact_types + id_attr and instantiate
-        #  the flattener. Keep a reference to out_mem around.
+        #  the flattener. Keep a reference to out_memset around.
         flattener_type = get_flattener_type(fact_types, id_attr)
-        self = flattener_ctor(flattener_type, in_mem, out_mem, enumerizer)
-        self._out_mem = out_mem
+        self = flattener_ctor(flattener_type, in_memset, out_memset, enumerizer)
+        self._out_memset = out_memset
         return self
 
     @property
-    def in_mem(self):
-        return get_in_mem(self)
+    def in_memset(self):
+        return get_in_memset(self)
 
     @property
-    def out_mem(self):
-        return self._out_mem
+    def out_memset(self):
+        return self._out_memset
 
-    def apply(self, in_mem=None):
-        if(in_mem is not None):
-            set_in_mem(self, in_mem)
+    def apply(self, in_memset=None):
+        if(in_memset is not None):
+            set_in_memset(self, in_memset)
         self.update()
-        return self._out_mem
+        return self._out_memset
 
     def update(self):
         flattener_update(self)
 
 define_boxing(FlattenerTypeClass, Flattener)
 
-@njit(types.void(GenericFlattenerType,MemoryType),cache=True)
-def set_in_mem(self, x):
-    self.in_mem = x
+@njit(types.void(GenericFlattenerType,MemSetType),cache=True)
+def set_in_memset(self, x):
+    self.in_memset = x
 
-@njit(MemoryType(GenericFlattenerType),cache=True)
-def get_in_mem(self):
-    return self.in_mem
+@njit(MemSetType(GenericFlattenerType),cache=True)
+def get_in_memset(self):
+    return self.in_memset
 
 def get_ground_type(head_type,val_type):
     return 
@@ -214,9 +214,9 @@ def flattener_update_for_attr(self, fact, id_attr, attr):
 
         # Make the gval.
         g = new_gval(head=self.var_map[tup], val=v, nom=nom)
-        idrec = self.out_mem.declare(g)
+        idrec = self.out_memset.declare(g)
 
-        # Map the fact's idrec in 'in_mem' to the gval's idrec in 'out_mem' 
+        # Map the fact's idrec in 'in_memset' to the gval's idrec in 'out_memset' 
         if(fact.idrec not in self.idrec_map):
             self.idrec_map[fact.idrec] = List.empty_list(u8)
         self.idrec_map[fact.idrec].append(idrec)
@@ -228,10 +228,10 @@ def clean_a_id(self, change_idrec, a_id):
     '''Cleans the gvals associated with the fact at 'change_idrec' with 'a_id' ''' 
     if(change_idrec in self.idrec_map):
         for idrec in self.idrec_map[change_idrec]:
-            gval = self.out_mem.get_fact(idrec).asa(gval_type)
+            gval = self.out_memset.get_fact(idrec).asa(gval_type)
             var = _cast_structref(GenericVarType, gval.head)
             if(var.deref_infos[0].a_id == a_id):
-                self.out_mem.retract(idrec)
+                self.out_memset.retract(idrec)
                 self.idrec_map[change_idrec].remove(idrec)
                 break
             
@@ -255,7 +255,7 @@ def flattener_update(self):
             if(change_event.was_retracted):
                 if(change_event.idrec in self.idrec_map):
                     for idrec in self.idrec_map[change_event.idrec]:
-                        self.out_mem.retract(idrec)
+                        self.out_memset.retract(idrec)
                     del self.idrec_map[change_event.idrec]
 
             # On DECLARE or MODIFY.
@@ -274,7 +274,7 @@ def flattener_update(self):
                                 # Skip if MODIFY a_id doesn't match this implementation
                                 continue
 
-                        fact = _cast_structref(typ, self.in_mem.get_fact(change_event.idrec))
+                        fact = _cast_structref(typ, self.in_memset.get_fact(change_event.idrec))
                         flattener_update_for_attr(self,fact, id_attr, attr)
 
     return impl

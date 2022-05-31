@@ -2,7 +2,7 @@ import contextvars
 
 
 skip = contextvars.ContextVar("cre_skip_package_level_imports",default=False)
-print("<<", skip.get())
+# print("<<", skip.get())
 if(not skip.get()):
     print("NOT THIS FIRST", __name__)
     import cre.cfuncs
@@ -17,7 +17,7 @@ if(not skip.get()):
 
     # Other helpful things exposed at the package level
     from cre.context import cre_context
-    from cre.memory import Memory
+    from cre.memory import MemSet
     from cre.ptrop import PtrOp
 
     # Instantiate the default context at the package level

@@ -17,6 +17,7 @@ os.environ['NUMBA_CACHE_DIR'] = os.path.join(os.path.split(cache_dir)[0], "numba
 from numba.core.dispatcher import Dispatcher
 import numba.typed.typedlist as tl_mod 
 import numba.typed.typeddict as td_mod
+import cloudpickle
 #Monkey Patch Numba so that the builtin functions for List() and Dict() cache between runs 
 def monkey_patch_caching(mod,exclude=[]):
     for name, val in mod.__dict__.items():
@@ -106,12 +107,22 @@ def lines_in_type_registry():
             GLOBAL_TYPE_COUNT = 0
     return GLOBAL_TYPE_COUNT
 
-def add_to_type_registry(name, hash_code):
+from cre.utils import PrintElapse
+def add_type_pickle(typ, t_id):
+    pickle_dir = get_cache_path("type_pickles",suffix='')
+    os.makedirs(pickle_dir, exist_ok=True)
+    # print(os.path.join(pickle_dir,f'{t_id}.pkl'))
+    with open(os.path.join(pickle_dir,f'{t_id}.pkl'), 'wb') as f:
+        cloudpickle.dump(typ, f)
+
+
+def add_to_type_registry(name, hash_code, typ=None):
     global GLOBAL_TYPE_COUNT
     if(GLOBAL_TYPE_COUNT == -1): lines_in_type_registry()
     count = GLOBAL_TYPE_COUNT
     with open(get_cache_path("type_registry",suffix=''),'a') as f:
-        f.write(f"{name} {hash_code}\n")
+        f.write(f"{count} {name} {hash_code}\n")
+    if(typ is not None): add_type_pickle(typ, count)
     GLOBAL_TYPE_COUNT += 1
     return count
 
@@ -119,15 +130,18 @@ def type_from_t_id(t_id):
     if(t_id < len(DEFAULT_REGISTERED_TYPES)):
         return list(DEFAULT_REGISTERED_TYPES.values())[t_id]
     name, hash_code = None, None
-    with open(get_cache_path("type_registry",suffix=''),'r') as f:
-        for i, line in enumerate(f):
-            if(i == t_id):
-                tokens = line.split()
-                name, hash_code = tokens[0], tokens[1]
-                break
+    pickle_dir = get_cache_path("type_pickles",suffix='')
+    with open(os.path.join(pickle_dir,f'{t_id}.pkl'), 'rb') as f:
+        typ = cloudpickle.load(f)
+    # with open(get_cache_path("type_registry",suffix=''),'r') as f:
+    #     for i, line in enumerate(f):
+    #         if(i == t_id):
+    #             tokens = line.split()
+    #             name, hash_code = tokens[0], tokens[1]
+    #             break
 
-    fact_type = import_from_cached(name, hash_code, ['fact_type'])['fact_type']
-    return fact_type
+    # fact_type = import_from_cached(name, hash_code, ['fact_type'])['fact_type']
+    return typ
 
 def t_id_from_type_name(typ_name, hash_code=None):
     if(hash_code is None): hash_code = hash(typ)
@@ -135,7 +149,7 @@ def t_id_from_type_name(typ_name, hash_code=None):
     with open(get_cache_path("type_registry",suffix=''),'r') as f:
         for i, line in enumerate(f):
             tokens = line.split()
-            if(tokens[0] == name and tokens[1] == hash_code):
+            if(tokens[1] == name and tokens[2] == hash_code):
                 return i
     return -1
             
@@ -187,8 +201,8 @@ DEFAULT_REGISTERED_TYPES = {
                             }
 
 if(not os.path.exists(get_cache_path("type_registry",suffix=''))):
-    for t in DEFAULT_REGISTERED_TYPES:
-        add_to_type_registry(t,"builtin")
+    for name in DEFAULT_REGISTERED_TYPES:
+        add_to_type_registry(name,"builtin")
 
 
 DEFAULT_TYPE_T_IDS = {}
@@ -218,7 +232,7 @@ SHORT_NAMES = {
     types.undefined : "undf",
     types.bool_ : "bool",
     i8 : "i8",
-    
+
     f8 : "f8",
     unicode_type : "str",
 }

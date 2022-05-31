@@ -48,7 +48,7 @@ def _expand(self):
     Doubles the size of the vector. For whatever reason it runs faster when this
     is a separate function. Probably prevents some lookahead execution gone wrong.
     '''
-    new_data = np.empty(len(self.data)*2, dtype=np.int64)
+    new_data = np.zeros(len(self.data)*2, dtype=np.int64)
     new_data[:len(self.data)] = self.data
     new_data[len(self.data):-1] = 0
     self.data = new_data

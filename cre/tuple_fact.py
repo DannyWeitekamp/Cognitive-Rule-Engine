@@ -2,7 +2,7 @@ from numba import njit, u1,u2, i4, i8, u8, types, literal_unroll, generated_jit
 from numba.typed import List
 from numba.types import ListType, unicode_type
 from cre.caching import unique_hash, source_to_cache, import_from_cached, source_in_cache, get_cache_path
-from cre.fact import base_fact_field_dict, BaseFact, FactProxy, Fact, add_to_type_registry
+from cre.fact import base_fact_field_dict, BaseFact, FactProxy, Fact, lines_in_type_registry, add_to_type_registry, add_type_pickle
 from cre.fact_intrinsics import fact_lower_setattr, _register_fact_structref
 from cre.cre_object import cre_obj_get_item, CREObjType, CREObjProxy, CREObjTypeTemplate, member_info_type
 from cre.utils import _struct_get_attr_offset, _sizeof_type, _struct_get_data_ptr, _load_ptr, _struct_get_attr_offset, _struct_from_ptr, _cast_structref, _obj_cast_codegen, encode_idrec, decode_idrec, _incref_structref, _get_member_offset
@@ -153,13 +153,18 @@ def define_tuple_fact(member_types, context=None, return_proxy=False, return_typ
 
     TF_hash_code = unique_hash(["TupleFact",member_types])
     if(not source_in_cache("TupleFact",TF_hash_code)):
-        # from cre.core import T_ID_TUPLE_FACT
+        # Possible for other types to be defined while running the Fact source
+        #  so preregister the t_id then add the pickle later.
         TF_T_ID = add_to_type_registry("TupleFact", TF_hash_code)
 
         # TupleFacts all have the same t_id
         source = gen_tuple_fact_source(member_types, TF_T_ID, specialization_name)
         source_to_cache("TupleFact", TF_hash_code, source)
-    tf_type = import_from_cached("TupleFact", TF_hash_code, ["SpecializedTF"])["SpecializedTF"]
+        tf_type = import_from_cached("TupleFact", TF_hash_code, ["SpecializedTF"])["SpecializedTF"]
+        add_type_pickle(tf_type, TF_T_ID)
+        
+    else:
+        tf_type = import_from_cached("TupleFact", TF_hash_code, ["SpecializedTF"])["SpecializedTF"]
 
     if(specialization_name is not None):
         context = cre_context(context)

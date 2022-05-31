@@ -11,7 +11,6 @@ from numba.core.typing.templates import AttributeTemplate
 from cre.caching import gen_import_str, unique_hash,import_from_cached, source_to_cache, source_in_cache
 from cre.context import cre_context
 from cre.structref import define_structref, define_boxing, define_structref_template, CastFriendlyStructref
-from cre.memory import MemoryType, Memory, facts_for_t_id, fact_at_f_id
 from cre.fact import define_fact, BaseFact, cast_fact, DeferredFactRefType, Fact, _standardize_type
 from cre.utils import PrintElapse, ptr_t, _struct_from_meminfo, _meminfo_from_struct, _cast_structref, cast_structref, decode_idrec, lower_getattr, _struct_from_ptr,  lower_setattr, lower_getattr, _raw_ptr_from_struct, _decref_ptr, _incref_ptr, _incref_structref, _ptr_from_struct_incref
 from cre.utils import assign_to_alias_in_parent_frame, encode_idrec, _obj_cast_codegen
@@ -261,10 +260,11 @@ class Var(CREObjProxy):
             base = f'{prefix}({self.base_type},{self.alias!r})'
         else: 
             base = f'{prefix}({self.base_type})'
-
+        # print(self.deref_attrs)
         deref_strs = [f"[{a}]" if a.isdigit() else "." + a 
                 for a in self.deref_attrs]
         s = base + "".join(deref_strs)
+
         # print("$$", s, self.deref_infos)
          # s = f'NOT({s})'
         return s
@@ -505,19 +505,27 @@ def var_getattr_impl(context, builder, typ, val, attr):
 def resolve_deref_attrs(self):
     '''Gets the chain of attribute strings for a Var e.g. x.A.B.C -> ['A','B','C']
     '''
+    # print("Q")
     context = cre_context()
     deref_infos = var_get_deref_infos(self)
+    # print("Y")
     # print(deref_infos)
     deref_attrs = []
     typ = self.base_type
-    # print("base_t_id", self.base_t_id)
+    # print("base", typ)
     for i,x in enumerate(deref_infos):
-        # print(i, typ, x['a_id'])
+        # print(i, "X")
+        
         if(isinstance(typ, ListType)):
             deref_attrs.append(str(x['a_id']))
         else:
             deref_attrs.append(typ.get_attr_from_a_id(x['a_id']))
+        # print(i, "U")
         typ = context.get_type(t_id=x['t_id'])
+        # print(i, typ, x['t_id'])
+        # print(i, "R")
+    # print("Z")
+    # print("<<", deref_attrs)
     return deref_attrs
 
 ### Methods that require python interpreter ### 
@@ -528,6 +536,7 @@ def resolve_deref_attrs(self):
 @overload_method(VarTypeClass, "get_head_type_name")
 def get_head_type_name(self):
     def impl(self):
+        print("GET HEAD")
         with objmode(head_type_name=unicode_type):
             context = cre_context()
             head_type_name = str(context.get_type(t_id=self.head_t_id))
@@ -538,6 +547,7 @@ def get_head_type_name(self):
 @overload_method(VarTypeClass, "get_base_type_name")
 def get_base_type_name(self):
     def impl(self):
+        print("GET BASE")
         with objmode(base_type_name=unicode_type):
             context = cre_context()
             base_type_name = str(context.get_type(t_id=self.base_t_id))
@@ -549,6 +559,7 @@ def get_base_type_name(self):
 def get_deref_attrs(self):
     str_list_type = ListType(unicode_type)
     def impl(self):
+        print("GET DEREF ATTRS")
         with objmode(deref_attrs=str_list_type):
             context = cre_context()
             deref_attrs = List.empty_list(unicode_type)

@@ -332,16 +332,12 @@ def _list_from_ptr(typingctx, listtyperef, raw_ptr_ty):
     list_type = listtyperef.instance_type
     
     def codegen(context, builder, sig, args):
-        # [tdref, _] = sig.args
-        # td = tdref.instance_type
         [_, raw_ptr] = args
 
         mi = builder.inttoptr(raw_ptr, cgutils.voidptr_t)
 
         ctor = cgutils.create_struct_proxy(list_type)
         dstruct = ctor(context, builder)
-
-        print("dstruct", dstruct)
 
         data_pointer = context.nrt.meminfo_data(builder, mi)
         data_pointer = builder.bitcast(data_pointer, cgutils.voidptr_t.as_pointer())
@@ -455,8 +451,11 @@ def _memcpy_structref(typingctx, inst_type):
 
         inst_struct = context.make_helper(builder, inst_type)
         inst_struct.meminfo = new_meminfo
+        # context.nrt.incref(builder, types.MemInfoPointer(types.voidptr), new_meminfo)
+        # context.nrt.incref(builder, types.MemInfoPointer(types.voidptr), new_meminfo)
 
         return impl_ret_borrowed(context, builder, inst_type, inst_struct._getvalue())
+        # return inst_struct._getvalue()
 
     sig = inst_type(inst_type)
     return sig, codegen
@@ -595,17 +594,14 @@ def _store(typingctx, typ, ptr, val):
     '''Get the value pointed to by 'ptr' assuming it has type 'typ' 
     '''
     inst_type = typ.instance_type
-    print(typ)
     def codegen(context, builder, sig, args):
         _,ptr,val = args
         llrtype = context.get_value_type(inst_type)
         ptr = builder.inttoptr(ptr, ll_types.PointerType(llrtype))
         builder.store(val, ptr)
-        print("A")
         
         # if context.enable_nrt:
         #     context.nrt.incref(builder, llrtype, val)
-        print("A")
         
 
     sig = types.void(typ,ptr,val)

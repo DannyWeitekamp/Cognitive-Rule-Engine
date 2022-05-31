@@ -232,19 +232,33 @@ class CREContext(object):
     def _assert_written_to_type_registry(self, typ):
         if(typ not in self.type_to_t_id):
             hash_code = getattr(typ,'_hash_code',unique_hash(typ.name))
+            # print(">>", typ, str(typ), hash_code)
             t_id = t_id_from_type_name(str(typ), hash_code)
-            # print(t_id, typ, hash_code)
+            # print("assert", t_id, typ, str(typ), hash_code)
             name = str(typ)
             if(t_id == -1):
-                t_id = add_to_type_registry(name, hash_code)
-            
-            for i in range(len(self.t_id_to_type),t_id+1):
-                self.t_id_to_type.append(None)
-            self.t_id_to_type[t_id] = typ
-            self.type_to_t_id[typ] = t_id   
+                t_id = add_to_type_registry(name, hash_code, typ)
+            # print("added", t_id, str(typ))
+            self._assign_name_t_id(str(typ), typ, t_id)
+            # for i in range(len(self.t_id_to_type),t_id+1):
+            #     self.t_id_to_type.append(None)
+            # self.t_id_to_type[t_id] = typ
+            # self.type_to_t_id[typ] = t_id   
             # if(hash_code == 'builtin'):
             # assign_name_to_t_id(self.context_data,name,t_id)
 
+    def _assign_name_t_id(self, name, typ, t_id):
+        assign_name_to_t_id(self.context_data,name,t_id)
+
+        # Fill in the python facing 'name_to_type'
+        self.name_to_type[name] = typ
+
+        # Ensure 't_id_to_type' is long enough. In the case of a retroactive
+        #  registration there can be holes so fill with None first then assign t_id
+        for i in range(len(self.t_id_to_type),t_id+1):
+            self.t_id_to_type.append(None)
+        self.t_id_to_type[t_id] = typ
+        self.type_to_t_id[typ] = t_id
 
 
     def _register_fact_type(self, name, fact_type, inherit_from=None):
@@ -260,17 +274,7 @@ class CREContext(object):
         t_id = fact_type.t_id
         inh_t_id = inherit_from.t_id if inherit_from is not None else -1
         ensure_inheritance(self.context_data, t_id, inh_t_id)
-        assign_name_to_t_id(self.context_data,name,t_id)
-
-        # Fill in the python facing 'name_to_type'
-        self.name_to_type[name] = fact_type
-
-        # Ensure 't_id_to_type' is long enough. In the case of a retroactive
-        #  registration there can be holes so fill with None first then assign t_id
-        for i in range(len(self.t_id_to_type),t_id+1):
-            self.t_id_to_type.append(None)
-        self.t_id_to_type[t_id] = fact_type
-        self.type_to_t_id[fact_type] = t_id
+        self._assign_name_t_id(name, fact_type, t_id)
 
         # NOTE: Maybe unecessary
         from numba.core.typeconv.rules import TypeCastingRules, default_type_manager as tm
@@ -306,7 +310,6 @@ class CREContext(object):
                 return self.name_to_type[name]
             else:
                 raise ValueError(f"No type {name} registered in cre_context {self.name}.")
-
         # If t_id defined then retrieve the type for t_id
         if(t_id is not None):
             typ = None
@@ -315,12 +318,15 @@ class CREContext(object):
                 if(typ is types.undefined): typ = None
             if(typ is None): typ = self._retroactive_register(t_id)
             if(typ is None): 
+                print(f"No type with t_id={t_id} registered in cre_context {self.name}.")
                 raise ValueError(f"No type with t_id={t_id} registered in cre_context {self.name}.")
             return typ
         
         raise ValueError("Bad arguments for 'get_type'. Expecting one keyword argument name:str, or t_id:int")
 
     def _retroactive_register(self, t_id):
+        if(t_id == 0): 
+            raise ValueError("Tried to register t_id=0 (i.e. undefined)")
         try:
             ft = ret_typ = _type = type_from_t_id(t_id)
         except ImportError:
@@ -332,8 +338,10 @@ class CREContext(object):
             ft = getattr(ft,"parent_type",None)
         # print("RETRO", [str(x) for x in reversed(types)])
         for ft in reversed(types):
-            # print(ft)
-            self._register_fact_type(ft._fact_name, ft, getattr(ft,'parent_type', None))
+            if(hasattr(ft,"_fact_name")):
+                self._register_fact_type(ft._fact_name, ft, getattr(ft,'parent_type', None))
+            else:
+                self._assign_name_t_id(str(ft), ft, t_id)
         return ret_typ
 
     def get_t_id(self, _type=None, name:str=None, retro_register:bool=True):
@@ -364,7 +372,7 @@ class CREContext(object):
         if(t_id >= len(p_t_ids) or len(p_t_ids[t_id])):
             self._retroactive_register(t_id)
         p_t_ids = self.context_data.parent_t_ids
-        print(p_t_ids, len(p_t_ids), t_id)
+        # print(p_t_ids, len(p_t_ids), t_id)
 
         return p_t_ids[t_id]
         

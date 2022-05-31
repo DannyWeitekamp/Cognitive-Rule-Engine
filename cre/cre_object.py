@@ -5,9 +5,9 @@ from numba.extending import  overload, lower_getattr, overload_method
 from cre.core import register_global_default, T_ID_UNDEFINED, T_ID_BOOL, T_ID_INT, T_ID_FLOAT, T_ID_STR, T_ID_TUPLE_FACT 
 from cre.utils import (_memcpy_structref, _obj_cast_codegen, ptr_t,
     _raw_ptr_from_struct, _raw_ptr_from_struct_incref, _incref_ptr,
-    CastFriendlyMixin, decode_idrec, _func_from_address,
-    _cast_structref, _get_member_offset, _struct_get_data_ptr,
-    _sizeof_type, _load_ptr, _struct_from_ptr, encode_idrec)
+    CastFriendlyMixin, decode_idrec, _func_from_address, _incref_structref,
+    _cast_structref, _get_member_offset, _struct_get_data_ptr, _store,
+    _sizeof_type, _load_ptr, _struct_from_ptr, encode_idrec, _decref_ptr, _incref_ptr)
 from cre.structref import define_structref
 from numba.core.datamodel import default_manager, models
 from numba.core import cgutils
@@ -160,6 +160,7 @@ class CREObjProxy(StructRefProxy):
         instance._meminfo = mi
         instance.recover_type_safe()
         
+        
         return instance
 
     # __numba_ctor = cre_obj_ctor
@@ -184,11 +185,13 @@ class CREObjProxy(StructRefProxy):
         ''' Try to recover the true type that the object was instantiated as'''            
         from cre.context import cre_context
         context = cre_context(context)
+
         t_id = get_t_id(self._meminfo)
 
+        # print("<<", t_id, getattr(self._type,'t_id',0))
+        # print(type(self),self._type,)
         if(getattr(self._type,'t_id',0) == t_id):
             return self
-
         if(t_id != T_ID_TUPLE_FACT):
             # The type associated with the object's t_id in 'context'
 
@@ -202,7 +205,6 @@ class CREObjProxy(StructRefProxy):
             tf_mbr_types = [context.get_type(t_id=t_id) for t_id in mbr_t_ids]
             tf_type,tf_proxy_type = define_tuple_fact(tf_mbr_types,context,return_proxy=True)
             self.__class__ = tf_proxy_type
-
         return self
 
     def recover_type_safe(self,context=None):
@@ -457,6 +459,29 @@ def cre_obj_get_item(obj, item_type, index):
     _, _, item_ptr = cre_obj_get_item_t_id_ptr(obj,index)
     out = _load_ptr(item_type, item_ptr)
     return out
+
+@generated_jit(cache=True,nopython=True)
+def cre_obj_set_item(obj, index, val):
+    item_type = val
+
+    from numba.core.datamodel import default_manager, StructModel
+    if isinstance(default_manager[item_type], StructModel):
+    # self._datamodel = self._context.data_model_manager[self._fe_type]
+        def impl(obj, index, val):
+            _, m_id, item_ptr = cre_obj_get_item_t_id_ptr(obj, index)
+            old_ptr = _load_ptr(i8, item_ptr)
+
+            _store(item_type, item_ptr, val)
+            _incref_structref(val)
+
+            if(old_ptr != 0):
+                _decref_ptr(old_ptr)
+    else:
+        def impl(obj, index, val):
+            _, m_id, item_ptr = cre_obj_get_item_t_id_ptr(obj, index)
+            _store(item_type, item_ptr, val)        
+    return impl
+
 
 
 @njit(cache=True)

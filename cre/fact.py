@@ -22,7 +22,7 @@ from numba.core.typing import signature
 
 # from numba.core.extending import overload
 
-from cre.core import TYPE_ALIASES, JITSTRUCTS, py_type_map, numba_type_map, numpy_type_map, register_global_default, lines_in_type_registry, add_to_type_registry
+from cre.core import TYPE_ALIASES, JITSTRUCTS, py_type_map, numba_type_map, numpy_type_map, register_global_default, lines_in_type_registry, add_to_type_registry, add_type_pickle
 from cre.gensource import assert_gen_source
 from cre.caching import unique_hash, source_to_cache, import_from_cached, source_in_cache, get_cache_path
 from cre.structref import gen_structref_code, define_structref
@@ -69,7 +69,8 @@ class Fact(CREObjTypeTemplate):
         if(not hasattr(self, priv_var_name)):
             a_id = self.get_attr_a_id(attr)
             offset = self.get_attr_offset(attr)
-            head_type = self.field_dict[attr]
+            head_type = self.get_attr_type(attr)
+            
             head_t_id = cre_context().get_t_id(_type=head_type)
             # deref_type = DEREF_TYPE_LIST if isinstance(head_type,types.ListType) else DEREF_TYPE_ATTR
 
@@ -82,6 +83,16 @@ class Fact(CREObjTypeTemplate):
             setattr(self, priv_var_name, deref_info)
         return getattr(self, priv_var_name)
         
+    def get_attr_type(self, attr):
+        attr_type = self.spec[attr]['type']
+        if(isinstance(attr_type, ListType)):
+            if(isinstance(attr_type.item_type,DeferredFactRefType)):
+                attr_type = types.ListType(attr_type.item_type.get())
+        if(isinstance(attr_type, DeferredFactRefType)):
+            attr_type = attr_type.get()
+        return attr_type
+
+
 
     def get_attr_offset(self,attr):
         return self._attr_offsets[self.get_attr_a_id(attr)]
@@ -839,13 +850,19 @@ define_boxing({typ}Class,{typ}Proxy)
 
 def _fact_from_fields(name, fields, inherit_from=None, specialization_name=None, is_untyped=False, return_proxy=False, return_type_class=False):
     # context = cre_context(context)
+    
+
     hash_code = unique_hash([name,fields])
     if(not source_in_cache(name,hash_code)):
-        t_id = lines_in_type_registry()
+        # Possible for other types to be defined while running the Fact source
+        #  so preregister the t_id then add the pickle later.
+        t_id = add_to_type_registry(name, hash_code)
         source = gen_fact_src(name, fields, t_id, inherit_from, specialization_name, is_untyped, hash_code)
         source_to_cache(name, hash_code, source)
-        add_to_type_registry(name, hash_code)
-
+        
+        fact_type = tuple(import_from_cached(name, hash_code, [name]).values())[0]
+        add_type_pickle(fact_type, t_id)
+        
     to_get = [name]
     if(return_proxy): to_get.append(name+"Proxy")
     if(return_type_class): to_get.append(name+"Class")

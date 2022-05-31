@@ -55,9 +55,10 @@ flattener_fields = {
     # "inv_idrec_map" : DictType(u8,ListType(u8)),
     "base_var_map" : DictType(Tuple((u2,unicode_type)), GenericVarType),
     "var_map" : DictType(Tuple((u2,unicode_type,unicode_type)), GenericVarType),
+    "enumerizer" : EnumerizerType,
     "fact_visible_attr_pairs" : types.Any,
     "id_attr" : types.Any,
-    "enumerizer" : EnumerizerType,
+    
 }
 
 @structref.register

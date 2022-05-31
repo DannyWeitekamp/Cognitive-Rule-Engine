@@ -10,7 +10,6 @@ from numba.core.typing.templates import AttributeTemplate
 from cre.caching import gen_import_str, unique_hash,import_from_cached, source_to_cache, source_in_cache
 from cre.context import cre_context
 from cre.structref import define_structref, define_structref_template
-from cre.memory import MemoryType, Memory, facts_for_t_id, fact_at_f_id
 from cre.fact import define_fact, BaseFact, cast_fact
 from cre.utils import _struct_from_meminfo, _meminfo_from_struct, _cast_structref, cast_structref, decode_idrec, lower_getattr, _struct_from_ptr,  lower_setattr, lower_getattr, _raw_ptr_from_struct, _ptr_from_struct_incref, _decref_ptr
 from cre.utils import assign_to_alias_in_parent_frame, meminfo_type
@@ -37,9 +36,9 @@ literal_link_data_field_dict = {
     "change_head": i8,
     "grow_head": i8,
     "change_queue": VectorType,
-    "grow_queue": VectorType,
-    "mem_grow_queue" : VectorType,
-    "mem_change_queue" : VectorType,
+    # "grow_queue": VectorType,
+    # "ms_grow_queue" : VectorType,
+    "ms_change_queue" : VectorType,
 
 
 
@@ -54,16 +53,16 @@ LiteralLinkData, LiteralLinkDataType = define_structref("LiteralLinkData",
 
 
 @njit(cache=True)
-def generate_link_data(pn, mem):
+def generate_link_data(pn, ms):
     '''Takes a prototype predicate node and a knowledge base and returns
         a link_data instance for that predicate node.
     '''
     link_data = new(LiteralLinkDataType)
-    link_data.left_t_id = mem.context_data.fact_to_t_id[pn.left_fact_type_name]
-    link_data.left_facts = facts_for_t_id(mem.mem_data,i8(link_data.left_t_id)) 
+    link_data.left_t_id = ms.context_data.fact_to_t_id[pn.left_fact_type_name]
+    link_data.left_facts = facts_for_t_id(ms,i8(link_data.left_t_id)) 
     if(not pn.is_alpha):
-        link_data.right_t_id = mem.context_data.fact_to_t_id[pn.right_fact_type_name]
-        link_data.right_facts = facts_for_t_id(mem.mem_data,i8(link_data.right_t_id)) 
+        link_data.right_t_id = ms.context_data.fact_to_t_id[pn.right_fact_type_name]
+        link_data.right_facts = facts_for_t_id(ms,i8(link_data.right_t_id)) 
         link_data.left_consistency = np.empty((0,),dtype=np.uint8)
         link_data.right_consistency = np.empty((0,),dtype=np.uint8)
     else:
@@ -73,10 +72,10 @@ def generate_link_data(pn, mem):
     link_data.change_head = 0
     link_data.grow_head = 0
     link_data.change_queue = new_vector(8)
-    link_data.grow_queue = new_vector(8)
+    # link_data.grow_queue = new_vector(8)
 
-    link_data.mem_grow_queue = mem.mem_data.grow_queue
-    link_data.mem_change_queue = mem.mem_data.change_queue
+    # link_data.ms_grow_queue = ms.grow_queue
+    link_data.ms_change_queue = ms.change_queue
     link_data.truth_values = np.empty((0,0),dtype=np.uint8)
         
     
@@ -92,7 +91,7 @@ literal_fields_dict = {
     "var_base_ptrs" : i8[:],#UniTuple(i8,2),
     "negated" : u1,
     "is_alpha" : u1,
-    "cre_mem_ptr" : i8,
+    "cre_ms_ptr" : i8,
     "link_data" : LiteralLinkDataType   
 }
 
@@ -145,7 +144,7 @@ def literal_ctor(op):
         st.var_base_ptrs[i] = ptr
     st.negated = 0
     st.is_alpha = u1(len(st.var_base_ptrs) == 1)
-    st.cre_mem_ptr = 0
+    st.cre_ms_ptr = 0
     return st
 
 
@@ -166,8 +165,8 @@ def literal_copy(self):
     st.var_base_ptrs = self.var_base_ptrs
     st.negated = self.negated
     st.is_alpha = self.is_alpha
-    st.cre_mem_ptr = self.cre_mem_ptr
-    if(self.cre_mem_ptr):
+    st.cre_ms_ptr = self.cre_ms_ptr
+    if(self.cre_ms_ptr):
         st.link_data = self.link_data
     return st
     
@@ -225,9 +224,9 @@ conditions_fields_dict = {
     # Wether or not the conditions object has been initialized
     # 'is_initialized' : u1,
 
-    # A pointer to the Memory the Conditions object is linked to.
-    #   If the Memory is not linked defaults to 0.
-    'mem_ptr' : i8,
+    # A pointer to the MemSet the Conditions object is linked to.
+    #   If the MemSet is not linked defaults to 0.
+    'ms_ptr' : i8,
 
     ### Fields that are filled in after initialization ### 
     "has_distr_dnf" : types.boolean,
@@ -277,16 +276,16 @@ class Conditions(structref.StructRefProxy):
     def __invert__(self):
         return conditions_not(self)
 
-    def get_ptr_matches(self,mem=None):
+    def get_ptr_matches(self,ms=None):
         from cre.matching import get_ptr_matches
-        return get_ptr_matches(self,mem)
+        return get_ptr_matches(self,ms)
 
-    def get_matches(self, mem=None):
+    def get_matches(self, ms=None):
         from cre.rete import MatchIterator
         # return get_matches(self, self.var_base_types, mem=mem)
 
 
-        return MatchIterator(mem, self)#get_match_iter(mem, self)
+        return MatchIterator(ms, self)#get_match_iter(mem, self)
 
     # def __del__(self):
     #     print("CONDITIONS DTOR",self)
@@ -306,8 +305,8 @@ class Conditions(structref.StructRefProxy):
 
 
 
-    def link(self,mem):
-        get_linked_conditions_instance(self,mem,copy=False)
+    def link(self,ms):
+        get_linked_conditions_instance(self,ms,copy=False)
 
     @property
     def signature(self):
@@ -467,9 +466,9 @@ def conds_get_distr_dnf(self):
 
 
 @overload_method(ConditionsTypeTemplate,'get_matches')
-def impl_get_matches(self,mem=None):
+def impl_get_matches(self,ms=None):
     from cre.matching import get_matches
-    def impl(self,mem=None):
+    def impl(self,ms=None):
         return get_matches(get_matches)
     return impl
 
@@ -994,10 +993,10 @@ def cond_not(c):
 #### Linking ####
 
 @njit(cache=True)
-def link_literal_instance(literal, mem):
-    link_data = generate_link_data(literal.pred_node, mem)
+def link_literal_instance(literal, ms):
+    link_data = generate_link_data(literal.pred_node, ms)
     literal.link_data = link_data
-    literal.mem_ptr = _raw_ptr_from_struct(mem)
+    literal.ms_ptr = _raw_ptr_from_struct(ms)
     return literal
 
 @njit(cache=True)
@@ -1013,19 +1012,19 @@ def dnf_copy(dnf,shallow=True):
     return ndnf
 
 @njit(cache=True)
-def get_linked_conditions_instance(conds, mem, copy=False):
+def get_linked_conditions_instance(conds, ms, copy=False):
     dnf = dnf_copy(conds.dnf,shallow=False) if copy else conds.dnf
     for alpha_conjunct, beta_conjunct in dnf:
-        for term in alpha_conjunct: link_literal_instance(term, mem)
-        for term in beta_conjunct: link_literal_instance(term, mem)
+        for term in alpha_conjunct: link_literal_instance(term, ms)
+        for term in beta_conjunct: link_literal_instance(term, ms)
     if(copy):
         new_conds = Conditions(conds.base_var_map, dnf)
         # if(conds.is_initialized): initialize_conditions(new_conds)
         conds = new_conds
 
     #Note... maybe it's simpler to just make mem an optional(memType)
-    old_ptr = conds.mem_ptr
-    conds.mem_ptr = _raw_ptr_from_struct(mem)#_ptr_from_struct_incref(mem)
+    old_ptr = conds.ms_ptr
+    conds.ms_ptr = _raw_ptr_from_struct(ms)#_ptr_from_struct_incref(mem)
     if(old_ptr != 0): _decref_ptr(old_ptr)
     return conds
 

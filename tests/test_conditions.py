@@ -1,6 +1,6 @@
 from numba import f8
 from cre.conditions import *
-from cre.memory import Memory
+from cre.memory import MemSet
 from cre.context import cre_context
 from cre.cre_object import CREObjType
 from time import time_ns
@@ -177,12 +177,12 @@ def _test_link():
              (l2.B < 1) & (l2.B > 7) & (l2.B < r1.B) & (l1.B < l2.B)
 
         print(c)
-        mem = Memory()
-        cl = get_linked_conditions_instance(c, mem)
+        ms = MemSet()
+        cl = get_linked_conditions_instance(c, ms)
 
         assert get_pointer(cl) == get_pointer(c)
 
-        cl = get_linked_conditions_instance(c, mem, copy=True)
+        cl = get_linked_conditions_instance(c, ms, copy=True)
 
         assert get_pointer(cl) != get_pointer(c)
 

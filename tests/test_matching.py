@@ -2,7 +2,7 @@ import numpy as np
 from numba import njit, f8
 from numba.typed import List
 from cre.conditions import *
-from cre.memory import Memory
+from cre.memory import MemSet
 from cre.context import cre_context
 # from cre.matching import get_ptr_matches,_get_matches
 from cre.utils import _struct_from_ptr, _list_base,_list_base_from_ptr,_load_ptr, _incref_structref, _raw_ptr_from_struct
@@ -13,9 +13,9 @@ import gc
 # with cre_context("test_matching"):
     
 
-def match_names(c,mem=None):
+def match_names(c,ms=None):
     out = []
-    for m in c.get_matches(mem):
+    for m in c.get_matches(ms):
         # print(m)
         out.append([x.name for x in m])
         # print("X")
@@ -41,15 +41,15 @@ def get_ptr(fact):
     return _raw_ptr_from_struct(fact)
 
 @njit(cache=True)
-def declare_n_BOOPS(n,BOOP,mem):
+def declare_n_BOOPS(n,BOOP,ms):
     for i in range(n):
         boop = BOOP(str(i), i)
-        mem.declare(boop)
+        ms.declare(boop)
 
-def mem_w_n_boops(n,BOOP):
-    mem = Memory()
-    declare_n_BOOPS(n,BOOP,mem)
-    return mem
+def ms_w_n_boops(n,BOOP):
+    ms = MemSet()
+    declare_n_BOOPS(n,BOOP,ms)
+    return ms
 
 
 # def test_matching():
@@ -108,7 +108,7 @@ def test_ref_matching():
     ''' This mostly tests PtrOps '''
     with cre_context("test_ref_matching"):
         TestDLL = define_fact("TestDLL",{"name": "string", "prev" : "TestDLL", "next" : "TestDLL"})
-        mem = Memory()
+        ms = MemSet()
 
         #a -> b -> c
         a = TestDLL("A")
@@ -118,9 +118,9 @@ def test_ref_matching():
         b.prev = a
         b.next = c
         c.prev = b
-        mem.declare(a)
-        mem.declare(b)
-        mem.declare(c)
+        ms.declare(a)
+        ms.declare(b)
+        ms.declare(c)
 
         print(a,b,c)
 
@@ -128,10 +128,10 @@ def test_ref_matching():
         c = (x1.next == x2)
         # assert str(c) == '(x1.next == x2)'
         # print(c)
-        # print(match_names(c,mem))
+        # print(match_names(c,ms))
 
-        assert sorted(match_names(c,mem)) == [['A','B'],['B','C']]
-        # cl = get_linked_conditions_instance(c, mem)
+        assert sorted(match_names(c,ms)) == [['A','B'],['B','C']]
+        # cl = get_linked_conditions_instance(c, ms)
         # print(get_ptr_matches(cl))
         # Bs = boop_Bs_from_ptrs(get_ptr_matches(cl))
 
@@ -140,9 +140,9 @@ def test_ref_matching():
         # assert str(c) == '(x1.next == None)'
         print(c)
 
-        assert match_names(c,mem) == [['C']]
+        assert match_names(c,ms) == [['C']]
 
-        # cl = get_linked_conditions_instance(c, mem)
+        # cl = get_linked_conditions_instance(c, ms)
         # print(get_ptr_matches(cl))
 
 
@@ -150,14 +150,14 @@ def test_ref_matching():
         # assert str(c) == '(x1.next == None)'
         print(c)
 
-        assert match_names(c,mem) == [['C']]
+        assert match_names(c,ms) == [['C']]
 
 
         c = x1 == x1.next.prev
 
-        assert match_names(c,mem) == [['A'],['B']]
+        assert match_names(c,ms) == [['A'],['B']]
 
-        # cl = get_linked_conditions_instance(c, mem)
+        # cl = get_linked_conditions_instance(c, ms)
         # print(get_ptr_matches(cl))
 
 
@@ -165,7 +165,7 @@ def test_ref_matching():
 def test_multiple_deref():
     with cre_context("test_multiple_deref"):
         TestLL = define_fact("TestLL",{"name": "string", "B" :'number', "nxt" : "TestLL"})
-        mem = Memory()
+        ms = MemSet()
 
         #    c1   c2
         #     |   |
@@ -180,43 +180,43 @@ def test_multiple_deref():
 
         # print([(i,pointer_from_struct(x)) for i,x in enumerate([a,b1,c1,b2,c2])])
 
-        mem.declare(a)
-        mem.declare(b1)
-        mem.declare(c1)
-        mem.declare(b2)
-        mem.declare(c2)
+        ms.declare(a)
+        ms.declare(b1)
+        ms.declare(c1)
+        ms.declare(b2)
+        ms.declare(c2)
 
         v1 = Var(TestLL,'v1')
         v2 = Var(TestLL,'v2')
 
         # One Deep check same fact instance
         c = (v1.nxt != None) & (v1.nxt == v2.nxt) & (v1 != v2)
-        names = match_names(c, mem) 
+        names = match_names(c, ms) 
         assert set_is_same(names, [['B1', 'B2'], ['B2', 'B1']])
 
         # One Deep check same B value
         c = (v1.nxt != None) & (v1.nxt.B == v2.nxt.B) & (v1 != v2)
-        names = match_names(c, mem) 
+        names = match_names(c, ms) 
         assert set_is_same(names, [['B1', 'B2'], ['C1', 'C2'], ['B2', 'B1'], ['C2', 'C1']])
 
         # Two Deep w/ Permutions
         c = (v1.nxt.nxt != None) & (v1.nxt.nxt == v2.nxt.nxt) & (v1 != v2)
-        names = match_names(c, mem)
+        names = match_names(c, ms)
         assert set_is_same(names, [['C1', 'C2'], ['C2', 'C1']])
 
         # Two Deep w/o Permutions. 
         # NOTE: v1 < v2 compares ptrs, can't guarentee order 
         c = (v1.nxt.nxt != None) & (v1.nxt.nxt == v2.nxt.nxt) & (v1 < v2)
-        names = match_names(c, mem)
+        names = match_names(c, ms)
         assert names == [['C1', 'C2']] or names == [['C2', 'C1']]
 
-        mem.declare(TestLL("D1", B=3, nxt=c1))
-        mem.declare(TestLL("D2", B=3, nxt=c2))
+        ms.declare(TestLL("D1", B=3, nxt=c1))
+        ms.declare(TestLL("D2", B=3, nxt=c2))
 
         # Three Deep (use None) -- helps check that dereference errors 
         #  are treated internally as errors instead evaluating to 0.
         c = (v1.nxt.nxt.nxt != None) & (v1.nxt.nxt.nxt == v2.nxt.nxt.nxt) & (v1 != v2)
-        names = match_names(c, mem) 
+        names = match_names(c, ms) 
         assert set_is_same(names, [['D1', 'D2'], ['D2', 'D1']])
 
 
@@ -226,21 +226,21 @@ def _test_NOT():
     with cre_context("test_NOT"):
         BOOP = define_fact("BOOP",{"name": "string", "B" : "number"})
 
-        mem = mem_w_n_boops(3,BOOP)
+        ms = ms_w_n_boops(3,BOOP)
 
         x1,x2,x3 = Var(BOOP,'x1'), Var(BOOP,'x2'), Var(BOOP,'x3')
         c = (x1.B > 1) & (x2.B < 1) & NOT(x3.B > 9000) 
 
-        assert match_names(c,mem) == [['2','0']]
+        assert match_names(c,ms) == [['2','0']]
 
         over_9000 = BOOP("over_9000", 9001)
-        mem.declare(over_9000)
+        ms.declare(over_9000)
 
-        assert match_names(c,mem) == []
+        assert match_names(c,ms) == []
 
-        mem.retract(over_9000)
+        ms.retract(over_9000)
 
-        assert match_names(c,mem) == [['2','0']]
+        assert match_names(c,ms) == [['2','0']]
 
         #TODO: Make sure NOT() works on betas
 # @njit(cache=True)
@@ -265,9 +265,9 @@ def test_list():
         # print("--len(LIST[0])", get_list_base(l1), get_list_base(l2))
 
         # print("FACT BASES", a.get_ptr(), b.get_ptr())
-        mem = Memory()
-        mem.declare(TList("A", List(["x","a"])),)
-        mem.declare(TList("B", List(["x","b"] )))
+        ms = MemSet()
+        ms.declare(TList("A", List(["x","a"])),)
+        ms.declare(TList("B", List(["x","b"] )))
 
         # print("head_type", v1.items[0].head_type)
         # print((v1.items[0] == v2.items[0]).call_sig)
@@ -275,12 +275,12 @@ def test_list():
         # print("MOOOO", v2.items[0].deref_offsets)
 
         c = (v1 != v2) & (v1.items[0] == v2.items[0])
-        names = match_names(c, mem)
+        names = match_names(c, ms)
         assert set_is_same(names, [['A','B'],['B','A']])
 
         # Checks that empty matches work fine
         c = (v1 != v2) & (v1.items[0] != v2.items[0])
-        names = match_names(c, mem)
+        names = match_names(c, ms)
         assert set_is_same(names, [])
 
         
@@ -288,14 +288,14 @@ def test_list():
 
         c = (v1 != v2) & (v1.items[1] != v2.items[1])
 
-        names = match_names(c, mem)
+        names = match_names(c, ms)
         assert set_is_same(names,  [['A','B'],['B','A']])
 
-        mem.declare(TList("C", List(["x","c"])))
-        mem.declare(TList("D", List(["x","x"])))
+        ms.declare(TList("C", List(["x","c"])))
+        ms.declare(TList("D", List(["x","x"])))
         #TODO: Self-Beta-like conditions
         c = v1.items[0] != v1.items[1]
-        names = match_names(c, mem)
+        names = match_names(c, ms)
         assert set_is_same(names, [["A"],["B"],["C"]])
 
 
@@ -316,17 +316,17 @@ def test_multiple_types():
 
         # print(c.context_data.fact_to_t_id["BOOP"], c.context_data.fact_to_t_id["TList"])
 
-        mem = Memory()
-        mem.declare(BOOP("A", 0))
-        mem.declare(BOOP("B", 1))
-        mem.declare(TList("A", List(["x","a"])))
-        mem.declare(TList("B", List(["x","b"])))
+        ms = MemSet()
+        ms.declare(BOOP("A", 0))
+        ms.declare(BOOP("B", 1))
+        ms.declare(TList("A", List(["x","a"])))
+        ms.declare(TList("B", List(["x","b"])))
 
         c = t & b & (t.name == b.name)
-        assert match_names(c, mem) == [["A","A"], ["B","B"]]
+        assert match_names(c, ms) == [["A","A"], ["B","B"]]
 
         c = t & b & (b.name == t.name)
-        assert match_names(c, mem) == [["A","A"], ["B","B"]]
+        assert match_names(c, ms) == [["A","A"], ["B","B"]]
 
 
 def used_bytes():
@@ -356,9 +356,9 @@ def test_mem_leaks():
     # with cre_context("test_matching_benchmarks"):
 
     # Lead with these because in principle when an Op is typed a singleton inst is alloced
-    (c,mem),_ = matching_alphas_setup()
-    (c,mem),_ = matching_betas_setup()
-    c,mem = None,None; gc.collect()
+    (c,ms),_ = matching_alphas_setup()
+    (c,ms),_ = matching_betas_setup()
+    c,ms = None,None; gc.collect()
 
     init_used = used_bytes()
 
@@ -395,7 +395,7 @@ def test_mem_leaks():
         l1, l2 = Var(BOOP,"l1"), Var(BOOP,"l2")
         c = (l1.B > 0)
         c = None; gc.collect()
-        # print(type(c),l1._meminfo.refcount,l2._meminfo.refcount)
+        # print(type(c),l1._msinfo.refcount,l2._msinfo.refcount)
         c, l1, l2 = None, None,None; gc.collect()
         if(i==0): init_used = used_bytes()
         # print(used_bytes()-init_used)
@@ -414,28 +414,28 @@ def test_mem_leaks():
 
 
     # Alphas setup 
-    (c,mem),_ = matching_alphas_setup()    
-    c, mem = None, None; gc.collect()
+    (c,ms),_ = matching_alphas_setup()    
+    c, ms = None, None; gc.collect()
     assert used_bytes()==init_used
 
     # Betas setup
-    (c,mem),_ = matching_betas_setup()
-    c,mem = None,None; gc.collect()
+    (c,ms),_ = matching_betas_setup()
+    c,ms = None,None; gc.collect()
     assert used_bytes()==init_used
 
-    (c,mem),_ = matching_alphas_setup()
+    (c,ms),_ = matching_alphas_setup()
     print("c", c._meminfo.refcount)
 
     from cre.rete import update_graph, build_rete_graph
-    # rete_graph = build_rete_graph(mem, c)
+    # rete_graph = build_rete_graph(ms, c)
     # update_graph(rete_graph)
     with cre_context("test_matching_benchmarks") as ctxt:
-        matches = c.get_matches(mem)
+        matches = c.get_matches(ms)
 
     # distr_dnf = c.distr_dnf
     # rete_graph = c.rete_graph
     # print("c", c._meminfo.refcount, 'rete_graph', rete_graph._meminfo.refcount, "matches", matches._meminfo.refcount)
-    c,matches,mem,ctxt = None,None,None,None; gc.collect()
+    c,matches,ms,ctxt = None,None,None,None; gc.collect()
 
     # print('rete_graph', rete_graph._meminfo.refcount)
 
@@ -452,81 +452,81 @@ def test_mem_leaks():
 
 
 @njit(cache=True)
-def apply_it(mem,l1,l2,r1):
+def apply_it(ms,l1,l2,r1):
     print(l1,l2,r1)
-    mem.declare(BOOP("??",1000+r1.B))
+    ms.declare(BOOP("??",1000+r1.B))
 
 # @njit(cache=True)
-# def apply_all_matches(c, f, mem):
-#     cl = get_linked_conditions_instance(c, mem)
+# def apply_all_matches(c, f, ms):
+#     cl = get_linked_conditions_instance(c, ms)
 #     ptr_matches = get_ptr_matches(cl)
 #     for match in ptr_matches:
 #         arg0 = _struct_from_ptr(BOOP,match[0]) 
 #         arg1 = _struct_from_ptr(BOOP,match[1]) 
 #         arg2 = _struct_from_ptr(BOOP,match[2]) 
-#         f(mem,arg0,arg1,arg2)
+#         f(ms,arg0,arg1,arg2)
 
 
 # def test_applying():
 #     with cre_context("test_matching_benchmarks"):
-#         mem = mem_w_n_boops(5)
+#         ms = ms_w_n_boops(5)
 #         l1, l2 = Var(BOOP,"l1"), Var(BOOP,"l2")
 #         r1, r2 = Var(BOOP,"r1"), Var(BOOP,"r2")
 #         c = (l1.B <= 1) & (l1.B < l2.B) & (l2.B <= r1.B)
-#         apply_all_matches(c,apply_it,mem)
-#         apply_all_matches(c,apply_it,mem)
+#         apply_all_matches(c,apply_it,ms)
+#         apply_all_matches(c,apply_it,ms)
 
 # with cre_context("test_matching_benchmarks") as ctxt:
 #     BOOP = define_fact("BOOP",{"name": "string", "B" : "number"})
 
 def matching_alphas_setup():
     with cre_context("test_matching_benchmarks") as ctxt:
-        mem = mem_w_n_boops(500,BOOP)
+        ms = ms_w_n_boops(500,BOOP)
 
         l1, l2 = Var(BOOP,"l1"), Var(BOOP,"l2")
         r1, r2 = Var(BOOP,"r1"), Var(BOOP,"r2")
 
         c = (l1.B > 0) & (l2.B != 3) 
 
-        return (c,mem), {}
+        return (c,ms), {}
 
 def matching_betas_setup():
     with cre_context("test_matching_benchmarks") as ctxt:
-        mem = mem_w_n_boops(500,BOOP)
+        ms = ms_w_n_boops(500,BOOP)
 
         l1, l2 = Var(BOOP,"l1"), Var(BOOP,"l2")
         r1, r2 = Var(BOOP,"r1"), Var(BOOP,"r2")
 
         c = l1 & l2 & (l1.B > l2.B) #& ((l1.B % 2) == (l2.B + 1) % 2)
 
-        return (c,mem), {}
+        return (c,ms), {}
 
-from cre.rete import get_match_iter, update_graph, ReteGraphType, parse_mem_change_queue, update_node, build_rete_graph, new_match_iter, restitch_match_iter
-def apply_get_matches(c,mem):
-    # rete_graph = build_rete_graph(mem, c)
+from cre.rete import get_match_iter, update_graph, ReteGraphType, parse_change_queue, update_node, build_rete_graph, new_match_iter, restitch_match_iter
+def apply_get_matches(c,ms):
+    # rete_graph = build_rete_graph(ms, c)
     # update_graph(rete_graph)
     # m_iter = new_match_iter(rete_graph)
     # restitch_match_iter(m_iter, -1)
     with cre_context("test_matching_benchmarks") as ctxt:
-        c.get_matches(mem)
+        c.get_matches(ms)
     # graph = _struct_from_ptr(ReteGraphType, c.matcher_inst_ptr)
-    # parse_mem_change_queue(graph)
+    # parse_ms_change_queue(graph)
 
     # for lst in graph.nodes_by_nargs:
     #     for node in lst:
     #         update_node(node)        
-    # get_match_iter(mem,c)
+    # get_match_iter(ms,c)
 
     # with ctxt:
-    #     for x in c.get_matches(mem):
+    #     for x in c.get_matches(ms):
     #         pass
         
-        # c.get_matches(mem)
+        # c.get_matches(ms)
 
 @njit(cache=True)
-def do_update_graph(c,mem):
+def do_update_graph(c,ms):
     # print("BUILD")
-    rete_graph = build_rete_graph(mem, c)
+    rete_graph = build_rete_graph(ms, c)
     # print("UDPATE")
     update_graph(rete_graph)
     # print("new iter")
@@ -560,11 +560,11 @@ if(__name__ == "__main__"):
     # dat = matching_betas_setup()[0]
 
     # with cre_context("test_matching_benchmarks") as ctxt:
-    #     # c.get_matches(mem)
+    #     # c.get_matches(ms)
 
-    #     mem = mem_w_n_boops(80, BOOP)
+    #     ms = ms_w_n_boops(80, BOOP)
     #     print(rtsys.get_allocation_stats())
-    #     mem = None
+    #     ms = None
     #     print(rtsys.get_allocation_stats())
 
    

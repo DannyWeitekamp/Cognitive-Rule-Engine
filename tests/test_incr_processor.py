@@ -1,7 +1,7 @@
 from cre.fact import define_fact
 from cre.context import cre_context
 from cre.incr_processor import IncrProcessor, IncrProcessorType
-from cre.memory import Memory
+from cre.memory import MemSet
 
 
 
@@ -11,16 +11,16 @@ def test_get_changes():
     with cre_context("test_get_changes"):
         BOOP = define_fact("BOOP",{"A": "string", "B" : "number"})
 
-        mem = Memory()
-        ip = IncrProcessor(mem,0)
+        ms = MemSet()
+        ip = IncrProcessor(ms,0)
 
         b1 = BOOP("A", 1)
         b2 = BOOP("A", 1)
         b3 = BOOP("A", 1)
-        mem.declare(b1)
-        mem.declare(b2)
-        mem.declare(b3)
-        mem.modify(b3, "A", "Q")
+        ms.declare(b1)
+        ms.declare(b2)
+        ms.declare(b3)
+        ms.modify(b3, "A", "Q")
 
         changes = ip.get_changes()
         assert len(changes) == 3
@@ -35,11 +35,11 @@ def test_get_changes():
         # Get changes exhausts changes by default
         assert len(changes) == 0
 
-        mem.modify(b1,"A", "Q")
-        mem.modify(b1,"A", "V")
-        mem.modify(b1,"B", 7)
-        mem.modify(b2,"A", "Q")
-        mem.modify(b3,"B", 7)
+        ms.modify(b1,"A", "Q")
+        ms.modify(b1,"A", "V")
+        ms.modify(b1,"B", 7)
+        ms.modify(b2,"A", "Q")
+        ms.modify(b3,"B", 7)
         
         changes = ip.get_changes()
         assert len(changes) == 3
@@ -50,23 +50,23 @@ def test_get_changes():
         assert changes[2].was_modified == True
         assert len(changes[2].a_ids) == 1
 
-        mem.retract(b1)
-        mem.retract(b2)
-        mem.retract(b3)
+        ms.retract(b1)
+        ms.retract(b2)
+        ms.retract(b3)
 
         b1 = BOOP("A", 1)
         b2 = BOOP("A", 1)
         b3 = BOOP("A", 1)
 
-        mem.declare(b3)
-        mem.declare(b2)
-        mem.declare(b1)
+        ms.declare(b3)
+        ms.declare(b2)
+        ms.declare(b1)
 
-        mem.modify(b1,"A", "Q")
-        mem.modify(b1,"A", "V")
-        mem.modify(b1,"B", 7)
-        mem.modify(b2,"A", "Q")
-        mem.modify(b3,"B", 7)
+        ms.modify(b1,"A", "Q")
+        ms.modify(b1,"A", "V")
+        ms.modify(b1,"B", 7)
+        ms.modify(b2,"A", "Q")
+        ms.modify(b3,"B", 7)
 
         changes = ip.get_changes()
         assert len(changes) == 3

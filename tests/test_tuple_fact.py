@@ -2,7 +2,6 @@
 #      define_fact, cast_fact, _cast_structref, BaseFact, BaseFactType, DeferredFactRefType
 from cre.utils import _cast_structref
 from cre.context import cre_context
-from cre.memory import Memory
 from cre.tuple_fact import TupleFact, TF#TupleFact, assert_cre_obj, TupleFact
 from cre.fact import define_fact#TupleFact, assert_cre_obj, TupleFact
 # from cre.primitive import Primitive, StringPrimitiveType

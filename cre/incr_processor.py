@@ -6,7 +6,7 @@ from numba.types import ListType, DictType
 from cre.structref import define_structref, define_structref_template
 from numba.experimental.structref import new, define_attributes
 from numba.extending import lower_cast, overload_method
-from cre.memory import Memory,MemoryType
+from cre.memory import MemSet,MemSetType
 from cre.utils import _cast_structref, _obj_cast_codegen
 from cre.vector import VectorType
 
@@ -19,7 +19,7 @@ from cre.fact import BaseFact
 from cre.utils import decode_idrec, encode_idrec
 
 incr_processor_fields = {
-    "in_mem" : MemoryType,
+    "in_memset" : MemSetType,
     "change_queue_head" : i8,
 }
 
@@ -31,13 +31,13 @@ IncrProcessorTypeTemplate.__str__ = lambda x : "cre.IncrProcessor"
 # print(IncrProcessorType)
 # raise ValueError()
 
-@njit(IncrProcessorType(IncrProcessorType, MemoryType),cache=True)
-def init_incr_processor(st, mem):
-    st.in_mem = mem
+@njit(IncrProcessorType(IncrProcessorType, MemSetType),cache=True)
+def init_incr_processor(st, ms):
+    st.in_memset = ms
     st.change_queue_head = 0
     return st
 
-# @njit(IncrProcessorType(IncrProcessorType, MemoryType),cache=True)
+# @njit(IncrProcessorType(IncrProcessorType, MemSetType),cache=True)
 # def incr_processor_ctor(st, mem):
 #     st = new(IncrProcessorType)
 #     st.in_mem = mem
@@ -135,7 +135,7 @@ def accumulate_change_events(cq, start, end=-1):
 @overload_method(IncrProcessorTypeTemplate,'get_changes')
 def incr_pr_accumulate_change_events(incr_pr, end=-1, exhaust_changes=True):
     def impl(incr_pr, end=-1, exhaust_changes=True):
-        cq = incr_pr.in_mem.mem_data.change_queue
+        cq = incr_pr.in_memset.change_queue
         start = incr_pr.change_queue_head
         if(end == -1): end = cq.head
         change_events = accumulate_change_events(cq, start, end)

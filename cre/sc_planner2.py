@@ -12,7 +12,6 @@ from numba.core.typing.templates import AttributeTemplate
 from cre.caching import gen_import_str, unique_hash,import_from_cached, source_to_cache, source_in_cache, cache_safe_exec, get_cache_path
 from cre.context import cre_context
 from cre.structref import define_structref, define_structref_template
-from cre.memory import MemoryType, Memory, facts_for_t_id, fact_at_f_id
 from cre.var import GenericVarType
 from cre.utils import (ptr_t, _struct_from_meminfo, _meminfo_from_struct, _cast_structref, cast_structref, decode_idrec, lower_getattr, _struct_from_ptr,  lower_setattr, lower_getattr,
                        _raw_ptr_from_struct, _decref_ptr, _incref_ptr, _incref_structref, _ptr_from_struct_incref,

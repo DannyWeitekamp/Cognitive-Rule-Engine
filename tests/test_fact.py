@@ -3,7 +3,7 @@ from cre.fact import (_fact_from_spec, _standardize_spec, _merge_spec_inheritanc
      define_fact, cast_fact, _cast_structref, BaseFact, DeferredFactRefType, isa,
       uint_to_inheritance_bytes, get_inheritance_bytes_len_ptr, get_inheritance_t_ids)
 from cre.context import cre_context
-from cre.memory import Memory
+from cre.memory import MemSet
 from cre.cre_object import CREObjType, copy_cre_obj
 from numba import njit, u8, u1
 from numba.typed import List
@@ -416,7 +416,7 @@ def test_protected_mutability():
         spec = {"A" : "string", "B" : "number"}
         BOOP = define_fact("BOOP", spec)
         print("RUNTIME1.3")
-        mem = Memory()
+        ms = MemSet()
         print("RUNTIME1")
         b1 = BOOP("A",0)
         b2 = BOOP("B",0)
@@ -432,12 +432,12 @@ def test_protected_mutability():
         # edit_it.py_func(b2)
         print("RUNTIME3")
         @njit
-        def declare_it(mem,b,name):
-            mem.declare(b,name)
+        def declare_it(ms,b,name):
+            ms.declare(b,name)
 
-        declare_it(mem,b1,"b1")
+        declare_it(ms,b1,"b1")
         print("RUNTIME3.2")
-        declare_it.py_func(mem,b2,"b2")
+        declare_it.py_func(ms,b2,"b2")
 
         print("RUNTIMEz")
 

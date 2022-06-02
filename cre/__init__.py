@@ -20,6 +20,9 @@ if(not skip.get()):
     from cre.memset import MemSet
     from cre.ptrop import PtrOp
 
+    # Import this to monkey-patch numba 
+    import cre.type_conv
+
     # Instantiate the default context at the package level
     import cre.context as context_module
 

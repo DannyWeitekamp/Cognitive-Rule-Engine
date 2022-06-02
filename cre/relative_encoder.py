@@ -13,10 +13,11 @@ from cre.utils import  lower_setattr, _ptr_from_struct_incref, decode_idrec, lis
 from cre.vector import VectorType
 from cre.incr_processor import IncrProcessorType, ChangeEventType, incr_processor_fields, init_incr_processor
 from cre.structref import CastFriendlyStructref, define_boxing
-from cre.context import cre_context
+from cre.context import cre_context, CREContextDataType
 from cre.fact import Fact, BaseFact, DeferredFactRefType
 from cre.gval import gval as gval_type
 from cre.var import GenericVarType
+from cre.vector import new_vector
 
 
 def _get_base_type(fact_type):
@@ -26,6 +27,7 @@ def _get_base_type(fact_type):
     return parent
 
 def assert_mutual_base(fact_types, id_attr):
+    if(len(fact_types) == 1): return fact_types[0]
     base = None
     for fact_type in fact_types:
         f_base = _get_base_type(fact_type)
@@ -86,6 +88,7 @@ ind_dist_deref = numba.from_dtype(np_ind_dist_deref)
 
 relative_encoder_fields = {
     **incr_processor_fields,
+    "context_data" : CREContextDataType,
     "dist_matrix" : ind_dist_deref[:, ::1],
     "idrec_to_ind" : DictType(u8, i4),
     "visited_inds" : DictType(i8, u1),
@@ -94,6 +97,8 @@ relative_encoder_fields = {
     "lateral_w" : f8,
     "id_to_ind" : DictType(unicode_type, i4),
     "var_cache" : DictType(Tuple((i4,i4,i4)),GenericVarType),
+    "valid_t_ids" : VectorType,
+    "fact_types" : types.Any,
     "relational_attrs" : types.Any,
     "base_fact_type" : types.Any,
     "id_attr" : types.Any,
@@ -110,33 +115,38 @@ GenericRelativeEncoderType = RelativeEncoderTypeClass([(k,v) for k,v in relative
 from numba.core.typing.typeof import typeof
 def get_relative_encoder_type(fact_types, id_attr):
     relational_fact_attrs = get_relational_fact_attrs(fact_types)
+
     relational_fact_attrs_type = typeof(relational_fact_attrs)
     field_dict = {**relative_encoder_fields,
+                 "fact_types" : Tuple(fact_types),
                  "relational_attrs" : relational_fact_attrs_type,
                  "base_fact_type" : types.TypeRef(assert_mutual_base(fact_types, id_attr)), 
                  "id_attr" : types.literal(id_attr),
                  }
     re_type = RelativeEncoderTypeClass([(k,v) for k,v in field_dict.items()])
+    re_type._fact_types = fact_types
     re_type._relational_attrs = relational_fact_attrs
     return re_type
 
 class RelativeEncoder(structref.StructRefProxy):
     def __new__(cls, fact_types, in_ms=None, id_attr='id', context=None):
         # Make new in_ms and out_ms if they are not provided.
+        context = cre_context(context)
         if(in_ms is None): in_ms = MemSet(context);
         re_type = get_relative_encoder_type(fact_types,id_attr)
-        self = RelativeEncoder_ctor(re_type, in_ms)
+        self = RelativeEncoder_ctor(context.context_data, re_type, in_ms)
         return self
 
     def encode_relative_to(self, ms, sources, source_vars):
-        if(isinstance(source_vars,list)):
-            _source_vars = List.empty_list(GenericVarType)
-            for v in source_vars:
-                _source_vars.append(v)
-            source_vars = _source_vars
-        source_idrecs = np.array([u8(x.idrec) for x in sources],dtype=np.uint64)
-        # print("source_idrecs", [decode_idrec(x) for x in source_idrecs])
-        return encode_relative_to(self, ms, source_idrecs, source_vars)
+        source_idrecs = np.empty(len(sources),dtype=np.uint64)
+        for i, src in enumerate(sources): 
+            source_idrecs[i] = src.idrec
+
+        var_ptrs = np.empty(len(sources),dtype=np.int64)
+        for i, v in enumerate(source_vars): 
+            var_ptrs[i] = v.get_ptr()
+
+        return encode_relative_to(self, ms, source_idrecs, var_ptrs)
 
     def update(self):
         RelativeEncoder_update(self)
@@ -148,17 +158,6 @@ define_boxing(RelativeEncoderTypeClass, RelativeEncoder)
 @lower_cast(RelativeEncoderTypeClass, IncrProcessorType)
 def upcast(context, builder, fromty, toty, val):
     return _obj_cast_codegen(context, builder, val, fromty, toty, incref=False)
-
-
-# # component_fields = list(Component.field_dict.keys())
-# TO_LEFT_A_ID = Component.get_attr_a_id("to_left")#component_fields.index("to_left")
-# TO_RIGHT_A_ID = Component.get_attr_a_id("to_right")#component_fields.index("to_right")
-# ABOVE_A_ID = Component.get_attr_a_id("above")#component_fields.index("above")
-# BELOW_A_ID = Component.get_attr_a_id("below")#component_fields.index("below")
-# PARENTS_A_ID = Component.get_attr_a_id("parents")#component_fields.index("parents")
-
-# # container_fields = list(Container.field_dict.keys())
-# CHILDREN_A_ID = Container.get_attr_a_id("children")#container_fields.index("children")
 
 
 @njit(cache=True)
@@ -183,13 +182,70 @@ def new_dist_matrix(n, old_dist_matrix=None):
 
 
 
-@generated_jit(cache=True)
-def _new_deref_info_matrix(self):
+@generated_jit(cache=True, nopython=True)
+def _fill_rel_derefs(deref_info_matrix, rel_derefs, start=0):
+    if(len(rel_derefs) > 0):
+        def impl(deref_info_matrix, rel_derefs, start=0):
+            attr_id = start
+            for i in range(len(rel_derefs)):
+                d1 = rel_derefs[i]
+                deref_info_matrix[attr_id][0].type = d1[0]
+                deref_info_matrix[attr_id][0].a_id = d1[1]
+                deref_info_matrix[attr_id][0].t_id = d1[2]
+                deref_info_matrix[attr_id][0].offset = d1[3]
+                attr_id += 1
+    else:
+        def impl(deref_info_matrix, rel_derefs, start=0):
+            pass
+    return impl
+
+
+@generated_jit(cache=True, nopython=True)
+def _fill_list_derefs(deref_info_matrix, list_derefs, start=0):
+    if(len(list_derefs) > 0):
+        def impl(deref_info_matrix, list_derefs, start=0):
+            attr_id = start
+            for i in range(len(list_derefs)):
+                attr_t, d1, d2 = list_derefs[i]
+                deref_info_matrix[attr_id][0].type = d1[0]
+                deref_info_matrix[attr_id][0].a_id = d1[1]
+                deref_info_matrix[attr_id][0].t_id = d1[2]
+                deref_info_matrix[attr_id][0].offset = d1[3]
+                deref_info_matrix[attr_id][1].type = d2[0]
+                deref_info_matrix[attr_id][1].a_id = 0
+                deref_info_matrix[attr_id][1].t_id = d2[2]
+                item_size = listtype_sizeof_item(attr_t)
+                deref_info_matrix[attr_id][1].offset = item_size
+                attr_id += 1
+    else:
+        def impl(deref_info_matrix, list_derefs, start=0):
+            pass
+    return impl
+
+@generated_jit(cache=True, nopython=True)
+def _build_valid_t_ids(self):
+    context = cre_context()
+    t_ids = set()
+    for fact_type in self._fact_types:
+        t_ids.add(context.get_t_id(_type=fact_type))
+    val_t_ids = tuple(t_ids)
+    max_t_id = int(max(val_t_ids))
+
+    def impl(self):
+        valid_t_ids = new_vector(max_t_id+1)
+        for i in range(len(val_t_ids)):
+            valid_t_ids.set_item_safe(val_t_ids[i], 1) 
+        return valid_t_ids
+    return impl
+
+@generated_jit(cache=True, nopython=True)
+def _build_deref_info_matrix(self):
     context = cre_context()
     re_type = self
     rel_derefs, list_derefs = [], []
 
     for base_t, attr_t, attr in re_type._relational_attrs:
+        # print(base_t, attr_t, attr)
         deref_info1 = base_t.get_attr_deref_info(attr.literal_value)
         if(not isinstance(attr_t,types.ListType)):
             rel_derefs.append(deref_info1.tolist())
@@ -198,40 +254,17 @@ def _new_deref_info_matrix(self):
             deref_info2['type'] = DEREF_TYPE_LIST
             deref_info2['t_id'] = context.get_t_id(_type=attr_t.item_type)
             d1, d2 = deref_info1.tolist(), deref_info2.tolist()
-            list_derefs.append((attr_t, deref_info1.tolist(), deref_info2.tolist()))
+            list_derefs.append((attr_t, deref_info1.tolist(), deref_info2.tolist()))        
 
     rel_derefs = tuple(rel_derefs)
     list_derefs = tuple(list_derefs)
     n_attrs = len(rel_derefs) + len(list_derefs)
-    # print("___________")
-    # print(rel_derefs)
-    # print(list_derefs)
 
     def impl(self):
         # Fill in the deref_info_matrix which we use to build Var instances 
         deref_info_matrix = np.zeros((n_attrs,2),dtype=deref_info_type)
-        attr_id = 0
-        for i in range(len(rel_derefs)):
-            d1 = rel_derefs[i]
-            deref_info_matrix[attr_id][0].type = d1[0]
-            deref_info_matrix[attr_id][0].a_id = d1[1]
-            deref_info_matrix[attr_id][0].t_id = d1[2]
-            deref_info_matrix[attr_id][0].offset = d1[3]
-            attr_id += 1
-        for i in range(len(list_derefs)):
-            attr_t, d1, d2 = list_derefs[i]
-            # print("___________")
-            # print(d1,d2)
-            deref_info_matrix[attr_id][0].type = d1[0]
-            deref_info_matrix[attr_id][0].a_id = d1[1]
-            deref_info_matrix[attr_id][0].t_id = d1[2]
-            deref_info_matrix[attr_id][0].offset = d1[3]
-            deref_info_matrix[attr_id][1].type = d2[0]
-            deref_info_matrix[attr_id][1].a_id = 0
-            deref_info_matrix[attr_id][1].t_id = d2[2]
-            deref_info_matrix[attr_id][1].offset = listtype_sizeof_item(attr_t)
-            attr_id += 1
-        # print(deref_info_matrix)
+        _fill_rel_derefs(deref_info_matrix, rel_derefs)
+        _fill_list_derefs(deref_info_matrix, list_derefs,start=len(rel_derefs))
         return deref_info_matrix
 
     return impl
@@ -249,43 +282,23 @@ def RelativeEncoder_reinit(self,size=32):
 
 # print("A")
 @njit(cache=True, nopython=True)
-def RelativeEncoder_ctor(re_type, in_ms):
+def RelativeEncoder_ctor(context_data, re_type, in_ms):
     # def impl(re_type, in_ms):
     st = new(re_type)
     init_incr_processor(st, in_ms)
     RelativeEncoder_reinit(st)
+    st.context_data = context_data
     st.lateral_w = f8(1.0)
-    st.deref_info_matrix = _new_deref_info_matrix(st)
-    
+    st.deref_info_matrix = _build_deref_info_matrix(st)
+    st.valid_t_ids = _build_valid_t_ids(st)
     return st
-    # return impl
 
-
-# @njit(inline='always')
-# def _try_append_nxt(re, facts, inds_ws, obj, deref_info1, deref_info2, k):
-#     if(obj.idrec not in self.idrec_to_ind):
-#         self.idrec_to_ind[obj.idrec] = len(self.idrec_to_ind)
-#         self.facts.append(obj)
-#     ind = self.idrec_to_ind[obj.idrec]
-#     # if(ind not in self.covered_inds):
-#     facts.append(obj)
-#     inds_ws[k].ind = ind
-#     inds_ws[k].dist = self.lateral_w
-#     inds_ws[k].deref_info1 = deref_info1
-#     # inds_ws[k].a_id = a_id
-    
     
     return k+1
 from cre.fact_intrinsics import fact_lower_getattr
 
 @njit(cache=True)
 def fill_adj_inds(self, fact, k, adj_inds, attr_id, item_ind):
-    # idrec = fact.idrec
-    # if(idrec not in self.idrec_to_ind):
-    #     ind = i4(len(self.idrec_to_ind))
-    #     self.idrec_to_ind[idrec] = ind
-    #     self.id_to_ind[fact_lower_getattr(fact, self.id_attr)] = ind
-    #     self.facts.append(fact)
     ind = self.idrec_to_ind[fact.idrec]
 
     adj_inds[k].ind = i4(ind)
@@ -294,58 +307,42 @@ def fill_adj_inds(self, fact, k, adj_inds, attr_id, item_ind):
     adj_inds[k].item_ind = i4(item_ind)
 
     return k+1
-    # adj_inds[k].deref_info1.type = u1(d1[0])
-    # adj_inds[k].deref_info1.a_id = u4(d1[1])
-    # adj_inds[k].deref_info1.t_id = u2(d1[2])
-    # adj_inds[k].deref_info1.offset = i4(d1[3])
-    # adj_inds[k].deref_info2.type = u1(d2[0])
-    # adj_inds[k].deref_info2.a_id = u4(d2[1])
-    # adj_inds[k].deref_info2.t_id = u2(d2[2])
-    # adj_inds[k].deref_info2.offset = i4(d2[3])
+
+@njit(cache=True,inline='always')
+def fill_adj_inds(self, fact, k, adj_inds, attr_id, item_ind):
+    ind = self.idrec_to_ind[fact.idrec]
+    adj_inds[k].ind = i4(ind)
+    adj_inds[k].dist = f4(self.lateral_w)
+    adj_inds[k].attr_id = u4(attr_id)
+    adj_inds[k].item_ind = i4(item_ind)
+    return k+1
 
 
 @generated_jit(cache=True,nopython=True)
-def next_adjacent(self, fact):
-    rel_attrs, list_attrs = [], []
-    context = cre_context()
-
+def _next_list_adj(self, fact):
+    list_attrs = []
+    n_rel = 0
     for base_t, attr_t, attr in self._relational_attrs:
-        literal_attr = attr
-        if(hasattr(attr,'literal_value')): attr = attr.literal_value
         if(isinstance(attr_t,types.ListType)):
-            list_attrs.append((literal_attr, base_t))
+            list_attrs.append((attr, base_t))
         else:
-            rel_attrs.append((literal_attr, base_t))
-
+            n_rel += 1
     list_attrs = tuple(list_attrs)
-    rel_attrs = tuple(rel_attrs)
 
+    if(len(list_attrs) == 0): 
+        return lambda self, fact : (np.empty(n_rel, dtype=ind_dist_deref), 0, 0)
+    
     def impl(self, fact):
         # Make a buffer to fill adj_inds
-        n_adj = len(rel_attrs)
-        for ltup in literal_unroll(list_attrs):        
+        n_ladj = 0
+        for ltup in literal_unroll(list_attrs):
             attr, base_t = ltup
             if(fact.isa(base_t)):
                 typed_fact = _cast_structref(base_t, fact)
-                n_adj += len(fact_lower_getattr(typed_fact, attr))
-        adj_inds = np.empty(n_adj, dtype=ind_dist_deref)
+                n_ladj += len(fact_lower_getattr(typed_fact, attr))
+        adj_inds = np.empty(n_rel+n_ladj, dtype=ind_dist_deref)
         # adj_facts = List.empty_list(self.base_fact_type)
-        k = 0
-
-        attr_id = 0 
-        # Fill in non-list relative attributes
-        for tup in literal_unroll(rel_attrs):
-            attr, base_t = tup
-            if(fact.isa(base_t)):
-                typed_fact = _cast_structref(base_t, fact)
-                member = fact_lower_getattr(typed_fact, attr)
-
-                if(member is not None):
-                    base_member = _cast_structref(self.base_fact_type, member)
-                    k = fill_adj_inds(self, base_member, k, adj_inds, attr_id, -1)
-                    # adj_facts.append(base_member)
-            attr_id += 1
-                # print(member)
+        attr_id, k = 0, 0
 
         # Fill in list relative attributes
         for ltup in literal_unroll(list_attrs):
@@ -357,38 +354,42 @@ def next_adjacent(self, fact):
                 for i, item in enumerate(member):
                     base_item = _cast_structref(self.base_fact_type,item)
                     k = fill_adj_inds(self, base_item, k, adj_inds, attr_id, i4(i))
-                    # adj_facts.append(base_item)
             attr_id += 1
-        # return adj_facts, adj_inds[:len(adj_facts)]
-        return adj_inds[:k]
+        return adj_inds, attr_id, k
     return impl
 
+@generated_jit(cache=True,nopython=True)
+def _next_rel_adj(self, fact, adj_inds, attr_id, k):
+    rel_attrs = []
+    n_rel = 0
+    for base_t, attr_t, attr in self._relational_attrs:
+        if(not isinstance(attr_t,types.ListType)):
+            rel_attrs.append((attr, base_t))
+    rel_attrs = tuple(rel_attrs)
 
-# @njit(cache=True)
-# def next_adj_comps_inds_weights(re, c):
-#     if(c.isa(Container)):
-#         cont = _cast_structref(Container,c)
-#         adj_inds = np.empty(4+len(cont.parents)+len(cont.children),dtype=ind_dist_deref)
-#     else:   
-#         adj_inds = np.empty(4,dtype=ind_dist_deref)
-#     adj_comps = List.empty_list(BaseFact)
+    if(len(rel_attrs) == 0): 
+        return lambda self, fact, adj_inds, attr_id, k : (adj_inds, attr_id, k)
 
-#     k = 0
-#     if(c.to_left is not None): k = _try_append_nxt(re, adj_comps, adj_inds, c.to_left, TO_LEFT_A_ID, k, self.lateral_w)
-#     if(c.to_right is not None): k = _try_append_nxt(re, adj_comps, adj_inds, c.to_right, TO_RIGHT_A_ID, k, self.lateral_w)
-#     if(c.below is not None): k = _try_append_nxt(re, adj_comps, adj_inds, c.below, k, BELOW_A_ID, self.lateral_w)
-#     if(c.above is not None): k = _try_append_nxt(re, adj_comps, adj_inds, c.above, k, ABOVE_A_ID, self.lateral_w)
-#     if(c.parents is not None):
-#         _parents = c.parents
-#         for parent in c.parents:
-#             k = _try_append_nxt(re, adj_comps, adj_inds, parent, PARENTS_A_ID, k, self.lateral_w)
+    def impl(self, fact, adj_inds, attr_id, k):
+        # Fill in list relative attributes
+        for tup in literal_unroll(rel_attrs):
+            attr, base_t = tup
+            if(fact.isa(base_t)):
+                typed_fact = _cast_structref(base_t, fact)
+                member = fact_lower_getattr(typed_fact, attr)
 
-#     if(c.isa(Container)):
-#         c_cont = _cast_structref(Container,c)
-#         if(c_cont.children is not None):
-#             for child in c_cont.children:
-#                 k = _try_append_nxt(re, adj_comps, adj_inds, child, CHILDREN_A_ID, k, self.lateral_w)            
-#     return adj_comps, adj_inds[:len(adj_comps)]
+                if(member is not None):
+                    base_member = _cast_structref(self.base_fact_type, member)
+                    k = fill_adj_inds(self, base_member, k, adj_inds, attr_id, -1)
+            attr_id += 1
+        return adj_inds, attr_id, k
+    return impl
+        
+@njit(cache=True,nopython=True)
+def next_adjacent(self, fact):
+    adj_inds, attr_id, k = _next_list_adj(self, fact)
+    adj_inds, attr_id, k = _next_rel_adj(self, fact, adj_inds, attr_id, k)
+    return adj_inds[:k]
 
 
 @njit(cache=True)
@@ -398,29 +399,15 @@ def update_relative_to(self , sources):
     next_frontier_inds = Dict.empty(i8,u1)
 
     for src in sources:
-        # if(src.idrec not in self.idrec_to_ind):
-        #     ind = len(self.idrec_to_ind)
-        #     self.idrec_to_ind[src.idrec] = ind
-        #     self.id_to_ind[fact_lower_getattr(src, self.id_attr)] = ind
-        #     self.facts.append(src)
         s_ind = self.idrec_to_ind[src.idrec]
         frontier_inds[i8(s_ind)] = u1(1)
 
-
     while(len(frontier_inds) > 0):
-        print(": -----")
-        print("visited",List(self.visited_inds.keys()))
-        print("frontier",List(frontier_inds.keys()))
         for b_ind in frontier_inds:
             b = self.facts[b_ind]
-            # adj_ind_dists = next_adjacent(self,b)#next_adj_comps_inds_weights(re, b)
-
             for c_ind_dist in next_adjacent(self,b):
 
-            # for i,c in enumerate(adj_facts):
-                # c_ind_dist = adj_ind_dists[i]
                 c_ind = i8(c_ind_dist.ind)
-                # print(c_ind_dist, b_ind, c_ind)
 
                 # Skip if does not exist
                 if(c_ind == -1): continue
@@ -449,19 +436,16 @@ def update_relative_to(self , sources):
                         dist_matrix[a_ind, c_ind].attr_id = dist_matrix[a_ind, b_ind].attr_id
                         dist_matrix[a_ind, c_ind].item_ind = dist_matrix[a_ind, b_ind].item_ind
                         next_frontier_inds[c_ind] = u1(1)
-
-            # print("A", b_ind)
                 
             self.visited_inds[b_ind] = u1(1)
-        # print("C")
         frontier_inds = next_frontier_inds
         next_frontier_inds = Dict.empty(i8,u1)
 
     # print("B")
-    print(dist_matrix[:len(self.idrec_to_ind),:len(self.idrec_to_ind)])
+    # print(dist_matrix[:len(self.idrec_to_ind),:len(self.idrec_to_ind)])
 
 
-@generated_jit(cache=True)
+@generated_jit(cache=True, nopython=True)
 @overload_method(RelativeEncoderTypeClass,'get_changes')
 def incr_pr_accumulate_change_events(self, end=-1, exhaust_changes=True):
     def impl(self, end=-1, exhaust_changes=True):
@@ -485,15 +469,24 @@ def _check_needs_rebuild(self, change_events):
         #  'relational' attributes.
         need_rebuild = False
         for ce in change_events:
-            if(ce.was_retracted): 
-                need_rebuild = True; break;
-            if(ce.was_modified):
-                fact = self.in_memset.get_fact(ce.idrec, self.base_fact_type)
-                for tup in literal_unroll(base_a_id_pairs):
-                    base_t, a_id = tup
-                    if(a_id in ce.a_ids and fact.isa(base_t)):
-                        need_rebuild = True; break;
+            # Ensure that the t_ids belong to provided fact_types.
+            if(ce.t_id <= len(self.valid_t_ids) and self.valid_t_ids[i8(ce.t_id)]):
+                if(ce.was_retracted): 
+                    need_rebuild = True; break;
+                if(ce.was_modified):
+                    fact = self.in_memset.get_fact(ce.idrec, self.base_fact_type)
+                    for tup in literal_unroll(base_a_id_pairs):
+                        base_t, a_id = tup
+                        if(a_id in ce.a_ids and fact.isa(base_t)):
+                            need_rebuild = True; break;
+            else:
+                raise ValueError(
+"Relative Encoder in_memset should only contain facts of given fact_types. \
+Ensure that RelativeEncoder is not initialized with a flattened MemSet."
+                    )
+            
         return need_rebuild
+            
     return impl
 
 
@@ -506,19 +499,26 @@ def _insert_fact(self,fact):
 
 
 @njit(cache=True)
+def _ensure_dist_matrix_size(self):
+    if(len(self.dist_matrix) < len(self.facts)):
+        self.dist_matrix = new_dist_matrix(len(self.facts)*2, self.dist_matrix)
+    
+
+
+@njit(cache=True)
 def RelativeEncoder_update(self):
     change_events = self.get_changes()
     # Need rebuild if there were any retractions or modifications to
     #  'relative' attributes. TODO: rebuilds could probably triggered
     #   more conservatively.
     need_rebuild = _check_needs_rebuild(self,change_events)
-
     if(need_rebuild):
         # If need_rebuild start bellman-ford shortest path from scratch
         RelativeEncoder_reinit(self)
         sources = self.in_memset.get_facts(self.base_fact_type)
         for fact in sources:
             _insert_fact(self, fact)
+        _ensure_dist_matrix_size(self)
         update_relative_to(self, sources)    
     else:
         # Otherwise we can do an incremental update
@@ -528,10 +528,8 @@ def RelativeEncoder_update(self):
                 fact = self.in_memset.get_fact(change_event.idrec, self.base_fact_type)
                 if(change_event.was_declared): _insert_fact(self,fact)
                 sources.append(fact)
+        _ensure_dist_matrix_size(self)
         update_relative_to(self, sources)    
-
-
-    
 
 
 @njit(cache=True)
@@ -644,373 +642,44 @@ from cre.tuple_fact import TupleFact
 from cre.utils import _load_ptr, _struct_from_ptr
 
 @njit(cache=True, locals={"source_idrecs" : u8[::1]})
-def encode_relative_to(self, ms, source_idrecs, source_vars):
+def encode_relative_to(self, gval_ms, source_idrecs, source_var_ptrs):
+    # Ensure that it is up-to-date.
+    RelativeEncoder_update(self)
     # Get the inds associated with the source_idrecs
+    source_vars = List.empty_list(GenericVarType)
+    for i, var_ptr in enumerate(source_var_ptrs):
+        source_vars.append(_struct_from_ptr(GenericVarType, var_ptr))
+
     s_inds = np.empty((len(source_idrecs,)),dtype=np.int32)
     for i, s_idrec in enumerate(source_idrecs):
+        if(s_idrec not in self.idrec_to_ind):
+            raise ValueError("Source fact not declared to input MemSet.")
         s_inds[i] = self.idrec_to_ind[s_idrec]
 
-    # mem = MemSet()
+    rel_ms = MemSet(self.context_data)
 
-    # l = List.empty_list(GenericVarType)
-    # seq_buffer = np.empty((len(self.dist_matrix),),dtype=np.int64)
-    # deref_info_buffer = np.empty((2*len(self.dist_matrix),),dtype=deref_info_type)
-    for fact in ms.get_facts(gval_type):
+    for fact in gval_ms.get_facts(gval_type):
         fact_copy = copy_cre_obj(fact)
 
         head = fact.head
         head_t_id, _, _ = decode_idrec(head.idrec)
+        # For TupleFacts replace each Var member with a relatively encoded one.
         if(head_t_id == T_ID_TUPLE_FACT):
             tf = _cast_structref(TupleFact, head)
             tf_copy = copy_cre_obj(tf)
-            
 
             for i, (t_id, m_id, data_ptr) in enumerate(cre_obj_iter_t_id_item_ptrs(tf)):
                 if(t_id == T_ID_VAR):
                     v = _struct_from_ptr(GenericVarType, _load_ptr(i8,data_ptr))
                     rel_var = rel_var_for_id(self, v.alias, source_idrecs, source_vars, s_inds, v.deref_infos)
                     cre_obj_set_item(tf_copy, i, rel_var)
-                    # print("\t", rel_var)
             fact_copy.head = _cast_structref(CREObjType, tf_copy)
-            # print("TF", tf)
-            # print(">>", fact_copy)
-
-                
-
 
         elif(head_t_id == T_ID_VAR):
             v = _cast_structref(GenericVarType, head)
             rel_var = rel_var_for_id(self, v.alias, source_idrecs, source_vars, s_inds, v.deref_infos)
             fact_copy.head = _cast_structref(CREObjType, rel_var)
-            # print("Var", v)
-        print(">>", fact_copy)
+        rel_ms.declare(fact_copy)
+
+    return rel_ms
             
-
-
-
-        # print(fact.head)
-        # fact_id = fact_lower_getattr(fact, self.id_attr)
-        # rel_var = rel_var_for_id(self, fact_id, source_idrecs, source_vars, s_inds)
-
-        # print(rel_var.deref_infos)
-        # l.append(rel_var)
-        # return rel_var
-        # print("DONE")
-        # print(fact_id, rel_var)
-        # print(rel_var.idrec)
-    # return l 
-        # print(fact,fact.idrec)
-        # print(self.idrec_to_ind)
-        # ind = f_ind = self.idrec_to_ind[fact.idrec]
-        # s_ind = _closest_source_ind(self, f_ind, s_inds)
-
-        # k = 0
-        # while(True):
-        #     dm_entry = self.dist_matrix[ind][s_ind]
-        #     ind = dm_entry.ind
-
-        #     if(ind == -1):break
-        #     # seq_buffer[k] = ind
-        #     # k += 1
-
-        #     # attr_id = dm_entry.attr_id
-        #     # item_ind = dm_entry.item_ind
-
-
-        #     deref_infos = self.deref_info_matrix[dm_entry.attr_id]
-        #     # print(attr_id, deref_infos)
-        #     deref_info_buffer[k:k+1] = deref_infos[0:1]
-        #     k += 1
-        #     if(deref_infos[1].type == DEREF_TYPE_LIST):
-        #         deref_info_buffer[k].type = DEREF_TYPE_LIST
-        #         deref_info_buffer[k].a_id = dm_entry.item_ind
-        #         deref_info_buffer[k].t_id = deref_infos[1].t_id
-        #         deref_info_buffer[k].offset = dm_entry.item_ind*deref_infos[1].offset
-        #         k += 1
-
-        # base_t_id,_,_ = decode_idrec(source_idrecs[s_ind])
-        # head_t_id = base_t_id
-        # if(k > 0):
-        #     head_t_id = deref_info_buffer[k-1].t_id
-
-        # print(base_t_id, head_t_id, deref_info_buffer[:k])
-
-            
-        # print(fact.idrec, seq_buffer[:k])
-
-
-
-
-
-
-
-        
-        
-
-    # print("<<HEAD:",cq.head)
-
-# import logging
-# logging.basicConfig(level=logging.DEBUG)
-# numba_logger = logging.getLogger('numba')
-# numba_logger.setLevel(logging.INFO)
-
-
-
-
-'''PLANNING PLANNING PLANNING
-
-Incremental bellman-ford for free floating objects
-Input: a bunch of objects with adjacency relationships, left, right, above, below, parent
-Output: For each pair of objects, the effective minimum distance needed to follow
-        adjacencies from A->B.
-
-Incremental Input: More objects
-
-Thoughts, it may make sense to keep around all paths of equivalent distance.
-But, favor relationships that include parent->child jumps. For instance
-
-c1 c2 c3
--- -- --
-A1 A2 A3
-B1 B2 B3
-C1 C2 C3
-
-B2 from A1 can be represented as
--A1.r.b    (2 steps)
--A1.b.r    (2 steps)
--A1.p.r[1] (3 steps)
--A1.p.r[-2] (3 steps)
-
-Considering these relationships, some of the parent child relationships are fragile
-for instance in the case of:
-
-c1 c2 c3
--- -- --
-   Z2   
-A1 A2 A3
-B1 B2 B3
-C1 C2 C3
-   C3
-
-The first two will succeed, the last two will fail.
-
-Now lets consider an example from algebra:
-
-          Eq 2x + 1 = 5
-
-add-expr 2x + 1;        op =; expr 5
-
-term 2x; op +; term 1;
-
-coef-term 2; var-term x
-
-What would the 'selection' look like in this case... the whole next line?
-I suppose it must be, we'll call it "NL". Then coef from NL is.
-
-NL.a.lexpr.terms[0].coef
-
-So from these two examples it isn't necessarily true that the parent relationships 
-need be preferred, as long as in this case we haven't parsed the state in a
-weird way. 
-
-What if we consider going up the tree to be almost free. Then any way down the
-tree from a parent will be free-ish. For long division:
-
-
-128/5
-
-      2 ? 
-    -----
-5 | 1 2 8
-    1 0  
-    -----
-      2 8
-      2 5
-      ---
-
-
-One way to break this down is that each line divides a table, which 
-can either be viewed as a row or column first table. The whole thing,
-is then a sort of bifurcated table of tables. 
-
-It seems that upward traversals are tricky (there can be multiple parents), 
-so we should probably just consider all objects found along an upward traversal 
-to be sources. This makes this a little bit tricky, but perhaps a little bit easier, 
-since for tree-like structures the bellman-ford will be trivial. 
-
-So in this case it's fine if the BF data structure is not symmetric
-some child objects will not have paths to their parents, but parents
-will have paths to their children. So what happens then in this case 
-when the where-learning mechanism generalizes away the problem root?
-I think in principle the root should always stick around, it should
-be possible for there to be holes in the tree, so long as decendants
-of a common ancestor are used.
-
-It seems this means we will need in our feature space fairly
-general predicates such as is_ancestor(A, B), is_decendant(A, B), etc.
-
-
-Speaking of predicates what would an invented predicate look like.
-The classic case is:
-ancestor(A,C) =: ancestor(A,B) ^ child(B,C)
-ancestor(A,B) =: child(A,B)
-
-This needs to be determined by a unification process right???
-How much would we get out of recursion here? Seems computing this,
-let alone learning this would be complex. 
-
-
-Seems like some kind of use of loop-like statements that evaluate to
-objects or lists would be more useful like:
-All_Until(X, Pred(X), Next(X)) -> [x for x in generator(X, Next) if Pred(x)]
-
-But to feasibly consider using such a statement, we need some heuristics.
-
-Consider the problems:
-
-1000
--  7
------
-
-10000
--   7
------
-
-Where we need to borrow from previous digits
-
-
---------
-
-Back to Bellman-Ford 3/24
-
-Typical bellmanford
-1. Fill in src as zero others as inf
-2. Go through all verticies |V| - 1 times trying to find better connections
-3. Check for negative weights (we don't need this)
-
-For our case we need to find the shortest dist from everything to everything else
--The distance from thing to itself is 0
--Should fill in a Dict[idrec]-> (Dict[idrec] -> Struct(dist,heading))
--Should be a procedure on Component class, might need to check if Component is a Container
-
-
-BFClass_fields = {
-       
-}
-
-
-
-dist_ind_pair = ...
-
-_try_append_nxt(re, comps, inds_ws, obj, k, w):
-    ind = self.idrec_to_ind[obj.idrec]
-    if(ind not in self.covered_inds):
-        adj_comps.append(obj)
-        adj_inds[k].ind = ind
-        adj_inds[k].weight = w
-        return k+1
-    return k
-
-NextAdjacentComponents_IndsWeights(re : BellmanFordObj, c : Component):
-    //Extract indicies for adjacent elements 
-    if(c.isa(Container)):
-        cont = _cast_structref(Container,c)
-        adj_inds = np.empty(4+len(cont.parents)+len(cont.children),dtype=ind_weight_pair)
-    else:   
-        adj_inds = np.empty(4,dtype=ind_weight_pair)
-
-    adj_comps = List.empt_list(Component)
-
-    k = 0
-    if(c.to_left): k = _try_append_nxt(re, adj_comps, adj_inds, c.to_left, k, self.lateral_w)
-    if(c.to_right): k = _try_append_nxt(re, adj_comps, adj_inds, c.to_right, k, self.lateral_w)
-    if(c.below): k = _try_append_nxt(re, adj_comps, adj_inds, c.below, k, self.lateral_w)
-    if(c.above): k = _try_append_nxt(re, adj_comps, adj_inds, c.above, k, self.lateral_w)
-        
-    for parent in c.parents:
-        k = _try_append_nxt(re, adj_comps, adj_inds, parent, k, self.lateral_w)
-
-    if(c.isa(Container)):
-        for child in _cast_structref(Container,c).children:
-            k = _try_append_nxt(re, adj_comps, adj_inds, child, k, self.lateral_w)            
-    return adj_comps, adj_inds[:len(adj_comps)]
-
-
-//Need to define
-updateRERelativeTo(re : BellmanFordObj, src : Component):
-    dist_matrix = self.dist_matrix
-    s_ind = self.idrec_to_ind[src.idrec]
-
-    head_components = List([src])
-    covered_inds = Dict.empty(i8,u1)
-    covered_inds[0] = u1(1)
-
-    next_components = List.empty_list(Component)
-    while(len(head_components) > 0):
-        for b_ind in head_components:
-            adj_comps, adj_indweights = GetAdjacentInds(re,c)
-            for i, c_ind_w_pair in enumerate(adj_indweights):
-                c_ind = c_ind_w_pair.ind
-
-                //Skip if does not exist
-                if(c_ind == -1): continue
-
-                did_update = False
-
-                item_ind = self.idrec_to_ind[item.idrec]
-                
-                ab_dist, ab_heading = dist_matrix[b_ind][c_ind]
-
-                if(ab_heading == -1):
-                    dist_matrix[b_ind, c_ind] = (c_ind_w_pair.weight, c_ind)
-                    dist_matrix[c_ind, b_ind] = (c_ind_w_pair.weight, b_ind)
-    
-                for a_ind in covered_inds:
-                    ca_dist, ca_heading = dist_matrix[a_ind][b_ind]
-                    n_dist = ca_dist + c_ind_w_pair.weight
-                    if(n_dist < ca_dist):
-                        dist_matrix[a_ind, c_ind] = (n_dist, ca_heading)
-                        dist_matrix[c_ind, a_ind] = (n_dist, b_ind)
-                
-                next_components.append(c_ind)
-
-            covered_inds[b_ind] = u1(1)
-
-
-            
-                
-        head_components = next_components
-        next_components = List.empty_list(Component)
-
-
-######## PLANNING PLANNING PLANNING 4/7 ####### 
-
-What is an incremental processor? Why do we need one when we have rules?
-
-An incremental processor allows us to do incremental processing in a more imperative manner
-than rules. We can directly force an incremental processor to update from python, keep/update datastructures
-within it that are cumbersome or impossible to distribute across facts stored in a working memory.
-For instance datastructures like hash maps, queues etc. aren't currently supported in CRE facts. An imperative
-incremental processor that lives outside of a ruleset also alleviates the complexity of fitting 
-
-
-
-
-5/29
-Gvals don't keep a reference to the object that they came from...
-But ought they? Probably would make sense. Although raises questions of 
-reference lifetime... are gvals meant to be serializable? Need all
-fact references be within the same MemSet? Not sure it matters if 
-I don't intend to apply matching Conditions on that MemSet. 
-
-Ultimately we are in a situation of needing to map from either the idrec or id
-to an index. 
-
-
-
-
-
-
-
-
-'''

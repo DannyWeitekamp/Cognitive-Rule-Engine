@@ -879,7 +879,7 @@ class OpMeta(type):
                             [str(x) for x in cls.signature.args])
 
         if(not hasattr(cls,'_expr_template')):
-            cls._expr_template = f"{cls.__name__}({','.join([f'{{{i}}}' for i in range(len(cls.arg_type_names))])})"  
+            cls._expr_template = f"{cls.__name__}({', '.join([f'{{{i}}}' for i in range(len(cls.arg_type_names))])})"  
         
         cls._shorthand_template = cls.shorthand if(hasattr(cls,'shorthand')) else cls._expr_template
 

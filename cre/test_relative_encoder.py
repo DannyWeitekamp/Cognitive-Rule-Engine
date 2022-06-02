@@ -8,9 +8,10 @@ from cre.var import Var
 from cre.flattener import Flattener
 from cre.feature_applier import FeatureApplier
 from cre.relative_encoder import _check_needs_rebuild, RelativeEncoder, get_relational_fact_attrs, next_adjacent
-from cre.utils import deref_info_type
+from cre.utils import PrintElapse, deref_info_type
 from cre.fact import define_fact
 from cre.default_ops import Equals
+from cre.context import cre_context
 import cre
 # v1 = Var(Container).children[0]
 # v2 = Var(Container).children[1]
@@ -27,67 +28,24 @@ Component = define_fact("Component", {
     "above" : "Component", "below" : "Component",
     "to_left": "Component", "to_right" : "Component",
     "parents" : "List(Component)"
-    })
+})
 
 Container = define_fact("Container", {
     "inherit_from" : "Component",
     "children" : "List(Component)"
 })
 
-deref_infos = Container.get_attr_deref_info("children")
-print("<<", type(deref_infos.tolist()))
 
-@njit(cache=True)
-def foo():
-    arr = np.zeros(1,dtype=deref_info_type)
-    arr[0].a_id = deref_infos.a_id
-    arr[0].a_id = 200
-    print("Foo", arr)
-
-foo()
-
-re = RelativeEncoder((Component,Container))
-next_adjacent(re,Component())
-
-
-np.set_printoptions(linewidth=100000)
-# raise ValueError()
-
-# for a,b,c in get_relational_fact_attrs((Component,Container)):
-#     print(a,b,c)
-# print()
-
-# from cre.utils import np_deref_info_type
-# np_dtype = np.dtype([("ind", np.int32), ("dist", np.float32), ('deref_info', np_deref_info_type)])
-# dtype = numba.from_dtype(np_dtype)
-
-# a = np.array((1,2,(3,4,5,6)),dtype=dtype)
-# print(a)
-# print(a.dtype)
-# print(dtype)
-
-# @njit(cache=True)
-# def foo():
-#     a = np.zeros(2, dtype=dtype)
-#     a[0].deref_info.a_id = 1
-#     print(a)
-
-# foo()
-
-# raise ValueError()
-
-
-def test_relative_encoder():
-    import faulthandler; faulthandler.enable()
+def setup_encoder_w_heir_state():
     ### Make Structure ### 
     #     p3
     #     p2
     #     p1
     #  [a,b,c]
 
-    a = Component(id="A")
-    b = Component(id="B")
-    c = Component(id="C")
+    a = Component(id="A",value="a")
+    b = Component(id="B",value="b")
+    c = Component(id="C",value="c")
     a.to_right = b
     b.to_right = c
     b.to_left = a
@@ -97,17 +55,12 @@ def test_relative_encoder():
     a.parents = List([p1])
     b.parents = List([p1])
     c.parents = List([p1])
-    # print("<<",*[p for p in a.parents])
 
     p2 = Container(id="P2", children=List([p1]))
     p1.parents = List([p2])
 
     p3 = Container(id="P3", children=List([p2]))
     p2.parents = List([p3])
-
-    # print(a,b,c)
-    # print(p1)
-    # print(p2)
 
     ms = MemSet()
     ms.declare(a)
@@ -117,67 +70,104 @@ def test_relative_encoder():
     ms.declare(p2)
     ms.declare(p3)
 
-    re = RelativeEncoder((Component,Container),ms)
-
-    @njit(cache=True)
-    def get_changes(re):
-        return re.get_changes()
-
-    _check_needs_rebuild(re, get_changes(re))
-
     fl = Flattener((Component,Container,), ms, id_attr="id")
     flat_ms = fl.apply()
     fa = FeatureApplier([eq_f8,eq_str], flat_ms)
     feat_ms = fa.apply()
 
+    re = RelativeEncoder((Component,Container),ms)
+    vs = [Var(Container,'p1'),Var(Container,'p2'),Var(Container,'p3')]
+    return (ms,feat_ms,fl,fa,re,[p1,p2,p3], vs), {}
 
 
-    
-    # rel_ms = re.encode_relative_to(feat_ms,[p1])
 
-    ### Revise Structure ### 
-    #     p4
-    #     p3
-    #     p2
-    #     p1
-    #   [a,b,c]
+def test_relative_encoder():
+    import faulthandler; faulthandler.enable()
 
-    p4 = Container(id="P4", children=List([p3]))
-    p4.parents = List([p3])
-    ms.declare(p4)
-    ms.modify(p3,'parents', List([p4]))
-    print()
-    print("-----------4-------------")
-    print()
+    (ms,feat_ms,fl,fa,re,ps,vs),_ = setup_encoder_w_heir_state()
+    p1, p2, p3  = ps[0],ps[1],ps[2]
+    vp1,vp2,vp2 = vs[0],vs[1],vs[2]
 
     re.update()
-    fl.update()
-    fa.update()
 
-    print()
-    print("-----------5-------------")
-    print()
+    with PrintElapse("encode_relative"):
+        rel_ms = re.encode_relative_to(feat_ms,[p1], [vp1])
+    print(rel_ms)
 
-    # print(flat_ms)
+    with PrintElapse("encode_relative"):
+        rel_ms = re.encode_relative_to(feat_ms,[p1,p2,p3], [vp1,vp2,vp2])
+    print(rel_ms)
+    
+TestLL = define_fact("TestLL",{
+    "id": "string",
+    "value" : {"type": "string", "is_semantic_visible" : True},
+    "nxt" : "TestLL",
+    "prev" : "TestLL",
+})
 
 
-    src_vars = [Var(Container,'p1')]
-    print(src_vars)
-    re.encode_relative_to(feat_ms,[p1], src_vars)
-    # l = re.encode_relative_to(ms,[p1], src_vars)
-    # print("<<", l)
+def setup_update():
+    with cre_context("rel_encode_update_100x100"):
+        ms = MemSet()
+        end = TestLL(id="q",value="1")
+        ms.declare(end)
+        fl = Flattener((TestLL,), in_memset=ms, id_attr="id",)
+        flat_ms = fl.apply()
+        fa = FeatureApplier([eq_f8,eq_str], flat_ms)
+        feat_ms = fa.apply()
+        re = RelativeEncoder((TestLL,), ms, id_attr="id")
+        re.update()
+
+        for i in range(100):
+            new_end = TestLL(str(i),str(i),end)
+            ms.modify(end, "prev",new_end)
+            ms.declare(new_end)
+            end = new_end
+
+        flat_ms = fl.apply()
+        feat_ms = fa.apply()
+        # print(l)
+        
+    return (re,ms,end), {}
+
+def setup_update_plus_1():
+    (re,ms,end),_ = setup_update()
+    re.update()
+    new_end = TestLL("plus1","plus1",end)
+    ms.modify(end, "prev",new_end)
+    ms.declare(new_end)
+    
+    return (re,ms,end), {}    
 
 
-    print()
-    print("-----------6-------------")
-    print()
 
-    # re.encode_relative_to(feat_ms,[p1,p2,p3,p4])
+def do_update(re,ms,end):
+    re.update()
 
-    src_vars = [Var(Container,'p1'),Var(Container,'p2'),Var(Container,'p3'),Var(Container,'p4')]
-    re.encode_relative_to(feat_ms,[p1,p2,p3,p4], src_vars)
-    # l = re.encode_relative_to(ms,[p1,p2,p3,p4],src_vars)
-    # print("<<", l)
+def do_encode_rel(ms,feat_ms,fl,fa,re,ps,vs):
+    rel_ms = re.encode_relative_to(feat_ms, ps,vs)
+
+
+def test_b_rel_enc_update_100x100(benchmark):
+    benchmark.pedantic(do_update,setup=setup_update, warmup_rounds=1, rounds=10)
+
+def test_b_rel_enc_100x100_update_plus_1(benchmark):
+    benchmark.pedantic(do_update,setup=setup_update_plus_1, warmup_rounds=1, rounds=10)
+
+
+def test_b_rel_enc_100x100_encode(benchmark):
+    benchmark.pedantic(do_encode_rel,setup=setup_encoder_w_heir_state, warmup_rounds=1, rounds=10)
+
 
 if __name__ == "__main__":
+    np.set_printoptions(linewidth=1000)
     test_relative_encoder()
+    (re,ms,_), _ = setup_update()
+    with PrintElapse("Elapse"):
+        re.update()
+    with PrintElapse("Elapse 2"):
+        re.update()
+
+    (re,ms,_), _ = setup_update_plus_1()
+    with PrintElapse("Elapse_plus 1"):
+        re.update()

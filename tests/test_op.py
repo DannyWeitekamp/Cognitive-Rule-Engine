@@ -90,10 +90,10 @@ def test_var_propagation():
             return a + b + c
     x,y,z = Var(float,'x'),Var(float,'y'),Var(float,'z')
     op = Add3(x,y,z)
-    assert str(op) == 'Add3(x,y,z)'
+    assert str(op) == 'Add3(x, y, z)'
     assert [x.get_ptr(),y.get_ptr(),z.get_ptr()] == [*extract_var_ptrs(op)]
     op = Add3(x,y,Add3(y,z,x))
-    assert str(op) == 'Add3(x,y,Add3(y,z,x))'
+    assert str(op) == 'Add3(x, y, Add3(y, z, x))'
     assert op(2,1,3) == 9
 
 def test_order():
@@ -115,11 +115,11 @@ def test_untyped_op():
 
     x,y,z = Var(float,'x'),Var(float,'y'),Var(float,'z')
     op = Add3(x,y,z)
-    assert str(op) == 'Add3(x,y,z)'
+    assert str(op) == 'Add3(x, y, z)'
     assert op(1,2,3)==6
 
     op = Add3(x,y,Add3(y,z,x))
-    assert str(op) == 'Add3(x,y,Add3(y,z,x))'
+    assert str(op) == 'Add3(x, y, Add3(y, z, x))'
     assert op(2,1,3) == 9
 
 

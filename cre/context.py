@@ -36,6 +36,7 @@ Dict_Unicode_to_Flags = DictType(unicode_type,u1[:])
 
 context_data_fields = [
     # ("next_t_id", u2),
+    ("name", unicode_type),
     ("has_unhandled_retro_register", boolean),
     # ("string_enums" , DictType(unicode_type,i8)),
     # ("number_enums" , DictType(f8,i8)),
@@ -62,8 +63,9 @@ CREContextData, CREContextDataType, CREContextDataTypeClass  = define_structref(
 # CREContextDataType = CREContextDataTypeTemplate(fields=context_data_fields)
 i8_arr_type = i8[::1]
 @njit(cache=True)
-def new_cre_context(next_t_id):
+def new_cre_context(name):
     st = new(CREContextDataType)
+    st.name = name
     # st.next_t_id = next_t_id
     st.has_unhandled_retro_register = False
     # st.string_enums = Dict.empty(unicode_type,i8)
@@ -198,7 +200,7 @@ class CREContext(object):
         self.parents_of = {}
         self.children_of = {}
         
-        self.context_data = cd = new_cre_context(len(self.name_to_type))
+        self.context_data = cd = new_cre_context(name)
 
         
     def get_deferred_type(self,name):

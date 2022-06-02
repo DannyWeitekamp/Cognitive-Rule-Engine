@@ -3,7 +3,7 @@ import numpy as np
 import numba
 from numba import types, njit, i8, u8, i4, u1,u2,u4,  i8, literally, generated_jit, objmode
 from numba.typed import List
-from numba.types import ListType, unicode_type, void, Tuple
+from numba.core.types import ListType, unicode_type, void, Tuple
 from numba.experimental import structref
 from numba.experimental.structref import new, define_attributes, _Utils
 from numba.extending import SentryLiteralArgs, lower_cast, overload_method, intrinsic, overload_attribute, intrinsic, lower_getattr_generic, overload, infer_getattr, lower_setattr_generic
@@ -46,6 +46,7 @@ var_fields_dict = {
 
     # The name of the Var 
     'alias' : unicode_type,
+    'deref_attrs_str' : types.optional(unicode_type),
 
     # The byte offsets for each attribute relative to the previous resolved
     #  fact. E.g.  if attr "B" is at offset 10 in the type assigned to "B"
@@ -209,7 +210,17 @@ class Var(CREObjProxy):
 
     def __getattr__(self, attr):
         if(attr in ['_head_type', '_base_type','_derefs_str', '_deref_attrs']): return None
-        if(attr == 'base_type'):
+        if(attr == 'deref_attrs_str'):
+            if('_deref_attrs_str' not in self.__dict__):
+                self._deref_attrs_str = "".join(
+                    [f"[{a}]" if a.isdigit() else "." + a for a in self.deref_attrs]
+                )
+            return self._deref_attrs_str
+        elif(attr == 'deref_attrs'):
+            if('_deref_attrs' not in self.__dict__):
+                self._deref_attrs = resolve_deref_attrs(self)
+            return self._deref_attrs
+        elif(attr == 'base_type'):
             # Otherwise we need to resolve the type from the current context
             if('_base_type' not in self.__dict__):
                 base_type_ref = self._numba_type_.field_dict['base_type']
@@ -231,10 +242,7 @@ class Var(CREObjProxy):
             return self._head_type
         elif(attr == 'is_not'):
             return var_get_is_not(self)
-        elif(attr == 'deref_attrs'):
-            if('_deref_attrs' not in self.__dict__):
-                self._deref_attrs = resolve_deref_attrs(self)
-            return self._deref_attrs
+        
         #     return var_get_deref_attrs(self)
         elif(attr == 'deref_infos'):
             return var_get_deref_infos(self)
@@ -261,13 +269,8 @@ class Var(CREObjProxy):
         else: 
             base = f'{prefix}({self.base_type})'
         # print(self.deref_attrs)
-        deref_strs = [f"[{a}]" if a.isdigit() else "." + a 
-                for a in self.deref_attrs]
-        s = base + "".join(deref_strs)
+        return base + self.deref_attrs_str
 
-        # print("$$", s, self.deref_infos)
-         # s = f'NOT({s})'
-        return s
     def __repr__(self):
         return str(self)
 
@@ -573,6 +576,18 @@ def get_deref_attrs(self):
         return deref_attrs
     return impl
 
+@generated_jit
+@overload_method(VarTypeClass, "get_deref_attr_str")
+def get_deref_attrs_str(self):
+    def impl(self):
+        # If self.deref_attrs_str is None then get it from object mode.
+        if(self.deref_attrs_str is None):
+            with objmode(deref_attrs_str=unicode_type):
+                deref_attrs_str = self.deref_attrs_str
+            self.deref_attrs_str = deref_attrs_str
+        return self.deref_attrs_str
+    return impl
+
 @njit(cache=True)    
 def get_var_ptr(self):
     return _raw_ptr_from_struct(self)
@@ -674,6 +689,7 @@ def var_ctor(var_struct_type, base_t_id, alias=""):
     st.base_ptr = i8(_raw_ptr_from_struct(st))
     st.base_ptr_ref = ptr_t(0)
     st.alias =  "" if(alias is  None) else alias
+    st.deref_attrs_str = None
     # st.deref_attrs = List.empty_list(unicode_type)
     st.deref_infos = np.empty(0,dtype=deref_info_type)
     return st

@@ -806,6 +806,24 @@ def test_copy():
         assert m2.boop2.B == 4
 
 
+# def test_weird_case():
+#     from cre.fact_intrinsics import fact_lower_getattr
+#     from cre.memset import MemSet
+#     with cre_context("test_weird_case"):
+#         TestLL = define_fact("TestLL",{
+#             "id": "string",
+#             "value" : {"type": "string", "is_semantic_visible" : True},
+#             "nxt" : "TestLL",
+#         })
+
+#         ms = MemSet()
+#         q = TestLL(id="q", value="1")
+#         ms.declare(q)
+#         @njit(cache=True)
+#         def foo(x):
+#             print(fact_lower_getattr(x,"id"))
+#             # return x.id
+#         foo(q)
 
 
 
@@ -870,7 +888,8 @@ if __name__ == "__main__":
     # _test_reference_type()
     # test_hash()
     # test_eq()
-    test_copy()
+    # test_copy()
+    # test_weird_case()
     # test_inheritence()
     # test_inheritence_bytes()
     # test_context_retroactive_register()

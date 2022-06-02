@@ -1,5 +1,5 @@
 import numpy as np
-from numba import i8, u8, u2, u1, types, njit, generated_jit, literal_unroll
+from numba import i8, u8, u1, u2, u4, types, njit, generated_jit, literal_unroll
 from numba.types import FunctionType, unicode_type, Tuple
 from numba.extending import  overload, lower_getattr, overload_method
 from cre.core import register_global_default, T_ID_UNDEFINED, T_ID_BOOL, T_ID_INT, T_ID_FLOAT, T_ID_STR, T_ID_TUPLE_FACT 
@@ -94,8 +94,8 @@ cre_obj_field_dict = {
     "idrec" : u8,
     # The number of members in the CREObj 
     "hash_val" : _Py_hash_t,
-    "num_chr_mbrs": u1,
-    "chr_mbrs_infos_offset" : u2,
+    "num_chr_mbrs": u4,
+    "chr_mbrs_infos_offset" : u4,
     # The data offset of the "members" attribute (unpredictable because of layout alignment)
     # "chr_mbrs_infos" : BaseIdentityMemberInfosType,#types.UniTuple(member_info_type,1),
 }
@@ -454,11 +454,14 @@ def cre_obj_get_item_t_id_ptr(x, index):
     t_id, m_id, member_offset = _load_ptr(member_info_type, member_info_ptr)
     return t_id, m_id, data_ptr + member_offset
 
-@njit(cache=True)
+@generated_jit(cache=True,nopython=True)
+@overload_method(CREObjTypeClass,'get_item')
 def cre_obj_get_item(obj, item_type, index):
-    _, _, item_ptr = cre_obj_get_item_t_id_ptr(obj,index)
-    out = _load_ptr(item_type, item_ptr)
-    return out
+    def impl(obj, item_type, index):
+        _, _, item_ptr = cre_obj_get_item_t_id_ptr(obj, index)
+        out = _load_ptr(item_type, item_ptr)
+        return out
+    return impl
 
 @generated_jit(cache=True,nopython=True)
 def cre_obj_set_item(obj, index, val):
@@ -527,7 +530,7 @@ def copy_cre_obj(fact):
             t_id_a, m_id_a, data_ptr_a = info_a
             t_id_b, m_id_b, data_ptr_b = info_b
 
-            if(m_id_b != 0):
+            if(m_id_b != PRIMITIVE_MBR_ID):
                 obj_ptr = _load_ptr(i8, data_ptr_a)
                 _incref_ptr(obj_ptr)
 

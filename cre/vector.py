@@ -33,7 +33,7 @@ def _expand_to(self,size):
     if(len(self.data) < size):
         new_data = np.empty(size, dtype=np.int64)
         new_data[:len(self.data)] = self.data
-        new_data[len(self.data):-1] = 0
+        new_data[len(self.data):] = 0
         self.data = new_data
 
 @overload_method(VectorTypeClass, "assert_size")
@@ -50,7 +50,7 @@ def _expand(self):
     '''
     new_data = np.zeros(len(self.data)*2, dtype=np.int64)
     new_data[:len(self.data)] = self.data
-    new_data[len(self.data):-1] = 0
+    new_data[len(self.data):] = 0
     self.data = new_data
 
 @overload_method(VectorTypeClass, "expand")
@@ -180,6 +180,7 @@ def expand(self):
     # new_size = self.size*2
     new_data = np.empty(len(self.data)*2, dtype=np.int64)
     new_data[:len(self.data)] = self.data
+    new_data[len(self.data):] = 0
     self.data = new_data
     # self.size = new_size
 

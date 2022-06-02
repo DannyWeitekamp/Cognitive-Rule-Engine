@@ -119,11 +119,20 @@ class MemSet(structref.StructRefProxy):
     ''' '''
     def __new__(cls, context=None):
         context = cre_context(context)
-        context_data = context.context_data
-        self = memset_ctor(context_data)
-        self.context_data = context_data
-        self.context = context
+        self = memset_ctor(context.context_data)
+        self._context = context
         return self
+
+    @property
+    def context(self):
+        if(not hasattr(self,'_context')):
+            cd = get_context_data(self)
+            self._context = cre_context(cd.name)
+        return self._context
+
+    @property
+    def change_queue(self):
+        return get_change_queue(self)
     
     def declare(self,fact,name=None):
         return memset_declare(self,fact,name)
@@ -145,7 +154,7 @@ class MemSet(structref.StructRefProxy):
         return iter_facts(self, typ)
 
     def get_fact(self,idrec):
-        return get_fact(self, idrec)
+        return memset_get_fact(self, idrec)
 
     def modify(self, fact, attr, val):
         return memset_modify(self,fact, attr, val)
@@ -197,6 +206,14 @@ def overload_MemSet(context_data=None, mem_data=None):
             return memset_ctor(context_data)
 
     return impl
+
+@njit(cache=True)
+def get_context_data(self):
+    return self.context_data
+
+@njit(cache=True)
+def get_change_queue(self):
+    return self.change_queue
 
 
 @njit(cache=True)
@@ -356,14 +373,18 @@ def modify(ms,fact,attr,val):
 
 @generated_jit(cache=True)
 @overload_method(MemSetTypeClass, "get_fact")
-def mem_get_fact(self, identifier, typ=None):
+def memset_get_fact(self, identifier, typ=None):
     if(isinstance(typ,types.Omitted) or typ is None):
         return_typ = BaseFact    
     else:
         return_typ = typ.instance_type
+    # context = cre_context()
+    # typ_t_id = context.get_t_id(_type=return_typ)
+    # err_msg = f"Invalid idrec for {return_typ}."
     if(isinstance(identifier, types.Integer)):
         def impl(self, identifier, typ=None):
             t_id, f_id, _ =  decode_idrec(identifier)
+            # if(t_id != typ_t_id): raise ValueError(err_msg)
             facts = facts_for_t_id(self, t_id) #negligible
             fact_ptr = facts.data[f_id]
             return _struct_from_ptr(return_typ, fact_ptr)
@@ -372,6 +393,7 @@ def mem_get_fact(self, identifier, typ=None):
         def impl(self, identifier, typ=None):
             idrec = self.names_to_idrecs[identifier]
             t_id, f_id, _ =  decode_idrec(idrec)
+            # if(t_id != typ_t_id): raise ValueError(err_msg)
             facts = facts_for_t_id(self, t_id) #negligible
             fact_ptr = facts.data[f_id]
             return _struct_from_ptr(return_typ, fact_ptr)
@@ -608,6 +630,7 @@ def get_facts(ms, fact_type=None, no_subtypes=False):
     else:
         raise ValueError("fact_type of get_facts() must be a numba type or None.")
     
+    
     get_all = fact_type is None or _fact_type is BaseFact
 
     fact_t_id = _fact_type.t_id
@@ -621,7 +644,6 @@ def get_facts(ms, fact_type=None, no_subtypes=False):
                 t_ids = np.array((fact_t_id,),dtype=np.int64)
             else:                
                 t_ids = cd.child_t_ids[fact_t_id]
-        # print("<< t_ids", t_ids)
         out = List.empty_list(_fact_type)
         curr_t_id_ind = 0
         curr_ind = 0

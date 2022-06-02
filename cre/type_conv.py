@@ -1,13 +1,13 @@
 import numba 
 import numpy as np
 import numba
-from numba import types, jit,njit
+from numba import types, jit,njit, generated_jit
 from numba import deferred_type, optional
 from numba import void,b1,u1,u2,u4,u8,i1,i2,i4,i8,f4,f8,c8,c16
 from numba.typed import List, Dict
-from numba.types import ListType, unicode_type
+from numba.types import ListType, unicode_type, UnicodeType
 from numba.cpython.unicode import _empty_string, _set_code_point, _get_code_point, PY_UNICODE_1BYTE_KIND
-from numba.extending import overload
+from numba.extending import overload, overload_method
 # from numba.cpython.unicode import _empty_string, _set_code_point, _get_code_point, PY_UNICODE_1BYTE_KIND
 
 
@@ -189,18 +189,67 @@ def float_to_str(x):
 # work like in normal python
 
 @overload(str)
-def overload_float_from_str(x):
-    if(x not in types.real_domain): return
-    def impl(x):
-        return float_to_str(x)
+def overload_float_to_str(x):
+    if(x is types.bool_):
+        def impl(x):
+            return "True" if x else "False"
+    elif(x in types.real_domain): 
+        def impl(x):
+            return float_to_str(x)
+    elif(x in types.integer_domain):
+        def impl(x):
+            return int_to_str(x)
+    else:
+        return
     return impl
 
 @overload(float)
-def overload_float_from_str(x):
+def overload_str_to_float(x):
     if(x != unicode_type): return
     def impl(x):
         return str_to_float(x)
     return impl
+
+@overload(int)
+def overload_str_to_int(x):
+    if(x != unicode_type): return
+    def impl(x):
+        return str_to_int(x)
+    return impl
+
+
+@njit(cache=True,inline="never")
+def format_str(s, args):
+    strs = List.empty_list(unicode_type)
+    start = 0
+    end = 0
+    for i,c in enumerate(s):
+        if(c == "{"):
+            end = i 
+            strs.append(s[start:end])
+        elif(c == "}"):
+            start = i+1
+            ind = int(s[end+1:i])
+            if(ind >= len(args)): raise ValueError()
+            strs.append(args[ind])
+
+    strs.append(s[start:])
+    return "".join(strs)
+
+@generated_jit(cache=True,nopython=True)
+@overload_method(UnicodeType,'format')
+def overload_format(s, *args):
+    zero_type = args[0]
+    if(isinstance(zero_type, types.BaseTuple)):
+        zero_type = zero_type[0]
+    if(isinstance(zero_type,types.ListType)):
+        def impl(s, *args):
+            return format_str(s,args[0])
+    else:
+        def impl(s, *args):
+            return format_str(s,args)
+    return impl
+
 
 
 from numba.core.typing.templates import (AttributeTemplate, ConcreteTemplate,
@@ -231,6 +280,8 @@ class Float(AbstractTemplate):
 
         elif arg in types.real_domain:
             return signature(arg, arg)
+
+
 
 
 

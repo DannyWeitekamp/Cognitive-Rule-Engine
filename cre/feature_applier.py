@@ -350,14 +350,14 @@ def assign_new_f_ids(self):
 #     from cre.flattener import Flattener
 #     from cre.default_ops import Equals
 #     with cre_context("test_feature_applier") as context:
-#         spec1 = {"A" : {"type" : "string", "is_semantic_visible" : True}, 
-#                  "B" : {"type" : "number", "is_semantic_visible" : False}}
+#         spec1 = {"A" : {"type" : "string", "visible" : True}, 
+#                  "B" : {"type" : "number", "visible" : False}}
 #         BOOP1 = define_fact("BOOP1", spec1)
 #         spec2 = {"inherit_from" : BOOP1,
-#                  "C" : {"type" : "number", "is_semantic_visible" : True}}
+#                  "C" : {"type" : "number", "visible" : True}}
 #         BOOP2 = define_fact("BOOP2", spec2)
 #         spec3 = {"inherit_from" : BOOP2,
-#                  "D" : {"type" : "number", "is_semantic_visible" : True}}
+#                  "D" : {"type" : "number", "visible" : True}}
 #         BOOP3 = define_fact("BOOP3", spec3)
 
 #         eq_f8 = Equals(f8, f8)

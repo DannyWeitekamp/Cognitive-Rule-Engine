@@ -371,6 +371,8 @@ class UntypedOp():
                 op_comp = OpComp(op, *py_args)
                 op_cls = op_comp.flatten(return_class=True)
                 self._specialize_cache[tup] = op_cls
+                # print("_specialize_cache")
+                # op_cls.__qualname__ = f"{cls.__module__}.{name}(signature={members['signature']})" 
                 # op = op_cls.make_singleton_inst([x[0] for x in op_comp.head_vars.values()])
             # else:
                 # print("HIT")
@@ -422,6 +424,7 @@ class UntypedOp():
                 # print("MISS", sig)
                 op_cls = new_op(self.name, members,return_class=True)
                 self._specialize_cache[sig] = op_cls
+                # op_cls.__qualname__ = self.__qualname__ + 
             # else:
                 # print("HIT")
             
@@ -701,8 +704,12 @@ def new_op(name, members, head_vars=None, return_class=False):
     # check_needs_jitting = has_check and (not isinstance(members['check'],Dispatcher))
     
     # 'cls' is the class of the user defined Op (i.e. Add(a,b)).
-    cls = type.__new__(OpMeta,name,(Op,),members) 
+    cls = type.__new__(OpMeta, name, (Op,), members) # (cls, name, bases, dct)
+    # print(">>", cls)
+    cls.__reduce__ = lambda self : (OpMeta,(name,(Op,),members))
+    
     cls.__module__ = members["call"].__module__
+    # cls.__qualname__ = f"{cls.__module__}.{name}(signature={members['signature']})" 
     # cls.__call__ = call_op
     cls._handle_commutes()
     cls._handle_nopython()
@@ -804,10 +811,18 @@ class OpMeta(type):
         
         def wrapper(call_func):
             assert hasattr(call_func,"__call__")
+
             name = call_func.__name__
             members = kwargs
             members["call"] = call_func
-            return new_op(name, members)
+
+            op = new_op(name, members)
+
+            # Since decorator replaces, ensure original function is pickle accessible. 
+            op.py_func = call_func
+            call_func.__qualname__  = call_func.__qualname__ + ".py_func"
+            # print("<<call_func", type(call_func))
+            return op
 
         if(len(args) == 1):
             if(isinstance(args[0],(str, numba.core.typing.templates.Signature))):
@@ -829,6 +844,10 @@ class OpMeta(type):
 
     def __repr__(cls):
         return f"cre.op.OpMeta(name={cls.__name__!r}, signature={cls._get_simple_sig_str()})"
+
+    # def __reduce__(cls):
+    #     return (self.__class__,())
+
         
 
     def _handle_nopython(cls):
@@ -986,6 +1005,7 @@ class Op(CREObjProxy,metaclass=OpMeta):
     #         return op
 
     def __call__(self,*py_args):
+        # print(py_args)
         if(all([not isinstance(x,(Var,OpMeta,OpComp, Op)) for x in py_args])):
             # If all of the arguments are constants then just call the Op
             return self.call(*py_args)

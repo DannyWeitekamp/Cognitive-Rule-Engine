@@ -268,19 +268,28 @@ SetChainingPlanner_field_dict = {
     # Maps (type_str[str],depth[int]) -> *Iterator[any]
     'flat_vals_ptr_dict' : DictType(Tuple((unicode_type,i8)), ptr_t),
 
+    # A list of tuples with (fact_type, attr, conversions) for the planner's known fact_types
+    'semantic_visible_attrs' : types.Any
 }
-SetChainingPlanner_fields = [(k,v) for k,v in SetChainingPlanner_field_dict.items()]
+
+
+
+    
+
 
 @structref.register
-class SetChainingPlannerTypeTemplate(types.StructRef):
+class SetChainingPlannerTypeClass(types.StructRef):
     def __str__(self):
         return f"cre.SetChainingPlannerType"
-    def preprocess_fields(self, fields):
-        return tuple((name, types.unliteral(typ)) for name, typ in fields)
+    # def preprocess_fields(self, fields):
+    #     return tuple((name, types.unliteral(typ)) for name, typ in fields)
+
+
+
 
 
 class SetChainingPlanner(structref.StructRefProxy):
-    def __new__(cls):
+    def __new__(cls, fact_types):
         self = sc_planner_ctor()
         self.curr_infer_depth = 0
         self.max_depth = 0
@@ -294,11 +303,10 @@ class SetChainingPlanner(structref.StructRefProxy):
              search_depth=1, min_stop_depth=-1,context=None):
         return search_for_explanations(self, goal, ops, search_depth, min_stop_depth, context)
 
-    # def forward_chain_one(self,val):
 
 
-define_boxing(SetChainingPlannerTypeTemplate,SetChainingPlanner)
-SetChainingPlannerType = SetChainingPlannerTypeTemplate(SetChainingPlanner_fields)
+define_boxing(SetChainingPlannerTypeClass, SetChainingPlanner)
+GenericSetChainingPlannerType = SetChainingPlannerTypeClass([(k,v) for k,v in SetChainingPlanner_field_dict.items()])
 
 
 @njit(cache=True)
@@ -344,7 +352,7 @@ def ensure_ptr_dicts(planner, typ):
 
 
 @generated_jit(cache=True,nopython=True)
-@overload_method(SetChainingPlannerTypeTemplate, "declare")
+@overload_method(SetChainingPlannerTypeClass, "declare")
 def planner_declare(planner, val, var=None,
             visible_attrs=None, include_vis_at_def=True):
     '''Declares a primative value or fact (and its visible attributes)

@@ -26,26 +26,28 @@ import cloudpickle
 from cre.gval import get_gval_type, new_gval, gval as gval_type
 from cre.fact import DeferredFactRefType
 
-def get_semantic_visibile_fact_attrs(fact_types):
+
+
+
+def get_visibile_fact_attrs(fact_types):
     ''' Takes in a set of fact types and returns all (fact, attribute) pairs
-        for "is_semantic_visible" attributes. 
+        for "visible" attributes. 
     '''
     context = cre_context()
 
-    sem_vis_fact_attrs = {}
+    vis_fact_attrs = {}
     for ft in fact_types:
         ft = ft.instance_type if (isinstance(ft, (types.TypeRef,))) else ft
         parents = context.parents_of.get(ft._fact_name,[])
-        for attr, d in ft.spec.items():
-            if(d.get("is_semantic_visible", False)):
-                is_new = True
-                for p in parents:
-                    if((p,attr) in sem_vis_fact_attrs):
-                        is_new = False
-                        break
-                if(is_new): sem_vis_fact_attrs[(ft,attr)] = True
+        for attr in ft.filter_spec("visible"):
+            is_new = True
+            for p in parents:
+                if((p,attr) in vis_fact_attrs):
+                    is_new = False
+                    break
+            if(is_new): vis_fact_attrs[(ft,attr)] = True
 
-    return tuple([(fact_type,types.literal(attr)) for fact_type, attr in sem_vis_fact_attrs.keys()])
+    return tuple([(fact_type,types.literal(attr)) for fact_type, attr in vis_fact_attrs.keys()])
 
 # Flattener Struct Definition
 flattener_fields = {
@@ -86,7 +88,7 @@ t_id_alias_pair_type = Tuple((u2,unicode_type))
 u8_list = ListType(u8)
 
 def get_flattener_type(fact_types,id_attr):
-    fact_visible_attr_pairs = get_semantic_visibile_fact_attrs(fact_types)
+    fact_visible_attr_pairs = get_visibile_fact_attrs(fact_types)
     fact_visible_attr_pairs_type = typeof(fact_visible_attr_pairs)
     field_dict = {**flattener_fields,
                  "fact_visible_attr_pairs" : fact_visible_attr_pairs_type,
@@ -121,6 +123,7 @@ class Flattener(structref.StructRefProxy):
     def __new__(cls, fact_types, in_memset=None, id_attr="id",
                  out_memset=None, enumerizer=None, context=None):
         context = cre_context(context)
+        fact_types = tuple(fact_types)
 
         # Make new in_memset and out_memset if they are not provided.
         if(in_memset is None): in_memset = MemSet(context);
@@ -170,6 +173,12 @@ def get_in_memset(self):
 def get_ground_type(head_type,val_type):
     return 
 
+
+
+
+
+
+
 @generated_jit(cache=True, nopython=True)    
 def flattener_update_for_attr(self, fact, id_attr, attr):
     '''Implements the flattening of a particular attribute of a fact'''
@@ -183,6 +192,7 @@ def flattener_update_for_attr(self, fact, id_attr, attr):
     fact_type = fact
     t_id = fact_type.t_id
     base_var_type = get_var_type(fact_type)
+
 
     def impl(self, fact, id_attr, attr):
         # NOTE: upfront cost of ~2.5 ms/10k to handle change_events.

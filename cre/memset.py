@@ -26,7 +26,7 @@ import sys
 import cloudpickle
 import __main__
 
-from cre.context import _BaseContextful, CREContextDataType, CREContext, ensure_inheritance, cre_context
+from cre.context import CREContextDataType, CREContext, ensure_inheritance, cre_context
 from cre.transform import infer_type
 
 

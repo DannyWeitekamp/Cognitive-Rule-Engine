@@ -45,12 +45,13 @@ def tf_field_dict_from_types(member_types):
 def tf_get_item(tf,typ, index):
     return cre_obj_get_item(tf.asa(CREObjType),typ,index)
 
-from cre.fact import _gen_props, _gen_getter_jit
+from cre.fact import _gen_props, _gen_getter_jit, _gen_setter_jit
 def gen_tuple_fact_source(member_types, TF_T_ID, specialization_name=None, ind='    '):    
     # attr_offsets = get_offsets_from_member_types(member_types)
     base_fields = [(k,v) for k,v in base_fact_field_dict.items()]
-    getter_jits = "\n".join([_gen_getter_jit("TupleFact",t,attr) for attr,t in base_fields])
-    properties = "\n".join([_gen_props("TupleFact",attr) for attr,t in base_fields])
+    getter_jits = "\n".join([_gen_getter_jit("SpecializedTF",t,attr) for attr,t in base_fields])
+    setter_jits = "\n".join([_gen_setter_jit("SpecializedTF",attr,a_id) for a_id, (attr,t) in enumerate(base_fields)])
+    properties = "\n".join([_gen_props(attr) for attr,t in base_fields])
     init_fields = f'\n{ind}'.join([f"fact_lower_setattr(st, 'a{i}', members[{i}])" for i in range(len(member_types))])
     # print("::", member_types)
 # attr_offsets = np.array({attr_offsets!r},dtype=np.int16)    
@@ -69,7 +70,7 @@ import cloudpickle
 TF_T_ID = T_ID_TUPLE_FACT#{TF_T_ID}
 member_types = cloudpickle.loads({cloudpickle.dumps(member_types)})
 n_members = len(member_types)
-tf_fields = [(k,v) for k,v in tf_field_dict_from_types(member_types).items()]
+field_list = [(k,v) for k,v in tf_field_dict_from_types(member_types).items()]
 
 inheritance_bytes = tuple(list(uint_to_inheritance_bytes(T_ID_TUPLE_FACT)) + [u1(0)] + list(uint_to_inheritance_bytes({TF_T_ID}))) 
 num_inh_bytes = len(inheritance_bytes)
@@ -80,8 +81,8 @@ class SpecializedTFClass(TupleFactClass):
     def __str__(self):
         return '{specialization_name if specialization_name else "TupleFact"}'
 
-SpecializedTF = fact_type = SpecializedTFClass(tf_fields)
-SpecializedTF_w_mbr_infos = SpecializedTFClass(tf_fields+
+SpecializedTF = fact_type = SpecializedTFClass(field_list)
+SpecializedTF_w_mbr_infos = SpecializedTFClass(field_list+
 [("chr_mbrs_infos", UniTuple(member_info_type,{len(member_types)})),
  ("num_inh_bytes", u1),
  ("inh_bytes", UniTuple(u1, num_inh_bytes))])
@@ -116,6 +117,8 @@ def ctor({"*members" if len(member_types) > 0 else ""}):
 SpecializedTFClass._ctor = (ctor,)
 
 {getter_jits}
+
+{setter_jits}
 
 class SpecializedTFProxy(TupleFactProxy):
     __numba_ctor = ctor

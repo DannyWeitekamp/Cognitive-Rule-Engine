@@ -1,7 +1,7 @@
 #From here: https://github.com/znerol/py-fnvhash/blob/master/fnvhash/__init__.py
 import numba
 from numba import types, njit
-from numba import void,b1,u1,u2,u4,u8,i1,i2,i4,i8,f4,f8,c8,c16,types
+from numba import void,b1,u1,u2,u4,u8,i1,i2,i4,i8,f4,f8,c8,c16,types, boolean
 from numba.core.types import unicode_type, float64
 from numba.core.dispatcher import Dispatcher
 from numba.extending import intrinsic
@@ -34,6 +34,8 @@ def monkey_patch_caching(mod,exclude=[]):
 
 #These will be filled in if the user registers a new type
 TYPE_ALIASES = {
+    "boolean" : 'boolean',
+    "bool" : 'boolean',
     "float" : 'float64',
     "flt" : 'float64',
     "number" : 'float64',
@@ -46,6 +48,7 @@ TYPE_ALIASES = {
 JITSTRUCTS = {}                  
 
 numba_type_map = {
+    "boolean" : boolean,
     "float64" : float64,
     "unicode_type" : unicode_type,
     "string" : unicode_type,
@@ -57,6 +60,7 @@ py_type_map = {
     "unicode_type" : str,
     "string" : str,
     "number" : float,   
+    "bool" : bool,   
 }
 
 numpy_type_map = {

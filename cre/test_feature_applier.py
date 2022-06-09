@@ -31,15 +31,15 @@ def count_true_false(flat_mem):
 
 def test_feature_apply():
     with cre_context("test_feature_apply") as context:
-        spec1 = {"id" : {"type" : "string", "is_semantic_visible" : False},
-                 "u" : {"type" : "string", "is_semantic_visible" : True}, 
-                 "v" : {"type" : "number", "is_semantic_visible" : False}}
+        spec1 = {"id" : {"type" : "string", "visible" : False},
+                 "u" : {"type" : "string", "visible" : True}, 
+                 "v" : {"type" : "number", "visible" : False}}
         BOOP1 = define_fact("BOOP1", spec1)
         spec2 = {"inherit_from" : BOOP1,
-                 "q" : {"type" : "number", "is_semantic_visible" : True}}
+                 "q" : {"type" : "number", "visible" : True}}
         BOOP2 = define_fact("BOOP2", spec2)
         spec3 = {"inherit_from" : BOOP2,
-                 "x" : {"type" : "number", "is_semantic_visible" : True}}
+                 "x" : {"type" : "number", "visible" : True}}
         BOOP3 = define_fact("BOOP3", spec3)
    
         fa = FeatureApplier([eq_f8,eq_str],MemSet())
@@ -105,8 +105,8 @@ def test_feature_apply():
 
 
 with cre_context("feat_apply_100x100"):
-    spec ={ "A" : {"type" : "string", "is_semantic_visible" : True},
-            "B" : {"type" : "number", "is_semantic_visible" : True}
+    spec ={ "A" : {"type" : "string", "visible" : True},
+            "B" : {"type" : "number", "visible" : True}
           }
     BOOP = define_fact("BOOP", spec)
             # return (BOOP,), {}

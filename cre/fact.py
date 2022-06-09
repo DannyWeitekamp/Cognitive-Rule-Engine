@@ -43,13 +43,13 @@ SPECIAL_SPEC_ATTRIBUTES = ["inherit_from"]
 
 class Fact(CREObjTypeClass):
     def __init__(self, fields):
-        super(Fact, self).__init__(fields)        
+        super(Fact, self).__init__(fields)
 
     def __str__(self):
-        if(hasattr(self,"_specialization_name")):
-            return self._specialization_name
-        elif(hasattr(self, '_fact_name')):
+        if(hasattr(self, '_fact_name')):
             return self._fact_name
+        elif(hasattr(self,"_specialization_name")):
+            return self._specialization_name
         else:
             return "Fact"
 
@@ -92,8 +92,6 @@ class Fact(CREObjTypeClass):
             attr_type = attr_type.get()
         return attr_type
 
-
-
     def get_attr_offset(self,attr):
         return self._attr_offsets[self.get_attr_a_id(attr)]
 
@@ -109,6 +107,45 @@ class Fact(CREObjTypeClass):
         if len(args) > 0 and isinstance(args[0], types.Type):
             return signature(self, *args)
         return self._ctor[0](*args, **kwargs)
+
+    def filter_spec(self, *flags, and_or="and"):
+        if(len(flags) == 0): return self.clean_spec
+        flags = list(flags)
+
+        negated = np.empty(len(flags),dtype=np.bool_)
+        for i, flag in enumerate(flags):
+            if(flag[0] == "~"):
+                flags[i] = flag[1:]
+                negated[i] = True
+            else:
+                negated[i] = False
+
+        from cre.attr_filter import attr_filter_registry
+        for flag in flags:
+            if(flag not in attr_filter_registry):
+                raise ValueError(f"No filter registered under flag {flag!r}")
+
+        filtered_spec = {k:v for k,v in attr_filter_registry[flags[0]].get(self,negated[0])}
+        for i in range(1,len(flags)):
+            _fs = attr_filter_registry[flags[i]].get(self,negated[i])
+            if(and_or.lower() == "or"):
+                filtered_spec = {**_fs, **filtered_spec}
+            else:
+                filtered_spec = {k : v for k,v in _fs if k in filtered_spec}
+
+        return filtered_spec
+
+    @property
+    def clean_spec(self):
+        if(not hasattr(self,'_clean_spec')):
+            self._clean_spec = _clean_spec(self.spec)
+        return self._clean_spec
+
+    def __getstate__(self):
+        d = self.__dict__
+        if('_clean_spec' in d): del d['_clean_spec']
+        # if('spec' in d): del d['spec']
+        return d
 
 @generated_jit(cache=True)
 def call_untyped_fact(self, **kwargs):
@@ -257,16 +294,6 @@ def _standardize_type(typ, context, name='', attr=''):
     return typ
 
 
-# def _standardize_type(attr, attr_spec, context, name=''):
-    '''A helper function for _standardize_spec'''
-
-    # Extract typ_str + flags
-    
-    
-    
-
-    # return typ, rest
-
 def _merge_spec_inheritance(spec : dict, context):
     '''Expands a spec with attributes from its 'inherit_from' type'''
     if("inherit_from" not in spec): return spec, None
@@ -298,6 +325,19 @@ def _merge_spec_inheritance(spec : dict, context):
     del spec['inherit_from']
     return {**inherit_spec, **spec}, inherit_from
 
+def _standardize_conversions(conversions, attr_type, context):
+    from cre.op import UntypedOp
+    assert isinstance(conversions, dict), f"'conversions' expecting dict : type -> conversion_op, not {type(conversions)}."
+    stand_conv = {}
+    for conv_type, conv_op in conversions.items():
+        conv_type = _standardize_type(conv_type, context)
+        if(isinstance(conv_op, UntypedOp)): conv_op = conv_op(attr_type)
+        assert conv_op.signature.return_type == conv_type, f"{conv_op} does not return conversion type {conv_type}."
+        stand_conv[conv_type] = conv_op
+    return stand_conv
+
+    # attr_spec['conversions'] = {_standardize_type(k, context):v for }
+
 def _standardize_spec(spec : dict, context, name=''):
     '''Takes in a spec and puts it in standard form'''
 
@@ -311,8 +351,29 @@ def _standardize_spec(spec : dict, context, name=''):
         typ, attr_spec = (attr_spec['type'], attr_spec) if isinstance(attr_spec, dict) else (attr_spec, {})
         typ = _standardize_type(typ, context, name, attr)
 
+        if('conversions' in attr_spec): 
+            attr_spec['conversions'] = _standardize_conversions(attr_spec['conversions'], typ, context)
+
         out[attr] = {"type": typ,**{k:v for k,v in attr_spec.items() if k != "type"}}
     return out
+
+def _clean_spec(spec : dict):
+    '''Replaces any defferred types in a spec with their definitions'''
+    new_spec = {}
+    for attr, attr_spec in spec.items():
+        attr_t = attr_spec['type']
+        attr_t = attr_t.instance_type if (isinstance(attr_t, (types.TypeRef,DeferredFactRefType))) else attr_t
+
+        # Handle List case
+        if(isinstance(attr_t, types.ListType)):
+            item_t = attr_t.item_type
+            item_t = item_t.instance_type if (isinstance(item_t, (types.TypeRef,DeferredFactRefType))) else item_t
+            attr_t = types.ListType(item_t)
+        new_spec[attr] = {**attr_spec, 'type': attr_t}
+    return new_spec
+
+
+
 
 
 
@@ -332,8 +393,6 @@ class FactProxy(CREObjProxy):
 
         Parameters
         ----------
-        ty :
-            a Numba type instance.
         mi :
             a wrapped MemInfoPointer.
 
@@ -442,21 +501,8 @@ class FactProxy(CREObjProxy):
     def asa(self, typ):
         return asa(self,typ)
 
-    # def __str__(self):
-    #     return "duck"
     def __repr__(self):
         return str(self)
-
-
-
-        
-        
-
-
-
-    # def __setattr__(self,attr,val):
-    #     from cre.fact_intrinsics import fact_lower_setattr
-    #     fact_lower_setattr(self,attr,val)
 
 
 def gen_fact_import_str(t):
@@ -469,28 +515,33 @@ def _gen_getter_jit(f_typ,typ,attr):
     if(isinstance(typ,(Fact,DeferredFactRefType))):
         return \
 f'''@njit(cache=True)
-def {f_typ}_get_{attr}_as_ptr(self):
+def get_{attr}_as_ptr(self):
     return get_fact_attr_ptr(self, '{attr}')
 
 @njit(cache=True)
-def {f_typ}_get_{attr}(self):
+def get_{attr}(self):
     return self.{attr}
-    #_struct_from_ptr({typ._fact_name}Type, self.{attr})
 '''
     else:
         return \
 f'''@njit(cache=True)
-def {f_typ}_get_{attr}(self):
+def get_{attr}(self):
     return self.{attr}
 '''
 
-def _gen_props(typ,attr):
-    return f'''    {attr} = property({typ}_get_{attr},lambda s,v : lower_setattr(s,"{attr}",v))'''
+def _gen_setter_jit(f_typ, attr, a_id):
+    return f'''@njit(types.void({f_typ},field_list[{a_id}][1]), cache=True)
+def set_{attr}(self, val):
+    fact_mutability_protected_setattr(self,'{attr}',val)
+'''
 
-# from .structref import _gen_getter, _gen_getter_jit
+def _gen_props(attr):
+    return f'''    {attr} = property(get_{attr}, set_{attr})'''
 
 def get_type_default(t):
-    if(isinstance(t,(str,types.UnicodeType))):
+    if(isinstance(t,(bool,types.Boolean))):
+        return False
+    elif(isinstance(t,(str,types.UnicodeType))):
         return ""
     elif(isinstance(t,(float,types.Float))):
         return 0.0
@@ -521,33 +572,20 @@ def get_offsets_from_member_types(fields):
 
     return [struct_get_attr_offset(TempType,attr) for attr, _ in fields]
 
-# def repr_type(typ):
-#     '''Helper function for turning a type into code that reproduces it'''
-#     if(isinstance(typ,fact_types)):
-#         # To avoid various typing issues fact refs are just i8 (i.e. raw pointers)
-#         return 'BaseFact'
-#     elif(isinstance(typ, ListType)):
-#         # To avoid various typing issues lists of facts are stored with dtype BaseFact
-#         dt = typ.dtype
-#         dtype_repr = f'BaseFact' if(isinstance(dt,fact_types)) else repr(dt)
-#         return f'ListType({dtype_repr})'
-#     elif(isinstance(typ, UniTuple)):
-#         typ.type 
-
-#     else:
-#         return repr(typ)
 
 def repr_fact_attr(inst):
     if(inst is None): return 'None'
 
     inst_type = type(inst)
+    # cre_context().get
+    # print(isinstance(inst, Fact), str(inst_type))
     if(hasattr(inst_type,"_fact_type") and
         hasattr(inst_type._fact_type, "_specialization_name")):
         return str(inst)
 
     ptr = inst.get_ptr()
     if(ptr != 0):
-        return f'<{str(inst_type)} at {hex(ptr)}>'
+        return f'<{inst_type._fact_name} at {hex(ptr)}>'
     else:
         return 'None'
 
@@ -646,8 +684,9 @@ def gen_fact_src(typ, fields, t_id, inherit_from=None, specialization_name=None,
     all_fields = [(k,v) for k,v in _base_fact_field_dict.items()] + fields    # all_fields = [(k,v) for (k,v) in all_fields]
 
     # all_fields = base_fact_fields+fields
-    properties = "\n".join([_gen_props(typ,attr) for attr,t in all_fields])
+    properties = "\n".join([_gen_props(attr) for attr,t in all_fields])
     getter_jits = "\n".join([_gen_getter_jit(typ,t,attr) for attr,t in all_fields])
+    setter_jits = "\n".join([_gen_setter_jit(typ,attr,a_id) for a_id, (attr,t) in enumerate(all_fields)])
     # field_list = ",".join(["'%s'"%attr for attr,t in fields])
 
     param_defaults_seq = ",".join([f"{attr}={get_type_default(t)!r}" for attr,t in fields])
@@ -774,10 +813,7 @@ def ctor({param_defaults_seq}):
 
 {getter_jits}
 
-@njit(cache=True)
-def lower_setattr(self,attr,val):
-    fact_mutability_protected_setattr(self,literally(attr),val)
-
+{setter_jits}
         
 class {typ}Proxy(FactProxy):
     __numba_ctor = ctor
@@ -918,6 +954,8 @@ def define_fact(name : str, spec : dict = None, context=None, return_proxy=False
         # context._assert_flags(name, spec)
         context._register_fact_type(specialization_name, fact_type, inherit_from=inherit_from)
         _spec = spec if(spec is not None) else {}
+        # _spec = _undeffer_spec(_spec)
+        print({_id : str(config['type']) for _id, config in _spec.items()})
         fact_type.spec = _spec
         fact_type._fact_proxy.spec = _spec
         fact_type._fact_type_class._spec = _spec

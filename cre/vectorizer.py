@@ -16,7 +16,6 @@ from cre.utils import PrintElapse,encode_idrec, _func_from_address, _cast_struct
 from cre.structref import define_structref
 from numba.experimental import structref
 from cre.incr_processor import incr_processor_fields, IncrProcessorType, init_incr_processor
-from cre.memset import Memory, MemoryType
 from cre.structref import CastFriendlyStructref, define_boxing
 from numba.extending import overload_method, overload, lower_cast, SentryLiteralArgs
 from numba.experimental.function_type import _get_wrapper_address
@@ -46,6 +45,7 @@ def get_vectorizer_type(val_types):
 
 class Vectorizer(structref.StructRefProxy):
     def __new__(cls, val_types):
+        val_types = tuple(val_types)
         vectorizer_type = get_vectorizer_type(val_types)
         self = vectorizer_ctor(vectorizer_type)
         self._val_types = val_types

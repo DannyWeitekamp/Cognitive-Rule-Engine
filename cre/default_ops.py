@@ -101,3 +101,6 @@ def ObjIsNone(ptrs):
     return _load_ptr(i8,ptrs[0]) == 0
 
 
+@Op(shorthand = 'float({0})')
+def CastFloat(a):
+    return float(a)

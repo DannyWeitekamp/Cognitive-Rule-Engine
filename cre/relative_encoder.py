@@ -24,7 +24,7 @@ def _get_base_type(fact_type):
     parent = None
     while(hasattr(fact_type,'parent_type')):
         parent = fact_type = fact_type.parent_type
-    return parent
+    return parent if parent is not None else fact_type
 
 def assert_mutual_base(fact_types, id_attr):
     if(len(fact_types) == 1): return fact_types[0]
@@ -33,6 +33,7 @@ def assert_mutual_base(fact_types, id_attr):
         f_base = _get_base_type(fact_type)
         if(base is not None):
             assert f_base == base, "RelativeEncoder requires that all fact types inherit from a common base type."
+        
         base = f_base
 
     assert id_attr in base.spec, "Base type must define an identifier attribute (e.g. like id='fact_instance_name')"
@@ -50,26 +51,26 @@ def get_relational_fact_attrs(fact_types):
     for ft in fact_types:
         ft = ft.instance_type if (isinstance(ft, types.TypeRef)) else ft
         parents = context.parents_of.get(ft._fact_name,[])
-        for attr, d in ft.spec.items():
-            relational = False
-            attr_t = d['type']
-            attr_t = attr_t.instance_type if (isinstance(attr_t, (types.TypeRef,DeferredFactRefType))) else attr_t
-            if(isinstance(attr_t, Fact)): relational = True
-            if(isinstance(attr_t, types.ListType)):
-                item_t = attr_t.item_type
-                item_t = item_t.instance_type if (isinstance(item_t, (types.TypeRef,DeferredFactRefType))) else item_t
-                if(isinstance(item_t, Fact)): relational = True
-                attr_t = types.ListType(item_t)
+        for attr, attr_spec in ft.filter_spec("relational").items():
+            # relational = False
+            attr_t = attr_spec['type']
+            # attr_t = attr_t.instance_type if (isinstance(attr_t, (types.TypeRef,DeferredFactRefType))) else attr_t
+            # if(isinstance(attr_t, Fact)): relational = True
+            # if(isinstance(attr_t, types.ListType)):
+            #     item_t = attr_t.item_type
+            #     item_t = item_t.instance_type if (isinstance(item_t, (types.TypeRef,DeferredFactRefType))) else item_t
+            #     if(isinstance(item_t, Fact)): relational = True
+            #     attr_t = types.ListType(item_t)
 
-            relational = d.get("relational", relational)
+            # relational = d.get("relational", relational)
                 
-            if(relational):
-                is_new = True
-                for p in parents:
-                    if((p,attr) in rel_fact_attrs):
-                        is_new = False
-                        break
-                if(is_new): rel_fact_attrs[(ft,attr)] = attr_t
+            # if(relational):
+            is_new = True
+            for p in parents:
+                if((p,attr) in rel_fact_attrs):
+                    is_new = False
+                    break
+            if(is_new): rel_fact_attrs[(ft,attr)] = attr_t
 
     return tuple([(fact_type, attr_t, types.literal(attr)) for (fact_type, attr), attr_t in rel_fact_attrs.items()])
 
@@ -129,12 +130,13 @@ def get_relative_encoder_type(fact_types, id_attr):
     return re_type
 
 class RelativeEncoder(structref.StructRefProxy):
-    def __new__(cls, fact_types, in_ms=None, id_attr='id', context=None):
+    def __new__(cls, fact_types, in_memset=None, id_attr='id', context=None):
         # Make new in_ms and out_ms if they are not provided.
         context = cre_context(context)
-        if(in_ms is None): in_ms = MemSet(context);
+        fact_types=tuple(fact_types)
+        if(in_memset is None): in_memset = MemSet(context);
         re_type = get_relative_encoder_type(fact_types,id_attr)
-        self = RelativeEncoder_ctor(context.context_data, re_type, in_ms)
+        self = RelativeEncoder_ctor(context.context_data, re_type, in_memset)
         return self
 
     def encode_relative_to(self, ms, sources, source_vars):
@@ -146,7 +148,8 @@ class RelativeEncoder(structref.StructRefProxy):
         for i, v in enumerate(source_vars): 
             var_ptrs[i] = v.get_ptr()
 
-        return encode_relative_to(self, ms, source_idrecs, var_ptrs)
+        out_ms = encode_relative_to(self, ms, source_idrecs, var_ptrs)
+        return out_ms
 
     def update(self):
         RelativeEncoder_update(self)
@@ -282,10 +285,10 @@ def RelativeEncoder_reinit(self,size=32):
 
 # print("A")
 @njit(cache=True, nopython=True)
-def RelativeEncoder_ctor(context_data, re_type, in_ms):
+def RelativeEncoder_ctor(context_data, re_type, in_memset):
     # def impl(re_type, in_ms):
     st = new(re_type)
-    init_incr_processor(st, in_ms)
+    init_incr_processor(st, in_memset)
     RelativeEncoder_reinit(st)
     st.context_data = context_data
     st.lateral_w = f8(1.0)
@@ -508,10 +511,12 @@ def _ensure_dist_matrix_size(self):
 @njit(cache=True)
 def RelativeEncoder_update(self):
     change_events = self.get_changes()
+    
     # Need rebuild if there were any retractions or modifications to
     #  'relative' attributes. TODO: rebuilds could probably triggered
     #   more conservatively.
     need_rebuild = _check_needs_rebuild(self,change_events)
+    # print("<<", "need_rebuild", need_rebuild)
     if(need_rebuild):
         # If need_rebuild start bellman-ford shortest path from scratch
         RelativeEncoder_reinit(self)
@@ -522,12 +527,15 @@ def RelativeEncoder_update(self):
         update_relative_to(self, sources)    
     else:
         # Otherwise we can do an incremental update
+        # TODO: For some reason slower on second run. Might be in here
+        #  although could also be a cache locality thing.
         sources = List.empty_list(self.base_fact_type)
-        for change_event in change_events:
-            if(change_event.was_declared or change_event.was_modified):
-                fact = self.in_memset.get_fact(change_event.idrec, self.base_fact_type)
-                if(change_event.was_declared): _insert_fact(self,fact)
-                sources.append(fact)
+        for ce in change_events:
+            if(ce.was_declared or ce.was_modified):
+                if(ce.was_declared):
+                    fact = self.in_memset.get_fact(ce.idrec, self.base_fact_type)
+                    _insert_fact(self,fact)
+                    sources.append(fact)
         _ensure_dist_matrix_size(self)
         update_relative_to(self, sources)    
 
@@ -667,7 +675,6 @@ def encode_relative_to(self, gval_ms, source_idrecs, source_var_ptrs):
         if(head_t_id == T_ID_TUPLE_FACT):
             tf = _cast_structref(TupleFact, head)
             tf_copy = copy_cre_obj(tf)
-
             for i, (t_id, m_id, data_ptr) in enumerate(cre_obj_iter_t_id_item_ptrs(tf)):
                 if(t_id == T_ID_VAR):
                     v = _struct_from_ptr(GenericVarType, _load_ptr(i8,data_ptr))
@@ -679,7 +686,7 @@ def encode_relative_to(self, gval_ms, source_idrecs, source_var_ptrs):
             v = _cast_structref(GenericVarType, head)
             rel_var = rel_var_for_id(self, v.alias, source_idrecs, source_vars, s_inds, v.deref_infos)
             fact_copy.head = _cast_structref(CREObjType, rel_var)
-        rel_ms.declare(fact_copy)
 
+        rel_ms.declare(fact_copy)
     return rel_ms
             

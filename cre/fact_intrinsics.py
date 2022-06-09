@@ -191,7 +191,7 @@ def get_fact_attr_ptr(typingctx, inst_type, attr_type):
     return u8(inst_type,attr_type), codegen
 
 def fact_setattr_codegen(context, builder, sig, args, attr, mutability_protected=False):
-    from cre.fact import Fact, BaseFact
+    from cre.fact import Fact
     if(len(args) == 2):
         [inst_type, val_type] = sig.args
         [instance, val] = args

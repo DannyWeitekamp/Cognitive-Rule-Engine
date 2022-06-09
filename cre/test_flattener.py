@@ -15,14 +15,14 @@ def flat_ms_vals(flat_ms):
 
 def test_flatten():
     with cre_context("test_flatten") as context:
-        spec1 = {"A" : {"type" : "string", "is_semantic_visible" : True}, 
-                 "B" : {"type" : "number", "is_semantic_visible" : False}}
+        spec1 = {"A" : {"type" : "string", "visible" : True}, 
+                 "B" : {"type" : "number", "visible" : False}}
         BOOP1 = define_fact("BOOP1", spec1)
         spec2 = {"inherit_from" : BOOP1,
-                 "C" : {"type" : "number", "is_semantic_visible" : True}}
+                 "C" : {"type" : "number", "visible" : True}}
         BOOP2 = define_fact("BOOP2", spec2)
         spec3 = {"inherit_from" : BOOP2,
-                 "D" : {"type" : "number", "is_semantic_visible" : True}}
+                 "D" : {"type" : "number", "visible" : True}}
         BOOP3 = define_fact("BOOP3", spec3)
 
 
@@ -71,8 +71,8 @@ def test_flatten():
 # with cre_context("flat") as context:
 
 with cre_context("flatten_10000"):
-    spec ={ "A" : {"type" : "string", "is_semantic_visible" : True},
-            "B" : {"type" : "number", "is_semantic_visible" : True}
+    spec ={ "A" : {"type" : "string", "visible" : True},
+            "B" : {"type" : "number", "visible" : True}
           }
     BOOP = define_fact("BOOP", spec)
             # return (BOOP,), {}
@@ -87,7 +87,7 @@ def setup_flatten():
     with cre_context("flatten_10000"):
         ms = MemSet()
         ms.declare(BOOP("HI",-1))
-        fl = Flattener((BOOP,),in_ms=ms,id_attr="A",)
+        fl = Flattener((BOOP,),in_memset=ms,id_attr="A",)
         fl.update()
         _b_dec_10000(ms)
         
@@ -95,7 +95,7 @@ def setup_flatten():
 
 def do_flatten(fl,ms):
     fl.update()
-    return fl.out_ms
+    return fl.out_memset
 
 def test_b_flatten_10000(benchmark):
     benchmark.pedantic(do_flatten,setup=setup_flatten, warmup_rounds=1, rounds=10)

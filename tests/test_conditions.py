@@ -302,11 +302,6 @@ def test_hash():
         assert hsh(a1) != hsh(b3)
 
 
-
-
-        
-
-
 @njit(cache=True)
 def eq(a,b):
     return _cast_structref(CREObjType, a)==_cast_structref(CREObjType, b)
@@ -363,67 +358,46 @@ def test_eq():
         assert not eq(a1,b2)
         assert not eq(a1,b3)
 
-from cre.conditions import conds_to_lit_sets, best_intersection, make_base_ptrs_to_inds, score_remaps
+from cre.conditions import conds_to_lit_sets, make_base_ptrs_to_inds, score_remaps
 def test_anti_unify():
     x, y, z = Var(f8,'x'), Var(f8,'y'), Var(f8,'z')
     a, b, c, d = Var(f8,'a'), Var(f8,'b'), Var(f8,'c'), Var(f8,'d')
 
+    # Single Conjunction Case
     c1 = (x < y) & (y < z) & (y < z) & (z != x) & (y != 0) 
     c2 = (a < b) & (b < c) & (b < c) & (b < c) & (c != a) & (b != 0) & (d != 0)
+    c12_ref = ((x < y) & (y < z) & (y < z) & (z != x) & (y != 0))
 
+    c12 = c1.antiunify(c2) 
 
-    conds_antiunify(c1,c2)
+    assert str(c12) == str(c12_ref)
 
-
-    c1 = ((x < y) & (z != x) & (y != 0) |
-          (x < y) & (z == x) & (y != 7) | 
-          (x > y) & (z != x) & (y != 2)
+    # Disjunction of Conjunctions Case
+    c1 = ((x < y) & (z != x) & (y != 0) | # 1
+          (x < y) & (z == x) & (y != 7) | # 2
+          (x > y) & (z != x) & (y != 2)   # 3
          )
 
-    c2 = ((a < b) & (c == a) & (b != 7) & (d > 0) |
-          (a < b) & (c != a) & (b != 0) |
-          (a > b) & (c != a) & (b != 0) & (d != 7)
+    c2 = ((a < b) & (c == a) & (b != 7) & (d > 0) | #2
+          (a < b) & (c != a) & (b != 0) |           #1
+          (a > b) & (c != a) & (b != 0) & (d != 7)  #3
          )
 
-    conds_antiunify(c1,c2)
+    c12_ref = ((x < y) & (z != x) & (y != 0) |\
+              (x < y) & (z == x) & (y != 7) |\
+              (x > y) & (z != x))
 
+    c12, score = c1.antiunify(c2,return_score=True) #conds_antiunify(c1,c2)
+
+    assert str(c12) == str(c12_ref)
+    assert score == 8./9.
     
-    # score_remaps()
-
-    # For ? < ?
-    # x -> [1,1,0,0]
-    # y -> [1,1,1,0]
-    # z -> [0,1,1,0]
-    # test_frzn_ind_arr_type()
-    # raise ValueError()
-
-    # lsl1 = conds_to_lit_sets(c1)
-    # lsl2 = conds_to_lit_sets(c2)
-
-    # # print(lsl1[0].keys())
-    # bpti1 = make_base_ptrs_to_inds(c1)
-    # bpti2 = make_base_ptrs_to_inds(c2)
-    # score_remaps(lsl1[0], lsl2[0], bpti1, bpti2)
-    # score_remaps(lsl2[0], lsl1[0], bpti2, bpti1)
-
-
-
-
-
-    
-
-
-
-# import logging
-# print([name for name in logging.root.manager.loggerDict])
-# logger = logging.getLogger()
-# logger.setLevel(logging.DEBUG)
 
 if(__name__ == "__main__"):
-    # test_anti_unify()
+    test_anti_unify()
     # test_unconditioned()
     # test_build_conditions()
-    test_list_operations()
+    # test_list_operations()
     # test_link()
     # test_initialize()
     # for i in range(10):

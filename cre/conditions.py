@@ -459,13 +459,13 @@ def conds_get_distr_dnf(self):
 
 
 
-
-@overload_method(ConditionsTypeClass,'get_matches')
-def impl_get_matches(self,ms=None):
-    from cre.matching import get_matches
-    def impl(self,ms=None):
-        return get_matches(get_matches)
-    return impl
+# TODO: Reimplement
+# @overload_method(ConditionsTypeClass,'get_matches')
+# def impl_get_matches(self,ms=None):
+#     from cre.matching import get_matches
+#     def impl(self,ms=None):
+#         return get_matches(ms)
+#     return impl
 
 
 @njit(cache=True)

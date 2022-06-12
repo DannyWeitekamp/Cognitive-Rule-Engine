@@ -168,14 +168,14 @@ class MemSet(structref.StructRefProxy):
 
     def __str__(self,**kwargs):
         from cre.utils import PrintElapse
-        with PrintElapse("__STR__"):
-            return self._repr_helper(str,**kwargs)
+        # with PrintElapse("__STR__"):
+        return self._repr_helper(str,**kwargs)
 
 
     def __repr__(self,**kwargs):
         from cre.utils import PrintElapse
-        with PrintElapse("__REPR__"):
-            return self._repr_helper(repr,**kwargs)
+        # with PrintElapse("__REPR__"):
+        return self._repr_helper(repr,**kwargs)
     
 
     def __del__(self):        

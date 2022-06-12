@@ -106,6 +106,10 @@ class Fact(CREObjTypeClass):
             otherwise use it's ctor to return a new instance'''
         if len(args) > 0 and isinstance(args[0], types.Type):
             return signature(self, *args)
+
+        # Ensure that any lists are converted to typed lists
+        args = [List(x) if(isinstance(x,list)) else x for x in args]
+        kwargs = {k: (List(v) if(isinstance(v,list)) else v) for k,v in kwargs.items()}
         return self._ctor[0](*args, **kwargs)
 
     def filter_spec(self, *flags, and_or="and"):

@@ -107,7 +107,7 @@ def ms_w_n_boops(n,BOOP):
 def test_ref_matching():
     ''' This mostly tests PtrOps '''
     with cre_context("test_ref_matching"):
-        TestDLL = define_fact("TestDLL",{"name": "string", "prev" : "TestDLL", "next" : "TestDLL"})
+        TestDLL = define_fact("TestDLL", {"name": "string", "prev" : "TestDLL", "next" : "TestDLL"})
         ms = MemSet()
 
         #a -> b -> c
@@ -585,10 +585,8 @@ if(__name__ == "__main__"):
     test_ref_matching()
     test_multiple_deref()
     # test_matching_unconditioned()
-    test_ref_matching()
     test_list()
     test_multiple_types()
-    test_ref_matching()
     # import pytest.__main__.benchmark
     # matching_1_t_4_lit_setup()
     # _test_NOT()

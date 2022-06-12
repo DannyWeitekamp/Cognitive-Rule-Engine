@@ -10,30 +10,9 @@ import  cre.dynamic_exec
 
 BOOP = define_fact("BOOP",{"A": "string", "B" : "number"})
 
-def test_aliasing():
+#TODO: would be nice to have functionality like x:=Var(BOOP) => Var(BOOP,'x')
+def _test_auto_aliasing():
     pass
-
-# @njit(cache=True)
-# def first_alpha(c):
-#     return c.dnf[0][0][0].is_alpha
-
-# @njit(cache=True)
-# def first_beta(c):
-#     return c.dnf[0][1][0].is_alpha 
-
-# def test_literal():
-#     with cre_context("test_literal"):
-#         # BOOP = define_fact("BOOP",{"A": "string", "B" : "number"})
-#         l1, l2 = Var(BOOP,"l1"), Var(BOOP,"l2")
-#         c1 = l1.B < 1
-#         print(first_alpha(c1))
-#         # print(c1.dnf[0][0][0].is_alpha)
-#         c2 = l1.B < l2.B
-#         print(first_beta(c2))
-#         # print(c1.dnf[0][1][0].is_alpha)
-
-
-
 
 # @njit(cache=True)
 def test_build_conditions():
@@ -110,8 +89,6 @@ def test_build_conditions():
 (l1.B == 5) & (l1.B == 5) & (l1.B == l2.B) & ~(l1.B == l2.B)'''
         assert str(c3 | c4) == c3_or_c4_str
 
-    # l1, l2 = Var(BOOP,"l1"), Var(BOOP,"l2")
-
 
 list_i8 = ListType(i8)
 list_list_i8 = ListType(ListType(i8))
@@ -134,29 +111,6 @@ def var_get_ptr(var):
 @njit(cache=True)
 def cond_get_vars(cond):
     return cond.vars
-
-# def test_initialize():
-#     with cre_context("test_initialize"):
-#         # BOOP = define_fact("BOOP",{"A": "string", "B" : "number"})
-
-#         l1, l2 = Var(BOOP,"l1"), Var(BOOP,"l2")
-#         r1, r2 = Var(BOOP,"r1"), Var(BOOP,"r2")
-
-#         c = (l1.B < 1) & (l1.B > 7) & (l2.B < r1.B) & (r2.B < l1.B)# |\
-#              # (l2.B < 1) & (l2.B > 7) & (l2.B < r1.B) & (r1.B < r2.B) |\
-#              # (l2.B < 1) & (l2.B > 7) & (l2.B < r1.B) & (l1.B < l2.B)
-
-#         assert [x.alias for x in cond_get_vars(c)] == ['l1','l2','r1','r2']
-
-#         initialize_conditions(c)
-#         print("DONE")
-#         alpha_sizes, beta_sizes = get_init_cond_sizes(c)
-
-        
-#         print(alpha_sizes)
-#         print(beta_sizes)
-#         assert [list(x) for x in alpha_sizes] == [[2, 0, 0, 0], [0, 2, 0, 0], [0, 2, 0, 0]]
-#         assert [list(x) for x in beta_sizes] == [[1, 1], [1, 1], [1, 1]]
 
 
 @njit(cache=True)
@@ -237,8 +191,6 @@ def test_list_operations():
 
         c = v.items[0] != v.items[1]
         assert str(c) == "~(v.items[0] == v.items[1])"
-
-
 
 @njit(cache=True)
 def hsh(x):

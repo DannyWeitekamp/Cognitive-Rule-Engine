@@ -909,6 +909,7 @@ def update_node(self):
     # garbage = 0
     # return
     # (Beta 125 us)
+    # print("D")
     for i in range(n_vars):
         idrecs_to_inds_i = self.idrecs_to_inds[i]
         head_ptrs_i = self.head_ptr_buffers[i]
@@ -1016,17 +1017,20 @@ def update_node(self):
             input_state_buffers_i = self.input_state_buffers[i]
             # ALPHA CASE 
             for ind_i in changed_inds_i:
+                # print("loop")
                 inp_state_i=  input_state_buffers_i[ind_i]
                 # if(not inp_state_i.head_was_valid): continue
                 idrec_i = inp_state_i.idrec
                 t_id_i, f_id_i, a_id_i = decode_idrec(idrec_i)
                 idrec_i = encode_idrec(t_id_i, f_id_i, 0)
 
+                # print("start slice", match_inp_ptrs, i_strt, i_strt+i_len)
+                # print("hp", head_ptrs_i, ind_i)
                 match_inp_ptrs[i_strt:i_strt+i_len] = head_ptrs_i[ind_i]
 
                 # print("alpha",match_inp_ptrs)
                 is_match = match_head_ptrs_func(match_inp_ptrs) ^ negated
-
+                # print("is_match", is_match)
                 inp_state_i.true_count = i8(is_match)
             # print("ALPHA CASE END")
 
@@ -1053,6 +1057,8 @@ def update_node(self):
     #     print(alpha_matches_to_str(self.outputs[0].matches))   
     # print("LOOP")
     # if(n_vars > 1):
+
+    # print("E")
     for i, out_i in enumerate(self.outputs):
         change_ind = 0
         match_ind = 0
@@ -1130,7 +1136,7 @@ def update_node(self):
         out_i.match_idrecs = out_i.match_idrecs_buffer[:match_ind]
         out_i.match_inds = out_i.match_inds_buffer[:match_ind]
         out_i.change_set = out_i.change_buffer[:change_ind]
-
+    # print("F")
         # print("match_idrecs", out_i.match_idrecs)
         # print("match_inds", out_i.match_inds)
         # print("change_set", np.array([decode_idrec(x)[1] for x in out_i.change_set]))
@@ -2017,21 +2023,24 @@ def fact_ptrs_as_tuple(typs, ptr_arr):
 def update_graph(graph):
     # print("START UP")
     parse_change_queue(graph)
+    # print("PARSED")
     for lst in graph.nodes_by_nargs:
         for node in lst:
+            # print(node)
             update_node(node)        
     # print("END UPDATE")
 
 
 @njit(GenericMatchIteratorType(MemSetType, ConditionsType), cache=True)
 def get_match_iter(ms, conds):
-    # print("START")
+    # print("START", conds.matcher_inst_ptr)
     if(i8(conds.matcher_inst_ptr) == 0):
         rete_graph = build_rete_graph(ms, conds)
         # conds.matcher_inst_meminfo = _meminfo_from_struct(rete_graph)
         conds.matcher_inst_ptr = _ptr_from_struct_incref(rete_graph)
-    # print("BUILT")
+    # print("BUILT", conds.matcher_inst_ptr)
     rete_graph = _struct_from_ptr(ReteGraphType, conds.matcher_inst_ptr)
+    # print("LOADED")
     update_graph(rete_graph)
     # print("UPDATED")
     m_iter = new_match_iter(rete_graph)

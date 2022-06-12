@@ -212,7 +212,9 @@ def test_commutes():
     print(Add3.commutes)
     assert Add3.commutes == [[0,1,2]]
     print(Add3.right_commutes)
-    assert str(Add3.right_commutes) == '{2: array([0, 1]), 1: array([0])}'
+    rc_str = str(Add3.right_commutes)
+    assert "2: array([0, 1]" in rc_str
+    assert "1: array([0]" in rc_str
 
     with pytest.raises(AssertionError):
         class Floop(Op):

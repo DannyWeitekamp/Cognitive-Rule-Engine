@@ -888,7 +888,7 @@ if __name__ == "__main__":
     # _test_reference_type()
     # test_hash()
     # test_eq()
-    # test_copy()
+    test_copy()
     # test_weird_case()
     # test_inheritence()
     # test_inheritence_bytes()

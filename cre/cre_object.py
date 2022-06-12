@@ -518,7 +518,7 @@ def asa(self, typ):
 
 
 # from cre.utils import _raw_ptr_from_struct, _struct_from_ptr, _store, _cast_structref, decode_idrec, encode_idrec, _incref_ptr, _load_ptr
-@generated_jit(cache=True)
+@generated_jit(cache=True,nopython=True)
 def copy_cre_obj(fact):
     fact_type = fact
     def impl(fact):
@@ -534,6 +534,10 @@ def copy_cre_obj(fact):
             if(m_id_b != PRIMITIVE_MBR_ID):
                 obj_ptr = _load_ptr(i8, data_ptr_a)
                 _incref_ptr(obj_ptr)
+            elif(t_id_a == T_ID_STR):
+                s = _load_ptr(unicode_type, data_ptr_a)
+                _incref_structref(s)
+                #_store(unicode_type, data_ptr_b, s)
 
         return new_fact
     return impl

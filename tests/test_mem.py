@@ -436,7 +436,7 @@ def test_b_encode_idrec(benchmark):
 #### b_decode_idrec ####
 
 def gen_rand_idrecs():
-    return (np.random.randint(0xFFFFFFFF,size=(10000,)),), {}
+    return (np.random.randint(0xFFFFFFFF,size=(10000,),dtype=np.uint64),), {}
 
 @njit(cache=True)
 def _b_decode_idrec(rand_idrecs):

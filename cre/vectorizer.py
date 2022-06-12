@@ -24,6 +24,7 @@ from cre.gval import get_gval_type, new_gval, gval as gval_type
 from cre.vector import VectorType, new_vector
 from cre.incr_processor import incr_processor_fields, IncrProcessorType, init_incr_processor, ChangeEventType
 from itertools import chain
+import cre.dynamic_exec
 
 vectorizer_fields = {
     "head_to_slot_ind" : DictType(CREObjType, i8),
@@ -59,7 +60,7 @@ class Vectorizer(structref.StructRefProxy):
 
 define_boxing(VectorizerTypeClass, Vectorizer)
 
-@generated_jit(cache=True)    
+@generated_jit(cache=True, nopython=True)    
 def vectorizer_ctor(struct_type):
     def impl(struct_type):    
         st = new(struct_type)

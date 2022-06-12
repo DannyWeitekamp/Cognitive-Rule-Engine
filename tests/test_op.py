@@ -1,8 +1,9 @@
 from numba import f8, njit
 from numba.core.errors import NumbaPerformanceWarning
 from numba.types import  FunctionType, unicode_type
+from numba.typed import  List, Dict
 import numpy as np
-from cre.op import Op, GenericOpType
+from cre.op import Op, GenericOpType, op_copy
 from cre.default_ops import Add
 from cre.var import Var
 from cre.utils import _func_from_address, _cast_structref
@@ -161,7 +162,7 @@ def test_source_gen():
     assert TimesDoublePlusOne.check(1,1) == True
     
     assert TimesDoublePlusOne.gen_expr(use_shorthand=True) == '(((x*2)+1)*y)'
-    assert TimesDoublePlusOne.gen_expr(use_shorthand=False) == 'Multiply(Add(Multiply(x,2),1),y)'
+    assert TimesDoublePlusOne.gen_expr(use_shorthand=False) == 'Multiply(Add(Multiply(x, 2), 1), y)'
     assert TimesDoublePlusOne.gen_expr(lang='javascript',use_shorthand=True) == '(((x*2)+1)*y)'
 
     assert str(DoublePlusOne) == "((x*2)+1)"
@@ -232,16 +233,16 @@ def test_fact_args():
         BOOP = define_fact("BOOP", spec)
 
         op = Add(Var(BOOP,'x').B, Var(BOOP,'y').B)
-        assert str(op) == "Add(x.B,y.B)"
+        assert str(op) == "Add(x.B, y.B)"
         assert op(BOOP("A",1),BOOP("B",2)) == 3.0
 
         vb = Var(BOOP,'v').B
         op = Add(vb,vb)
-        assert str(op) == 'Add(v.B,v.B)'
+        assert str(op) == 'Add(v.B, v.B)'
         assert op(BOOP("A",1)) == 2.0
 
         op = Add(vb,Add(vb,Var(BOOP, 'u').B))
-        assert str(op) == 'Add(v.B,Add(v.B,u.B))'
+        assert str(op) == 'Add(v.B, Add(v.B, u.B))'
         assert op(BOOP("A",1), BOOP("B",2)) == 4.0
 
 
@@ -592,6 +593,22 @@ def test_eq():
     # assert a1 != b1
     # assert a1 != b2
 
+def test_copy():
+    x, y, z = Var(f8,'x'), Var(f8,'y'), Var(f8,'z')
+    x2, y2, z2 = Var(f8,'x2'), Var(f8,'y2'), Var(f8,'z2 ')
+    o = (x + z) + (y + z)
+
+    new_base_vars = List([x2, y2, z2])
+    c1 = op_copy(o)
+    c2 = op_copy(o, new_base_vars)
+
+    assert str(o) == str(c1)
+    assert str(o) != str(c2)
+
+    # NOTE/TODO: extra space in str???
+    # assert str(o) == str(c2).replace("2", "")
+    
+
 
 import time
 class PrintElapse():
@@ -625,11 +642,12 @@ if __name__ == "__main__":
     #     test_source_gen()
 
     #     test_commutes()
-    test_fact_args()
+    # test_fact_args()
     # test_head_ptrs_ranges()
-    # not_jit_compilable()
+    not_jit_compilable()
     # test_ptr_ops()
     # test_hash()
     # test_eq()
+    test_copy()
             
 

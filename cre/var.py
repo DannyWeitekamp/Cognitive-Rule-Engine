@@ -64,6 +64,10 @@ var_fields_dict = {
     # 'head_type_name': unicode_type,
     'base_type': types.Any,
     'head_type': types.Any,
+
+    # # Put the hashes of the head  
+    # 'literal_base_hash' : types.Any,
+    # 'literal_head_hash' : types.Any,
 }
 
 var_fields =  [(k,v) for k,v, in var_fields_dict.items()]
@@ -264,10 +268,11 @@ class Var(CREObjProxy):
 
     def __str__(self):
         prefix = "NOT" if(self.is_not) else "Var"
+        base_name = self.base_type._fact_name if hasattr(self.base_type,'_fact_name') else str(self.base_type)
         if(self.alias != ""):
-            base = f'{prefix}({self.base_type},{self.alias!r})'
+            base = f'{prefix}({base_name},{self.alias!r})'
         else: 
-            base = f'{prefix}({self.base_type})'
+            base = f'{prefix}({base_name})'
         # print(self.deref_attrs)
         return base + self.deref_attrs_str
 
@@ -670,7 +675,11 @@ def get_var_type(base_type, head_type=None):
     t = (base_type, head_type)
     if(t not in var_type_cache):
         # print((str(t[0]),str(t[1])), t[0].t_id)
-        d = {**var_fields_dict,**{'base_type':types.TypeRef(base_type), 'head_type':types.TypeRef(head_type)}}
+        d = {**var_fields_dict,**{
+            'base_type': types.TypeRef(base_type),
+            'head_type': types.TypeRef(head_type),
+            }}
+
         struct_type = VarTypeClass([(k,v) for k,v, in d.items()])
         var_type_cache[t] = struct_type
         return struct_type
@@ -825,6 +834,8 @@ def var_append_deref(self, attr):
     head_t_id = cre_context().get_t_id(_type=head_type)
     
     var_struct_type = get_var_type(base_type, head_type)
+
+    print("CONSTR VAR", base_type, head_type, self.name)
     # print("<<", var_struct_type)
     if(isinstance(attr,int)):
         typ = DEREF_TYPE_ATTR

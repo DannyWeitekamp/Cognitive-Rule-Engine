@@ -293,6 +293,8 @@ def op_define_boxing(struct_type, obj_class):
         return NativeValue(out)
 
 
+
+
 GenericOpType = OpTypeClass([(k,v) for k,v in op_fields_dict.items()])
 register_global_default("Op", GenericOpType)
 
@@ -309,7 +311,7 @@ class UntypedOp():
         if(not hasattr(self,"_arg_names")):
             f = self.members['call']
             py_func = f.py_func if isinstance(f, Dispatcher) else f
-            self._arg_names = inspect.getfullargspec(f)[0]
+            self._arg_names = inspect.getfullargspec(py_func)[0]
         return self._arg_names
 
     def __repr__(self):
@@ -423,6 +425,7 @@ class UntypedOp():
             if(sig not in self._specialize_cache):
                 # print("MISS", sig)
                 op_cls = new_op(self.name, members,return_class=True)
+                # op_cls.__reduce__ = lambda : (new_op, (self.name, ), {"return_class":True})
                 self._specialize_cache[sig] = op_cls
                 # op_cls.__qualname__ = self.__qualname__ + 
             # else:
@@ -623,11 +626,43 @@ def op_ctor(name, return_type_name, return_t_id, arg_type_names, head_var_ptrs, 
     return st
 
 
+@intrinsic
+def _copy_op(typingctx, inst_type):
+    # from cre.utils import _meminfo_copy_unsafe
+    from numba.experimental.jitclass.base import imp_dtor
+    def codegen(context, builder, signature, args):
+        inp_op = args[0]
+        ctor = cgutils.create_struct_proxy(inst_type)
+        inp_op_struct = ctor(context, builder, value=inp_op)
+        # meminfo = dstruct.meminfo
+
+        model = context.data_model_manager[inst_type.get_data_type()]
+        alloc_type = model.get_value_type()
+        alloc_size = context.get_abi_sizeof(alloc_type)
+
+        meminfo = context.nrt.meminfo_alloc_dtor(
+            builder,
+            context.get_constant(types.uintp, alloc_size),
+            imp_dtor(context, builder.module, inst_type),
+        )
+        data_pointer = context.nrt.meminfo_data(builder, meminfo)
+        data_pointer = builder.bitcast(data_pointer, alloc_type.as_pointer())
+
+        # Nullify all data
+        builder.store(cgutils.get_null_value(alloc_type), data_pointer)
+
+        inst_struct = context.make_helper(builder, inst_type)
+        inst_struct.meminfo = meminfo
+        inst_struct.py_class = inp_op_struct.py_class
+        return inst_struct._getvalue()
+
+
+    sig = inst_type(inst_type)
+    return sig, codegen
+
 @njit(cache=True)
 def op_copy(op, new_base_vars=None):
-    
-
-    st = new(GenericOpType)
+    st = _copy_op(op)
     st.idrec = op.idrec#encode_idrec(T_ID_OP, 0, 0)
     st.name = op.name
     st.return_type_name = op.return_type_name
@@ -668,11 +703,15 @@ def op_copy(op, new_base_vars=None):
     st.head_ranges = op.head_ranges 
     st.expr_template = op.expr_template
     st.shorthand_template = op.shorthand_template
-            
+    
+    st.call_heads_addr = op.call_heads_addr
+    st.call_head_ptrs_addr = op.call_head_ptrs_addr
     st.call_addr = op.call_addr
-    st.call_multi_addr = op.call_multi_addr
-    st.check_addr = op.check_addr
+    st.match_heads_addr = op.match_heads_addr
     st.match_head_ptrs_addr = op.match_head_ptrs_addr
+    st.match_addr = op.match_addr
+    st.check_addr = op.check_addr
+
     st.is_ptr_op = op.is_ptr_op
 
     return st
@@ -707,6 +746,10 @@ def new_op(name, members, head_vars=None, return_class=False):
     cls = type.__new__(OpMeta, name, (Op,), members) # (cls, name, bases, dct)
     # print(">>", cls)
     cls.__reduce__ = lambda self : (OpMeta,(name,(Op,),members))
+    # cls.__reduce__ = lambda self : (new_op,(name,members))
+    # cls.__getstate__ = lambda self : (name, members)
+    # cls.__setstate__ = lambda name, members : new_op(name, {**members}, return_class=True) 
+    # cls.__qualname__ = f'{members["call"].__qualname__}.__class__' 
     
     cls.__module__ = members["call"].__module__
     # cls.__qualname__ = f"{cls.__module__}.{name}(signature={members['signature']})" 
@@ -809,18 +852,18 @@ class OpMeta(type):
         ''' A decorator function that builds a new Op'''
         if(len(args) > 1): raise ValueError("Op() takes at most one position argument 'signature'.")
         
-        def wrapper(call_func):
-            assert hasattr(call_func,"__call__")
+        def wrapper(call_pyfunc):
+            assert hasattr(call_pyfunc,"__call__")
 
-            name = call_func.__name__
+            name = call_pyfunc.__name__
             members = kwargs
-            members["call"] = call_func
+            members["call"] = call_pyfunc
 
             op = new_op(name, members)
 
             # Since decorator replaces, ensure original function is pickle accessible. 
-            op.py_func = call_func
-            call_func.__qualname__  = call_func.__qualname__ + ".py_func"
+            # op.py_func = call_func
+            call_pyfunc.__qualname__  = call_pyfunc.__qualname__ + ".py_func"
             # print("<<call_func", type(call_func))
             return op
 
@@ -891,6 +934,7 @@ class OpMeta(type):
 
     def _handle_defaults(cls):
         # By default use the variable names that the user defined in the call() fn.
+        print(cls.call_pyfunc)
         cls.default_arg_names = inspect.getfullargspec(cls.call_pyfunc)[0]
         cls.default_vars = new_vars_from_types(cls.call_sig.args, cls.default_arg_names)
 
@@ -906,7 +950,7 @@ class OpMeta(type):
         
 
 
-    def process_method(cls,name,sig):
+    def process_method(cls,name, sig):
         if(not hasattr(cls, name+"_pyfunc")):
             func = getattr(cls,name)
             if(isinstance(func, Dispatcher)):
@@ -940,6 +984,8 @@ class OpMeta(type):
         return cls._long_hash
 
 
+    # def __getstate__(self) = lambda self : (name, members)
+    # cls.__setstate__ = lambda name, members : new_op(name, {**members}, return_class=True) 
     # def __del__(cls):
 
         # # pass
@@ -968,6 +1014,7 @@ class Op(CREObjProxy,metaclass=OpMeta):
         instance = super(structref.StructRefProxy,cls).__new__(cls)
         instance._type = ty
         instance._meminfo = mi
+        # print("<<", py_cls, ty)
         if(isinstance(py_cls,OpMeta)):# is not None):
             instance.__class__ = py_cls# is not None):
 
@@ -1271,7 +1318,7 @@ class Op(CREObjProxy,metaclass=OpMeta):
             E.g. Multiply(Add(x,y),2).gen_expr() -> "Multiply(Add(x,y),2)"
                  or if shorthands are defined -> "((x+y)*2)" '''
         if(arg_names is None):
-            arg_names = get_arg_seq(self).split(",") 
+            arg_names = get_arg_seq(self).split(", ") 
         if(hasattr(self,'op_comp')):
             return self.op_comp.gen_expr(
                 lang=lang,
@@ -1284,7 +1331,7 @@ class Op(CREObjProxy,metaclass=OpMeta):
                 template = resolve_template(lang,self.shorthand,'shorthand')
                 return template.format(*arg_names)
             else:
-                return f"{self.name}({','.join(arg_names)})"
+                return f"{self.name}({', '.join(arg_names)})"
 
     # Make Source:
     @make_source('*')
@@ -1425,7 +1472,7 @@ def get_arg_seq(self,type_annotations=False):
             s += ":" + get_base_type_name(v)#.base_type_name
 
         if(i < len(self.inv_base_var_map)-1): 
-            s += "," + (" " if type_annotations else "")
+            s += ", " + (" " if type_annotations else "")
     return s
 
 @njit(cache=True)

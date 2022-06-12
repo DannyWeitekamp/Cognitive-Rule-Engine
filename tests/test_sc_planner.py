@@ -13,6 +13,7 @@ from cre.utils import _ptr_from_struct_incref, _list_from_ptr, _dict_from_ptr, _
 from cre.var import Var
 from cre.context import cre_context
 from cre.fact import define_fact
+from cre.default_ops import CastFloat, CastStr
 from numba.core.runtime.nrt import rtsys
 import gc
 
@@ -157,7 +158,7 @@ def test_insert_record():
 
     assert len_f_recs(planner,'float64',1) == 1
 
-@generated_jit(cache=True)
+@generated_jit(cache=True, nopython=True)
 def summarize_depth_vals(planner, typ, depth):
     ''' Returns a summary of unique values of type 'typ' at 'depth':
         (len(flat_vals), min(flat_vals), max(flat_vals),
@@ -171,6 +172,8 @@ def summarize_depth_vals(planner, typ, depth):
     if(isinstance(_typ, Fact)):
         def impl(planner, typ, depth): 
             print("----",typ_name, depth,"-----")
+            if((typ_name,depth) not in planner.flat_vals_ptr_dict): return 0,None, None, 0,None, None
+
             l = _list_from_ptr(l_typ, planner.flat_vals_ptr_dict[(typ_name,depth)])
             d = _dict_from_ptr(d_typ, planner.val_map_ptr_dict[typ_name])
             first_l, last_l = None, None
@@ -193,6 +196,8 @@ def summarize_depth_vals(planner, typ, depth):
         def impl(planner, typ, depth): 
 
             print("----",typ_name, depth,"-----")
+            if((typ_name,depth) not in planner.flat_vals_ptr_dict): return 0,None, None, 0,None, None
+
             l = _list_from_ptr(l_typ, planner.flat_vals_ptr_dict[(typ_name,depth)])
             d = _dict_from_ptr(d_typ, planner.val_map_ptr_dict[typ_name])
             # print(l)
@@ -350,55 +355,99 @@ def test_mem_leaks(n=5):
 
 def test_declare_fact():
     with cre_context("test_declare_fact"):
-        BOOP = define_fact("BOOP", {"A" : "string", "B" : {"type": "number", "visible_to_planner" : True}})
+        BOOP = define_fact("BOOP", {
+            "A" : "string",
+            "B" : {"type": "number", "visible":  True, "semantic" : True,
+                    'conversions' : {unicode_type : CastStr}}
+        })
         
         def declare_em(planner,s="A"):
             for i in range(5):
                 b = BOOP(s,i)
-                planner.declare(b, visible_attrs=("A","B"))
+                planner.declare(b)
 
-        planner = SetChainingPlanner()
+        planner = SetChainingPlanner([BOOP])
         declare_em(planner,"A")
 
         assert summarize_depth_vals(planner, BOOP, 0)[0] == 5
-        assert summarize_depth_vals(planner, unicode_type, 0)[0] == 1
+        assert summarize_depth_vals(planner, unicode_type, 0)[0] == 5
         assert summarize_depth_vals(planner, f8, 0)[0] == 5
 
         expls = planner.search_for_explanations(36.0, ops=get_base_ops(), search_depth=2)
         A_op_comp_binding_pairs = list(iter(expls))
 
-        planner = SetChainingPlanner()
+        planner = SetChainingPlanner([BOOP])
         declare_em(planner,"A")
         declare_em(planner,"B")
         
         assert summarize_depth_vals(planner, BOOP, 0)[0] == 10
-        assert summarize_depth_vals(planner, unicode_type, 0)[0] == 2
+        assert summarize_depth_vals(planner, unicode_type, 0)[0] == 5
         assert summarize_depth_vals(planner, f8, 0)[0] == 5
 
         expls = planner.search_for_explanations(36.0, ops=get_base_ops(), search_depth=2)
         AB_op_comp_binding_pairs = list(iter(expls))
 
+        assert len(AB_op_comp_binding_pairs) >= 4 * len(A_op_comp_binding_pairs)
+
+        # print("(()()))")
+        for i, (op_comp, binding) in enumerate(A_op_comp_binding_pairs):
+            op = op_comp.flatten()
+            print("<<", op, binding)
+
+
+            assert(op(*binding)==36.0)
+
+            # Flattening takes a while so stop after 3 
+            if(i >= 2): break
+            
+
+def test_declare_fact_w_conversions():
+    with cre_context("test_declare_fact_w_conversions"):
+        BOOP = define_fact("BOOP", {
+            "A" : str,
+            "B" : {"type": str, "visible":  True,
+                 "semantic" : True, 'conversions' : {float : CastFloat}}
+        })
+        
+        def declare_em(planner,s="A"):
+            for i in range(5):
+                b = BOOP(s,str(i))
+                planner.declare(b)
+
+            # Declare one that can't be converted
+            planner.declare(BOOP(s,s))
+
+        planner = SetChainingPlanner([BOOP])
+        declare_em(planner,"A")
+
+        assert summarize_depth_vals(planner, BOOP, 0)[0] == 6
+        assert summarize_depth_vals(planner, unicode_type, 0)[0] == 6
+        assert summarize_depth_vals(planner, f8, 0)[0] == 5
+
+        expls = planner.search_for_explanations(36.0, ops=get_base_ops(), search_depth=2)
+        A_op_comp_binding_pairs = list(iter(expls))
+
+        planner = SetChainingPlanner([BOOP])
+        declare_em(planner,"A")
+        declare_em(planner,"B")
+        
+        assert summarize_depth_vals(planner, BOOP, 0)[0] == 12
+        assert summarize_depth_vals(planner, unicode_type, 0)[0] == 7
+        assert summarize_depth_vals(planner, f8, 0)[0] == 5
+
+        expls = planner.search_for_explanations(36.0, ops=get_base_ops(), search_depth=2)
+        AB_op_comp_binding_pairs = list(iter(expls))
 
         assert len(AB_op_comp_binding_pairs) >= 4 * len(A_op_comp_binding_pairs)
 
-        for op_comp, binding in A_op_comp_binding_pairs:
-            print("<<", op_comp, binding)
+        for i, (op_comp, binding) in enumerate(A_op_comp_binding_pairs):
             op = op_comp.flatten()
+            print("<<", op, binding)
 
             assert(op(*binding)==36.0)
-            
 
-            # print(op, binding, op(*binding))
-
-
-
-
-
-
-
-
-
-        # print()
+            # Flattening takes a while so stop after 3 
+            if(i >= 2): break
 
 
 
@@ -521,7 +570,9 @@ if __name__ == "__main__":
     # gen = foo_gen()
     # for i in gen:
     #     print(i)
-    test_declare_fact()
+    # test_declare_fact()
+    # test_declare_fact()
+    test_declare_fact_w_conversions()
 # from numba import njit, i8
 # from numba.typed import Dict
 # from numba.types import ListType

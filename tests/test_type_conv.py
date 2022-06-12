@@ -25,6 +25,7 @@ def test_str_to_float():
     assert str_to_float("1.3452")==float("1.3452")
     assert str_to_float("-1000.9999")==float("-1000.9999")
     assert str_to_float("-0.009999")==float("-0.009999")
+    assert str_to_float("0")==float("0")
 
 def test_str_to_int():
 
@@ -95,13 +96,15 @@ def test_ops():
 
     x,y,z = Var(unicode_type,'x'), Var(unicode_type,'y'), Var(unicode_type,'z')
     op = Add3(StrToFloat(x),StrToFloat(y),StrToFloat(z))
-    assert str(op) == 'Add3(StrToFloat(x),StrToFloat(y),StrToFloat(z))'
+    assert str(op) == 'Add3(StrToFloat(x), StrToFloat(y), StrToFloat(z))'
     assert op('1','2','3') == 6.0
 
 if __name__ == "__main__":
+    print(str_to_float("0"))
+    # test_str_to_float()
     # test_to_str()
     # test_str_to_int()
-    test_ops()
+    # test_ops()
 
     # @njit
     # def test_nb_float():

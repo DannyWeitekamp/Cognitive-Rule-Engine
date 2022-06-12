@@ -101,6 +101,32 @@ def ObjIsNone(ptrs):
     return _load_ptr(i8,ptrs[0]) == 0
 
 
-@Op(shorthand = 'float({0})')
+def check_cast_float(a):
+    try:
+        float(a)
+    except:
+        return False
+    return True
+
+@Op(shorthand = 'float({0})', check=check_cast_float)
 def CastFloat(a):
     return float(a)
+
+# print(CastFloat(unicode_type).check('0'))
+# print(CastFloat(unicode_type).check('A'))
+
+def check_cast_str(a):
+    try:
+        str(a)
+    except:
+        return False
+    return True
+
+@Op(shorthand = 'str({0})', check=check_cast_str)
+def CastStr(a):
+    return str(a)
+
+# print("------------")
+# print(CastStr)
+# print(CastStr.__class__)
+# print("------------")

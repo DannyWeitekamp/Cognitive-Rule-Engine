@@ -7,9 +7,8 @@ from cre.flattener import Flattener, get_semantic_visibile_fact_attrs, flattener
 from cre.fact import define_fact
 import pytest_benchmark
 from cre.default_ops import Equals
-from cre.vectorizer import Vectorizer
-from cre.flattener import Flattener
 from cre.feature_applier import FeatureApplier
+from cre.vectorizer import Vectorizer
 from pprint import pprint
 
 

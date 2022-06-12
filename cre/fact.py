@@ -47,7 +47,7 @@ class Fact(CREObjTypeClass):
 
     def __str__(self):
         if(hasattr(self, '_fact_name')):
-            return self._fact_name
+            return f'{self._fact_name}_{self._hash_code[:10]}'
         elif(hasattr(self,"_specialization_name")):
             return self._specialization_name
         else:
@@ -142,8 +142,23 @@ class Fact(CREObjTypeClass):
         return self._clean_spec
 
     def __getstate__(self):
-        d = self.__dict__
+        d = self.__dict__.copy()
         if('_clean_spec' in d): del d['_clean_spec']
+
+        # NOTE: While ops still use py_classes we need clean out 'conversions' from the spec
+        if('spec' in d):
+
+            d_spec = d['spec'].copy()
+            
+            for attr, attr_spec in d_spec.items():
+                if('conversions' in attr_spec):
+                    attr_spec_copy = attr_spec.copy()
+                    attr_spec_copy['conversions'] = tuple([(attr_spec['type'], attr, typ) for typ in attr_spec_copy['conversions']])
+                    d_spec[attr] = attr_spec_copy
+            d['spec'] = d_spec
+            # print(d)
+
+        
         # if('spec' in d): del d['spec']
         return d
 
@@ -333,7 +348,7 @@ def _standardize_conversions(conversions, attr_type, context):
         conv_type = _standardize_type(conv_type, context)
         if(isinstance(conv_op, UntypedOp)): conv_op = conv_op(attr_type)
         assert conv_op.signature.return_type == conv_type, f"{conv_op} does not return conversion type {conv_type}."
-        stand_conv[conv_type] = conv_op
+        stand_conv[conv_type] = conv_op.__class__
     return stand_conv
 
     # attr_spec['conversions'] = {_standardize_type(k, context):v for }

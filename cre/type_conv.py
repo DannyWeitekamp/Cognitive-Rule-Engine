@@ -12,6 +12,7 @@ from numba.extending import overload, overload_method
 
 
 DIGITS_START = 48
+DIGITS_END = 58
 DASH = 45
 DOT = 46
 PLUS = 43
@@ -24,7 +25,10 @@ E_CHAR = 101
 def str_to_posint(s):
     final_index, result = len(s) - 1, 0
     for i,v in enumerate(s):
-        result += (ord(v) - 48) * (10 ** (final_index - i))
+        char = ord(v)
+        if(char < DIGITS_START or char >= DIGITS_END):
+            raise ValueError("Could not convert string to numeric type.")
+        result += (char - 48) * (10 ** (final_index - i))
     return result
 
 # @njit(i8(unicode_type,), cache=True)
@@ -40,7 +44,7 @@ def str_to_float(s):
     neg = (s[0] == "-")
     if(neg): s = s[1:]
 
-    exp,dec_loc,exp_loc = 1,-1, len(s)
+    exp, dec_loc, exp_loc = 1,-1, len(s)
     for i,c in enumerate(s):
         if(c == "."): 
             dec_loc=i

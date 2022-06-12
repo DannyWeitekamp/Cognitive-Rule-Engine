@@ -190,8 +190,8 @@ def _fill_rel_derefs(deref_info_matrix, rel_derefs, start=0):
     if(len(rel_derefs) > 0):
         def impl(deref_info_matrix, rel_derefs, start=0):
             attr_id = start
-            for i in range(len(rel_derefs)):
-                d1 = rel_derefs[i]
+            for d1 in literal_unroll(rel_derefs):
+                # d1 = rel_derefs[i]
                 deref_info_matrix[attr_id][0].type = d1[0]
                 deref_info_matrix[attr_id][0].a_id = d1[1]
                 deref_info_matrix[attr_id][0].t_id = d1[2]
@@ -208,8 +208,8 @@ def _fill_list_derefs(deref_info_matrix, list_derefs, start=0):
     if(len(list_derefs) > 0):
         def impl(deref_info_matrix, list_derefs, start=0):
             attr_id = start
-            for i in range(len(list_derefs)):
-                attr_t, d1, d2 = list_derefs[i]
+            for tup in literal_unroll(list_derefs):
+                attr_t, d1, d2 = tup
                 deref_info_matrix[attr_id][0].type = d1[0]
                 deref_info_matrix[attr_id][0].a_id = d1[1]
                 deref_info_matrix[attr_id][0].t_id = d1[2]
@@ -284,7 +284,7 @@ def RelativeEncoder_reinit(self,size=32):
     self.var_cache = Dict.empty(var_cache_key_type,GenericVarType)
 
 # print("A")
-@njit(cache=True, nopython=True)
+@njit(cache=True)
 def RelativeEncoder_ctor(context_data, re_type, in_memset):
     # def impl(re_type, in_ms):
     st = new(re_type)
@@ -388,7 +388,7 @@ def _next_rel_adj(self, fact, adj_inds, attr_id, k):
         return adj_inds, attr_id, k
     return impl
         
-@njit(cache=True,nopython=True)
+@njit(cache=True)
 def next_adjacent(self, fact):
     adj_inds, attr_id, k = _next_list_adj(self, fact)
     adj_inds, attr_id, k = _next_rel_adj(self, fact, adj_inds, attr_id, k)

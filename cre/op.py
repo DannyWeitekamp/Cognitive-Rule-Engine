@@ -934,7 +934,6 @@ class OpMeta(type):
 
     def _handle_defaults(cls):
         # By default use the variable names that the user defined in the call() fn.
-        print(cls.call_pyfunc)
         cls.default_arg_names = inspect.getfullargspec(cls.call_pyfunc)[0]
         cls.default_vars = new_vars_from_types(cls.call_sig.args, cls.default_arg_names)
 

@@ -955,8 +955,7 @@ def define_fact(name : str, spec : dict = None, context=None, return_proxy=False
         inherit_from = None
 
 
-    if(specialization_name in context.name_to_type and
-       hasattr(context.name_to_type[specialization_name], 'attr')):
+    if(specialization_name in context.name_to_type):
         assert str(context.name_to_type[specialization_name].spec) == str(spec), \
         f"Redefinition of fact '{specialization_name}' in context '{context.name}' not permitted"
         fact_type = context.name_to_type[specialization_name]        

@@ -3,7 +3,7 @@ from numba.types import unicode_type, boolean
 from cre.utils import decode_idrec 
 from cre.context import cre_context 
 from cre.memset import MemSet 
-from cre.flattener import Flattener, get_semantic_visibile_fact_attrs, flattener_update
+from cre.flattener import Flattener, flattener_update
 from cre.fact import define_fact
 import pytest_benchmark
 from cre.default_ops import Equals

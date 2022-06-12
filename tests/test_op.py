@@ -246,7 +246,7 @@ def test_fact_args():
         assert op(BOOP("A",1), BOOP("B",2)) == 4.0
 
 
-def not_jit_compilable():
+def test_not_jittable():
     class Add(Op):
         signature = f8(f8,f8)        
         commutes = True
@@ -282,6 +282,8 @@ def not_jit_compilable():
     op = Add(Map(Var(float,'x')),Map(Var(float,'y')))
     assert op(1,2)==30.0
 
+
+def _test_returns_object():
     with cre_context('test_fact_args'):
         spec = {"A" : "string", "B" : "number"}
         BOOP = define_fact("BOOP", spec)
@@ -644,10 +646,10 @@ if __name__ == "__main__":
     #     test_commutes()
     # test_fact_args()
     # test_head_ptrs_ranges()
-    not_jit_compilable()
+    # test_not_jittable()
     # test_ptr_ops()
     # test_hash()
     # test_eq()
-    test_copy()
+    # test_copy()
             
 

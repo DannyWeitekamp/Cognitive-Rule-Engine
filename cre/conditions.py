@@ -5,7 +5,7 @@ from numba.typed import List, Dict
 from numba.types import ListType, DictType, unicode_type, void, Tuple, UniTuple, optional
 from numba.experimental import structref
 from numba.experimental.structref import new, define_boxing, define_attributes, _Utils
-from numba.extending import lower_cast, overload_method, intrinsic, overload_attribute, intrinsic, lower_getattr_generic, overload, infer_getattr, lower_setattr_generic
+from numba.extending import lower_cast, overload_method, intrinsic, overload_attribute, intrinsic, lower_getattr_generic, overload, infer_getattr, lower_setattr_generic, SentryLiteralArgs
 from numba.core.typing.templates import AttributeTemplate
 from cre.caching import gen_import_str, unique_hash,import_from_cached, source_to_cache, source_in_cache
 from cre.context import cre_context
@@ -282,16 +282,11 @@ class Conditions(structref.StructRefProxy):
 
     def get_matches(self, ms=None):
         from cre.rete import MatchIterator
-        # return get_matches(self, self.var_base_types, mem=mem)
+        return MatchIterator(ms, self)
 
-
-        return MatchIterator(ms, self)#get_match_iter(mem, self)
-
-    # def __del__(self):
-    #     print("CONDITIONS DTOR",self)
-    #     conds_dtor(self)
-        # if()
-
+    def antiunify(self, other, return_score=False, normalize='left'):
+        return conds_antiunify(self, other, return_score, normalize) 
+    
     @property
     def var_base_types(self):
         if(not hasattr(self,"_var_base_types")):
@@ -464,13 +459,13 @@ def conds_get_distr_dnf(self):
 
 
 
-
-@overload_method(ConditionsTypeClass,'get_matches')
-def impl_get_matches(self,ms=None):
-    from cre.matching import get_matches
-    def impl(self,ms=None):
-        return get_matches(get_matches)
-    return impl
+# TODO: Reimplement
+# @overload_method(ConditionsTypeClass,'get_matches')
+# def impl_get_matches(self,ms=None):
+#     from cre.matching import get_matches
+#     def impl(self,ms=None):
+#         return get_matches(ms)
+#     return impl
 
 
 @njit(cache=True)
@@ -1079,17 +1074,9 @@ def build_distributed_dnf(c,index_map=None):
 
 
 
-#### Intersecting Conditions #### 
+# -----------------------------------------------------------------------
+# : Conditions.antiunify()
 
-# The literal instance plus base_var_ptrs
-# literal_inst_record_type = Tuple( (LiteralType, i8[::1]) )
-# lit_list_type = ListType(LiteralType)
-
-
-# NOTE: if ever going to use dynamic ops then need to use more than call_addr
-
-# op.call_addr -> list of arrays of base_ptrs 
-# lit_set_type = DictType(i8,var_set_list_type)
 lit_list = ListType(LiteralType)
 lit_unq_tup_type = Tuple((i8,i8))
 
@@ -1122,6 +1109,13 @@ def conds_to_lit_sets(self):
     # print(lit_sets)
     return lit_sets
 
+@njit(cache=True)
+def count_literals(self):
+    c = 0
+    for conjunct in self.dnf:
+        for lit in conjunct:
+            c += 1
+    return c
 
 @njit(cache=True)
 def intersect_keys(a, b):
@@ -1130,16 +1124,6 @@ def intersect_keys(a, b):
         # print(k, k in b)
         if(k in b): l.append(k)
     return l
-
-# @njit(cache=True)
-# def intersect_and_remap_op_sets(op_set_a, op_set_b, base_ptrs_to_inds):
-#     remapping_votes = np.empty(())
-#     d = Dict()
-#     for k,v in a.items():
-#         d[k] = v
-#     for k,v in b.items():
-#         d[k] = v
-#     return d
 
 u2_arr = u2[::1]
 @njit(cache=True)
@@ -1187,9 +1171,6 @@ def get_possible_remap_inds(a_ind_set, b_ind_set, n_a, n_b):
     for n_remaps in num_remaps_per_a:
         if(n_remaps != 0): n_possibilities *= n_remaps
     
-    # print("num_remaps_per_a", num_remaps_per_a)
-    # print("n_possibilities", n_possibilities)
-
     # Find the first variable that is remappable 
     first_i = 0
     for i,n in enumerate(num_remaps_per_a): 
@@ -1356,23 +1337,8 @@ from numba.cpython.hashing import _PyHASH_XXPRIME_5
 from cre.hashing import accum_item_hash
 
 
-
-# @njit(u8(u8,u8))
-# def accum_item_hash(acc, lane):
-#     if lane == _Py_uhash_t(-1):
-#         return _Py_uhash_t(1546275796)
-#     acc += lane * _PyHASH_XXPRIME_2
-#     acc = _PyHASH_XXROTATE(acc)
-#     acc *= _PyHASH_XXPRIME_1
-#     return acc
-
-# from collections import namedtuple
 FrozenArr, FrozenArrTypei8 = define_structref("FrozenArr", [("arr" , i8[:]),])
 FrozenArrTypei2 = type(FrozenArrTypei8)([("arr" , i2[::1]),])
-# FrozenArr = namedtuple("FrozenArr", ['arr'])
-# FrozenArrType_i8 = numba.types.NamedTuple([i8[::1]],FrozenArr)
-
-# print("<<",type(FrozenArrTypei8))
 
 @overload(hash)
 @overload_method(type(FrozenArrTypei8), '__hash__')
@@ -1394,19 +1360,6 @@ def _impl_eq_FrozenArr(a, b):
         def impl(a, b):
             return np.array_equal(a.arr, b.arr)
         return impl
-
-
-# @njit(cache=True)
-# def test_frzn_ind_arr_type():
-#     a1 = FrozenArr(np.arange(3,dtype=np.int64))
-#     a2 = FrozenArr(np.arange(3,dtype=np.int64))
-#     b = FrozenArr(np.arange(3,dtype=np.int64)+1)
-#     print(a1, a2, b)
-#     print(hash(a1),hash(a2),hash(b))
-#     print(a1 == a2)
-#     print(a1 == b)
-#     # d = Dict()
-#     # d[]
 
 
 f8_2darr_type = f8[:,::1]
@@ -1478,33 +1431,23 @@ def _conj_from_litset_and_remap(ls_a,ls_b, remap, keys, bpti_a, bpti_b):
                 conj.append(new_lit)
     return conj
 
+@njit(cache=True,locals={"i" : u2})
+def make_base_ptrs_to_inds(self):
+    ''' From a collection of vars a mapping between their base ptrs to unique indicies'''
+    base_ptrs_to_inds = Dict.empty(i8,u2)
+    i = u2(0)
+    for v in self.vars:
+        base_ptrs_to_inds[v.base_ptr] = i; i += 1;
 
-        # for lit, inds in zip(lit_set,ind_set):
-        #     print(lit, inds)
-        # print("___")
-
-            # new_base_vars = List([_struct_from_ptr(GenericVarType,bps_b[ind]) for ind in inds])
-            # print(new_base_vars)
-            # new_op = op_copy(lit.op, new_base_vars)
-            # new_lit = literal_ctor(new_op)
-            # new_lit.negated = lit.negated
-            # conj.append(new_lit)
-
-        
-@njit(cache=True)
-def conds_antiunify(c_a, c_b):
+    return base_ptrs_to_inds
+@njit(Tuple((ConditionsType,f8))(ConditionsType,ConditionsType), cache=True)
+# @njit(cache=True)
+def _conds_antiunify(c_a, c_b):
     ls_as = conds_to_lit_sets(c_a)
     ls_bs = conds_to_lit_sets(c_b)
 
-    print(ls_as)
-    print(ls_bs)
-
     bpti_a = make_base_ptrs_to_inds(c_a)
     bpti_b = make_base_ptrs_to_inds(c_b)
-
-    # bps_b = np.empty(len(bpti_b),dtype=np.int64)    
-    # for base_ptr, ind in bpti_b.items():
-    #     bps_b[ind] = base_ptr
 
     remap_size = len(bpti_a)
     num_conj = len(ls_as)
@@ -1518,11 +1461,9 @@ def conds_antiunify(c_a, c_b):
                                     op_key_intersection=op_key_intersection)
         best_score, best_remap = scored_remaps[0]
 
-
         conj = _conj_from_litset_and_remap(ls_as[0], ls_bs[0], best_remap, op_key_intersection, bpti_a, bpti_b)
         dnf = List([conj])
         conds = _conditions_ctor_dnf(dnf)
-        print(conds)
     else:
         score_aligment_matrices = _buid_score_aligment_matrices(ls_as, ls_bs, bpti_a, bpti_b)
         
@@ -1550,8 +1491,6 @@ def conds_antiunify(c_a, c_b):
                 best_score = score
                 best_alignment = alignment
 
-        print("best_alignment:", best_alignment)
-
         dnf = List()
         for i, ls_a in enumerate(ls_as):
             ls_b = ls_bs[alignment[i]]
@@ -1561,12 +1500,37 @@ def conds_antiunify(c_a, c_b):
             dnf.append(conj)
                 
         conds = _conditions_ctor_dnf(dnf)
-        print(conds)
+
+    return conds, best_score
 
 
 
-        # print("col_assign_per_row", col_assign_per_row)
-        print("FINAL SCORE:", best_score, best_remap)
+@generated_jit(cache=True)
+@overload_method(ConditionsTypeClass, 'antiunify')
+def conds_antiunify(c_a, c_b, return_score=False, normalize='left'):
+    SentryLiteralArgs(['return_score','normalize']).for_function(conds_antiunify).bind(c_a, c_b, return_score, normalize)
+    normalize = normalize.literal_value
+    if(return_score.literal_value):
+        def impl(c_a, c_b, return_score=False, normalize='left'):
+            c, score = _conds_antiunify(c_a,c_b)
+            if(normalize == 'left'):
+                n_literals_a = count_literals(c_a)
+                return c, score / n_literals_a
+            elif(normalize == 'right'):
+                n_literals_b = count_literals(c_b)
+                return c, score / n_literals_b
+            elif(normalize == 'max'):
+                n_literals_a = count_literals(c_a)
+                n_literals_b = count_literals(c_b)
+                return c, score / max(n_literals_a, n_literals_b)
+            else:
+                return c, score
+    else:
+        def impl(c_a, c_b, return_score=False, normalize='left'):
+            c, score = _conds_antiunify(c_a,c_b)
+            return c
+    return impl
+
         
 
 
@@ -1793,26 +1757,16 @@ def conds_antiunify(c_a, c_b):
     
 #     return d
 
-@njit(cache=True,locals={"i" : u2})
-def make_base_ptrs_to_inds(self):
-    ''' From a collection of vars a mapping between their base ptrs to unique indicies'''
-    base_ptrs_to_inds = Dict.empty(i8,u2)
-    i = u2(0)
-    for v in self.vars:
-        base_ptrs_to_inds[v.base_ptr] = i; i += 1;
-    # for v in other.vars:
-    #     base_ptrs_to_inds[v.base_ptr] = i; i += 1;
 
-    return base_ptrs_to_inds
 
 # def get_op_set_re():
 
 
 
 
-@njit(cache=True)
-def best_intersection(self, other):
-    return None
+# @njit(cache=True)
+# def best_intersection(self, other):
+#     return None
     
 
 #     for conjunct_a in self.dnf:

@@ -10,30 +10,9 @@ import  cre.dynamic_exec
 
 BOOP = define_fact("BOOP",{"A": "string", "B" : "number"})
 
-def test_aliasing():
+#TODO: would be nice to have functionality like x:=Var(BOOP) => Var(BOOP,'x')
+def _test_auto_aliasing():
     pass
-
-# @njit(cache=True)
-# def first_alpha(c):
-#     return c.dnf[0][0][0].is_alpha
-
-# @njit(cache=True)
-# def first_beta(c):
-#     return c.dnf[0][1][0].is_alpha 
-
-# def test_literal():
-#     with cre_context("test_literal"):
-#         # BOOP = define_fact("BOOP",{"A": "string", "B" : "number"})
-#         l1, l2 = Var(BOOP,"l1"), Var(BOOP,"l2")
-#         c1 = l1.B < 1
-#         print(first_alpha(c1))
-#         # print(c1.dnf[0][0][0].is_alpha)
-#         c2 = l1.B < l2.B
-#         print(first_beta(c2))
-#         # print(c1.dnf[0][1][0].is_alpha)
-
-
-
 
 # @njit(cache=True)
 def test_build_conditions():
@@ -110,8 +89,6 @@ def test_build_conditions():
 (l1.B == 5) & (l1.B == 5) & (l1.B == l2.B) & ~(l1.B == l2.B)'''
         assert str(c3 | c4) == c3_or_c4_str
 
-    # l1, l2 = Var(BOOP,"l1"), Var(BOOP,"l2")
-
 
 list_i8 = ListType(i8)
 list_list_i8 = ListType(ListType(i8))
@@ -134,29 +111,6 @@ def var_get_ptr(var):
 @njit(cache=True)
 def cond_get_vars(cond):
     return cond.vars
-
-# def test_initialize():
-#     with cre_context("test_initialize"):
-#         # BOOP = define_fact("BOOP",{"A": "string", "B" : "number"})
-
-#         l1, l2 = Var(BOOP,"l1"), Var(BOOP,"l2")
-#         r1, r2 = Var(BOOP,"r1"), Var(BOOP,"r2")
-
-#         c = (l1.B < 1) & (l1.B > 7) & (l2.B < r1.B) & (r2.B < l1.B)# |\
-#              # (l2.B < 1) & (l2.B > 7) & (l2.B < r1.B) & (r1.B < r2.B) |\
-#              # (l2.B < 1) & (l2.B > 7) & (l2.B < r1.B) & (l1.B < l2.B)
-
-#         assert [x.alias for x in cond_get_vars(c)] == ['l1','l2','r1','r2']
-
-#         initialize_conditions(c)
-#         print("DONE")
-#         alpha_sizes, beta_sizes = get_init_cond_sizes(c)
-
-        
-#         print(alpha_sizes)
-#         print(beta_sizes)
-#         assert [list(x) for x in alpha_sizes] == [[2, 0, 0, 0], [0, 2, 0, 0], [0, 2, 0, 0]]
-#         assert [list(x) for x in beta_sizes] == [[1, 1], [1, 1], [1, 1]]
 
 
 @njit(cache=True)
@@ -238,8 +192,6 @@ def test_list_operations():
         c = v.items[0] != v.items[1]
         assert str(c) == "~(v.items[0] == v.items[1])"
 
-
-
 @njit(cache=True)
 def hsh(x):
     return hash(x)
@@ -302,11 +254,6 @@ def test_hash():
         assert hsh(a1) != hsh(b3)
 
 
-
-
-        
-
-
 @njit(cache=True)
 def eq(a,b):
     return _cast_structref(CREObjType, a)==_cast_structref(CREObjType, b)
@@ -363,67 +310,46 @@ def test_eq():
         assert not eq(a1,b2)
         assert not eq(a1,b3)
 
-from cre.conditions import conds_to_lit_sets, best_intersection, make_base_ptrs_to_inds, score_remaps
+from cre.conditions import conds_to_lit_sets, make_base_ptrs_to_inds, score_remaps
 def test_anti_unify():
     x, y, z = Var(f8,'x'), Var(f8,'y'), Var(f8,'z')
     a, b, c, d = Var(f8,'a'), Var(f8,'b'), Var(f8,'c'), Var(f8,'d')
 
+    # Single Conjunction Case
     c1 = (x < y) & (y < z) & (y < z) & (z != x) & (y != 0) 
     c2 = (a < b) & (b < c) & (b < c) & (b < c) & (c != a) & (b != 0) & (d != 0)
+    c12_ref = ((x < y) & (y < z) & (y < z) & (z != x) & (y != 0))
 
+    c12 = c1.antiunify(c2) 
 
-    conds_antiunify(c1,c2)
+    assert str(c12) == str(c12_ref)
 
-
-    c1 = ((x < y) & (z != x) & (y != 0) |
-          (x < y) & (z == x) & (y != 7) | 
-          (x > y) & (z != x) & (y != 2)
+    # Disjunction of Conjunctions Case
+    c1 = ((x < y) & (z != x) & (y != 0) | # 1
+          (x < y) & (z == x) & (y != 7) | # 2
+          (x > y) & (z != x) & (y != 2)   # 3
          )
 
-    c2 = ((a < b) & (c == a) & (b != 7) & (d > 0) |
-          (a < b) & (c != a) & (b != 0) |
-          (a > b) & (c != a) & (b != 0) & (d != 7)
+    c2 = ((a < b) & (c == a) & (b != 7) & (d > 0) | #2
+          (a < b) & (c != a) & (b != 0) |           #1
+          (a > b) & (c != a) & (b != 0) & (d != 7)  #3
          )
 
-    conds_antiunify(c1,c2)
+    c12_ref = ((x < y) & (z != x) & (y != 0) |\
+              (x < y) & (z == x) & (y != 7) |\
+              (x > y) & (z != x))
 
+    c12, score = c1.antiunify(c2,return_score=True) #conds_antiunify(c1,c2)
+
+    assert str(c12) == str(c12_ref)
+    assert score == 8./9.
     
-    # score_remaps()
-
-    # For ? < ?
-    # x -> [1,1,0,0]
-    # y -> [1,1,1,0]
-    # z -> [0,1,1,0]
-    # test_frzn_ind_arr_type()
-    # raise ValueError()
-
-    # lsl1 = conds_to_lit_sets(c1)
-    # lsl2 = conds_to_lit_sets(c2)
-
-    # # print(lsl1[0].keys())
-    # bpti1 = make_base_ptrs_to_inds(c1)
-    # bpti2 = make_base_ptrs_to_inds(c2)
-    # score_remaps(lsl1[0], lsl2[0], bpti1, bpti2)
-    # score_remaps(lsl2[0], lsl1[0], bpti2, bpti1)
-
-
-
-
-
-    
-
-
-
-# import logging
-# print([name for name in logging.root.manager.loggerDict])
-# logger = logging.getLogger()
-# logger.setLevel(logging.DEBUG)
 
 if(__name__ == "__main__"):
-    # test_anti_unify()
+    test_anti_unify()
     # test_unconditioned()
     # test_build_conditions()
-    test_list_operations()
+    # test_list_operations()
     # test_link()
     # test_initialize()
     # for i in range(10):

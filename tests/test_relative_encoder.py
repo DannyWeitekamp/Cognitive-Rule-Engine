@@ -5,9 +5,9 @@ from numba.typed import List, Dict
 from numba.types import ListType, DictType, unicode_type
 from cre.memset import MemSet
 from cre.var import Var
-from cre.flattener import Flattener
-from cre.feature_applier import FeatureApplier
-from cre.relative_encoder import _check_needs_rebuild, RelativeEncoder, get_relational_fact_attrs, next_adjacent
+from cre.processing.flattener import Flattener
+from cre.processing.feature_applier import FeatureApplier
+from cre.processing.relative_encoder import _check_needs_rebuild, RelativeEncoder, get_relational_fact_attrs, next_adjacent
 from cre.utils import PrintElapse, deref_info_type
 from cre.fact import define_fact
 from cre.default_ops import Equals

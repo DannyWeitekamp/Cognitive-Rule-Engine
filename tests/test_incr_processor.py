@@ -1,6 +1,6 @@
 from cre.fact import define_fact
 from cre.context import cre_context
-from cre.incr_processor import IncrProcessor, IncrProcessorType
+from cre.processing.incr_processor import IncrProcessor, IncrProcessorType
 from cre.memset import MemSet
 
 

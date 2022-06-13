@@ -15,7 +15,6 @@ from cre.op import GenericOpType
 from cre.utils import PrintElapse,encode_idrec, _func_from_address, _cast_structref, _obj_cast_codegen, _func_from_address, _incref_structref, _struct_from_ptr, decode_idrec, _ptr_to_data_ptr, _load_ptr, _struct_tuple_from_pointer_arr, _incref_ptr
 from cre.structref import define_structref
 from numba.experimental import structref
-from cre.incr_processor import incr_processor_fields, IncrProcessorType, init_incr_processor
 from cre.memset import MemSet, MemSetType
 from cre.structref import CastFriendlyStructref, define_boxing
 from numba.extending import overload_method, overload, lower_cast, SentryLiteralArgs
@@ -23,8 +22,8 @@ from numba.experimental.function_type import _get_wrapper_address
 import cloudpickle
 from cre.gval import get_gval_type, new_gval, gval as gval_type
 from cre.vector import VectorType, new_vector
-from cre.incr_processor import incr_processor_fields, IncrProcessorType, init_incr_processor, ChangeEventType
-from cre.enumerizer import Enumerizer, EnumerizerType
+from cre.processing.incr_processor import incr_processor_fields, IncrProcessorType, init_incr_processor, ChangeEventType
+from cre.processing.enumerizer import Enumerizer, EnumerizerType
 from itertools import chain
 
 # Flattener Struct Definition

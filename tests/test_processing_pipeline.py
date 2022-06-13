@@ -10,10 +10,10 @@ from cre.fact import define_fact
 from cre.default_ops import Equals
 from cre.context import cre_context
 from pprint import pprint
-from cre.flattener import Flattener
-from cre.feature_applier import FeatureApplier
-from cre.relative_encoder import _check_needs_rebuild, RelativeEncoder, get_relational_fact_attrs, next_adjacent
-from cre.vectorizer import Vectorizer
+from cre.processing.flattener import Flattener
+from cre.processing.feature_applier import FeatureApplier
+from cre.processing.relative_encoder import _check_needs_rebuild, RelativeEncoder, get_relational_fact_attrs, next_adjacent
+from cre.processing.vectorizer import Vectorizer
 from cre.default_ops import Equals
 
 eq_f8 = Equals(f8, f8)
@@ -22,32 +22,33 @@ eq_str = Equals(unicode_type, unicode_type)
 pprint._sorted = lambda x:x
 # pprint = lambda x : pprint(x, sort_dicts=False)
 
-Component = define_fact("Component", {
-    "id" : str,
-    # "x" : {"type" : float, "visible" : False},
-    # "y" : {"type" : float, "visible" : False},
-    # "width" : {"type" : float, "visible" : False},
-    # "height" : {"type" : float, "visible" : False},
-    "above" : "Component", "below" : "Component",
-    "to_left": "Component", "to_right" : "Component",
-    "parents" : "List(Component)"
-})
+with cre_context("test_processing_pipeline"):
+    Component = define_fact("Component", {
+        "id" : str,
+        # "x" : {"type" : float, "visible" : False},
+        # "y" : {"type" : float, "visible" : False},
+        # "width" : {"type" : float, "visible" : False},
+        # "height" : {"type" : float, "visible" : False},
+        "above" : "Component", "below" : "Component",
+        "to_left": "Component", "to_right" : "Component",
+        "parents" : "List(Component)"
+    })
 
-TextField = define_fact("TextField", {
-    "inherit_from" : "Component",
-    "value" : {"type" : str, "visible" : True},
-    "locked" : {"type" : bool, "visible" : True},
-})
+    TextField = define_fact("TextField", {
+        "inherit_from" : "Component",
+        "value" : {"type" : str, "visible" : True},
+        "locked" : {"type" : bool, "visible" : True},
+    })
 
-Button = define_fact("Button", {
-    "inherit_from" : "Component",
-    # "locked" : {"type" : bool, "visible" : True},
-})
+    Button = define_fact("Button", {
+        "inherit_from" : "Component",
+        # "locked" : {"type" : bool, "visible" : True},
+    })
 
-Container = define_fact("Container", {
-    "inherit_from" : "Component",
-    "children" : "List(Component)"
-})
+    Container = define_fact("Container", {
+        "inherit_from" : "Component",
+        "children" : "List(Component)"
+    })
 
 def encode_neighbors(objs, l_str='to_left', r_str="to_right", a_str="above", b_str="below", strip_attrs=["x", "y", "width", "height"]):
   # objs = list(_objs.values()) if(isinstance(_objs,dict)) else _objs
@@ -119,8 +120,8 @@ def new_mc_addition_state(upper, lower):
         offset = (n - i) * 110
         d_state.update({
             f"{i}_carry": {"id" : f"{i}_carry", "x" :offset,   "y" : 0 , **tf_config},
-            f"{i}_upper": {"id" : f"{i}_upper", "x" :offset,   "y" : 110 , **tf_config},
-            f"{i}_lower": {"id" : f"{i}_lower", "x" :offset,   "y" : 220 , **tf_config},
+            f"{i}_upper": {"id" : f"{i}_upper", "x" :offset,   "y" : 110 , "locked" : True, **tf_config},
+            f"{i}_lower": {"id" : f"{i}_lower", "x" :offset,   "y" : 220 , "locked" : True, **tf_config},
             f"{i}_answer": {"id" : f"{i}_answer", "x" :offset,   "y" : 330 , **tf_config},
         })
 
@@ -249,33 +250,82 @@ def pipeline_second_run(wm, pipeline, matches, vars):
 
 
 def test_pipeline():
-    args,_ = setup_pipeline_first_run()
-    (nom, flt), matches, fact_map = pipeline_first_run(*args)
-    (dict_state, wm, pipeline, match_names, vars) = args
-    conv, fl, fa, re, vr = pipeline
+    with cre_context("test_processing_pipeline"):
+        args,_ = setup_pipeline_first_run()
+        (flt, nom), matches, fact_map = pipeline_first_run(*args)
+        (dict_state, wm, pipeline, match_names, vars) = args
+        conv, fl, fa, re, vr = pipeline
 
-    wm.modify(fact_map["0_answer"], "value", "4")
-    (nom, new_flt) = pipeline_second_run(wm,pipeline, matches, vars)
-    assert len(np.unique(new_flt)) > len(np.unique(flt))
-    flt = new_flt
+        wm.modify(fact_map["0_answer"], "value", "4")
+        (new_flt, new_nom) = pipeline_second_run(wm,pipeline, matches, vars)
+        assert len(np.unique(new_nom)) > len(np.unique(nom))
+        nom = new_nom
 
-    wm.modify(fact_map["1_carry"], "value", "1")
-    (nom, new_flt) = pipeline_second_run(wm,pipeline, matches, vars)
-    assert len(np.unique(new_flt)) > len(np.unique(flt))
-    flt = new_flt
+        wm.modify(fact_map["1_carry"], "value", "1")
+        (new_flt, new_nom) = pipeline_second_run(wm,pipeline, matches, vars)
+        assert len(np.unique(new_nom)) > len(np.unique(nom))
+        nom = new_nom
+
+from operator import itemgetter
+def test_condition_generalizing():
+    with cre_context("test_processing_pipeline"):
+        dict_state = new_mc_addition_state(567,354)
+        pprint(dict_state)
+        wm = MemSet()
+        conv = DictMemSetConverter(wm)
+        wm, fact_map = conv.apply(dict_state, return_map=True)
+
+        # Add2
+        sel_a, arg_a0, arg_a1 = itemgetter("0_answer", "0_upper","0_lower")(fact_map)
+        sel_b, arg_b0, arg_b1 = itemgetter("1_answer", "1_upper","1_lower")(fact_map)
+        varz = [Var(TextField,'sel'), Var(TextField,'arg0'), Var(TextField,'arg1')]
+        fptv_a = {sel_a.get_ptr() : varz[0], arg_a0.get_ptr() : varz[1], arg_a1.get_ptr() : varz[2]}
+        fptv_b = {sel_b.get_ptr() : varz[0], arg_b0.get_ptr() : varz[1], arg_b1.get_ptr() : varz[2]}
+
+        c_a = sel_a.as_conditions(fptv_a) & arg_a0.as_conditions(fptv_a) & arg_a1.as_conditions(fptv_a)
+        c_b = sel_b.as_conditions(fptv_b) & arg_b0.as_conditions(fptv_b) & arg_b1.as_conditions(fptv_b)
+        print(c_a)
+        print("---")
+        print(c_b)
+        c_ab = c_a.antiunify(c_b)
+        print("---")
+        print(c_ab)
+        print("---")
+        print(wm)
+        print("---")
+
+        
+
+        sel, arg0, arg1 = varz
+        c_ab =((sel.value == '') & (sel.locked == False) & (arg0.locked == True) & (arg1.locked == True) 
+         & (sel.above == arg1) & (arg0.below == arg1) )#& (arg1.above == arg0) )#& (arg1.below == sel))
+
+    # c_ab = (sel.value == '') & (arg0.locked == True) & (arg1.locked == True) & (sel.above == arg1) & (arg0.below == arg1) & (arg1.below == sel)
+    #c_ab = (sel.above == arg1) & (arg0.below == arg1) #& (arg1.above == arg0) #& (arg1.below == sel) & (sel.value == '')
+    # c_ab = (sel.locked == False) 
+    # TODO: Not matching properly
+    for facts in c_ab.get_matches(wm):
+        print([x.id for x in facts])
+    print("---")
+
+
 
 
 def test_b_pipeline_1st_run(benchmark):
-    benchmark.pedantic(pipeline_first_run,setup=setup_pipeline_first_run, warmup_rounds=1, rounds=10)
+    with cre_context("test_processing_pipeline"):
+        benchmark.pedantic(pipeline_first_run,setup=setup_pipeline_first_run, warmup_rounds=1, rounds=10)
 
 def test_b_pipeline_2nd_run(benchmark):
-    benchmark.pedantic(pipeline_second_run,setup=setup_pipeline_second_run, warmup_rounds=1, rounds=10)
+    with cre_context("test_processing_pipeline"):
+        benchmark.pedantic(pipeline_second_run,setup=setup_pipeline_second_run, warmup_rounds=1, rounds=10)
 
 
 if __name__ == "__main__":
     import faulthandler; faulthandler.enable()
+    print("HI")
 
-    test_pipeline()
+    # test_pipeline()
+    test_condition_generalizing()
     # for i in range(2):
     #     args,_ = setup_pipeline_first_run()
     #     with PrintElapse("first_run"):

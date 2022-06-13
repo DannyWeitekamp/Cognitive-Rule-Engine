@@ -387,24 +387,25 @@ def test_fact_eq():
 from cre.fact_intrinsics import fact_lower_getattr
 
 def test_getattr():
-    spec = {"A" : "string", "B" : "number"}
-    BOOP = define_fact("BOOP", spec)
+    with cre_context("test_getattr"):
+        spec = {"A" : "string", "B" : "number"}
+        BOOP = define_fact("BOOP", spec)
 
-    @njit(cache=True)
-    def get_it(b):
-        return (b.A,b.B)
+        @njit(cache=True)
+        def get_it(b):
+            return (b.A,b.B)
 
-    b = BOOP("A",1)
+        b = BOOP("A",1)
 
-    assert get_it.py_func(b) == ("A",1)
-    assert get_it(b) == ("A",1)
+        assert get_it.py_func(b) == ("A",1)
+        assert get_it(b) == ("A",1)
 
-    @njit(cache=True)
-    def get_it_intrinsic(b):
-        return (fact_lower_getattr(b,"A"),fact_lower_getattr(b,"B"))    
+        @njit(cache=True)
+        def get_it_intrinsic(b):
+            return (fact_lower_getattr(b,"A"),fact_lower_getattr(b,"B"))    
 
-    # assert get_it_intrinsic.py_func(b) == ("A",1)
-    assert get_it_intrinsic(b) == ("A",1)
+        # assert get_it_intrinsic.py_func(b) == ("A",1)
+        assert get_it_intrinsic(b) == ("A",1)
 
 
 
@@ -844,7 +845,8 @@ with cre_context("_b_boop_ctor_10000"):
 
 
 def test_b_boop_ctor_10000(benchmark):
-    benchmark.pedantic(_b_boop_ctor_10000, warmup_rounds=1, rounds=10)
+    with cre_context("_b_boop_ctor_10000"):
+        benchmark.pedantic(_b_boop_ctor_10000, warmup_rounds=1, rounds=10)
 
 
 # @njit(cache=True)
@@ -853,7 +855,8 @@ def _b_py_dict_boop_10000():
         b = {"A" : "HI", "B" : i}
 
 def test_b_py_dict_boop_10000(benchmark):
-    benchmark.pedantic(_b_py_dict_boop_10000, warmup_rounds=1, rounds=10)
+    with cre_context("_b_boop_ctor_10000"):
+        benchmark.pedantic(_b_py_dict_boop_10000, warmup_rounds=1, rounds=10)
 
 
 

@@ -567,7 +567,7 @@ def get_base_type_name(self):
 def get_deref_attrs(self):
     str_list_type = ListType(unicode_type)
     def impl(self):
-        print("GET DEREF ATTRS")
+        # print("GET DEREF ATTRS")
         with objmode(deref_attrs=str_list_type):
             context = cre_context()
             deref_attrs = List.empty_list(unicode_type)
@@ -835,7 +835,7 @@ def var_append_deref(self, attr):
     
     var_struct_type = get_var_type(base_type, head_type)
 
-    print("CONSTR VAR", base_type, head_type, self.name)
+    # print("CONSTR VAR", base_type, head_type, self.name)
     # print("<<", var_struct_type)
     if(isinstance(attr,int)):
         typ = DEREF_TYPE_ATTR

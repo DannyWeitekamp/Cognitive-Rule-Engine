@@ -8,7 +8,7 @@ from cre.utils import  _raw_ptr_from_struct, _cast_structref
 
 import  cre.dynamic_exec
 
-BOOP = define_fact("BOOP",{"A": "string", "B" : "number"})
+# BOOP = define_fact("BOOP",{"A": "string", "B" : "number"})
 
 #TODO: would be nice to have functionality like x:=Var(BOOP) => Var(BOOP,'x')
 def _test_auto_aliasing():
@@ -17,7 +17,7 @@ def _test_auto_aliasing():
 # @njit(cache=True)
 def test_build_conditions():
     with cre_context("test_build_conditions"):
-        # BOOP = define_fact("BOOP",{"A": "string", "B" : "number"})
+        BOOP = define_fact("BOOP",{"A": "string", "B" : "number"})
 
         l1, l2 = Var(BOOP,"l1"), Var(BOOP,"l2")
         r1, r2 = Var(BOOP,"r1"), Var(BOOP,"r2")
@@ -120,8 +120,8 @@ def get_pointer(st):
 def _test_link():
     '''TODO: REWRITE'''
     print("START TEST LINK")
-    with cre_context() as context:
-        # BOOP = define_fact("BOOP",{"A": "string", "B" : "number"})
+    with cre_context("test_link") as context:
+        BOOP = define_fact("BOOP",{"A": "string", "B" : "number"})
         
         l1, l2 = Var(BOOP,"l1"), Var(BOOP,"l2")
         r1, r2 = Var(BOOP,"r1"), Var(BOOP,"r2")
@@ -143,13 +143,15 @@ def _test_link():
         
 
 def test_unconditioned():
-    l1, l2 = Var(BOOP,"l1"), Var(BOOP,"l2")
+    with cre_context("test_unconditioned") as context:
+        BOOP = define_fact("BOOP",{"A": "string", "B" : "number"})
+        l1, l2 = Var(BOOP,"l1"), Var(BOOP,"l2")
 
-    # c = var_and(l1,l2)
+        # c = var_and(l1,l2)
 
-    print(conditions_repr(l1 & l2,"c"))
-    print(conditions_repr((l1.B < 1) & l2, "c"))
-    print(conditions_repr(l1 & (l2.B > 1), "c"))
+        print(conditions_repr(l1 & l2,"c"))
+        print(conditions_repr((l1.B < 1) & l2, "c"))
+        print(conditions_repr(l1 & (l2.B > 1), "c"))
     
 def test_multiple_deref():
     with cre_context("test_ref_matching"):
@@ -161,24 +163,25 @@ def test_multiple_deref():
         print(c)
 
 def _test_existential_not():
-    l1, l2 = Var(BOOP,"l1"), Var(BOOP,"l2")
-    # print(l1.B)
-    # print(~l1)
-    # print(NOT(l1).B)
-    # print(NOT(l1.B))
-    a = (l1.B < 1)
-    # print(repr(a))
-    c = a & (l2.B > 1)
-    c_n = NOT(c)
-    # print("c.vars",c.vars)
-    # print("c_n.vars", c_n.vars)
-    print(repr(c))
-    print(repr(c_n))
-    assert repr(c) == 'l1, l2 = Var(BOOP), Var(BOOP)\n(l1.B < ?) & (l2.B > ?)'
-    assert repr(c_n) == 'l1, l2 = NOT(BOOP), NOT(BOOP)\n(l1.B < ?) & (l2.B > ?)'
+    with cre_context("test_existential_not"):
+        l1, l2 = Var(BOOP,"l1"), Var(BOOP,"l2")
+        # print(l1.B)
+        # print(~l1)
+        # print(NOT(l1).B)
+        # print(NOT(l1.B))
+        a = (l1.B < 1)
+        # print(repr(a))
+        c = a & (l2.B > 1)
+        c_n = NOT(c)
+        # print("c.vars",c.vars)
+        # print("c_n.vars", c_n.vars)
+        print(repr(c))
+        print(repr(c_n))
+        assert repr(c) == 'l1, l2 = Var(BOOP), Var(BOOP)\n(l1.B < ?) & (l2.B > ?)'
+        assert repr(c_n) == 'l1, l2 = NOT(BOOP), NOT(BOOP)\n(l1.B < ?) & (l2.B > ?)'
 
-    c2 = NOT(l1.B < l2.B)
-    assert repr(c2) == 'l1, l2 = NOT(BOOP), NOT(BOOP)\n(l1.B < l2.B)'
+        c2 = NOT(l1.B < l2.B)
+        assert repr(c2) == 'l1, l2 = NOT(BOOP), NOT(BOOP)\n(l1.B < l2.B)'
     # print(repr(c2))
 
 def test_list_operations():
@@ -259,6 +262,7 @@ def eq(a,b):
     return _cast_structref(CREObjType, a)==_cast_structref(CREObjType, b)
 
 def test_eq():
+    with cre_context("test_eq"):
         TestLL = define_fact("TestLL",{"name": "string", "B" :'number', "nxt" : "TestLL"})
 
         ### VAR ### 
@@ -329,7 +333,6 @@ def test_anti_unify():
           (x < y) & (z == x) & (y != 7) | # 2
           (x > y) & (z != x) & (y != 2)   # 3
          )
-
     c2 = ((a < b) & (c == a) & (b != 7) & (d > 0) | #2
           (a < b) & (c != a) & (b != 0) |           #1
           (a > b) & (c != a) & (b != 0) & (d != 7)  #3

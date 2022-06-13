@@ -500,7 +500,7 @@ class FactProxy(CREObjProxy):
                                     one_lit_conds.append(self_var==attr_var2)
 
                         else:
-                            one_lit_conds.append(attr_var==fact_ptr_to_var_map[val_fact_ptr])
+                            one_lit_conds.append(attr_var==fact_ptr_to_var_map[attr_val_fact_ptr])
                         
                 else:
                     # Primitive case
@@ -973,7 +973,7 @@ def define_fact(name : str, spec : dict = None, context=None, return_proxy=False
         context._register_fact_type(specialization_name, fact_type, inherit_from=inherit_from)
         _spec = spec if(spec is not None) else {}
         # _spec = _undeffer_spec(_spec)
-        print({_id : str(config['type']) for _id, config in _spec.items()})
+        # print({_id : str(config['type']) for _id, config in _spec.items()})
         fact_type.spec = _spec
         fact_type._fact_proxy.spec = _spec
         fact_type._fact_type_class._spec = _spec

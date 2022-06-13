@@ -3,12 +3,12 @@ from numba.types import unicode_type, boolean
 from cre.utils import decode_idrec 
 from cre.context import cre_context 
 from cre.memset import MemSet 
-from cre.flattener import Flattener, flattener_update
+from cre.processing.flattener import Flattener, flattener_update
 from cre.fact import define_fact
 import pytest_benchmark
 from cre.default_ops import Equals
-from cre.feature_applier import FeatureApplier
-from cre.vectorizer import Vectorizer
+from cre.processing.feature_applier import FeatureApplier
+from cre.processing.vectorizer import Vectorizer
 from pprint import pprint
 
 

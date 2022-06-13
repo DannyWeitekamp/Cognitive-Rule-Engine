@@ -3,11 +3,11 @@ from numba.types import unicode_type
 from cre.utils import decode_idrec, PrintElapse
 from cre.context import cre_context 
 from cre.memset import MemSet 
-from cre.flattener import Flattener, flattener_update
 from cre.fact import define_fact
 import pytest_benchmark
 from cre.default_ops import Equals
-from cre.feature_applier import FeatureApplier
+from cre.processing.flattener import Flattener, flattener_update
+from cre.processing.feature_applier import FeatureApplier
 
 
 eq_f8 = Equals(f8, f8)
@@ -125,14 +125,15 @@ def setup_feat_apply_100x100():
         flat_ms = fl.apply()
         fa = FeatureApplier([eq_f8,eq_str],flat_ms)
         feat_ms = fa.apply()
-    return (fa, feat_ms), {}
+        return (fa, feat_ms), {}
 
 def do_feat_apply(fa,ms):
     fa.update()
     return fa.out_memset
 
 def test_b_feat_apply_100x100(benchmark):
-    benchmark.pedantic(do_feat_apply,setup=setup_feat_apply_100x100, warmup_rounds=1, rounds=10)
+    with cre_context("feat_apply_100x100"):
+        benchmark.pedantic(do_feat_apply,setup=setup_feat_apply_100x100, warmup_rounds=1, rounds=10)
 
 
 

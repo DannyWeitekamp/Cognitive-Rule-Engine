@@ -11,7 +11,7 @@ from numba.extending import lower_cast, overload, overload_method
 from cre.memset import MemSet,MemSetType
 from cre.utils import  lower_setattr, _ptr_from_struct_incref, decode_idrec, listtype_sizeof_item, _cast_structref, _obj_cast_codegen, DEREF_TYPE_ATTR, DEREF_TYPE_LIST, _memcpy_structref
 from cre.vector import VectorType
-from cre.incr_processor import IncrProcessorType, ChangeEventType, incr_processor_fields, init_incr_processor
+from cre.processing.incr_processor import IncrProcessorType, ChangeEventType, incr_processor_fields, init_incr_processor
 from cre.structref import CastFriendlyStructref, define_boxing
 from cre.context import cre_context, CREContextDataType
 from cre.fact import Fact, BaseFact, DeferredFactRefType

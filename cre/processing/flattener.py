@@ -15,10 +15,10 @@ from cre.var import Var, GenericVarType, var_append_deref, get_var_type
 from cre.op import GenericOpType
 from cre.utils import _func_from_address, _cast_structref, _obj_cast_codegen, _func_from_address, _incref_structref
 from cre.structref import define_structref
-from cre.incr_processor import incr_processor_fields, IncrProcessorType, init_incr_processor
 from cre.memset import MemSet, MemSetType
 from cre.structref import CastFriendlyStructref, define_boxing
-from cre.enumerizer import Enumerizer, EnumerizerType
+from cre.processing.incr_processor import incr_processor_fields, IncrProcessorType, init_incr_processor
+from cre.processing.enumerizer import Enumerizer, EnumerizerType
 from numba.experimental import structref
 from numba.extending import overload_method, overload, lower_cast, SentryLiteralArgs
 from numba.experimental.function_type import _get_wrapper_address
@@ -95,6 +95,7 @@ def get_flattener_type(fact_types,id_attr):
                  "id_attr" : types.literal(id_attr)
                  }
     f_type = FlattenerTypeClass([(k,v) for k,v in field_dict.items()])
+    print("<<", fact_visible_attr_pairs)
     f_type._fact_visible_attr_pairs = fact_visible_attr_pairs
     f_type._id_attr = id_attr
     return f_type

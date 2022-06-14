@@ -305,7 +305,10 @@ def test_condition_generalizing():
     #c_ab = (sel.above == arg1) & (arg0.below == arg1) #& (arg1.above == arg0) #& (arg1.below == sel) & (sel.value == '')
     # c_ab = (sel.locked == False) 
     # TODO: Not matching properly
-    for facts in c_ab.get_matches(wm):
+    from cre.rete import repr_match_iter_dependencies
+    m_iter = c_ab.get_matches(wm)
+    print(repr_match_iter_dependencies(m_iter))
+    for facts in m_iter:
         print([x.id for x in facts])
     print("---")
     from cre.utils import decode_idrec

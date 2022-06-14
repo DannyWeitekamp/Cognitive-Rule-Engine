@@ -199,12 +199,12 @@ def test_multiple_deref():
         names = match_names(c, ms) 
         assert set_is_same(names, [['B1', 'B2'], ['C1', 'C2'], ['B2', 'B1'], ['C2', 'C1']])
 
-        # Two Deep w/ Permutions
+        # Two Deep w/ permutations
         c = (v1.nxt.nxt != None) & (v1.nxt.nxt == v2.nxt.nxt) & (v1 != v2)
         names = match_names(c, ms)
         assert set_is_same(names, [['C1', 'C2'], ['C2', 'C1']])
 
-        # Two Deep w/o Permutions. 
+        # Two Deep w/o permutations. 
         # NOTE: v1 < v2 compares ptrs, can't guarentee order 
         c = (v1.nxt.nxt != None) & (v1.nxt.nxt == v2.nxt.nxt) & (v1 < v2)
         names = match_names(c, ms)

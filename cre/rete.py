@@ -822,13 +822,8 @@ def _check_beta(negated, j, j_strt, j_len, inp_buffers_j,
          head_ptrs_j, ind_j, match_head_ptrs_func, match_inp_ptrs, match_inds):    
     inp_state_j = inp_buffers_j[ind_j]
     if(not inp_state_j.head_was_valid): return u1(0)
-
-    # Fill in the 'j' part of ptrs, indrecs, inds
-    # match_inds[j], match_idrecs[j] = ind_j, inp_state_j.idrec
     match_inds[j] = ind_j
     match_inp_ptrs[j_strt:j_strt+j_len] = head_ptrs_j[ind_j]
-
-    # Call node's op matches this candidate pair
     is_match = match_head_ptrs_func(match_inp_ptrs) ^ negated
     return is_match
 
@@ -937,6 +932,9 @@ def update_node(self):
                 match_inp_ptrs[i_strt:i_strt+i_len] = head_ptrs_i[ind_i]
                 # match_idrecs[i] = idrec_i
                 match_inds[i] = ind_i
+
+                # NOTE: Sections below have lots of repeated code. Couldn't find a way to inline
+                #  without incurring a ~4x slowdown.
                 
                 # If there is a beta node upstream of to this one that shares the same
                 #  variables then we'll need to make sure we also check its truth table.
@@ -947,36 +945,61 @@ def update_node(self):
                     if(j > i):
                         # Update the whole row/column
                         for ind_j in range(self.widths[j]):
+                            input_state_j = inp_buffers_j[ind_j]
                             if(not _upstream_true(u_tt, aligned, pind_i, pinds_j[ind_j])):
                                 match_inds[j] = ind_j
-                                _update_truth_table(tt, u1(0), match_inds, inp_state_i, inp_buffers_j[ind_j])    
+                                _update_truth_table(tt, u1(0), match_inds, inp_state_i, input_state_j)    
                                 continue
-                            is_match = _check_beta(negated, j, j_strt, j_len, inp_buffers_j, 
-                                head_ptrs_j, ind_j, match_head_ptrs_func, match_inp_ptrs, match_inds)
-                            _update_truth_table(tt, is_match, match_inds, inp_state_i, inp_buffers_j[ind_j])
+
+                            if(input_state_j.head_was_valid):
+                                match_inds[j] = ind_j
+                                match_inp_ptrs[j_strt:j_strt+j_len] = head_ptrs_j[ind_j]
+                                is_match = match_head_ptrs_func(match_inp_ptrs) ^ negated
+                            else:
+                                is_match = u1(0)
+                            _update_truth_table(tt, is_match, match_inds, inp_state_i, input_state_j)
                     else:
                         # Check just the unchanged parts, so to avoid repeat checks 
                         for ind_j in self.unchanged_inds[j]:
+                            input_state_j = inp_buffers_j[ind_j]
                             if(not _upstream_true(u_tt, aligned, pind_i, pinds_j[ind_j])):
                                 match_inds[j] = ind_j
-                                _update_truth_table(tt, u1(0), match_inds, inp_state_i, inp_buffers_j[ind_j])    
+                                _update_truth_table(tt, u1(0), match_inds, inp_state_i, input_state_j)    
                                 continue
-                            is_match = _check_beta(negated, j, j_strt, j_len, inp_buffers_j, 
-                                head_ptrs_j, ind_j, match_head_ptrs_func, match_inp_ptrs, match_inds)
-                            _update_truth_table(tt, is_match, match_inds, inp_state_i, inp_buffers_j[ind_j])
+
+                            if(input_state_j.head_was_valid):
+                                match_inds[j] = ind_j
+                                match_inp_ptrs[j_strt:j_strt+j_len] = head_ptrs_j[ind_j]
+                                is_match = match_head_ptrs_func(match_inp_ptrs) ^ negated
+                            else:
+                                is_match = u1(0)
+                            _update_truth_table(tt, is_match, match_inds, inp_state_i, input_state_j)
+
+                # If no 'upstream_same_parents' then just update the truth table 
+                #  with the match values for all relevant pairs.
                 else:
                     if(j > i):
                         # Update the whole row/column
                         for ind_j in range(self.widths[j]):
-                            is_match = _check_beta(negated, j, j_strt, j_len, inp_buffers_j, 
-                                head_ptrs_j, ind_j, match_head_ptrs_func, match_inp_ptrs, match_inds)
-                            _update_truth_table(tt, is_match, match_inds, inp_state_i, inp_buffers_j[ind_j])
+                            input_state_j = inp_buffers_j[ind_j]
+                            if(input_state_j.head_was_valid):
+                                match_inds[j] = ind_j
+                                match_inp_ptrs[j_strt:j_strt+j_len] = head_ptrs_j[ind_j]
+                                is_match = match_head_ptrs_func(match_inp_ptrs) ^ negated
+                            else:
+                                is_match = u1(0)
+                            _update_truth_table(tt, is_match, match_inds, inp_state_i, input_state_j)
                     else:
                         # Check just the unchanged parts, so to avoid repeat checks 
                         for ind_j in self.unchanged_inds[j]:
-                            is_match = _check_beta(negated, j, j_strt, j_len, inp_buffers_j, 
-                                head_ptrs_j, ind_j, match_head_ptrs_func, match_inp_ptrs, match_inds)
-                            _update_truth_table(tt, is_match, match_inds, inp_state_i, inp_buffers_j[ind_j])
+                            input_state_j = inp_buffers_j[ind_j]
+                            if(input_state_j.head_was_valid):
+                                match_inds[j] = ind_j
+                                match_inp_ptrs[j_strt:j_strt+j_len] = head_ptrs_j[ind_j]
+                                is_match = match_head_ptrs_func(match_inp_ptrs) ^ negated
+                            else:
+                                is_match = u1(0)
+                            _update_truth_table(tt, is_match, match_inds, inp_state_i, input_state_j)
 
         # ALPHA CASE (i.e. n_var = 1)
         else:
@@ -1642,29 +1665,39 @@ def new_match_iter(graph):
         m_iter_nodes = List.empty_list(MatchIterNodeType)
         handled_vars = Dict.empty(i8,MatchIterNodeType)
 
-        # Loop downstream to upstream through the end nodes of each Var. Build a MatchIterNode
+        # Loop downstream to upstream through the end nodes. Build a MatchIterNode
         #  for each end node to help us iterate over valid matches in the graph.
-        for i in range(len(graph.var_end_nodes)-1,-1,-1):
-            node = graph.var_end_nodes[i]
+        for var_ind in range(len(graph.var_end_nodes)-1,-1,-1):
+            node = graph.var_end_nodes[var_ind]
 
-            # Instantiate a prototype m_node for the end node of the ith var.
+            # Instantiate a prototype m_node for the end node for this Var.
             m_node = new(MatchIterNodeType)
             m_node.node = node
-            m_node.var_ind = i
-            m_node.associated_arg_ind = np.argmax(node.var_inds==i)#node.outputs[np.argmax(node.var_inds==i)]
+            m_node.var_ind = var_ind
+            m_node.associated_arg_ind = np.argmax(node.var_inds==var_ind)#node.outputs[np.argmax(node.var_inds==i)]
             m_node.curr_ind = -1;
+            other_var_ind = node.var_inds[1 if m_node.associated_arg_ind==0 else 0]
 
-            # If a downstream m_node handles match production for the ith Var 
-            #  then mark this m_node as depending on that downstream m_node. 
-            if(i in handled_vars):
-                m_node.depends_on_var_ind = handled_vars[i].var_ind
+            # If a downstream m_node handles match production for this Var 
+            #  or the other_var that this end node deals with then mark this m_node
+            #  as depending on that downstream m_node. 
+            if(var_ind in handled_vars):
+                m_node.depends_on_var_ind = handled_vars[var_ind].var_ind
+            elif(other_var_ind in handled_vars):
+                m_node.depends_on_var_ind = handled_vars[other_var_ind].var_ind
             else:
                 m_node.depends_on_var_ind = -1
+
+            # print(var_ind,
+            #      True if node.upstream_same_parents else False,
+            #     node.var_inds,
+            #     node.var_inds[m_node.associated_arg_ind])
 
             # Mark each of the Vars handled by this node.
             for j in node.var_inds:
                 if(j not in handled_vars):
                     handled_vars[j] = m_node
+                    # print("<<", j)
 
             m_iter_nodes.append(m_node)
 
@@ -1692,7 +1725,7 @@ def repr_match_iter_dependencies(m_iter):
         s = f'({str(m_node.var_ind)}'
         if(m_node.depends_on_var_ind != -1):
             # dep = _struct_from_ptr(MatchIterNodeType, )
-            s += f",{str(m_node.depends_on_var_ind)})"
+            s += f",dep={str(m_node.depends_on_var_ind)})"
         else:
              s += f")"
         rep += s

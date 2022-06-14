@@ -297,8 +297,9 @@ def test_condition_generalizing():
         
 
         sel, arg0, arg1 = varz
+        # c_ab =sel & (sel.locked == False)
         c_ab =((sel.value == '') & (sel.locked == False) & (arg0.locked == True) & (arg1.locked == True) 
-         & (sel.above == arg1) & (arg0.below == arg1) )#& (arg1.above == arg0) )#& (arg1.below == sel))
+            & (arg0.below == arg1) & (arg1.above == arg0) & (sel.above == arg1) & (arg1.below == sel))
 
     # c_ab = (sel.value == '') & (arg0.locked == True) & (arg1.locked == True) & (sel.above == arg1) & (arg0.below == arg1) & (arg1.below == sel)
     #c_ab = (sel.above == arg1) & (arg0.below == arg1) #& (arg1.above == arg0) #& (arg1.below == sel) & (sel.value == '')
@@ -307,7 +308,8 @@ def test_condition_generalizing():
     for facts in c_ab.get_matches(wm):
         print([x.id for x in facts])
     print("---")
-
+    from cre.utils import decode_idrec
+    print({decode_idrec(f.idrec)[1] : k for k,f in fact_map.items()})
 
 
 

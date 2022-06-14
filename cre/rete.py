@@ -158,12 +158,13 @@ base_rete_node_field_dict = {
 
     # True if the inputs to this node both come from the same beta node
     # e.g. like in the case of (a.v < b.v) & (a.v != b.v)
-    "inputs_same_parent" : u1,
+    "upstream_same_parents" : u1,
+    "upstream_aligned" : u1,
 
     # A weak pointer to the node upstream to this one
     "upstream_node_ptr" : i8,
 
-    # A temporary record array of with inds and idrecs of changes
+    # A temporary record array of inds and idrecs of changes
     "change_pairs" : ListType(idrec_ind_pair_type[::1])
 
 }
@@ -263,7 +264,8 @@ def node_ctor(ms, t_ids, var_inds,lit=None):
         st.change_pairs.append(np.empty(0,dtype=idrec_ind_pair_type))
 
     # Just make False by default, can end up being True after linking
-    st.inputs_same_parent = False
+    st.upstream_same_parents = False
+    st.upstream_aligned = False
     st.upstream_node_ptr = 0
 
 
@@ -505,27 +507,32 @@ def update_changes_from_inputs(self):
         # return
         # print("--", len(inp.change_set))
         # Designate inds for each idrec and expand widths (14 us) 
-        if(not self.inputs_same_parent):
-            change_pairs = self.change_pairs[i] = np.empty(len(inp.change_set),dtype=idrec_ind_pair_type)
-            for k, idrec in enumerate(inp.change_set):
-                # If the inputs have the same parent then the node should just share
-                #  the same idrecs_to_inds and widths
-                ind = idrecs_to_inds_i.get(idrec,-1)
-                if(ind == -1): 
-                    if(len(retracted_inds_i) > 0):
-                        ind = retracted_inds_i.pop()
-                    else:
-                        ind = w_i
-                        w_i += 1
-                    idrecs_to_inds_i[idrec] = ind
-                # else:
-                #     ind = idrecs_to_inds_i.get(idrec,-1)
-                #     assert ind != -1
+        # if(not self.upstream_same_parents):
+        # if(not self.upstream_aligned):
+        change_pairs = self.change_pairs[i] = np.empty(len(inp.change_set),dtype=idrec_ind_pair_type)
+        for k, idrec in enumerate(inp.change_set):
+            # If the inputs have the same parent then the node should just share
+            #  the same idrecs_to_inds and widths
+            ind = idrecs_to_inds_i.get(idrec,-1)
+            if(ind == -1): 
+                if(len(retracted_inds_i) > 0):
+                    ind = retracted_inds_i.pop()
+                else:
+                    ind = w_i
+                    w_i += 1
+                idrecs_to_inds_i[idrec] = ind
+            # else:
+            #     ind = idrecs_to_inds_i.get(idrec,-1)
+            #     assert ind != -1
 
-                change_pairs[k].idrec = idrec
-                change_pairs[k].ind = ind
-
+            change_pairs[k].idrec = idrec
+            change_pairs[k].ind = ind
         self.widths[i] = w_i
+        # elif(not self.upstream_aligned):
+        #     upstream_node = _struct_from_ptr(BaseReteNodeType, self.upstream_node_ptr)
+        #     self.widths[i] = upstream_node.widths[0 if i else 1]
+
+        
         # print("<<",idrecs_to_inds_i)
         # print("A")
         
@@ -803,343 +810,232 @@ def alpha_matches_to_str(matches):
     return s[:-1] + "]"
     # print("<<", [x.matches ])
 
-
+@njit(cache=True, inline='always')
+def _upstream_true(u_tt, aligned, pind_i, pind_j):
+    if(aligned):
+        return u_tt[pind_i, pind_j]
+    else:
+        return u_tt[pind_j, pind_i]
 
 @njit(cache=True, inline='always')
-def _handle_beta_match(tt, negated, inp_state_i, inp_state_j, match_head_ptrs_func, match_inp_ptrs, match_inds, match_idrecs):    
-    ind0, ind1 = match_inds[0], match_inds[1]
-    if(not inp_state_j.head_was_valid): return
-    
-    
-    was_match = tt[ind0, ind1]
-    is_match = match_head_ptrs_func(match_inp_ptrs) ^ negated
+def _check_beta(negated, j, j_strt, j_len, inp_buffers_j, 
+         head_ptrs_j, ind_j, match_head_ptrs_func, match_inp_ptrs, match_inds):    
+    inp_state_j = inp_buffers_j[ind_j]
+    if(not inp_state_j.head_was_valid): return u1(0)
 
+    # Fill in the 'j' part of ptrs, indrecs, inds
+    # match_inds[j], match_idrecs[j] = ind_j, inp_state_j.idrec
+    match_inds[j] = ind_j
+    match_inp_ptrs[j_strt:j_strt+j_len] = head_ptrs_j[ind_j]
+
+    # Call node's op matches this candidate pair
+    is_match = match_head_ptrs_func(match_inp_ptrs) ^ negated
+    return is_match
+
+    # Check the node's truth table to see if pair was already a match
+    # ind0, ind1 = match_inds[0], match_inds[1]
+    # was_match = tt[ind0, ind1]
 
     # print("L", match_inds, match_inp_ptrs, is_match, "NEGATED", negated)
-    # if(not negated):
-    #     print(_load_ptr(u8,match_inp_ptrs[0]), _load_ptr(u8,match_inp_ptrs[1]))
+
+    
+    # tt[ind0, ind1] = u1(is_match)
+    # count_diff = i8(is_match) - i8(was_match)
+    # inp_state_i.true_count += count_diff
+    # inp_state_j.true_count += count_diff
+
+@njit(cache=True, inline='always')
+def _update_truth_table(tt, is_match, match_inds, inp_state_i, inp_state_j):
+    # Set the truth table and modify 'true_count' as appropriate
+    ind0, ind1 = match_inds[0], match_inds[1]
+    was_match = tt[ind0, ind1]
     tt[ind0, ind1] = u1(is_match)
     count_diff = i8(is_match) - i8(was_match)
     inp_state_i.true_count += count_diff
     inp_state_j.true_count += count_diff
 
-    # print("Beta",is_match, match_inp_ptrs, match_inds, decode_idrec(inp_state_i.idrec)[1], decode_idrec(inp_state_j.idrec)[1])
 
-    #     tt[0, 0] |= u1(1)
-        # print("INSER", match_f_ids, self.lit.negated)
-        # ind0, ind1 = 
-    # idrec0, idrec1 = match_idrecs[0], match_idrecs[1]
-    # was_match = (self.truth_table[ind0,ind1] & 1) != 0
-    # print(ind0,ind1)
-        
-        # was_match = insert_beta_match(self, match_inds, match_idrecs)
-    # else:
-        # was_match = invalidate_beta_match(self, match_inds)
-    # print(f_id_i, decode_idrec(idrec_j)[1], is_match, was_match)
 
 @njit(cache=True)
 def update_node(self):
-    # return
-    # print("START")
     # If the node is an identity node then skip since the input is hardwired to the output
     if(self.op is None): return
-    # print("UPDATE_NODE", self.lit)    
-        
-    # NOTE: Before this could be 0 for declare , 1 for modify...
-# arg_change_sets = List.empty_list(u8_i8_dict_type)
-    # for j in range(len(self.var_inds)):
-    #      arg_change_sets.append(Dict.empty(u8,i8))
+    # print("-----------------------")
+    # print("Update", self.lit)
     
-        # self.change_set = self.inputs.outputs
-
-    #TODO will need to add back in
-    #update_changes_deref_dependencies(self, arg_change_sets)
-    # print("A")
-    # return
+    # Go through each idrec in the change_set and identify changes in
+    #  the set of candidate facts for this node's variables. 
     update_changes_from_inputs(self)
-    # print("B")
-    # update_head_ptrs(self, arg_change_sets)
-    # return 
-    
-
-    
-    # print("!UPDATE_NODE", self.op)    
     head_ranges = self.op.head_ranges
     n_vars = len(head_ranges)    
     negated = self.lit.negated
 
-    # for i,change_set in enumerate(arg_change_sets):
-    #     idrecs_to_inds_i = self.idrecs_to_inds[i]
-    #     retracted_inds_i = self.retracted_inds[i]
-    #     for idrec in change_set:
-    #         ind = idrecs_to_inds_i.get(idrec, -1)
-    #         if(ind == -1):
-    #             if(len(retracted_inds_i) > 0):
-    #                 ind = retracted_inds_i.pop()
-    #             else:
-    #                 ind = self.widths[i]
-    #                 self.widths[i] += 1
-    #             idrecs_to_inds_i[idrec] = ind
-
-
+    # If is a beta node make sure the truth_table is big enough.
     if(n_vars > 1):
         resize_truth_table(self)
 
-    # print("C")
-
-    # return
-    # print("MATCH_ADDR", self.op.match_head_ptrs_addr)
+    # Load the 'match' function for this node's op.
     match_head_ptrs_func = _func_from_address(match_heads_f_type, self.op.match_head_ptrs_addr)
 
-
+    # Buffers that will be loaded with ptrs, indrecs, or inds of candidates.
     match_inp_ptrs = np.zeros(len(self.op.head_var_ptrs),dtype=np.int64)
-    match_idrecs = np.zeros(len(self.var_inds),dtype=np.uint64)
+    # match_idrecs = np.zeros(len(self.var_inds),dtype=np.uint64)
     match_inds = np.zeros(len(self.var_inds),dtype=np.int64)
     tt = self.truth_table
 
-    # print("---", "~" if self.lit.negated else "", self.op, "---")
-    # print(self.inputs[0].change_set)
-    # print(self.inputs[0].change_set)
-    # return 
-    # for i, out in enumerate(self.outputs):
-    #     out.change_set = Dict.empty(u8,u1)
-    
-    # print("WHATT")
-    # print(arg_change_sets)
-    # garbage = 0
-    # return
-    # (Beta 125 us)
-    # print("D")
+    # Loop through the (at most 2) variables for this node.
     for i in range(n_vars):
+        # Extract various things used below
         idrecs_to_inds_i = self.idrecs_to_inds[i]
         head_ptrs_i = self.head_ptr_buffers[i]
         i_strt, i_len = head_ranges[i][0], head_ranges[i][1]
-
-        # if(j < i): continue
-        # changed_idrecs_i = self.changed_idrecs[i]
         changed_inds_i = self.changed_inds[i]
+
+        # BETA CASE (i.e. n_vars = 2)
         if(n_vars > 1):
-            # print("BETA CASE", changed_inds_i)
+            # For every change in a candidate to the first variable we'll 
+            #  update against every other possible candidate for the second.
+            #  i.e. for i=0 we fill  whole rows in our truth table.
+            #  [?--?--?]
+            #  [X--X--X]
+            #  [?--?--?]
+            
+            # For every change in a candidate to the second variable we'll 
+            #  update against only the unchanged candidates for the first.
+            #  i.e. for i=1 we fill columns in our truth table, but skip
+            #   cells that were already updated.
+            #  [?--X--?]
+            #  [?--?--?]
+            #  [?--X--?]
+
+            # When i=1, j=0 and vise versa
             j = 1 if i == 0 else 0
-            # p1, p2= self.inputs[i].parent_node_ptr, self.inputs[j].parent_node_ptr
-            # inputs_same_parent = p1 != 0 and p1 == p2
-            # BETA CASE 
+            
+            # Extract various things used below
             j_strt, j_len = head_ranges[j][0], head_ranges[j][1]        
             idrecs_to_inds_j = self.idrecs_to_inds[j]
             head_ptrs_j = self.head_ptr_buffers[j]
-            input_state_buffers_i = self.input_state_buffers[i]
-            input_state_buffers_j = self.input_state_buffers[j]
-
-            # print("Z")
-
+            inp_buffers_i = self.input_state_buffers[i]
+            inp_buffers_j = self.input_state_buffers[j]
+            pinds_i = self.inputs[i].match_inds
+            pinds_j = self.inputs[j].match_inds
+            aligned = self.upstream_aligned
+            same_parent = self.upstream_same_parents
+            
+            # Go through all of the changed candidates
             for ind_i in changed_inds_i:
-                inp_state_i  = input_state_buffers_i[ind_i]
-                # if(not inp_state_i.head_was_valid): continue
+                # Extract various things associated with 'ind_i'
+                inp_state_i  = inp_buffers_i[ind_i]
+                pind_i = pinds_i[ind_i]
+
+                # Clear a_id from idrec_i
                 idrec_i = inp_state_i.idrec
                 t_id_i, f_id_i, a_id_i = decode_idrec(idrec_i)
                 idrec_i = encode_idrec(t_id_i, f_id_i, 0)
-                # print("H", idrec_i, head_ptrs_i)
-                match_inp_ptrs[i_strt:i_strt+i_len] = head_ptrs_i[ind_i]
-                match_idrecs[i] = idrec_i
-                match_inds[i] = ind_i#= idrecs_to_inds_i[idrec_i]
-
-                # print("D",i, j)
-                # print(self.widths[j], self.unchanged_inds[j])
-                # if(i < j):
-                #     for idrec_j,ind_j in arg_change_sets[j].items():
-                #         tt[ind_i,ind_j] |= u1(0x2)
                 
-                # prev_matches_j = self.inputs[i].matches[idrec_i]
-                # if(i < j)
-
-                #NOTE...        
-
-                # idrecs_j = self.unchanged_idrecs[j]
-                # inds_j = self.unchanged_inds[j]
-
-                # if(inputs_same_parent):
-                #     # print("SAME PARENT", len(idrecs_to_inds_j))
-                #     for idrec_j in _ld_dict(self.inputs[i].matches[idrec_i]):
-                #         match_idrecs[j] = idrec_j
-                #         ind_j = match_inds[j] = self.idrecs_to_inds[j][idrec_j]
-                #         # if(i > j and tt[match_inds[0],match_inds[1]] & u1(0x2)): continue
-                #         match_inp_ptrs[j_strt:j_strt+j_len] = head_ptrs_j[ind_j]
-                #         _handle_beta_match(tt, negated, match_head_ptrs_func, match_inp_ptrs, match_inds, match_idrecs)
-                # else:
-                    # print("DIFF PARENT", len(idrecs_to_inds_j))
-                # print(input_state_buffers_j)
-
-                if(self.inputs_same_parent):
+                # Fill in the 'i' part of ptrs, indrecs, inds 
+                match_inp_ptrs[i_strt:i_strt+i_len] = head_ptrs_i[ind_i]
+                # match_idrecs[i] = idrec_i
+                match_inds[i] = ind_i
+                
+                # If there is a beta node upstream of to this one that shares the same
+                #  variables then we'll need to make sure we also check its truth table.
+                if(self.upstream_same_parents):
                     upstream_node = _struct_from_ptr(BaseReteNodeType, self.upstream_node_ptr)
                     u_tt = upstream_node.truth_table
+
                     if(j > i):
                         # Update the whole row/column
                         for ind_j in range(self.widths[j]):
-                            inp_state_j = input_state_buffers_j[ind_j]
-                            match_inds[j], match_idrecs[j] = ind_j, inp_state_j.idrec
-                            match_inp_ptrs[j_strt:j_strt+j_len] = head_ptrs_j[ind_j]
-                            # print(head_ptrs_j, ind_j)
-                            if(not u_tt[match_inds[0],match_inds[1]]): continue
-                            _handle_beta_match(tt, negated, inp_state_i, inp_state_j,
-                                match_head_ptrs_func, match_inp_ptrs, match_inds, match_idrecs)
+                            if(not _upstream_true(u_tt, aligned, pind_i, pinds_j[ind_j])):
+                                match_inds[j] = ind_j
+                                _update_truth_table(tt, u1(0), match_inds, inp_state_i, inp_buffers_j[ind_j])    
+                                continue
+                            is_match = _check_beta(negated, j, j_strt, j_len, inp_buffers_j, 
+                                head_ptrs_j, ind_j, match_head_ptrs_func, match_inp_ptrs, match_inds)
+                            _update_truth_table(tt, is_match, match_inds, inp_state_i, inp_buffers_j[ind_j])
                     else:
                         # Check just the unchanged parts, so to avoid repeat checks 
                         for ind_j in self.unchanged_inds[j]:
-                            inp_state_j = input_state_buffers_j[ind_j]
-                            match_inds[j], match_idrecs[j] = ind_j, inp_state_j.idrec
-                            match_inp_ptrs[j_strt:j_strt+j_len] = head_ptrs_j[ind_j]
-                            if(not u_tt[match_inds[0],match_inds[1]]): continue
-                            _handle_beta_match(tt, negated, inp_state_i, inp_state_j,
-                                match_head_ptrs_func, match_inp_ptrs, match_inds, match_idrecs)
+                            if(not _upstream_true(u_tt, aligned, pind_i, pinds_j[ind_j])):
+                                match_inds[j] = ind_j
+                                _update_truth_table(tt, u1(0), match_inds, inp_state_i, inp_buffers_j[ind_j])    
+                                continue
+                            is_match = _check_beta(negated, j, j_strt, j_len, inp_buffers_j, 
+                                head_ptrs_j, ind_j, match_head_ptrs_func, match_inp_ptrs, match_inds)
+                            _update_truth_table(tt, is_match, match_inds, inp_state_i, inp_buffers_j[ind_j])
                 else:
                     if(j > i):
                         # Update the whole row/column
                         for ind_j in range(self.widths[j]):
-                            inp_state_j = input_state_buffers_j[ind_j]
-                            match_inds[j], match_idrecs[j] = ind_j, inp_state_j.idrec
-                            match_inp_ptrs[j_strt:j_strt+j_len] = head_ptrs_j[ind_j]
-                            # print(head_ptrs_j, ind_j)
-                            _handle_beta_match(tt, negated, inp_state_i, inp_state_j,
-                                match_head_ptrs_func, match_inp_ptrs, match_inds, match_idrecs)
+                            is_match = _check_beta(negated, j, j_strt, j_len, inp_buffers_j, 
+                                head_ptrs_j, ind_j, match_head_ptrs_func, match_inp_ptrs, match_inds)
+                            _update_truth_table(tt, is_match, match_inds, inp_state_i, inp_buffers_j[ind_j])
                     else:
                         # Check just the unchanged parts, so to avoid repeat checks 
                         for ind_j in self.unchanged_inds[j]:
-                            inp_state_j = input_state_buffers_j[ind_j]
-                            match_inds[j], match_idrecs[j] = ind_j, inp_state_j.idrec
-                            match_inp_ptrs[j_strt:j_strt+j_len] = head_ptrs_j[ind_j]
-                            _handle_beta_match(tt, negated, inp_state_i, inp_state_j,
-                                match_head_ptrs_func, match_inp_ptrs, match_inds, match_idrecs)
-                # if(i < j):
-                #     for idrec_j,ind_j in arg_change_sets[j].items():
-                #         tt[ind_i,ind_j] &= u1(0x1)
+                            is_match = _check_beta(negated, j, j_strt, j_len, inp_buffers_j, 
+                                head_ptrs_j, ind_j, match_head_ptrs_func, match_inp_ptrs, match_inds)
+                            _update_truth_table(tt, is_match, match_inds, inp_state_i, inp_buffers_j[ind_j])
+
+        # ALPHA CASE (i.e. n_var = 1)
         else:
-            # print("ALPHA CASE", changed_inds_i, len(input_state_buffers_i))
             input_state_buffers_i = self.input_state_buffers[i]
-            # ALPHA CASE 
+            
+            # Go through all of the changed candidates 
             for ind_i in changed_inds_i:
-                # print("loop")
-                inp_state_i=  input_state_buffers_i[ind_i]
-                # if(not inp_state_i.head_was_valid): continue
-                idrec_i = inp_state_i.idrec
-                t_id_i, f_id_i, a_id_i = decode_idrec(idrec_i)
-                idrec_i = encode_idrec(t_id_i, f_id_i, 0)
+                inp_state_i = input_state_buffers_i[ind_i]
 
-                # print("start slice", match_inp_ptrs, i_strt, i_strt+i_len)
-                # print("hp", head_ptrs_i, ind_i)
+                # Check if the op matches this candidate
                 match_inp_ptrs[i_strt:i_strt+i_len] = head_ptrs_i[ind_i]
-
-                # print("alpha",match_inp_ptrs)
                 is_match = match_head_ptrs_func(match_inp_ptrs) ^ negated
-                # print("is_match", is_match)
                 inp_state_i.true_count = i8(is_match)
-            # print("ALPHA CASE END")
 
-                # ind0, ind1 = match_inds[0], match_inds[1]
-                # was_match = tt[ind0, ind1]
-                # is_match = match_head_ptrs_func(match_inp_ptrs) ^ negated
-                # tt[ind0, ind1] = u1(is_match)
-                # count_diff = i8(is_match) - i8(was_match)
-                # inp_state_i.true_count += count_diff
-                # inp_state_j.true_count += count_diff
-                
-                # if(is_match):
-                #     insert_alpha_match(self,idrec_i)
-                # else:
-                #     invalidate_alpha_match(self,idrec_i)
-
-        # for k, inp_s in enumerate(self.input_state_buffers[i]):
-        #     print(i,k, inp_s.true_count)
-            # print(alpha_matches_to_str(self.outputs[0].matches))
-
-    # if(n_vars > 1):
-    #     print(beta_matches_to_str(self.outputs[0].matches))
-    # else:
-    #     print(alpha_matches_to_str(self.outputs[0].matches))   
-    # print("LOOP")
-    # if(n_vars > 1):
-
-    # print("E")
+    # Update each of (the at most 2) outputs (one for each Var).
     for i, out_i in enumerate(self.outputs):
         change_ind = 0
         match_ind = 0
         input_state_buffers_i = self.input_state_buffers[i]
-        # idrecs_change_buffers_i = self.idrecs_change_buffers[i]
-
-        # match_idrecs_buffer_i = out_i.match_idrecs_buffer
-        # match_inds_buffer_i = out_i.match_inds_buffer
-        # change_buffer_i = out_i.change_buffer
-
-        # idrecs_match_buffers_i = self.idrecs_match_buffers[i]
-        # inds_match_buffers_i = self.inds_match_buffers[i]
         
+        # Update each slot k for match candidates for the ith Var.
         for k in range(self.widths[i]):
-            input_state = input_state_buffers_i[k]
-            idrec_i = input_state.idrec
-            t_id_i, f_id_i, a_id_i = decode_idrec(idrec_i)
+            # Extract t_id, f_id, a_id for the input at k.
+            input_state_k = input_state_buffers_i[k]
+            idrec_k = input_state_k.idrec
+            t_id_k, f_id_k, a_id_k = decode_idrec(idrec_k)
 
-            true_is_nonzero = (input_state.true_count != 0)
-            input_state.true_ever_nonzero |= true_is_nonzero
+            # Determine if we've ever found a match for this candidate
+            true_is_nonzero = (input_state_k.true_count != 0)
+            input_state_k.true_ever_nonzero |= true_is_nonzero
 
-            # print(k, input_state.true_ever_nonzero, match_ind, input_state.true_was_nonzero, true_is_nonzero, change_ind)
-
-            if(input_state.true_ever_nonzero):
-                # Insert match idrec or Leave a hole if ever_nonzero
-                idrec = encode_idrec(t_id_i, f_id_i, DECLARE) if true_is_nonzero else u8(0)
-                # idrecs_match_buffers_i[match_ind] = idrec
-
-                # Expand match buffers if necessary
-                # print("<<", match_ind, decode_idrec(idrec)[1], k)
+            # If we have then we'll slot it into the output.
+            if(input_state_k.true_ever_nonzero):
+                idrec = encode_idrec(t_id_k, f_id_k, DECLARE) if true_is_nonzero else u8(0)
                 node_memory_insert_match_buffers(out_i, match_ind, idrec, k)
                 match_ind += 1
 
-
-                # buff_len = len(match_idrecs_buffer_i)
-                # if(match_ind >= buff_len):
-                #     new_idrecs_buffer = np.empty(buff_len*2, dtype=np.uint64)
-                #     new_idrecs_buffer[:buff_len] = match_idrecs_buffer_i
-                #     match_idrecs_buffer_i = out_i.match_idrecs_buffer = new_idrecs_buffer
-
-                #     new_inds_buffer = np.empty(buff_len*2, dtype=np.int64)
-                #     new_inds_buffer[:buff_len] = match_inds_buffer_i
-                #     match_inds_buffer_i = out_i.match_inds_buffer = new_inds_buffer
-
-                # match_idrecs_buffer_i[match_ind] = k
-                
-
-            # If true_was_nonzero flipped then insert into the change_set
-            # print(i, input_state.true_count, input_state.true_was_nonzero)
-            if(input_state.true_was_nonzero != true_is_nonzero):
-                t_id_i, f_id_i, _ = decode_idrec(idrec_i)
+            # When a candidate flips whether it has matched insert into the change_set.
+            if(input_state_k.true_was_nonzero != true_is_nonzero):
+                t_id_k, f_id_k, _ = decode_idrec(idrec_k)
                 a_id = DECLARE if true_is_nonzero else RETRACT
-                idrec_i = encode_idrec(t_id_i, f_id_i, a_id)
-                # if(true_is_nonzero):
-                #     idrec_i = encode_idrec(t_id_i, f_id_i, DECLARE)
-                # else:
-                #     idrec_i = encode_idrec(t_id_i, f_id_i, RETRACT)
+                idrec_k = encode_idrec(t_id_k, f_id_k, a_id)
 
-                node_memory_insert_change_buffer(out_i, change_ind, idrec_i)
+                node_memory_insert_change_buffer(out_i, change_ind, idrec_k)
                 change_ind += 1
 
-                # Expand change buffer if necessary
-                # buff_len = len(change_buffer_i)
-                # if(change_ind >= buff_len):
-                #     new_change_buffer = np.empty(buff_len*2, dtype=np.uint64)
-                #     new_change_buffer[:buff_len] = change_buffer_i
-                #     change_buffer_i = out_i.change_buffer = new_change_buffer
 
-                # change_buffer_i[change_ind] = idrec_i
-                # inds_change_buffers_i[change_ind] = k
-                
-
-            input_state.true_was_nonzero = true_is_nonzero
+            input_state_k.true_was_nonzero = true_is_nonzero
         
+        # To avoid reallocations the arrays in each output are slices of larger buffers.
         out_i.match_idrecs = out_i.match_idrecs_buffer[:match_ind]
         out_i.match_inds = out_i.match_inds_buffer[:match_ind]
         out_i.change_set = out_i.change_buffer[:change_ind]
-    # print("F")
-        # print("match_idrecs", out_i.match_idrecs)
+
+        # print(":", i)
+        # print("match_idrecs.f_id", np.array([decode_idrec(x)[1] for x in out_i.match_idrecs]))
         # print("match_inds", out_i.match_inds)
-        # print("change_set", np.array([decode_idrec(x)[1] for x in out_i.change_set]))
+        # print("change_set.f_id", np.array([decode_idrec(x)[1] for x in out_i.change_set]))
+        # print(self.truth_table)
             
 
 
@@ -1308,10 +1204,6 @@ def _make_rete_nodes(mem, c, index_map):
     for distr_conjuct in c.distr_dnf:
         for j, var_conjuct in enumerate(distr_conjuct):
 
-            # if(len(var_conjuct)==0):
-                
-                # continue
-
             for lit in var_conjuct:
                 nargs = len(lit.var_base_ptrs)
                 _ensure_long_enough(nodes_by_nargs, nargs)
@@ -1353,28 +1245,28 @@ optional_node_mem_type = types.optional(NodeMemoryType)
 # optional_node_type = types.optional(BaseReteNodeType)
 
 
-
+@njit(cache=True)
+def arr_is_unique(arr):
+    for i in range(len(arr)):
+        for j in range(len(arr)):
+            if(i != j and arr[i]==arr[j]):
+                return False
+    return True
 
 
 @njit(cache=True)
 def build_rete_graph(ms, c):
     # print("A")
     index_map = Dict.empty(i8, i8)
-    # var_t_ids = np.zeros((len(c.vars),), dtype=np.uint16)
 
     for i, v in enumerate(c.vars):
         index_map[i8(v.base_ptr)] = i
 
-        # base_var = _struct_from_ptr(GenericVarType, v.base_ptr)
-        # if(base_var.base_type_name in mem.context_data.fact_to_t_id):
-        #     var_t_ids[i] = u2(mem.context_data.fact_to_t_id[base_var.base_type_name])
-        # if(_t_id is not None):
-        #     t_id = u2(i8(_t_id))
-        #     var_t_ids[i] = t_id
     # print("B")
     if(not c.has_distr_dnf):
         build_distributed_dnf(c,index_map)
-    # print("C")
+    
+    # Make all of the RETE nodes
     nodes_by_nargs, global_deref_idrec_map = \
          _make_rete_nodes(ms, c, index_map)
 
@@ -1382,54 +1274,75 @@ def build_rete_graph(ms, c):
     var_end_nodes = Dict.empty(i8,BaseReteNodeType)
     var_root_nodes = Dict.empty(i8,BaseReteNodeType)
 
-    # print("D")
     # Link nodes together. 'nodes_by_nargs' should already be ordered
     # so that alphas are before 2-way, 3-way, etc. betas. 
     for i, nodes in enumerate(nodes_by_nargs):
         for node in nodes:
+            # print("node", node.lit)
             inputs = List.empty_list(NodeMemoryType)
-            for j, ind in enumerate(node.var_inds):
+            for j, var_ind in enumerate(node.var_inds):
                 # print("ind", ind)
-                if(ind in var_end_nodes):
-                    # Extract the appropriate NodeMemory for this input
-                    e_node = var_end_nodes[ind]
-                    om = e_node.outputs[np.min(np.nonzero(e_node.var_inds==ind)[0])]
+                if(var_ind in var_end_nodes):
+                    # Set the .inputs of this node to be the NodeMemorys from the
+                    #   .outputs of the last node in the graph to check against 'var_ind' 
+                    e_node = var_end_nodes[var_ind]
+                    om = e_node.outputs[np.min(np.nonzero(e_node.var_inds==var_ind)[0])]
                     inputs.append(om)
                     node.upstream_node_ptr = _raw_ptr_from_struct(e_node)
+                    # print("wire", var_ind, e_node.lit, '[', np.min(np.nonzero(e_node.var_inds==var_ind)[0]),']', "->",  node.lit, "[", j, "]")
                 else:
+
                     t_id = node.t_ids[j]
                     if(t_id not in global_t_id_root_memory_map):
                         root = new_root_node_mem()
                         global_t_id_root_memory_map[t_id] = root
                     root = global_t_id_root_memory_map[t_id]
 
-
                     inputs.append(root)
-                    var_root_nodes[ind] = node
+                    var_root_nodes[var_ind] = node
 
             node.inputs = inputs
 
             if(len(inputs) == 2):
-                p1,p2 = inputs[0].parent_node_ptr, inputs[1].parent_node_ptr
-                node.inputs_same_parent = (p1 != 0 and p1 == p2)
-            else:
-                node.inputs_same_parent = False
+                p1, p2 = inputs[0].parent_node_ptr, inputs[1].parent_node_ptr
+                node.upstream_same_parents = (p1 != 0 and p1 == p2)
+                if(node.upstream_same_parents):
+                    parent = _struct_from_ptr(BaseReteNodeType, p1)
+                    node.upstream_aligned = np.all(node.var_inds==parent.var_inds)   
 
-            # In 'inputs_same_parent' cases make nodes share idrec_to_inds, widths, change_pairs
-            if(node.inputs_same_parent):
-                assert node.upstream_node_ptr != 0
-                upstream_node = _struct_from_ptr(BaseReteNodeType, node.upstream_node_ptr)
-                node.idrecs_to_inds = upstream_node.idrecs_to_inds
-                node.widths = upstream_node.widths
-                node.change_pairs = upstream_node.change_pairs
+                # node.upstream_same_parents = not arr_is_unique(node.var_inds)
+                # print(node.var_inds)
+                # p1,p2 = _raw_ptr_from_struct(inputs[0]), _raw_ptr_from_struct(inputs[1])
+                # print( p1,p2)
+                # node.upstream_same_parents = (p1 != 0 and p1 == p2)
+                # node.upstream_same_parent = np.sort(node.var_inds) == np.sort(node.var_inds)
+            # else:
+            #     node.upstream_same_parents = False
+
+            # In 'upstream_same_parents' cases make nodes share idrec_to_inds, widths, change_pairs
+            # if(node.upstream_same_parents):
+            #     assert node.upstream_node_ptr != 0
+            #     upstream_node = _struct_from_ptr(BaseReteNodeType, node.upstream_node_ptr)
+            #     print("aligned", upstream_node.lit, "upstream of", node.lit)
+            #     if(node.upstream_aligned):
+            #         node.idrecs_to_inds = upstream_node.idrecs_to_inds
+            #         node.change_pairs = upstream_node.change_pairs
+            #         node.widths = upstream_node.widths
+            #     else:
+            #         # node.idrecs_to_inds = List.empty_list(u8_i8_dict_type)
+            #         # node.change_pairs = List.empty_list(idrec_ind_pair_arr_type)
+            #         for i in range(len(upstream_node.change_pairs)):
+            #             node.idrecs_to_inds[i] = upstream_node.idrecs_to_inds[i]
+            #             node.change_pairs[i] = upstream_node.change_pairs[i]
+            #             node.widths[i] = upstream_node.widths[i]
 
             # Short circut the input to the output for identity nodes
             if(node.lit is None):
                 node.outputs = node.inputs
 
             # Make this node the new end node for the vars it takes as inputs
-            for ind in node.var_inds:
-                var_end_nodes[ind] = node
+            for var_ind in node.var_inds:
+                var_end_nodes[var_ind] = node
             
             
             # print("<<",len(inputs), node.var_inds)
@@ -1598,6 +1511,9 @@ def parse_change_queue(r_graph):
     # r_graph.mem.change_queue
 
 
+# ----------------------------------------------------------------------
+# : MatchIterator
+
 match_iterator_node_field_dict = {
     # "graph" : ReteGraphType,
     "node" : BaseReteNodeType,
@@ -1614,10 +1530,6 @@ match_iterator_node_field_dict = {
 
 MatchIterNode, MatchIterNodeType = define_structref("MatchIterNode", match_iterator_node_field_dict, define_constructor=False)
 
-
-
-
-
 match_iterator_field_dict = {
     "graph" : ReteGraphType,
     "iter_nodes" : ListType(MatchIterNodeType),
@@ -1628,7 +1540,9 @@ match_iterator_field_dict = {
 match_iterator_fields = [(k,v) for k,v, in match_iterator_field_dict.items()]
 
 
+# NOTE: Probably uncessary now that Fact types recover their original type on unboxing.
 def gen_match_iter_source(output_types):
+    ''' Generates source code for '''
     return f'''import cloudpickle
 from numba import njit
 from cre.rete import GenericMatchIteratorType, MatchIteratorType, match_iterator_field_dict
@@ -1641,23 +1555,15 @@ def specialize_m_iter(self):
     return _cast_structref(m_iter_type,self)
     '''
 
-
-
-
 class MatchIterator(structref.StructRefProxy):
     ''' '''
-    # def __init__(self):
-    #     super().__init__()
     m_iter_type_cache = {}
     def __new__(cls, ms, conds):
         # Make a generic MatchIterator (reuses graph if conds already has one)
-        # with PrintElapse("get_match_iter"):
-        # with mem.context as ctx:
         generic_m_iter = get_match_iter(ms, conds)
 
         #Cache 'output_types' and 'specialized_m_iter_type'
         var_base_types = conds.var_base_types
-
 
         if(var_base_types not in cls.m_iter_type_cache):
             hash_code = unique_hash([var_base_types])
@@ -1666,9 +1572,6 @@ class MatchIterator(structref.StructRefProxy):
                 source = gen_match_iter_source(output_types)
                 source_to_cache('MatchIterator', hash_code, source)
             l = import_from_cached('MatchIterator', hash_code, ['specialize_m_iter', 'output_types'])
-            # op_cls = self._generate_op_cls = l['MatchIterator']
-
-            # specialized_m_iter_type = MatchIteratorType([(k,v) for k,v in {**match_iterator_field_dict ,"output_types": output_types}.items()])
             output_types, specialize_m_iter = cls.m_iter_type_cache[var_base_types] = l['output_types'], l['specialize_m_iter']
         else:
             output_types, specialize_m_iter  = cls.m_iter_type_cache[var_base_types]
@@ -1679,20 +1582,14 @@ class MatchIterator(structref.StructRefProxy):
         return self
         
     def __next__(self):
-        # ptrs = match_iter_next_ptrs(self)
-        # print(ptrs)
-        # return fact_ptrs_as_tuple(self.output_types, ptrs)
         # with PrintElapse("match_iter_next"):
         return match_iter_next(self)
 
-        # return match_iter_next(self)
     def __iter__(self):
         return self
 
     def __del__(self):
         pass
-
-
 
 
 @structref.register
@@ -1712,16 +1609,9 @@ def upcast(context, builder, fromty, toty, val):
     return _obj_cast_codegen(context, builder, val, fromty, toty)
 
 
-
-
-# MatchIter, MatchIteratorType = define_structref("MatchIter", match_iterator_field_dict)
-
-# @njit(cache=True)
-# def copy_iter_nodes()
-
-
 @njit(GenericMatchIteratorType(GenericMatchIteratorType, ReteGraphType),cache=True)
 def copy_match_iter(m_iter, graph):
+    '''Makes a copy a prototype match iterator'''
     m_iter_nodes = List.empty_list(MatchIterNodeType)
     for i,m_node in enumerate(m_iter.iter_nodes):
         new_m_node = new(MatchIterNodeType)
@@ -1744,50 +1634,54 @@ def copy_match_iter(m_iter, graph):
 
 @njit(GenericMatchIteratorType(ReteGraphType), cache=True)
 def new_match_iter(graph):
+    '''Produces a new MatchIterator for a graph.'''
+
+    # Make an iterator prototype for this graph if one doesn't exist
+    #  a copy of the prototype will be built when __iter__ is called.
     if(graph.match_iter_prototype_ptr == 0):
         m_iter_nodes = List.empty_list(MatchIterNodeType)
         handled_vars = Dict.empty(i8,MatchIterNodeType)
 
-        # print("START", len(graph.var_end_nodes))
-
+        # Loop downstream to upstream through the end nodes of each Var. Build a MatchIterNode
+        #  for each end node to help us iterate over valid matches in the graph.
         for i in range(len(graph.var_end_nodes)-1,-1,-1):
             node = graph.var_end_nodes[i]
 
+            # Instantiate a prototype m_node for the end node of the ith var.
             m_node = new(MatchIterNodeType)
-            # m_node.graph = graph
             m_node.node = node
             m_node.var_ind = i
             m_node.associated_arg_ind = np.argmax(node.var_inds==i)#node.outputs[np.argmax(node.var_inds==i)]
+            m_node.curr_ind = -1;
 
+            # If a downstream m_node handles match production for the ith Var 
+            #  then mark this m_node as depending on that downstream m_node. 
             if(i in handled_vars):
                 m_node.depends_on_var_ind = handled_vars[i].var_ind
             else:
                 m_node.depends_on_var_ind = -1
 
-            m_node.curr_ind = -1;
-            # m_node.is_exhausted = True
-
+            # Mark each of the Vars handled by this node.
             for j in node.var_inds:
                 if(j not in handled_vars):
                     handled_vars[j] = m_node
 
             m_iter_nodes.append(m_node)
 
-        # Reverse the order since we should iterate from upstream to downstream
+        # Reverse so m_nodes are ordered upstream to downstream
         rev_m_iter_nodes = List.empty_list(MatchIterNodeType)
         for i in range(len(m_iter_nodes)-1,-1,-1):
             rev_m_iter_nodes.append(m_iter_nodes[i])
 
+        # Instantiate the prototype and link it to the graph
         m_iter = new(GenericMatchIteratorType)
-        # m_iter.graph = graph #Don't keep ref in the prototype to avoid cyclic refs
         m_iter.iter_nodes = rev_m_iter_nodes 
         m_iter.is_empty = False
-        # graph.match_iter_prototype_meminfo = _meminfo_from_struct(m_iter)
         graph.match_iter_prototype_ptr = _ptr_from_struct_incref(m_iter)
     
+    # Return a copy of the prototype 
     prototype = _struct_from_ptr(GenericMatchIteratorType, graph.match_iter_prototype_ptr)
     m_iter = copy_match_iter(prototype,graph)
-    
     return m_iter
 
 
@@ -1806,142 +1700,116 @@ def repr_match_iter_dependencies(m_iter):
 
     return rep
 
-
-
-    # return MatchIter(rev_m_iter_nodes)
-
 @njit(types.void(MatchIterNodeType),cache=True)
-# @njit(cache=True)
 def update_other_idrecs(m_node):
-    # print("START UPDATE OTHER")
+    ''' Updates the list of `other_idrecs` for a beta m_node. If an 
+          m_node's 'curr_ind' would have it yield a next match `A` for its 
+          associated Var then the 'other_idrecs' are the idrecs
+          for the matching facts of the other (non-associated) Var.
+    '''
     if(len(m_node.node.var_inds) > 1):
-        # print("A", m_node.idrecs, m_node.curr_ind)
-        # matches = m_node.associated_output.matches_inds
-        
-        # matches_inds = m_node.outputs[arg_ind]
-
-        # f_id = m_node.idrecs[m_node.curr_ind]
-        # print("B", matches, m_node.f_ids, m_node.curr_ind)
-
-        # other_idrecs_d = _dict_from_ptr(dict_i8_u1_type, matches[f_id]) 
-        # print("C", other_f_ids_d)
-        
-        # print("C", len(other_f_ids_d))
-        arg_ind = m_node.associated_arg_ind
-        other_ind = 0 if arg_ind == 1 else 1
+        # Extract various values used below
+        assoc_arg_ind = m_node.associated_arg_ind
         node = m_node.node
-        associated_output = node.outputs[arg_ind]
+        associated_output = node.outputs[assoc_arg_ind]
 
+        # Sanity check to avoid hard-to-debug segfaults.
         n_match_inds = len(associated_output.match_inds)
-        other_idrecs = np.empty((n_match_inds,), dtype=np.uint64)
-        if(m_node.curr_ind < n_match_inds):
-            this_internal_ind = associated_output.match_inds[m_node.curr_ind]
-            # print("C", arg_ind, associated_output.match_inds, m_node.curr_ind)
-            truth_table = node.truth_table
-            input_states = node.input_state_buffers[other_ind]
-            # print("D", input_states)
-            
-            # print(truth_table, this_internal_ind)
-            k = 0
-            if(arg_ind == 0):
-                for i, t in enumerate(truth_table[this_internal_ind, :]):
-                    if(t): other_idrecs[k] = input_states[i].idrec; k += 1
-            else:        
-                for i, t in enumerate(truth_table[:, this_internal_ind]):
-                    if(t): other_idrecs[k] = input_states[i].idrec; k += 1
-
-            m_node.other_idrecs = other_idrecs[:k]
-        else:
+        if(m_node.curr_ind >= n_match_inds):
             raise ValueError("Tried to update empty MatchIterNode.")
-            # m_node.other_idrecs = other_idrecs
-        # this_input_state = m_node.node.truth_table[arg_ind][]
-        # # this_ind = 
-        # other_idrecs = np.empty((len(other_input_state),), dtype=np.uint64)
-        # print("F")
-        # cnt = 0
-        # for j, (o_f_id,v) in enumerate(other_input_states):
-        #     if(v == 0): continue
-        #     other_idrecs[j] = o_f_id; cnt += 1;
-        # m_node.other_idrecs = other_idrecs[:cnt]
-        # print("S UPDATE OTHER", m_node.other_f_ids)
-        # print("Z")
-    # print("END UPDATE OTHER")
+
+        # Extract various values used below
+        this_internal_ind = associated_output.match_inds[m_node.curr_ind]
+        truth_table = node.truth_table
+        other_arg_ind = 0 if assoc_arg_ind == 1 else 1
+        other_inp_states = node.input_state_buffers[other_arg_ind]        
+
+        # Consult the node's truth_table to fill 'other_idrecs'.
+        k = 0
+        other_idrecs = np.empty((n_match_inds,), dtype=np.uint64)
+        if(assoc_arg_ind == 0):
+            for i, t in enumerate(truth_table[this_internal_ind, :]):
+                if(t): other_idrecs[k] = other_inp_states[i].idrec; k += 1
+        else:        
+            for i, t in enumerate(truth_table[:, this_internal_ind]):
+                if(t): other_idrecs[k] = other_inp_states[i].idrec; k += 1
+
+        # Assign other_idrecs as just the parts of the buffer we filled. 
+        m_node.other_idrecs = other_idrecs[:k]
 
 
 
 @njit(types.void(GenericMatchIteratorType,i8), cache=True)
 def restitch_match_iter(m_iter, start_from):
+    '''
+    Called when an m_node exhausts its matches. Finds the new set of 
+    matches that 
+    '''
+    # If -1 restich the whole chain of m_nodes.
     if(start_from == -1): start_from = len(m_iter.iter_nodes)-1
+
+    # Restich from downstream to upstream (to ensure end nodes go first)
+    #  until 'start_from'.
     for i in range(start_from,-1,-1):
-        # print("I", i)
         m_node = m_iter.iter_nodes[i]
         cnt = 0
         if(m_node.curr_ind == -1):
-            if(m_node.depends_on_var_ind == -1):
-                # print("A")
-                # matches = m_node.associated_output.matches
+            # If this m_node depends on another m_node then we should defer to the
+            #  'other_idrecs' of the m_node on which it depends.
+            if(m_node.depends_on_var_ind != -1):
+                dep_node = m_iter.iter_nodes[m_node.depends_on_var_ind]
+                m_node.idrecs = dep_node.other_idrecs
+
+            # If this m_node has no dependencies then it was built from an end_node
+            #  and thus it should be used as a source of matches.
+            else:
+                # From the output associated with m_node make a copy of match_idrecs
+                #  that omits all of the zeros. 
                 associated_output = m_node.node.outputs[m_node.associated_arg_ind]
                 matches = associated_output.match_idrecs
                 idrecs = np.empty((len(matches)),dtype=np.uint64)
-                
-                # print("B", matches, len(m_node.node.var_inds))
-                # print(matches)
-                # for j, (f_id, v) in enumerate(matches.items()):
                 for j, idrec in enumerate(matches):
                     if(idrec == 0): continue
                     idrecs[j] = idrec; cnt += 1;
 
+                # If the output only had zeros then prematurely mark m_node as empty.
                 if(cnt == 0):
                     m_iter.is_empty = True
                     break
 
+                # Otherwise update the idrecs for the matches of m_node.
                 m_node.idrecs = idrecs[:cnt]
 
-                # print("N_IDRECS",m_node.idrecs)
-                # if(i == start_from and len(m_node.idrecs) == 0):
-                #     print("EMPTY")
-                
-
-
-                # print("C", cnt)
-                # print(m_node.f_ids)
-                
-                
-            else:
-                dep_node = m_iter.iter_nodes[m_node.depends_on_var_ind]
-                m_node.idrecs = dep_node.other_idrecs
-                # m_node.curr_ind = 0
+            # Reset `curr_ind`
             m_node.curr_ind = 0
+
+        # If we retrieved idrecs from an end node then we need to update 
+        #  other_idrecs so that any upstream restich uses the right idrecs.
         if(i > 0 and cnt > 0):
-            # print("SS")
             update_other_idrecs(m_node)
 
-            # print("DONE")
-            # print("S UPDATE OTHER", i, m_node.other_idrecs)
-        # else:
-        #     print("CURRIND", m_node.curr_ind)
-            # m_node.curr_ind = 0
 
 @njit(u8[::1](GenericMatchIteratorType),cache=True)
 def match_iter_next_idrecs(m_iter):
     n_vars = len(m_iter.iter_nodes)
     if(m_iter.is_empty or n_vars == 0): raise StopIteration()
 
+    # Build an array 'idrecs' for the idrecs of the next match set of Facts.
     idrecs = np.empty(n_vars,dtype=np.uint64)
+
+    # For each 
     most_downstream_overflow = -1
     for i, m_node in enumerate(m_iter.iter_nodes):
-        # print("RESTICH")
-        # print(i, ":", m_node.curr_ind, m_node.f_ids)
+        # Fill the next idrec
         idrecs[m_node.var_ind] = m_node.idrecs[m_node.curr_ind]
 
-        update_other_needed = False
-        if(i == 0):
+        # Increment the current index for the m_node
+        if(i == 0 or most_downstream_overflow == i-1):
             m_node.curr_ind += 1
-        elif(most_downstream_overflow == i-1):
-            m_node.curr_ind += 1
-            update_other_needed = True
-
+        
+        # Track whether incrementing overflowed the m_node.
         if(m_node.curr_ind >= len(m_node.idrecs)):
+            # If the last m_node overflows then iteration is finished.
             if(i == n_vars-1):
                 m_iter.is_empty = True
                 return idrecs

@@ -8,14 +8,16 @@ from cre.context import cre_context
 from cre.utils import _struct_from_ptr, _list_base,_list_base_from_ptr,_load_ptr, _incref_structref, _raw_ptr_from_struct
 from numba.core.runtime.nrt import rtsys
 import gc
-
+from cre.rete import repr_match_iter_dependencies
 
 # with cre_context("test_matching"):
     
 
 def match_names(c,ms=None):
     out = []
-    for m in c.get_matches(ms):
+    m_iter = c.get_matches(ms)
+    # print(repr_match_iter_dependencies(m_iter))
+    for m in m_iter:
         # print(m)
         out.append([x.name for x in m])
         # print("X")
@@ -192,6 +194,7 @@ def test_multiple_deref():
         # One Deep check same fact instance
         c = (v1.nxt != None) & (v1.nxt == v2.nxt) & (v1 != v2)
         names = match_names(c, ms) 
+        print(names)
         assert set_is_same(names, [['B1', 'B2'], ['B2', 'B1']])
 
         # One Deep check same B value
@@ -327,6 +330,38 @@ def test_multiple_types():
 
         c = t & b & (b.name == t.name)
         assert match_names(c, ms) == [["A","A"], ["B","B"]]
+
+
+
+def test_same_parents():
+    with cre_context("test_same_parents"):
+        BOOP = define_fact("BOOP",{"name": str, "mod3": float, "mod5": float, "mod7": float, "val" : float})    
+
+        ms = MemSet()
+        for i in range(106):
+            ms.declare(BOOP(str(i),i%3,i%5, i%7,i))
+
+        a = Var(BOOP,"a")
+        b = Var(BOOP,"b")
+        c = Var(BOOP,"c")
+
+        # Aligned case
+        conds = (a.val < b.val) & (a.mod3 == b.mod3) & (a.mod5 == b.mod5) & (a.mod7 == b.mod7)
+        assert sorted(match_names(conds, ms)) == [['0', '105']]
+
+        # Unaligned case
+        conds = (a.val < b.val) & (b.mod3 == a.mod3) & (a.mod5 == b.mod5) & (b.mod7 == a.mod7)
+        assert sorted(match_names(conds, ms)) == [['0', '105']]
+
+        conds = (a & b & c &
+                 (a.val < b.val) & (b.mod3 == a.mod3) & (a.mod5 == b.mod5) & (b.mod7 == a.mod7) &
+                 (a.val < c.val) & (c.mod3 == a.mod7) & (c.mod3 == b.mod5) & (c.mod3 == a.mod7) & 
+                 (c.val < 12))
+
+        assert sorted(match_names(conds, ms)) == [['0', '105', '3'], ['0', '105', '6'], ['0', '105', '9']]
+        
+        
+
 
 
 def used_bytes():
@@ -501,7 +536,7 @@ def matching_betas_setup():
 
         return (c,ms), {}
 
-from cre.rete import get_match_iter, update_graph, ReteGraphType, parse_change_queue, update_node, build_rete_graph, new_match_iter, restitch_match_iter
+from cre.rete import get_match_iter, update_graph, ReteGraphType, parse_change_queue, update_node, build_rete_graph, new_match_iter#, restitch_match_iter
 def apply_get_matches(c,ms):
     # rete_graph = build_rete_graph(ms, c)
     # update_graph(rete_graph)
@@ -555,6 +590,7 @@ def test_b_matching_betas_lit(benchmark):
 
 if(__name__ == "__main__"):
     import faulthandler; faulthandler.enable()
+    
     # test_mem_leaks()
     # dat = matching_alphas_setup()[0]
     # dat = matching_betas_setup()[0]
@@ -582,14 +618,16 @@ if(__name__ == "__main__"):
     # print(alloc_stats1.alloc-alloc_stats1.free, alloc_stats2.alloc-alloc_stats2.free)
 
 
-    test_ref_matching()
-    test_multiple_deref()
+    # test_ref_matching()
+    # test_multiple_deref()
     # test_matching_unconditioned()
-    test_list()
-    test_multiple_types()
+    # test_list()
+    # test_multiple_types()
     # import pytest.__main__.benchmark
     # matching_1_t_4_lit_setup()
     # _test_NOT()
     # test_b_matching_1_t_4_lit()
-    test_multiple_types()
-    test_mem_leaks()
+    # test_multiple_types()
+    test_same_parents()
+    # test_mem_leaks()
+

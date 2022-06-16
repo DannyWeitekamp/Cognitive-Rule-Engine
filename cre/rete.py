@@ -1541,12 +1541,13 @@ match_iterator_node_field_dict = {
     # "graph" : ReteGraphType,
     "node" : BaseReteNodeType,
     "associated_arg_ind" : i8,
-    "depends_on_var_ind" : i8,
     "var_ind" : i8,
     # "is_exhausted": boolean,
     "curr_ind": i8,
     "idrecs" : u8[::1],
     "other_idrecs" : u8[::1],
+    "depends_on_var_ind" : i8,
+    "depends_on_arg_ind" : i8,
 }
 
 
@@ -1584,7 +1585,6 @@ class MatchIterator(structref.StructRefProxy):
     def __new__(cls, ms, conds):
         # Make a generic MatchIterator (reuses graph if conds already has one)
         generic_m_iter = get_match_iter(ms, conds)
-
         #Cache 'output_types' and 'specialized_m_iter_type'
         var_base_types = conds.var_base_types
 
@@ -1598,7 +1598,7 @@ class MatchIterator(structref.StructRefProxy):
             output_types, specialize_m_iter = cls.m_iter_type_cache[var_base_types] = l['output_types'], l['specialize_m_iter']
         else:
             output_types, specialize_m_iter  = cls.m_iter_type_cache[var_base_types]
-        
+
         # Specialize the match iter so that it outputs conds.var_base_types 
         self = specialize_m_iter(generic_m_iter)
         self.output_types = output_types#tuple([types.TypeRef(x) for x in conds.var_base_types])
@@ -1643,6 +1643,7 @@ def copy_match_iter(m_iter, graph):
         new_m_node.var_ind = m_node.var_ind
         new_m_node.associated_arg_ind = m_node.associated_arg_ind
         new_m_node.depends_on_var_ind = m_node.depends_on_var_ind
+        new_m_node.depends_on_arg_ind = m_node.depends_on_arg_ind
         new_m_node.curr_ind = m_node.curr_ind
         if(m_node.curr_ind != -1):
             new_m_node.idrecs = m_node.idrecs
@@ -1678,15 +1679,22 @@ def new_match_iter(graph):
             m_node.curr_ind = -1;
             other_var_ind = node.var_inds[1 if m_node.associated_arg_ind==0 else 0]
 
+            # print("END NODE", var_ind, node.lit, m_node.associated_arg_ind)
+
             # If a downstream m_node handles match production for this Var 
             #  or the other_var that this end node deals with then mark this m_node
             #  as depending on that downstream m_node. 
-            if(var_ind in handled_vars):
-                m_node.depends_on_var_ind = handled_vars[var_ind].var_ind
-            elif(other_var_ind in handled_vars):
-                m_node.depends_on_var_ind = handled_vars[other_var_ind].var_ind
+            # if(var_ind in handled_vars):
+            #     dep_m_node = handled_vars[var_ind]
+            #     m_node.depends_on_var_ind = dep_m_node.var_ind
+            #     m_node.depends_on_arg_ind = np.argmax(dep_m_node.node.var_inds==var_ind)
+            if(other_var_ind in handled_vars):
+                dep_m_node = handled_vars[other_var_ind]
+                m_node.depends_on_var_ind = dep_m_node.var_ind
+                m_node.depends_on_arg_ind = np.argmax(dep_m_node.node.var_inds==other_var_ind)
             else:
                 m_node.depends_on_var_ind = -1
+                m_node.depends_on_arg_ind = -1
 
             # print(var_ind,
             #      True if node.upstream_same_parents else False,
@@ -1711,7 +1719,7 @@ def new_match_iter(graph):
         m_iter.iter_nodes = rev_m_iter_nodes 
         m_iter.is_empty = False
         graph.match_iter_prototype_ptr = _ptr_from_struct_incref(m_iter)
-    
+    # print("END NEW MATCH ITER")
     # Return a copy of the prototype 
     prototype = _struct_from_ptr(GenericMatchIteratorType, graph.match_iter_prototype_ptr)
     m_iter = copy_match_iter(prototype,graph)
@@ -1733,93 +1741,127 @@ def repr_match_iter_dependencies(m_iter):
 
     return rep
 
-@njit(types.void(MatchIterNodeType),cache=True)
-def update_other_idrecs(m_node):
+@njit(types.void(MatchIterNodeType,MatchIterNodeType),cache=True)
+def update_from_downstream_match(m_node, dep_m_node):
     ''' Updates the list of `other_idrecs` for a beta m_node. If an 
           m_node's 'curr_ind' would have it yield a next match `A` for its 
           associated Var then the 'other_idrecs' are the idrecs
           for the matching facts of the other (non-associated) Var.
     '''
     if(len(m_node.node.var_inds) > 1):
-        # Extract various values used below
+        # Extract various values used below 
         assoc_arg_ind = m_node.associated_arg_ind
+        other_arg_ind = 1 if assoc_arg_ind == 0 else 0
         node = m_node.node
-        associated_output = node.outputs[assoc_arg_ind]
-
-        # Sanity check to avoid hard-to-debug segfaults.
-        n_match_inds = len(associated_output.match_inds)
-        if(m_node.curr_ind >= n_match_inds):
-            raise ValueError("Tried to update empty MatchIterNode.")
-
-        # Extract various values used below
-        this_internal_ind = associated_output.match_inds[m_node.curr_ind]
+        dep_node = dep_m_node.node
         truth_table = node.truth_table
-        other_arg_ind = 0 if assoc_arg_ind == 1 else 1
-        other_inp_states = node.input_state_buffers[other_arg_ind]        
 
-        # Consult the node's truth_table to fill 'other_idrecs'.
+        # Determine the index of the fixed downstream match within this node
+        if(_raw_ptr_from_struct(node) == _raw_ptr_from_struct(dep_node)):
+            # If they happen to represent the same graph node then get from match_inds
+            other_output = node.outputs[other_arg_ind]
+            fixed_intern_ind = other_output.match_inds[dep_m_node.curr_ind]
+        else:
+            # Otherwise we need to use the 'idrecs_to_inds' map
+            dep_input_states = dep_node.inputs[m_node.depends_on_arg_ind]
+            dep_idrec = dep_input_states.match_idrecs[dep_m_node.curr_ind]
+            fixed_intern_ind = node.idrecs_to_inds[other_arg_ind][dep_idrec]
+
+        inp_states = node.input_state_buffers[assoc_arg_ind]        
+     
+        # Consult the node's truth_table to fill 'idrecs'.
         k = 0
-        other_idrecs = np.empty((n_match_inds,), dtype=np.uint64)
-        if(assoc_arg_ind == 0):
-            for i, t in enumerate(truth_table[this_internal_ind, :]):
-                if(t): other_idrecs[k] = other_inp_states[i].idrec; k += 1
+        idrecs = np.empty((truth_table.shape[assoc_arg_ind],), dtype=np.uint64)
+        if(assoc_arg_ind == 1):
+            for i, t in enumerate(truth_table[fixed_intern_ind, :]):
+                if(t): idrecs[k] = inp_states[i].idrec; k += 1
         else:        
-            for i, t in enumerate(truth_table[:, this_internal_ind]):
-                if(t): other_idrecs[k] = other_inp_states[i].idrec; k += 1
+            for i, t in enumerate(truth_table[:, fixed_intern_ind]):
+                if(t): idrecs[k] = inp_states[i].idrec; k += 1
 
-        # Assign other_idrecs as just the parts of the buffer we filled. 
-        m_node.other_idrecs = other_idrecs[:k]
+        # Assign idrecs as just the parts of the buffer we filled. 
+        m_node.idrecs = idrecs[:k]
+
+        # print("Update", m_node.node.lit, m_node.node.var_inds[assoc_arg_ind],
+        #       "from", dep_m_node.node.lit, dep_m_node.node.var_inds[m_node.depends_on_arg_ind],
+        #       ":", np.array([decode_idrec(x)[1] for x in m_node.idrecs]))
 
 
 
-@njit(types.void(GenericMatchIteratorType,i8), cache=True)
-def restitch_match_iter(m_iter, start_from):
-    '''
-    Called when an m_node exhausts its matches. Finds the new set of 
-    matches that 
-    '''
-    # If -1 restich the whole chain of m_nodes.
-    if(start_from == -1): start_from = len(m_iter.iter_nodes)-1
+@njit(types.boolean(MatchIterNodeType))
+def update_terminal(m_node):
+    # From the output associated with m_node make a copy of match_idrecs
+    #  that omits all of the zeros. 
+    cnt = 0
+    associated_output = m_node.node.outputs[m_node.associated_arg_ind]
+    matches = associated_output.match_idrecs
+    idrecs = np.empty((len(matches)),dtype=np.uint64)
+    for j, idrec in enumerate(matches):
+        if(idrec == 0): continue
+        idrecs[cnt] = idrec; cnt += 1;
 
-    # Restich from downstream to upstream (to ensure end nodes go first)
-    #  until 'start_from'.
-    for i in range(start_from,-1,-1):
-        m_node = m_iter.iter_nodes[i]
-        cnt = 0
-        if(m_node.curr_ind == -1):
-            # If this m_node depends on another m_node then we should defer to the
-            #  'other_idrecs' of the m_node on which it depends.
-            if(m_node.depends_on_var_ind != -1):
-                dep_node = m_iter.iter_nodes[m_node.depends_on_var_ind]
-                m_node.idrecs = dep_node.other_idrecs
+    # If the output only had zeros then prematurely mark m_node as empty.
+    if(cnt == 0):
+        return False
 
-            # If this m_node has no dependencies then it was built from an end_node
-            #  and thus it should be used as a source of matches.
-            else:
-                # From the output associated with m_node make a copy of match_idrecs
-                #  that omits all of the zeros. 
-                associated_output = m_node.node.outputs[m_node.associated_arg_ind]
-                matches = associated_output.match_idrecs
-                idrecs = np.empty((len(matches)),dtype=np.uint64)
-                for j, idrec in enumerate(matches):
-                    if(idrec == 0): continue
-                    idrecs[j] = idrec; cnt += 1;
+    # Otherwise update the idrecs for the matches of m_node.
+    m_node.idrecs = idrecs[:cnt]
+    return True
 
-                # If the output only had zeros then prematurely mark m_node as empty.
-                if(cnt == 0):
-                    m_iter.is_empty = True
-                    break
+# @njit(types.void(GenericMatchIteratorType,i8), cache=True)
+# def restitch_match_iter(m_iter, start_from):
+#     '''
+#     Called when an m_node exhausts its matches. Finds the new set of 
+#     matches that 
+#     '''
+#     # If -1 restich the whole chain of m_nodes.
+#     if(start_from == -1): start_from = len(m_iter.iter_nodes)-1
 
-                # Otherwise update the idrecs for the matches of m_node.
-                m_node.idrecs = idrecs[:cnt]
+#     # Restich from downstream to upstream (to ensure end nodes go first)
+#     #  until 'start_from'.
+#     for i in range(start_from,-1,-1):
+#         m_node = m_iter.iter_nodes[i]
+#         cnt = 0
+#         if(m_node.curr_ind == -1):
+#             # If this m_node depends on another m_node then we should defer to the
+#             #  'other_idrecs' of the m_node on which it depends.
+#             if(m_node.depends_on_var_ind != -1):
+#                 dep_m_node = m_iter.iter_nodes[m_node.depends_on_var_ind]
+#                 update_from_downstream_match(m_node, dep_m_node)
+#                 # dep_node = m_iter.iter_nodes[m_node.depends_on_var_ind]
+#                 # print(i, "depends_on", m_node.depends_on_var_ind, m_node.depends_on_arg_ind)
+#                 # if(m_node.depends_on_arg_ind == dep_node.associated_arg_ind):
+#                 #     m_node.idrecs = dep_node.idrecs
+#                 # else:
+#                 #     m_node.idrecs = dep_node.other_idrecs
 
-            # Reset `curr_ind`
-            m_node.curr_ind = 0
+#             # If this m_node has no dependencies then it was built from an end_node
+#             #  and thus it should be used as a source of matches.
+#             else:
+#                 # From the output associated with m_node make a copy of match_idrecs
+#                 #  that omits all of the zeros. 
+#                 associated_output = m_node.node.outputs[m_node.associated_arg_ind]
+#                 matches = associated_output.match_idrecs
+#                 idrecs = np.empty((len(matches)),dtype=np.uint64)
+#                 for j, idrec in enumerate(matches):
+#                     if(idrec == 0): continue
+#                     idrecs[cnt] = idrec; cnt += 1;
 
-        # If we retrieved idrecs from an end node then we need to update 
-        #  other_idrecs so that any upstream restich uses the right idrecs.
-        if(i > 0 and cnt > 0):
-            update_other_idrecs(m_node)
+#                 # If the output only had zeros then prematurely mark m_node as empty.
+#                 if(cnt == 0):
+#                     m_iter.is_empty = True
+#                     break
+
+#                 # Otherwise update the idrecs for the matches of m_node.
+#                 m_node.idrecs = idrecs[:cnt]
+
+#             # Reset `curr_ind`
+#             m_node.curr_ind = 0
+
+#         # If we retrieved idrecs from an end node then we need to update 
+#         #  other_idrecs so that any upstream restich uses the right idrecs.
+#         # if(i > 0 and cnt > 0):
+#         #     update_other_idrecs(m_node)
 
 
 @njit(u8[::1](GenericMatchIteratorType),cache=True)
@@ -1833,10 +1875,12 @@ def match_iter_next_idrecs(m_iter):
     # For each 
     most_downstream_overflow = -1
     for i, m_node in enumerate(m_iter.iter_nodes):
+        # print(i, "v:", m_node.var_ind, "c:", m_node.curr_ind, np.array([decode_idrec(x)[1] for x in m_node.idrecs]))
+
         # Fill the next idrec
         idrecs[m_node.var_ind] = m_node.idrecs[m_node.curr_ind]
 
-        # Increment the current index for the m_node
+        # Increment if first node or prev node overflowed
         if(i == 0 or most_downstream_overflow == i-1):
             m_node.curr_ind += 1
         
@@ -1846,14 +1890,71 @@ def match_iter_next_idrecs(m_iter):
             if(i == n_vars-1):
                 m_iter.is_empty = True
                 return idrecs
-            m_node.curr_ind = -1
+
+            m_node.curr_ind = 0
             most_downstream_overflow = i
-        else:
-            update_other_idrecs(m_node)
 
+    # print(most_downstream_overflow, np.array([decode_idrec(x)[1] for x in idrecs]))        
+    for i in range(most_downstream_overflow,-1,-1):
+        m_node = m_iter.iter_nodes[i]
 
-    if(most_downstream_overflow != -1):
-        restitch_match_iter(m_iter, most_downstream_overflow)
+        # If this m_node depends on another m_node then we should defer to the
+        #  'other_idrecs' of the m_node on which it depends.
+        if(m_node.depends_on_var_ind != -1):
+            dep_m_node = m_iter.iter_nodes[m_node.depends_on_var_ind]
+            update_from_downstream_match(m_node, dep_m_node)
+
+    return idrecs
+
+# @njit(u8[::1](GenericMatchIteratorType),cache=True)
+# def match_iter_next_idrecs(m_iter):
+#     n_vars = len(m_iter.iter_nodes)
+#     end = len(m_iter.iter_nodes)-1
+#     if(m_iter.is_empty or n_vars == 0): raise StopIteration()
+
+#     # Build an array 'idrecs' for the idrecs of the next match set of Facts.
+#     idrecs = np.empty(n_vars,dtype=np.uint64)
+
+#     # For each 
+#     most_upstream_overflow = -1
+#     # for i, m_node in enumerate(m_iter.iter_nodes):
+#     for i in range(end ,-1,-1):
+#         m_node = m_iter.iter_nodes[i]
+        
+
+        
+
+#         print(i, "v:", m_node.var_ind, m_node.curr_ind, np.array([decode_idrec(x)[1] for x in m_node.idrecs]) ,most_upstream_overflow)
+#         # Fill the next idrec
+#         # print("B")
+#         # print(i, m_node.var_ind, decode_idrec(m_node.idrecs[m_node.curr_ind])[0])
+#         idrecs[m_node.var_ind] = m_node.idrecs[m_node.curr_ind]
+
+#         # Increment the current index for the m_node
+#         if(i == end or most_upstream_overflow == i+1):
+#             m_node.curr_ind += 1
+        
+#         # Track whether incrementing overflowed the m_node.
+#         if(m_node.curr_ind >= len(m_node.idrecs)):
+#             # If the last m_node overflows then iteration is finished.
+#             if(i == 0):
+#                 m_iter.is_empty = True
+#                 return idrecs
+
+#             if(m_node.depends_on_var_ind != -1):
+#                 dep_m_node = m_iter.iter_nodes[m_node.depends_on_var_ind]
+#                 update_from_downstream_match(m_node, dep_m_node)
+                
+#             m_node.curr_ind = 0
+#             most_upstream_overflow = i
+
+        
+
+#         # print(i, most_upstream_overflow)
+#     print("idrecs:", np.array([decode_idrec(x)[1] for x in idrecs]))
+    # if(most_upstream_overflow != -1):
+    #     # print("restich")
+    #     restitch_match_iter(m_iter, most_upstream_overflow)
 
     return idrecs
 
@@ -1929,7 +2030,6 @@ def update_graph(graph):
         for node in lst:
             # print(node)
             update_node(node)        
-    # print("END UPDATE")
 
 
 @njit(GenericMatchIteratorType(MemSetType, ConditionsType), cache=True)
@@ -1945,11 +2045,24 @@ def get_match_iter(ms, conds):
     update_graph(rete_graph)
     # print("UPDATED")
     m_iter = new_match_iter(rete_graph)
+
+    for i in range(len(m_iter.iter_nodes)-1,-1,-1):
+        m_node = m_iter.iter_nodes[i]
+        m_node.curr_ind = 0
+        if(m_node.depends_on_var_ind == -1):
+            ok = update_terminal(m_node)
+            if(not ok):
+                m_iter.is_empty = True
+                break
+        else:
+            dep_m_node = m_iter.iter_nodes[m_node.depends_on_var_ind]
+            update_from_downstream_match(m_node, dep_m_node)
+        
+    # print("fin get")
     # for i, m_node in enumerate(m_iter.iter_nodes):
     #     print("<<", m_node.curr_ind)
-    # print("INITIAL RESTICH")
-    restitch_match_iter(m_iter, -1)
-    # print("RESTRICT ED")
+    # print("initial restich")
+    # restitch_match_iter(m_iter, -1)
     return m_iter
 
 

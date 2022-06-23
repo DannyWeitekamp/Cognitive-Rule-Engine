@@ -358,6 +358,7 @@ def test_same_parents():
                  (a.val < c.val) & (c.mod3 == a.mod7) & (c.mod3 == b.mod5) & (c.mod3 == a.mod7) & 
                  (c.val < 12))
 
+        print("-----------")
         assert sorted(match_names(conds, ms)) == [['0', '105', '3'], ['0', '105', '6'], ['0', '105', '9']]
         
         

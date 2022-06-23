@@ -1134,6 +1134,7 @@ rete_graph_field_dict = {
     "nodes_by_nargs" : ListType(ListType(BaseReteNodeType)),
     "var_root_nodes" : DictType(i8,BaseReteNodeType),
     "var_end_nodes" : DictType(i8,BaseReteNodeType),
+    "var_end_join_ptrs" : i8[::,::1],
     "global_deref_idrec_map" : DictType(u8, node_list_type),
     "global_t_id_root_memory_map" : DictType(u2, NodeMemoryType),
     # "var_t_ids" : u2[::1], #NOTE: Something wrong with this... consider just not keeping
@@ -1146,7 +1147,7 @@ ReteGraph, ReteGraphType = define_structref("ReteGraph", rete_graph_field_dict, 
 
 @njit(cache=True)
 def rete_graph_ctor(ms, conds, nodes_by_nargs, var_root_nodes, var_end_nodes,
-                    global_deref_idrec_map, global_t_id_root_memory_map):
+                var_end_join_ptrs, global_deref_idrec_map, global_t_id_root_memory_map):
     st = new(ReteGraphType)
     st.change_head = 0
     st.memset = ms
@@ -1154,6 +1155,7 @@ def rete_graph_ctor(ms, conds, nodes_by_nargs, var_root_nodes, var_end_nodes,
     st.nodes_by_nargs = nodes_by_nargs
     st.var_root_nodes = var_root_nodes
     st.var_end_nodes = var_end_nodes
+    st.var_end_join_ptrs = var_end_join_ptrs
     st.global_deref_idrec_map = global_deref_idrec_map
     st.global_t_id_root_memory_map = global_t_id_root_memory_map
     # st.var_t_ids = var_t_ids 
@@ -1203,6 +1205,24 @@ def _ensure_long_enough(nodes_by_nargs, nargs):
 
 ReteNode_List_type = ListType(BaseReteNodeType)
 
+@njit(cache=True)
+def _get_degree_order(c, index_map):
+    ''' Order vars by decreasing degree '''
+    has_pairs = np.zeros((len(c.vars),len(c.vars)),dtype=np.uint8)
+    for distr_conjunct in c.distr_dnf:
+        for j, var_conjuct in enumerate(distr_conjunct):
+            for lit in var_conjuct:
+                var_inds = np.empty((len(lit.var_base_ptrs),),dtype=np.int64)
+                for i, base_var_ptr in enumerate(lit.var_base_ptrs):
+                    var_inds[i] = index_map[i8(base_var_ptr)]
+                if(len(var_inds) > 1):
+                    has_pairs[var_inds[0],var_inds[1]] = 1
+                    has_pairs[var_inds[1],var_inds[0]] = 1
+    degree = has_pairs.sum(axis=1)
+    degree_order = np.argsort(-degree)
+    return degree_order
+
+
 @njit(cache=True,locals={})
 def _make_rete_nodes(mem, c, index_map):
     nodes_by_nargs = List.empty_list(ReteNode_List_type)
@@ -1223,14 +1243,26 @@ def _make_rete_nodes(mem, c, index_map):
         # _ensure_long_enough(nodes_by_nargs, 1)
         nodes_by_nargs[0].append(node_ctor(mem, t_ids, var_inds,lit=None))
 
+    degree_order = _get_degree_order(c, index_map)
 
-    for distr_conjuct in c.distr_dnf:
-        for j, var_conjuct in enumerate(distr_conjuct):
+    # print("degree_order", degree_order)
 
+    for distr_conjunct in c.distr_dnf:
+        for j, var_ind in enumerate(degree_order):
+            var_conjuct = distr_conjunct[var_ind]
+        # for j, var_conjuct in enumerate(distr_conjunct):
+            # for lit in var_conjuct:
+        # print("var_ind", var_ind, len(c.distr_dnf))
+
+
+            # distr_dnf = c.distr_dnf[var_ind]
+            # print("0)")
+        # for j, var_conjuct in enumerate(distr_dnf):
+            # print("j)", j)
             for lit in var_conjuct:
                 nargs = len(lit.var_base_ptrs)
                 _ensure_long_enough(nodes_by_nargs, nargs)
-
+                # print("A")
                 t_ids = np.empty((nargs,),dtype=np.uint16)
                 var_inds = np.empty((nargs,),dtype=np.int64)
                 for i, base_var_ptr in enumerate(lit.var_base_ptrs):
@@ -1238,7 +1270,7 @@ def _make_rete_nodes(mem, c, index_map):
                     base_var = _struct_from_ptr(GenericVarType, base_var_ptr)
                     t_id = base_var.base_t_id#_get_var_t_id(mem, base_var)
                     t_ids[i] = t_id
-
+                # print("B")
                 # print("t_ids", t_ids)
                 node = node_ctor(mem, t_ids, var_inds, lit)
                 nodes_by_nargs[nargs-1].append(node)
@@ -1279,13 +1311,12 @@ def arr_is_unique(arr):
 
 @njit(cache=True)
 def build_rete_graph(ms, c):
-    # print("A")
+    # Build a map from base var ptrs to indicies
     index_map = Dict.empty(i8, i8)
-
     for i, v in enumerate(c.vars):
         index_map[i8(v.base_ptr)] = i
 
-    # print("B")
+    # Reorganize the dnf into a distributed dnf with one dnf per var
     if(not c.has_distr_dnf):
         build_distributed_dnf(c,index_map)
     
@@ -1294,6 +1325,7 @@ def build_rete_graph(ms, c):
          _make_rete_nodes(ms, c, index_map)
 
     global_t_id_root_memory_map = Dict.empty(u2, NodeMemoryType)
+    var_end_join_ptrs = np.zeros((len(c.vars),len(c.vars)),dtype=np.int64)
     var_end_nodes = Dict.empty(i8,BaseReteNodeType)
     var_root_nodes = Dict.empty(i8,BaseReteNodeType)
 
@@ -1333,31 +1365,11 @@ def build_rete_graph(ms, c):
                     parent = _struct_from_ptr(BaseReteNodeType, p1)
                     node.upstream_aligned = np.all(node.var_inds==parent.var_inds)   
 
-                # node.upstream_same_parents = not arr_is_unique(node.var_inds)
-                # print(node.var_inds)
-                # p1,p2 = _raw_ptr_from_struct(inputs[0]), _raw_ptr_from_struct(inputs[1])
-                # print( p1,p2)
-                # node.upstream_same_parents = (p1 != 0 and p1 == p2)
-                # node.upstream_same_parent = np.sort(node.var_inds) == np.sort(node.var_inds)
-            # else:
-            #     node.upstream_same_parents = False
-
-            # In 'upstream_same_parents' cases make nodes share idrec_to_inds, widths, change_pairs
-            # if(node.upstream_same_parents):
-            #     assert node.upstream_node_ptr != 0
-            #     upstream_node = _struct_from_ptr(BaseReteNodeType, node.upstream_node_ptr)
-            #     print("aligned", upstream_node.lit, "upstream of", node.lit)
-            #     if(node.upstream_aligned):
-            #         node.idrecs_to_inds = upstream_node.idrecs_to_inds
-            #         node.change_pairs = upstream_node.change_pairs
-            #         node.widths = upstream_node.widths
-            #     else:
-            #         # node.idrecs_to_inds = List.empty_list(u8_i8_dict_type)
-            #         # node.change_pairs = List.empty_list(idrec_ind_pair_arr_type)
-            #         for i in range(len(upstream_node.change_pairs)):
-            #             node.idrecs_to_inds[i] = upstream_node.idrecs_to_inds[i]
-            #             node.change_pairs[i] = upstream_node.change_pairs[i]
-            #             node.widths[i] = upstream_node.widths[i]
+                # Fill in end joins
+                vi_a, vi_b = node.var_inds[0],node.var_inds[1]
+                var_end_join_ptrs[vi_a, vi_b] = _raw_ptr_from_struct(node)
+                var_end_join_ptrs[vi_b, vi_a] = _raw_ptr_from_struct(node)
+                
 
             # Short circut the input to the output for identity nodes
             if(node.lit is None):
@@ -1373,8 +1385,8 @@ def build_rete_graph(ms, c):
     # print(var_end_nodes)
 
 
-    return rete_graph_ctor(ms, c, nodes_by_nargs, var_root_nodes,
-             var_end_nodes, global_deref_idrec_map, global_t_id_root_memory_map)
+    return rete_graph_ctor(ms, c, nodes_by_nargs, var_root_nodes, var_end_nodes,
+              var_end_join_ptrs, global_deref_idrec_map, global_t_id_root_memory_map)
 
 @njit(cache=True)
 def node_memory_insert_change_buffer(self, k, idrec):
@@ -1542,12 +1554,14 @@ match_iterator_node_field_dict = {
     "node" : BaseReteNodeType,
     "associated_arg_ind" : i8,
     "var_ind" : i8,
+    "m_node_ind" : i8,
     # "is_exhausted": boolean,
     "curr_ind": i8,
     "idrecs" : u8[::1],
     "other_idrecs" : u8[::1],
-    "depends_on_var_ind" : i8,
-    "depends_on_arg_ind" : i8,
+    "dep_m_node_inds" : i8[::1],
+    "dep_arg_inds" : i8[::1],
+    "dep_node_ptrs" : i8[::1],
 }
 
 
@@ -1558,6 +1572,7 @@ match_iterator_field_dict = {
     "graph" : ReteGraphType,
     "iter_nodes" : ListType(MatchIterNodeType),
     "is_empty" : types.boolean,
+    "iter_started" : types.boolean,
     "output_types" : types.Any
     # "curr_match" : u8[::1],
 }
@@ -1641,9 +1656,11 @@ def copy_match_iter(m_iter, graph):
         # new_m_node.graph = m_node.graph
         new_m_node.node = m_node.node
         new_m_node.var_ind = m_node.var_ind
+        new_m_node.m_node_ind = m_node.m_node_ind
         new_m_node.associated_arg_ind = m_node.associated_arg_ind
-        new_m_node.depends_on_var_ind = m_node.depends_on_var_ind
-        new_m_node.depends_on_arg_ind = m_node.depends_on_arg_ind
+        new_m_node.dep_m_node_inds = m_node.dep_m_node_inds
+        new_m_node.dep_arg_inds = m_node.dep_arg_inds
+        new_m_node.dep_node_ptrs = m_node.dep_node_ptrs
         new_m_node.curr_ind = m_node.curr_ind
         if(m_node.curr_ind != -1):
             new_m_node.idrecs = m_node.idrecs
@@ -1653,6 +1670,7 @@ def copy_match_iter(m_iter, graph):
     new_m_iter.graph = graph 
     new_m_iter.iter_nodes = m_iter_nodes 
     new_m_iter.is_empty = m_iter.is_empty
+    new_m_iter.iter_started = m_iter.iter_started
 
     return new_m_iter
 
@@ -1666,40 +1684,56 @@ def new_match_iter(graph):
         m_iter_nodes = List.empty_list(MatchIterNodeType)
         handled_vars = Dict.empty(i8,MatchIterNodeType)
 
+        #Make a list of var_inds
+        var_inds = List.empty_list(i8)
+        for i in range(len(graph.var_end_nodes)-1,-1,-1):
+            var_inds.append(i) 
+
         # Loop downstream to upstream through the end nodes. Build a MatchIterNode
         #  for each end node to help us iterate over valid matches in the graph.
-        for var_ind in range(len(graph.var_end_nodes)-1,-1,-1):
+        # for var_ind in range(len(graph.var_end_nodes)-1,-1,-1):
+        m_node_ind = 0;
+        while(len(var_inds) > 0):
+            print_ind = np.empty(len(handled_vars))
+            for q, k in enumerate(handled_vars):
+                print_ind[q] = k
+
+            var_ind = var_inds.pop()
             node = graph.var_end_nodes[var_ind]
 
             # Instantiate a prototype m_node for the end node for this Var.
             m_node = new(MatchIterNodeType)
             m_node.node = node
+            # The index the m_node will have after reversal
+            m_node.m_node_ind = m_node_ind
             m_node.var_ind = var_ind
             m_node.associated_arg_ind = np.argmax(node.var_inds==var_ind)#node.outputs[np.argmax(node.var_inds==i)]
             m_node.curr_ind = -1;
-            other_var_ind = node.var_inds[1 if m_node.associated_arg_ind==0 else 0]
+            # m_node.dep_m_node_ind = -1
+            # m_node.dep_arg_ind = -1
+            # other_var_ind = node.var_inds[1 if m_node.associated_arg_ind==0 else 0]
 
-            # print("END NODE", var_ind, node.lit, m_node.associated_arg_ind)
+            # print("END NODE", var_ind, m_node.m_node_ind, node.lit, m_node.associated_arg_ind)
+            
+            dep_m_node_inds = np.empty((len(graph.var_end_nodes)),dtype=np.int64)
+            dep_arg_inds = np.empty((len(graph.var_end_nodes)),dtype=np.int64)
+            dep_node_ptrs = np.empty((len(graph.var_end_nodes)),dtype=np.int64)
+            c = 0
+            for j, ptr in enumerate(graph.var_end_join_ptrs[m_node.var_ind]):
+                if(ptr != 0 and j in handled_vars):
+                    dep_m_node = handled_vars[j]
+                    dep_m_node_inds[c] = dep_m_node.m_node_ind
+                    dep_node_ptrs[c] = ptr
 
-            # If a downstream m_node handles match production for this Var 
-            #  or the other_var that this end node deals with then mark this m_node
-            #  as depending on that downstream m_node. 
-            # if(var_ind in handled_vars):
-            #     dep_m_node = handled_vars[var_ind]
-            #     m_node.depends_on_var_ind = dep_m_node.var_ind
-            #     m_node.depends_on_arg_ind = np.argmax(dep_m_node.node.var_inds==var_ind)
-            if(other_var_ind in handled_vars):
-                dep_m_node = handled_vars[other_var_ind]
-                m_node.depends_on_var_ind = dep_m_node.var_ind
-                m_node.depends_on_arg_ind = np.argmax(dep_m_node.node.var_inds==other_var_ind)
-            else:
-                m_node.depends_on_var_ind = -1
-                m_node.depends_on_arg_ind = -1
+                    dep_node = _struct_from_ptr(BaseReteNodeType, ptr)
+                    dep_arg_inds[c] = np.argmax(dep_node.var_inds==j)
+                    # print("Make", m_node.node.lit, m_node.associated_arg_ind, "dep on", dep_node.lit, dep_arg_inds[c])
+                    c +=1
+            m_node.dep_m_node_inds = dep_m_node_inds[:c]
+            m_node.dep_arg_inds = dep_arg_inds[:c]
+            m_node.dep_node_ptrs = dep_node_ptrs[:c]
 
-            # print(var_ind,
-            #      True if node.upstream_same_parents else False,
-            #     node.var_inds,
-            #     node.var_inds[m_node.associated_arg_ind])
+            m_node_ind += 1
 
             # Mark each of the Vars handled by this node.
             for j in node.var_inds:
@@ -1709,15 +1743,11 @@ def new_match_iter(graph):
 
             m_iter_nodes.append(m_node)
 
-        # Reverse so m_nodes are ordered upstream to downstream
-        rev_m_iter_nodes = List.empty_list(MatchIterNodeType)
-        for i in range(len(m_iter_nodes)-1,-1,-1):
-            rev_m_iter_nodes.append(m_iter_nodes[i])
-
         # Instantiate the prototype and link it to the graph
         m_iter = new(GenericMatchIteratorType)
-        m_iter.iter_nodes = rev_m_iter_nodes 
+        m_iter.iter_nodes = m_iter_nodes 
         m_iter.is_empty = False
+        m_iter.iter_started = False
         graph.match_iter_prototype_ptr = _ptr_from_struct_incref(m_iter)
     # print("END NEW MATCH ITER")
     # Return a copy of the prototype 
@@ -1731,67 +1761,117 @@ def repr_match_iter_dependencies(m_iter):
     rep = ""
     for i, m_node in enumerate(m_iter.iter_nodes):
         s = f'({str(m_node.var_ind)}'
-        if(m_node.depends_on_var_ind != -1):
-            # dep = _struct_from_ptr(MatchIterNodeType, )
-            s += f",dep={str(m_node.depends_on_var_ind)})"
-        else:
-             s += f")"
+        for j, dep_m_node_ind in enumerate(m_node.dep_m_node_inds):
+            dep_m_node = m_iter.iter_nodes[dep_m_node_ind]
+            s += f",dep={str(dep_m_node.var_ind)}"
+        s += f")"
+
         rep += s
         if(i < len(m_iter.iter_nodes)-1): rep += " "
 
     return rep
 
-@njit(types.void(MatchIterNodeType,MatchIterNodeType),cache=True)
-def update_from_downstream_match(m_node, dep_m_node):
+@njit(types.void(GenericMatchIteratorType, MatchIterNodeType),cache=True)
+def update_from_upstream_match(m_iter, m_node):
     ''' Updates the list of `other_idrecs` for a beta m_node. If an 
           m_node's 'curr_ind' would have it yield a next match `A` for its 
           associated Var then the 'other_idrecs' are the idrecs
           for the matching facts of the other (non-associated) Var.
     '''
-    if(len(m_node.node.var_inds) > 1):
-        # Extract various values used below 
-        assoc_arg_ind = m_node.associated_arg_ind
-        other_arg_ind = 1 if assoc_arg_ind == 0 else 0
-        node = m_node.node
-        dep_node = dep_m_node.node
-        truth_table = node.truth_table
+    multiple_deps = len(m_node.dep_m_node_inds) > 1
+    if(multiple_deps):
+        idrecs_set = Dict.empty(u8,u1)
+    
+    for i, dep_m_node_ind in enumerate(m_node.dep_m_node_inds):
+        # Each dep_node is the terminal beta node (i.e. a graph node not an iter node) 
+        #  between the vars iterated by m_node and dep_m_node, and might not be the same
+        #  as dep_m_node.node.
+        dep_node = _struct_from_ptr(BaseReteNodeType, m_node.dep_node_ptrs[i])
+        dep_arg_ind = m_node.dep_arg_inds[i]
+        dep_m_node = m_iter.iter_nodes[dep_m_node_ind]
+        assoc_arg_ind = 1 if dep_arg_ind == 0 else 0
 
+        
+        
+
+        # print("UPD UPSTR",m_node.var_ind, m_node.node.lit, m_node.associated_arg_ind, "dep on", dep_node.lit, dep_arg_ind)
+        
+        # print("A")
         # Determine the index of the fixed downstream match within this node
-        if(_raw_ptr_from_struct(node) == _raw_ptr_from_struct(dep_node)):
+        if(_raw_ptr_from_struct(m_node.node) == _raw_ptr_from_struct(dep_node)):
             # If they happen to represent the same graph node then get from match_inds
-            other_output = node.outputs[other_arg_ind]
+            other_output = m_node.node.outputs[dep_m_node.associated_arg_ind]
             fixed_intern_ind = other_output.match_inds[dep_m_node.curr_ind]
-        else:
-            # Otherwise we need to use the 'idrecs_to_inds' map
-            dep_input_states = dep_node.inputs[m_node.depends_on_arg_ind]
-            dep_idrec = dep_input_states.match_idrecs[dep_m_node.curr_ind]
-            fixed_intern_ind = node.idrecs_to_inds[other_arg_ind][dep_idrec]
 
-        inp_states = node.input_state_buffers[assoc_arg_ind]        
-     
-        # Consult the node's truth_table to fill 'idrecs'.
+        # Otherwise we need to use the 'idrecs_to_inds' map
+        else:
+            # Extract the idrec for the current fixed dependency value in dep_m_node
+            dep_idrec = dep_m_node.idrecs[dep_m_node.curr_ind]
+
+            # Use idrecs_to_inds to find the index of the fixed value in dep_node. 
+            fixed_intern_ind = dep_node.idrecs_to_inds[dep_arg_ind][dep_idrec]
+
+            # print("dep_f_id:", decode_idrec(dep_idrec)[1])
+            
+            # print(dep_node.idrecs_to_inds[0], dep_node.idrecs_to_inds[1])
+            
+            # print("`AB-")
+
+        
+        # print("B")
+        # Consult the dep_node's truth_table to fill 'idrecs'.
+        inp_states = dep_node.input_state_buffers[assoc_arg_ind]        
+        truth_table = dep_node.truth_table
         k = 0
         idrecs = np.empty((truth_table.shape[assoc_arg_ind],), dtype=np.uint64)
         if(assoc_arg_ind == 1):
-            for i, t in enumerate(truth_table[fixed_intern_ind, :]):
-                if(t): idrecs[k] = inp_states[i].idrec; k += 1
+            for j, t in enumerate(truth_table[fixed_intern_ind, :]):
+                if(t): idrecs[k] = inp_states[j].idrec; k += 1
         else:        
-            for i, t in enumerate(truth_table[:, fixed_intern_ind]):
-                if(t): idrecs[k] = inp_states[i].idrec; k += 1
+            for j, t in enumerate(truth_table[:, fixed_intern_ind]):
+                if(t): idrecs[k] = inp_states[j].idrec; k += 1
+        # print("C")
 
         # Assign idrecs as just the parts of the buffer we filled. 
-        m_node.idrecs = idrecs[:k]
+        idrecs = idrecs[:k]
+        
+        # If the var covered by m_node has multiple dependencies then 
+        #  find the set of idrecs common between them. 
+        if(multiple_deps):
+            if(i == 0):
+                for idrec in idrecs:
+                    idrecs_set[idrec] = u1(1)
+            else:
+                # Intersect with previous idrecs_set
+                new_idrecs_set = Dict.empty(u8,u1)
+                for idrec in idrecs:
+                    if(idrec in idrecs_set):
+                        new_idrecs_set[idrec] = u1(1)
+                idrecs_set = new_idrecs_set
+            # print("i", i, idrecs_set, idrecs)
+        else:
+            m_node.idrecs = idrecs
+
+    
+    # If multiple dependencies copy remaining contents of idrecs_set into an array.
+    if(multiple_deps):
+        idrecs = np.empty((len(idrecs_set),), dtype=np.uint64)
+        for i, idrec in enumerate(idrecs_set):
+            idrecs[i] = idrec
+        m_node.idrecs = idrecs
+    # return idrecs
 
         # print("Update", m_node.node.lit, m_node.node.var_inds[assoc_arg_ind],
-        #       "from", dep_m_node.node.lit, dep_m_node.node.var_inds[m_node.depends_on_arg_ind],
+        #       "from", dep_m_node.node.lit, dep_m_node.node.var_inds[m_node.dep_arg_ind],
         #       ":", np.array([decode_idrec(x)[1] for x in m_node.idrecs]))
-
+    # print("END DOWNSTREAM")
 
 
 @njit(types.boolean(MatchIterNodeType))
 def update_terminal(m_node):
     # From the output associated with m_node make a copy of match_idrecs
     #  that omits all of the zeros. 
+    # print("UPDA TERMINAL")
     cnt = 0
     associated_output = m_node.node.outputs[m_node.associated_arg_ind]
     matches = associated_output.match_idrecs
@@ -1806,6 +1886,7 @@ def update_terminal(m_node):
 
     # Otherwise update the idrecs for the matches of m_node.
     m_node.idrecs = idrecs[:cnt]
+    # print("END UPDA TERMINAL")
     return True
 
 # @njit(types.void(GenericMatchIteratorType,i8), cache=True)
@@ -1825,12 +1906,12 @@ def update_terminal(m_node):
 #         if(m_node.curr_ind == -1):
 #             # If this m_node depends on another m_node then we should defer to the
 #             #  'other_idrecs' of the m_node on which it depends.
-#             if(m_node.depends_on_var_ind != -1):
-#                 dep_m_node = m_iter.iter_nodes[m_node.depends_on_var_ind]
-#                 update_from_downstream_match(m_node, dep_m_node)
-#                 # dep_node = m_iter.iter_nodes[m_node.depends_on_var_ind]
-#                 # print(i, "depends_on", m_node.depends_on_var_ind, m_node.depends_on_arg_ind)
-#                 # if(m_node.depends_on_arg_ind == dep_node.associated_arg_ind):
+#             if(m_node.dep_m_node_ind != -1):
+#                 dep_m_node = m_iter.iter_nodes[m_node.dep_m_node_ind]
+#                 update_from_upstream_match(m_node, dep_m_node)
+#                 # dep_node = m_iter.iter_nodes[m_node.dep_m_node_ind]
+#                 # print(i, "depends_on", m_node.dep_m_node_ind, m_node.dep_arg_ind)
+#                 # if(m_node.dep_arg_ind == dep_node.associated_arg_ind):
 #                 #     m_node.idrecs = dep_node.idrecs
 #                 # else:
 #                 #     m_node.idrecs = dep_node.other_idrecs
@@ -1867,42 +1948,86 @@ def update_terminal(m_node):
 @njit(u8[::1](GenericMatchIteratorType),cache=True)
 def match_iter_next_idrecs(m_iter):
     n_vars = len(m_iter.iter_nodes)
-    if(m_iter.is_empty or n_vars == 0): raise StopIteration()
+    
+    
 
     # Build an array 'idrecs' for the idrecs of the next match set of Facts.
-    idrecs = np.empty(n_vars,dtype=np.uint64)
+    
+    while(not m_iter.is_empty):
+        
 
-    # For each 
-    most_downstream_overflow = -1
-    for i, m_node in enumerate(m_iter.iter_nodes):
-        # print(i, "v:", m_node.var_ind, "c:", m_node.curr_ind, np.array([decode_idrec(x)[1] for x in m_node.idrecs]))
+        most_upstream_overflow = -1
+        # On a fresh iterator just make sure upstream updates are in order
+        if(not m_iter.iter_started):
+            most_upstream_overflow = 0
+            m_iter.iter_started = True
+        # Otherwise increment from downstream to upstream
+        else:
+            most_upstream_overflow = -1
+            for i in range(n_vars-1,-1,-1):
+                m_node = m_iter.iter_nodes[i]
+                # Increment if final var or m_node for downstream var overflowed
+                if(i == n_vars-1 or most_upstream_overflow == i+1):
+                    m_node.curr_ind += 1
 
-        # Fill the next idrec
+                # Track whether incrementing overflowed the m_node.
+                if(m_node.curr_ind >= len(m_node.idrecs)):
+                    m_node.curr_ind = 0
+                    most_upstream_overflow = i
+
+            # If the 0th m_node overflows then iteration is finished.
+            if(most_upstream_overflow == 0):
+                # print("END", most_upstream_overflow)
+                m_iter.is_empty = True
+
+        
+        okay = True
+        for i in range(most_upstream_overflow, n_vars):
+            m_node = m_iter.iter_nodes[i]
+
+            # If this m_node depends on another m_node then we should defer to the
+            #  'other_idrecs' of the m_node on which it depends.
+            if(len(m_node.dep_m_node_inds)):
+                update_from_upstream_match(m_iter, m_node)
+
+            # If 
+            if(len(m_node.idrecs) == 0): okay = False;
+
+        # print("<< it: ", np.array([y.curr_ind for y in m_iter.iter_nodes]))        
+        # print("<< lens", np.array([len(m_iter.iter_nodes[i].idrecs) for i in range(n_vars)]))    
+
+
+        if(okay): break
+
+    # print("<< it: ", np.array([y.curr_ind for y in m_iter.iter_nodes]))        
+    # print("<< lens", np.array([len(m_iter.iter_nodes[i].idrecs) for i in range(n_vars)]))    
+
+    if(m_iter.is_empty or n_vars == 0): raise StopIteration()
+
+    # Fill in the matched idrecs
+    idrecs = np.empty(n_vars,dtype=np.uint64) 
+    for i in range(n_vars-1,-1,-1):
+        m_node = m_iter.iter_nodes[i]
         idrecs[m_node.var_ind] = m_node.idrecs[m_node.curr_ind]
 
-        # Increment if first node or prev node overflowed
-        if(i == 0 or most_downstream_overflow == i-1):
-            m_node.curr_ind += 1
-        
-        # Track whether incrementing overflowed the m_node.
-        if(m_node.curr_ind >= len(m_node.idrecs)):
-            # If the last m_node overflows then iteration is finished.
-            if(i == n_vars-1):
-                m_iter.is_empty = True
-                return idrecs
+    # print(most_upstream_overflow, np.array([decode_idrec(x)[1] for x in idrecs]))        
 
-            m_node.curr_ind = 0
-            most_downstream_overflow = i
 
-    # print(most_downstream_overflow, np.array([decode_idrec(x)[1] for x in idrecs]))        
-    for i in range(most_downstream_overflow,-1,-1):
-        m_node = m_iter.iter_nodes[i]
 
-        # If this m_node depends on another m_node then we should defer to the
-        #  'other_idrecs' of the m_node on which it depends.
-        if(m_node.depends_on_var_ind != -1):
-            dep_m_node = m_iter.iter_nodes[m_node.depends_on_var_ind]
-            update_from_downstream_match(m_node, dep_m_node)
+                # Pick the most downstream dependency of the empty node
+                # dep_ind = np.max(m_node.dep_m_node_inds)
+                # for j in range(dep_ind, n_vars):
+                #     m_iter.iter_nodes[i].curr_ind = 0                    
+
+                
+                # if(prev < 0): 
+                #     m_iter.is_empty = True
+                #     break
+
+                # m_iter.iter_nodes[most_upstream_overflow-1]
+
+
+    # print("<<", np.array([len(m_iter.iter_nodes[i].idrecs) for i in range(n_vars)]))
 
     return idrecs
 
@@ -1941,9 +2066,9 @@ def match_iter_next_idrecs(m_iter):
 #                 m_iter.is_empty = True
 #                 return idrecs
 
-#             if(m_node.depends_on_var_ind != -1):
-#                 dep_m_node = m_iter.iter_nodes[m_node.depends_on_var_ind]
-#                 update_from_downstream_match(m_node, dep_m_node)
+#             if(m_node.dep_m_node_ind != -1):
+#                 dep_m_node = m_iter.iter_nodes[m_node.dep_m_node_ind]
+#                 update_from_upstream_match(m_node, dep_m_node)
                 
 #             m_node.curr_ind = 0
 #             most_upstream_overflow = i
@@ -2045,20 +2170,22 @@ def get_match_iter(ms, conds):
     update_graph(rete_graph)
     # print("UPDATED")
     m_iter = new_match_iter(rete_graph)
-
-    for i in range(len(m_iter.iter_nodes)-1,-1,-1):
+    # print("NEW MATCH ITER")
+    for i in range(len(m_iter.iter_nodes)):
         m_node = m_iter.iter_nodes[i]
         m_node.curr_ind = 0
-        if(m_node.depends_on_var_ind == -1):
+        if(len(m_node.dep_m_node_inds) == 0):
             ok = update_terminal(m_node)
             if(not ok):
                 m_iter.is_empty = True
                 break
-        else:
-            dep_m_node = m_iter.iter_nodes[m_node.depends_on_var_ind]
-            update_from_downstream_match(m_node, dep_m_node)
+            # print("<<", m_node.var_ind, m_node.idrecs)
+            # print(m_node.idrecs, m_node.node.lit)
+        # else:
+        #     update_from_upstream_match(m_iter,  m_node)
         
-    # print("fin get")
+    # print("FINISH UPDATE")
+    # print("<< lens BEG:", np.array([len(m_node.idrecs) for m_node in m_iter.iter_nodes]))
     # for i, m_node in enumerate(m_iter.iter_nodes):
     #     print("<<", m_node.curr_ind)
     # print("initial restich")

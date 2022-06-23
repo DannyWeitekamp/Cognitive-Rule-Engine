@@ -5,7 +5,7 @@ from numba.typed import List, Dict
 from numba.types import ListType, DictType, unicode_type, boolean
 from cre.memset import MemSet
 from cre.var import Var
-from cre.utils import PrintElapse, deref_info_type
+from cre.utils import PrintElapse, deref_info_type, decode_idrec
 from cre.fact import define_fact
 from cre.default_ops import Equals
 from cre.context import cre_context
@@ -15,6 +15,7 @@ from cre.processing.feature_applier import FeatureApplier
 from cre.processing.relative_encoder import _check_needs_rebuild, RelativeEncoder, get_relational_fact_attrs, next_adjacent
 from cre.processing.vectorizer import Vectorizer
 from cre.default_ops import Equals
+from cre.conditions import Conditions
 
 eq_f8 = Equals(f8, f8)
 eq_str = Equals(unicode_type, unicode_type)
@@ -111,9 +112,9 @@ def new_mc_addition_state(upper, lower):
         "operator" : {"id" : "operator", "x" :-110,"y" : 220 , **comp_config},
         # "line" :     {"id" : "line", "x" :0,   "y" : 325 , **comp_config, "height" : 5},
         "done" :     {"id" : "done", "x" :0, "y" : 440 , **comp_config, "type": "Button"},
-        "hidey1" :   {"id" : "hidey1", "x" :n * 110, "y" : 0 , **comp_config},
-        "hidey2" :   {"id" : "hidey2", "x" :0,   "y" : 110 , **comp_config},
-        "hidey3" :   {"id" : "hidey3", "x" :0,   "y" : 220 , **comp_config},
+        "hidey1" :   {"id" : "hidey1", "x" :n * 110, "y" : 0 , **tf_config},
+        "hidey2" :   {"id" : "hidey2", "x" :0,   "y" : 110 , **tf_config},
+        "hidey3" :   {"id" : "hidey3", "x" :0,   "y" : 220 , **tf_config},
     }
 
     for i in range(n):
@@ -268,51 +269,79 @@ def test_pipeline():
 
 from operator import itemgetter
 def test_condition_generalizing():
+    from cre.rete import repr_match_iter_dependencies
+
     with cre_context("test_processing_pipeline"):
         dict_state = new_mc_addition_state(567,354)
-        pprint(dict_state)
+        # pprint(dict_state)
         wm = MemSet()
         conv = DictMemSetConverter(wm)
         wm, fact_map = conv.apply(dict_state, return_map=True)
 
-        # Add2
+        print({decode_idrec(f.idrec)[1] : f.id for f in  fact_map.values()})
+
+        # # -----------------
+        # # : Add2
+        varz = [Var(TextField,'Sel'), Var(TextField,'Arg0'), Var(TextField,'Arg1')]
         sel_a, arg_a0, arg_a1 = itemgetter("0_answer", "0_upper","0_lower")(fact_map)
         sel_b, arg_b0, arg_b1 = itemgetter("1_answer", "1_upper","1_lower")(fact_map)
-        varz = [Var(TextField,'sel'), Var(TextField,'arg0'), Var(TextField,'arg1')]
-        fptv_a = {sel_a.get_ptr() : varz[0], arg_a0.get_ptr() : varz[1], arg_a1.get_ptr() : varz[2]}
-        fptv_b = {sel_b.get_ptr() : varz[0], arg_b0.get_ptr() : varz[1], arg_b1.get_ptr() : varz[2]}
 
-        c_a = sel_a.as_conditions(fptv_a) & arg_a0.as_conditions(fptv_a) & arg_a1.as_conditions(fptv_a)
-        c_b = sel_b.as_conditions(fptv_b) & arg_b0.as_conditions(fptv_b) & arg_b1.as_conditions(fptv_b)
-        print(c_a)
-        print("---")
-        print(c_b)
+        c_a = Conditions.from_facts([sel_a, arg_a0, arg_a1], varz)
+        print(repr(c_a))
+        print(repr_match_iter_dependencies(c_a.get_matches(wm)))
+        match_names = [[x.id for x in match][:3] for match in c_a.get_matches(wm)]
+        print(match_names)
+        assert match_names == [['0_answer', '0_upper', '0_lower']]
+
+        c_b = Conditions.from_facts([sel_b, arg_b0, arg_b1], varz)
+        match_names = [[x.id for x in match][:3] for match in c_b.get_matches(wm)]
+        print(repr(c_b))
+        print(match_names)
+        assert match_names == [['1_answer', '1_upper', '1_lower']]
+
+        # Generalized verison
+        c_ab = varz[0] & varz[1] & varz[2] & c_a.antiunify(c_b)
+        print("---------------------")
+        match_names = [[x.id for x in match][:3] for match in c_ab.get_matches(wm)]
+        print(repr(c_ab))
+        print(repr_match_iter_dependencies(c_ab.get_matches(wm)))
+        print(match_names)
+        print({decode_idrec(f.idrec)[1] : f.id for f in  fact_map.values()})
+        assert match_names == [['0_answer', '0_upper', '0_lower'], ['1_answer', '1_upper', '1_lower'], ['2_answer', '2_upper', '2_lower']]
+
+        # raise ValueError()
+        # -----------------
+        # : Carry2
+        varz = [Var(TextField,'Sel'), Var(TextField,'Arg0'), Var(TextField,'Arg1')]
+        sel_a, arg_a0, arg_a1 = itemgetter("1_carry", "0_upper","0_lower")(fact_map)
+        sel_b, arg_b0, arg_b1 = itemgetter("2_carry", "1_upper","1_lower")(fact_map)
+
+        c_a = Conditions.from_facts([sel_a, arg_a0, arg_a1], varz)
+        match_names = [[x.id for x in match][:3] for match in c_a.get_matches(wm)]
+        print("--c_a--")
+        print(repr(c_a))
+        print("----")
+        print(match_names)
+        # assert match_names == [['1_carry', '0_upper', '0_lower']]
+
+        c_b = Conditions.from_facts([sel_b, arg_b0, arg_b1], varz)
+        match_names = [[x.id for x in match][:3] for match in c_b.get_matches(wm)]
+        print("--c_b--")
+        print(repr(c_b))
+        print("----")
+        print(match_names)
+        # assert match_names == [['2_carry', '1_upper', '1_lower']]
+
         c_ab = c_a.antiunify(c_b)
-        print("---")
-        print(c_ab)
-        print("---")
-        print(wm)
-        print("---")
+        match_names = [[x.id for x in match][:3] for match in c_ab.get_matches(wm)]
+        print("--c_ab--")
+        print(repr(c_ab))
+        print("----")
+        print(match_names)
+        # assert match_names == [['1_carry', '0_lower', '0_upper'], ['2_carry', '1_lower', '1_upper'], ['3_carry', '2_lower', '2_upper']]
 
-        
 
-        sel, arg0, arg1 = varz
-        # c_ab =sel & (sel.locked == False)
-        c_ab =((sel.value == '') & (sel.locked == False) & (arg0.locked == True) & (arg1.locked == True) 
-            & (arg0.below == arg1) & (arg1.above == arg0) & (sel.above == arg1) & (arg1.below == sel))
 
-    # c_ab = (sel.value == '') & (arg0.locked == True) & (arg1.locked == True) & (sel.above == arg1) & (arg0.below == arg1) & (arg1.below == sel)
-    #c_ab = (sel.above == arg1) & (arg0.below == arg1) #& (arg1.above == arg0) #& (arg1.below == sel) & (sel.value == '')
-    # c_ab = (sel.locked == False) 
-    # TODO: Not matching properly
-    from cre.rete import repr_match_iter_dependencies
-    m_iter = c_ab.get_matches(wm)
-    print(repr_match_iter_dependencies(m_iter))
-    for facts in m_iter:
-        print([x.id for x in facts])
-    print("---")
-    from cre.utils import decode_idrec
-    print({decode_idrec(f.idrec)[1] : k for k,f in fact_map.items()})
 
 
 

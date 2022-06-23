@@ -452,8 +452,9 @@ class FactProxy(CREObjProxy):
         return fact_to_ptr_incref(self)
 
     def _gen_val_var_possibilities(self, self_var):
-        for attr, config in self._fact_type.spec.items():
+        for attr, config in self._fact_type.clean_spec.items():
             typ = config['type']
+            # with PrintElapse("getattr_var"):
             val = getattr(self,attr)
             # with PrintElapse("getattr_var"):
             attr_var = getattr(self_var, attr)
@@ -468,49 +469,78 @@ class FactProxy(CREObjProxy):
                 # Primitive case
                 # one_lit_conds.append(attr_var==val)
 
-    def as_conditions(self, fact_ptr_to_var_map, keep_null=True, add_implicit_neighbor_self_refs=True):
+    def as_conditions(self, fact_ptr_to_var_map=None, keep_null=True, add_implicit_neighbor_self_refs=True, neigh_count = 0):
         from cre.default_ops import Equals
         from cre.conditions import op_to_cond 
         from cre.utils import as_typed_list
+        from cre.dynamic_exec import var_eq
+        from cre.var import Var
+
+
 
         self_ptr = self.get_ptr()
-        assert self_ptr in fact_ptr_to_var_map, "'fact_ptr_to_var_map' must include self.get_ptr()."
+
+        if(fact_ptr_to_var_map is None):
+             fact_ptr_to_var_map = {self_ptr : Var(self._fact_type, "X")}
+            
+
         self_var = fact_ptr_to_var_map[self_ptr]
         one_lit_conds = []
+
         
-        with PrintElapse("CONSTRUCTS"):       
-            # for attr, config in self._fact_type.spec.items():
-            for attr_val, attr_var in self._gen_val_var_possibilities(self_var):
-                if(isinstance(attr_val, FactProxy)):
-                    # Fact case
-                    attr_val_fact_ptr = attr_val.get_ptr()
-                    if(attr_val_fact_ptr in fact_ptr_to_var_map):
-                        val_var = fact_ptr_to_var_map[attr_val_fact_ptr]
-                        #   FIXME: use cre_obj.__eq__()
-                        
-                            # str(attr_var) == str(val_var)
 
-                        if(add_implicit_neighbor_self_refs and str(attr_var) == str(val_var)):
-                            # for case like x.next == x.next, try make conditions like x == x.next.prev
-                            # with PrintElapse("LOOP"):
-                            #     list(attr_val._gen_val_var_possibilities(attr_var))
-                            for attr_val2, attr_var2 in attr_val._gen_val_var_possibilities(attr_var):
-                                if(isinstance(attr_val2, FactProxy) and 
-                                    attr_val2.get_ptr() == self_ptr):
-                                    one_lit_conds.append(self_var==attr_var2)
+        
+        # with PrintElapse("CONSTRUCTS"):       
+        # for attr, config in self._fact_type.spec.items():
+        for attr_val, attr_var in self._gen_val_var_possibilities(self_var):
+            if(isinstance(attr_val, FactProxy)):
+                # Fact case
+                attr_val_fact_ptr = attr_val.get_ptr()
+                if(attr_val_fact_ptr not in fact_ptr_to_var_map):
+                    if(add_implicit_neighbor_self_refs):
+                        fact_ptr_to_var_map[attr_val_fact_ptr] = Var(attr_val._fact_type, f"Nbr{neigh_count}")
+                        neigh_count += 1
+                    else:
+                        continue
 
-                        else:
-                            one_lit_conds.append(attr_var==fact_ptr_to_var_map[attr_val_fact_ptr])
-                        
+
+                val_var = fact_ptr_to_var_map[attr_val_fact_ptr]
+                #   FIXME: use cre_obj.__eq__()
+                
+                    # str(attr_var) == str(val_var)
+                # print("<<", str(attr_var), str(val_var), var_eq(attr_var, val_var))
+                if(add_implicit_neighbor_self_refs and str(attr_var) == str(val_var)):
+                    # for case like x.next == x.next, try make conditions like x == x.next.prev
+                    # with PrintElapse("LOOP"):
+                        #     list(attr_val._gen_val_var_possibilities(attr_var))
+                    for attr_val2, attr_var2 in attr_val._gen_val_var_possibilities(attr_var):
+
+                        if(isinstance(attr_val2, FactProxy) and 
+                            attr_val2.get_ptr() == self_ptr):
+                            one_lit_conds.append(self_var==attr_var2)
+
                 else:
-                    # Primitive case
-                    if(not keep_null and attr_val is None): continue
-                    one_lit_conds.append(attr_var==attr_val)
+                    # with PrintElapse("NEW LIT"):
+                    one_lit_conds.append(attr_var==fact_ptr_to_var_map[attr_val_fact_ptr])
+                
+            else:
+                # Note: Making literals with primitives is slow w/ current Op 
+                #  implmenentation since it compiles compositions. 
 
-        with PrintElapse("ANDS"):        
-            conds = one_lit_conds[0]
-            for c in one_lit_conds[1:]:
-                conds = conds & c
+                # Primitive case
+                if(not keep_null and attr_val is None): continue
+                one_lit_conds.append(attr_var==attr_val)
+
+        # with PrintElapse("ANDS"):    
+        # print(fact_ptr_to_var_map)
+        _vars = list({v.get_ptr():v for v in fact_ptr_to_var_map.values()}.values())
+        # print(_vars)   
+        conds = _vars[0]
+        for i in range(1, len(_vars)):
+            conds = conds & _vars[i]
+
+        for c in one_lit_conds:
+            conds = conds & c
 
         return conds
 

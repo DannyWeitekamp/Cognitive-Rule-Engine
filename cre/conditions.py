@@ -177,13 +177,25 @@ def literal_not(self):
     return n
 
 
-literal_unique_tuple_type = Tuple((i8, i8))
+literal_unique_tuple_type = Tuple((i8, i8, unicode_type))
 @njit(literal_unique_tuple_type(LiteralType), cache=True)
 def literal_get_unique_tuple(self):
     '''Outputs a tuple that uniquely identifies an instance
-         of a literal independant of the Vars in its underlying op
+         of a literal independant of the base Vars of its underlying op.
     '''
-    return (i8(self.negated), self.op.call_addr)
+    deref_str = ""
+    for var in self.op.head_vars:
+        deref_strs = List.empty_list(unicode_type)    
+        if(len(var.deref_infos) > 0):
+            s = ""
+            for i, d in enumerate(var.deref_infos):
+                delim = "," if i != len(var.deref_infos)-1 else ""
+                s += f'({str(i8(d.type))},{str(i8(d.t_id))},{str(i8(d.a_id))},{str(i8(d.offset))}){delim}'
+                deref_strs.append(s)
+        
+        deref_str += f"[{','.join(deref_strs)}]"
+
+    return (i8(self.negated), self.op.match_head_ptrs_addr, deref_str)
 
 
 #TODO compartator helper?
@@ -343,6 +355,25 @@ class Conditions(structref.StructRefProxy):
 
     def __repr__(self):
         return conditions_repr(self)
+
+
+    def from_facts(facts,_vars=None):
+        assert len(facts), "Must provide one or more facts."
+        if(_vars is None):
+            _vars = [Var(x._fact_type, f'a{i}') for i, x in enumerate(facts)]
+
+        fact_ptr_map = {fact.get_ptr() : var for fact, var in zip(facts, _vars)}
+        
+        # Include each Var ahead of time to ensure order. 
+        conds = _vars[0]
+        for i in range(1,len(_vars)):
+            conds = conds & _vars[i]
+
+        for i in range(0,len(facts)):
+            conds = conds & facts[i].as_conditions(fact_ptr_map,neigh_count=len(fact_ptr_map)-len(facts))
+        return conds
+
+
 
 define_boxing(ConditionsTypeClass,Conditions)
 
@@ -1037,12 +1068,14 @@ def build_distributed_dnf(c,index_map=None):
         for i, v in enumerate(c.vars):
             index_map[i8(v.base_ptr)] = i
 
+    # Fill with empty lists
     for conjunct in c.dnf:
         var_spec_conj_list = List.empty_list(literal_list_type)
         distr_dnf.append(var_spec_conj_list)
         for i, v in enumerate(c.vars):
             var_spec_conj_list.append(List.empty_list(LiteralType))
-
+    
+    # Fill lists
     for i, conjunct in enumerate(c.dnf):
         distr_conjuct = distr_dnf[i]
         for j, lit in enumerate(conjunct):
@@ -1078,7 +1111,7 @@ def build_distributed_dnf(c,index_map=None):
 # : Conditions.antiunify()
 
 lit_list = ListType(LiteralType)
-lit_unq_tup_type = Tuple((i8,i8))
+lit_unq_tup_type = Tuple((i8,i8,unicode_type))
 
 @njit(cache=True)
 def conds_to_lit_sets(self):
@@ -1092,7 +1125,8 @@ def conds_to_lit_sets(self):
         d = Dict.empty(lit_unq_tup_type, lit_list)#Dict.empty(i8, var_set_list_type)
         for lit in conjunct:
             unq_tup = literal_get_unique_tuple(lit)
-            # print(unq_tup)
+            # print(lit, ":", unq_tup)
+
             if(unq_tup not in d):
                 l = d[unq_tup] = List.empty_list(LiteralType)
             else:
@@ -1454,16 +1488,20 @@ def _conds_antiunify(c_a, c_b):
     best_score = -np.inf
     best_remap = np.arange(remap_size, dtype=np.int16)
     
-
+    # Case 1: c_a and c_b are both single conjunctions like (lit1 & lit2 & lit3)
     if(len(ls_as) == 1 and len(ls_bs) == 1):
         op_key_intersection = intersect_keys(ls_as[0], ls_bs[0])
+        # print(op_key_intersection)
         scored_remaps = score_remaps(ls_as[0], ls_bs[0], bpti_a, bpti_b,
                                     op_key_intersection=op_key_intersection)
         best_score, best_remap = scored_remaps[0]
 
-        conj = _conj_from_litset_and_remap(ls_as[0], ls_bs[0], best_remap, op_key_intersection, bpti_a, bpti_b)
+        conj = _conj_from_litset_and_remap(ls_as[0], ls_bs[0], 
+                 best_remap, op_key_intersection, bpti_a, bpti_b)
         dnf = List([conj])
         conds = _conditions_ctor_dnf(dnf)
+
+    # Case 2: c_a or c_b have disjunction like ((lit1 & lit2 & lit3) | (lit4 & lit5))
     else:
         score_aligment_matrices = _buid_score_aligment_matrices(ls_as, ls_bs, bpti_a, bpti_b)
         
@@ -1496,10 +1534,23 @@ def _conds_antiunify(c_a, c_b):
             ls_b = ls_bs[alignment[i]]
 
             op_key_intersection = intersect_keys(ls_a, ls_b)
-            conj = _conj_from_litset_and_remap(ls_a, ls_b, best_remap, op_key_intersection, bpti_a, bpti_b)
+            conj = _conj_from_litset_and_remap(ls_a, ls_b,
+                     best_remap, op_key_intersection, bpti_a, bpti_b)
             dnf.append(conj)
-                
+
+        
         conds = _conditions_ctor_dnf(dnf)
+    
+
+    # Make sure base Vars are ordered like c_a
+    unordered_base_vars = conds.base_var_map
+    base_var_map = Dict.empty(i8,i8)
+    c = 0 
+    for base_ptr in bpti_a:
+        if(base_ptr in unordered_base_vars):
+            base_var_map[base_ptr] = c
+            c += 1
+    conds = _conditions_ctor_base_var_map(base_var_map, dnf)
 
     return conds, best_score
 

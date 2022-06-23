@@ -264,9 +264,15 @@ class Var(CREObjProxy):
     def __getitem__(self,ind):
         return self._handle_deref(ind)
 
-
-
     def __str__(self):
+        if(self.alias == ""):
+            return self.__repr__()
+        if(self.is_not):
+            return f'NOT({self.alias}){self.deref_attrs_str}'
+        else:
+            return f'{self.alias}{self.deref_attrs_str}'
+
+    def __repr__(self):
         prefix = "NOT" if(self.is_not) else "Var"
         base_name = self.base_type._fact_name if hasattr(self.base_type,'_fact_name') else str(self.base_type)
         if(self.alias != ""):
@@ -274,10 +280,7 @@ class Var(CREObjProxy):
         else: 
             base = f'{prefix}({base_name})'
         # print(self.deref_attrs)
-        return base + self.deref_attrs_str
-
-    def __repr__(self):
-        return str(self)
+        return f'{base}{self.deref_attrs_str}'
 
     def _cmp_helper(self,op_str,other,negate):
         check_legal_cmp(self, op_str, other)
@@ -544,7 +547,7 @@ def resolve_deref_attrs(self):
 @overload_method(VarTypeClass, "get_head_type_name")
 def get_head_type_name(self):
     def impl(self):
-        print("GET HEAD")
+        # print("GET HEAD")
         with objmode(head_type_name=unicode_type):
             context = cre_context()
             head_type_name = str(context.get_type(t_id=self.head_t_id))
@@ -555,7 +558,7 @@ def get_head_type_name(self):
 @overload_method(VarTypeClass, "get_base_type_name")
 def get_base_type_name(self):
     def impl(self):
-        print("GET BASE")
+        # print("GET BASE")
         with objmode(base_type_name=unicode_type):
             context = cre_context()
             base_type_name = str(context.get_type(t_id=self.base_t_id))

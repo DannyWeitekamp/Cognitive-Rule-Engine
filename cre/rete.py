@@ -1369,6 +1369,9 @@ def build_rete_graph(ms, c):
                 vi_a, vi_b = node.var_inds[0],node.var_inds[1]
                 var_end_join_ptrs[vi_a, vi_b] = _raw_ptr_from_struct(node)
                 var_end_join_ptrs[vi_b, vi_a] = _raw_ptr_from_struct(node)
+
+                # print("Assign end join:", vi_a if vi_a < vi_b else vi_b,
+                #      vi_b if vi_a < vi_b else vi_a, node.lit)
                 
 
             # Short circut the input to the output for identity nodes
@@ -1379,12 +1382,6 @@ def build_rete_graph(ms, c):
             for var_ind in node.var_inds:
                 var_end_nodes[var_ind] = node
             
-            
-            # print("<<",len(inputs), node.var_inds)
-
-    # print(var_end_nodes)
-
-
     return rete_graph_ctor(ms, c, nodes_by_nargs, var_root_nodes, var_end_nodes,
               var_end_join_ptrs, global_deref_idrec_map, global_t_id_root_memory_map)
 
@@ -1727,7 +1724,7 @@ def new_match_iter(graph):
 
                     dep_node = _struct_from_ptr(BaseReteNodeType, ptr)
                     dep_arg_inds[c] = np.argmax(dep_node.var_inds==j)
-                    # print("Make", m_node.node.lit, m_node.associated_arg_ind, "dep on", dep_node.lit, dep_arg_inds[c])
+                    # print(j, "Make", m_node.node.lit, m_node.associated_arg_ind, "dep on", dep_node.lit, dep_arg_inds[c])
                     c +=1
             m_node.dep_m_node_inds = dep_m_node_inds[:c]
             m_node.dep_arg_inds = dep_arg_inds[:c]
@@ -1735,11 +1732,10 @@ def new_match_iter(graph):
 
             m_node_ind += 1
 
-            # Mark each of the Vars handled by this node.
-            for j in node.var_inds:
-                if(j not in handled_vars):
-                    handled_vars[j] = m_node
-                    # print("<<", j)
+            # Mark 'var_ind' as being handled by m_node. This allows 
+            #   downstream m_nodes to depend on it.
+            if(var_ind not in handled_vars):
+                handled_vars[var_ind] = m_node
 
             m_iter_nodes.append(m_node)
 
@@ -1782,6 +1778,8 @@ def update_from_upstream_match(m_iter, m_node):
     if(multiple_deps):
         idrecs_set = Dict.empty(u8,u1)
     
+    # print("-- UPDATE FROM UPSTREAM:", _struct_from_ptr(GenericVarType, m_node.node.lit.var_base_ptrs[m_node.associated_arg_ind]).alias, "--")
+
     for i, dep_m_node_ind in enumerate(m_node.dep_m_node_inds):
         # Each dep_node is the terminal beta node (i.e. a graph node not an iter node) 
         #  between the vars iterated by m_node and dep_m_node, and might not be the same
@@ -1791,12 +1789,8 @@ def update_from_upstream_match(m_iter, m_node):
         dep_m_node = m_iter.iter_nodes[dep_m_node_ind]
         assoc_arg_ind = 1 if dep_arg_ind == 0 else 0
 
+        # print("\tdep on", dep_node.lit, dep_arg_ind)
         
-        
-
-        # print("UPD UPSTR",m_node.var_ind, m_node.node.lit, m_node.associated_arg_ind, "dep on", dep_node.lit, dep_arg_ind)
-        
-        # print("A")
         # Determine the index of the fixed downstream match within this node
         if(_raw_ptr_from_struct(m_node.node) == _raw_ptr_from_struct(dep_node)):
             # If they happen to represent the same graph node then get from match_inds
@@ -1811,14 +1805,11 @@ def update_from_upstream_match(m_iter, m_node):
             # Use idrecs_to_inds to find the index of the fixed value in dep_node. 
             fixed_intern_ind = dep_node.idrecs_to_inds[dep_arg_ind][dep_idrec]
 
-            # print("dep_f_id:", decode_idrec(dep_idrec)[1])
-            
-            # print(dep_node.idrecs_to_inds[0], dep_node.idrecs_to_inds[1])
-            
-            # print("`AB-")
+        fixed_var = _struct_from_ptr(GenericVarType, dep_node.lit.var_base_ptrs[dep_arg_ind])
+        fixed_idrec = dep_node.input_state_buffers[dep_arg_ind][fixed_intern_ind].idrec
 
+        # print("\tFixed:",  fixed_var.alias, "==", m_iter.graph.memset.get_fact(fixed_idrec))
         
-        # print("B")
         # Consult the dep_node's truth_table to fill 'idrecs'.
         inp_states = dep_node.input_state_buffers[assoc_arg_ind]        
         truth_table = dep_node.truth_table
@@ -1830,7 +1821,6 @@ def update_from_upstream_match(m_iter, m_node):
         else:        
             for j, t in enumerate(truth_table[:, fixed_intern_ind]):
                 if(t): idrecs[k] = inp_states[j].idrec; k += 1
-        # print("C")
 
         # Assign idrecs as just the parts of the buffer we filled. 
         idrecs = idrecs[:k]
@@ -1848,7 +1838,12 @@ def update_from_upstream_match(m_iter, m_node):
                     if(idrec in idrecs_set):
                         new_idrecs_set[idrec] = u1(1)
                 idrecs_set = new_idrecs_set
-            # print("i", i, idrecs_set, idrecs)
+
+            set_f_ids = np.empty(len(idrecs_set),dtype=np.int64)
+            for i, x in enumerate(idrecs_set):
+                set_f_ids[i] = decode_idrec(x)[1]
+
+            # print("i", i, "set", set_f_ids, 'new', np.array([decode_idrec(x)[1] for x in idrecs]))
         else:
             m_node.idrecs = idrecs
 
@@ -1999,9 +1994,6 @@ def match_iter_next_idrecs(m_iter):
 
         if(okay): break
 
-    # print("<< it: ", np.array([y.curr_ind for y in m_iter.iter_nodes]))        
-    # print("<< lens", np.array([len(m_iter.iter_nodes[i].idrecs) for i in range(n_vars)]))    
-
     if(m_iter.is_empty or n_vars == 0): raise StopIteration()
 
     # Fill in the matched idrecs
@@ -2009,25 +2001,6 @@ def match_iter_next_idrecs(m_iter):
     for i in range(n_vars-1,-1,-1):
         m_node = m_iter.iter_nodes[i]
         idrecs[m_node.var_ind] = m_node.idrecs[m_node.curr_ind]
-
-    # print(most_upstream_overflow, np.array([decode_idrec(x)[1] for x in idrecs]))        
-
-
-
-                # Pick the most downstream dependency of the empty node
-                # dep_ind = np.max(m_node.dep_m_node_inds)
-                # for j in range(dep_ind, n_vars):
-                #     m_iter.iter_nodes[i].curr_ind = 0                    
-
-                
-                # if(prev < 0): 
-                #     m_iter.is_empty = True
-                #     break
-
-                # m_iter.iter_nodes[most_upstream_overflow-1]
-
-
-    # print("<<", np.array([len(m_iter.iter_nodes[i].idrecs) for i in range(n_vars)]))
 
     return idrecs
 

@@ -101,7 +101,7 @@ def encode_neighbors(objs, l_str='to_left', r_str="to_right", a_str="above", b_s
 
 
 
-def new_mc_addition_state(upper, lower):
+def new_mc_addition_state(upper, lower, ):
     upper, lower = str(upper), str(lower)
     n = max(len(upper),len(lower))
 
@@ -306,7 +306,7 @@ def test_condition_generalizing():
         print(repr(c_ab))
         print(repr_match_iter_dependencies(c_ab.get_matches(wm)))
         print(match_names)
-        print({decode_idrec(f.idrec)[1] : f.id for f in  fact_map.values()})
+        
         assert match_names == [['0_answer', '0_upper', '0_lower'], ['1_answer', '1_upper', '1_lower'], ['2_answer', '2_upper', '2_lower']]
 
         # raise ValueError()
@@ -322,7 +322,7 @@ def test_condition_generalizing():
         print(repr(c_a))
         print("----")
         print(match_names)
-        # assert match_names == [['1_carry', '0_upper', '0_lower']]
+        assert match_names == [['1_carry', '0_upper', '0_lower']]
 
         c_b = Conditions.from_facts([sel_b, arg_b0, arg_b1], varz)
         match_names = [[x.id for x in match][:3] for match in c_b.get_matches(wm)]
@@ -330,7 +330,7 @@ def test_condition_generalizing():
         print(repr(c_b))
         print("----")
         print(match_names)
-        # assert match_names == [['2_carry', '1_upper', '1_lower']]
+        assert match_names == [['2_carry', '1_upper', '1_lower']]
 
         c_ab = c_a.antiunify(c_b)
         match_names = [[x.id for x in match][:3] for match in c_ab.get_matches(wm)]
@@ -338,7 +338,27 @@ def test_condition_generalizing():
         print(repr(c_ab))
         print("----")
         print(match_names)
-        # assert match_names == [['1_carry', '0_lower', '0_upper'], ['2_carry', '1_lower', '1_upper'], ['3_carry', '2_lower', '2_upper']]
+        assert ['1_carry', '0_upper', '0_lower'] in match_names 
+        assert ['2_carry', '1_upper', '1_lower'] in match_names 
+        # NOTE : ['3_carry', '2_lower', '2_upper'] might not be available at this point
+
+        sel_c, arg_c0, arg_c1 = itemgetter("3_carry", "2_upper","2_lower")(fact_map)
+        c_c = Conditions.from_facts([sel_c, arg_c0, arg_c1], varz)
+        c_abc = c_ab.antiunify(c_c)
+
+        # print(c_abc)
+
+        print(repr(c_abc))
+        
+        match_names = [[x.id for x in match][:3] for match in c_abc.get_matches(wm)]
+        print(match_names)
+        print(repr_match_iter_dependencies(c_abc.get_matches(wm)))
+        print({decode_idrec(f.idrec)[1] : f.id for f in  fact_map.values()})
+        assert ['1_carry', '0_upper', '0_lower'] in match_names 
+        assert ['2_carry', '1_upper', '1_lower'] in match_names 
+        assert ['3_carry', '2_upper', '2_lower'] in match_names 
+
+
 
 
 

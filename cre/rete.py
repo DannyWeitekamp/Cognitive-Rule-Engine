@@ -282,6 +282,8 @@ def node_ctor(ms, t_ids, var_inds,lit=None):
         # outputs.append(Dict.empty(u8,dict_u8_u1_type))
         node_mem = new_node_mem()
         node_mem.parent_node_ptr = self_ptr
+        node_mem.idrecs_to_inds = Dict.empty(u8,i8)
+        node_mem.retracted_inds = new_vector(8)
         outputs.append(node_mem)
         
     st.outputs = outputs
@@ -295,9 +297,9 @@ def node_ctor(ms, t_ids, var_inds,lit=None):
     # "retracted_inds" : ListType(VectorType),
     # "widths" : i8[::1],
 
-    for i in range(n_vars):
-        st.outputs[i].idrecs_to_inds = Dict.empty(u8,i8)
-        st.outputs[i].retracted_inds = new_vector(8)
+    # for i in range(n_vars):
+    #     st.outputs[i].idrecs_to_inds = Dict.empty(u8,i8)
+    #     st.outputs[i].retracted_inds = new_vector(8)
     #     st.idrecs_to_inds.append(Dict.empty(u8,i8))
     #     st.retracted_inds.append(new_vector(8))
         # st.change_pairs.append(np.empty(0,dtype=idrec_ind_pair_type))
@@ -1575,7 +1577,7 @@ def update_from_upstream_match(m_iter, m_node):
             dep_idrec = dep_m_node.idrecs[dep_m_node.curr_ind]
 
             # Use idrecs_to_inds to find the index of the fixed value in dep_node. 
-            fixed_intern_ind = dep_node.idrecs_to_inds[dep_arg_ind][dep_idrec]
+            fixed_intern_ind = dep_node.inputs[dep_arg_ind].idrecs_to_inds[dep_idrec]
 
         fixed_var = _struct_from_ptr(GenericVarType, dep_node.lit.var_base_ptrs[dep_arg_ind])
         fixed_idrec = dep_node.input_state_buffers[dep_arg_ind][fixed_intern_ind].idrec

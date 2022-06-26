@@ -478,7 +478,6 @@ def update_input_changes(self):
     '''Given upstream changes fills the changed and unchanged inds for a node.'''
     for i, inp in enumerate(self.inputs):
 
-
         # Extract values used below
         w_i = self.inp_widths[i]
         idrecs_to_inds_i = self.idrecs_to_inds[i]
@@ -493,19 +492,10 @@ def update_input_changes(self):
         # Clear input_states of properties only meant to last one cycle
         # c = 0
         for k in range(w_i):
-            # if(c != k):
-            #     input_state_buffers_i[c:c+1] = input_state_buffers_i[k:k+1]
             input_state = input_state_buffers_i[k]
-
-            # if(input_state.is_removed):
-            #     w_i -= 1
-            # else:
-            #     c += 1
-
             input_state.recently_removed = False
             input_state.recently_inserted = False
                 
-
         # Collection of various sources of changes as (idrec, ind) pairs.
         change_pairs = np.empty(len(inp.insert_set)+len(inp.remove_set)+
             len(modify_idrecs_i),dtype=idrec_ind_pair_type)
@@ -559,7 +549,7 @@ def update_input_changes(self):
                 change_pairs[c].ind = ind
                 c += 1
 
-        
+        assert len(inp.match_idrecs) == w_i
 
         change_pairs = change_pairs[:c]
         # print("len(change_pairs): ", len(change_pairs))     

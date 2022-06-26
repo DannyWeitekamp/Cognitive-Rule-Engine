@@ -1,6 +1,7 @@
 import numpy as np
 import numba
 from numba import types, njit, i8, u8, i4, u1, u2, i8, f8, literally, generated_jit
+from numba.extending import SentryLiteralArgs
 from numba.typed import List, Dict
 from numba.types import ListType, DictType, unicode_type, void, Tuple
 from numba.experimental.structref import new, define_boxing
@@ -9,7 +10,8 @@ from cre.utils import (wptr_t, ptr_t, _dict_from_ptr, _raw_ptr_from_struct, _get
          _ptr_from_struct_incref, _struct_from_ptr, decode_idrec, CastFriendlyMixin,
         encode_idrec, deref_info_type, DEREF_TYPE_ATTR, DEREF_TYPE_LIST, _obj_cast_codegen,
          _ptr_to_data_ptr, _list_base_from_ptr, _load_ptr, PrintElapse, meminfo_type,
-         _decref_structref, _decref_ptr, cast_structref, _struct_tuple_from_pointer_arr, _meminfo_from_struct)
+         _decref_structref, _decref_ptr, cast_structref, _struct_tuple_from_pointer_arr, _meminfo_from_struct,
+         lower_getattr, lower_setattr)
 from cre.structref import define_structref
 from cre.caching import gen_import_str, unique_hash,import_from_cached, source_to_cache, source_in_cache, cache_safe_exec, get_cache_path
 from cre.memset import MemSetType
@@ -929,15 +931,13 @@ def update_node(self):
             if( input_state_k.recently_invalid or
                (input_state_k.true_was_nonzero and not true_is_nonzero)):
                 print("RETRACT", f_id_k, input_state_k.recently_invalid, input_state_k.true_was_nonzero, ~true_is_nonzero)
-                out_i.remove_buffer = setitem_buffer(out_i.remove_buffer,
-                    remove_ind, match_ind)#encode_idrec(t_id_k, f_id_k, RETRACT))
+                setitem_buffer(out_i, "remove_buffer", remove_ind, match_ind)
                 remove_ind += 1
                 out_i.idrecs_to_inds[idrec_k] = -1
 
             # When a candidate flips to matching add the change_inds.
             elif(input_state_k.true_was_nonzero != true_is_nonzero):
-                out_i.change_buffer = setitem_buffer(out_i.change_buffer,
-                    change_ind, match_ind)#encode_idrec(t_id_k, f_id_k, DECLARE))
+                setitem_buffer(out_i, "change_buffer", change_ind, match_ind)
                 change_ind += 1
                 out_i.idrecs_to_inds[idrec_k] = match_ind
 
@@ -1212,16 +1212,19 @@ def build_rete_graph(ms, c):
     return rete_graph_ctor(ms, c, nodes_by_nargs, var_root_nodes, var_end_nodes,
               var_end_join_ptrs, global_modify_map, global_t_id_root_memory_map)
 
-@njit(cache=True)
-def setitem_buffer(buffer, k, idrec):
-    buff_len = len(buffer)
-    if(k >= buff_len):
-        expand = max(k-buff_len, buff_len)
-        new_buffer = np.empty(expand+buff_len,dtype=np.uint64)
-        new_buffer[:buff_len] = buffer
-        buffer = new_buffer
-    buffer[k] = idrec
-    return buffer
+@generated_jit(cache=True)
+def setitem_buffer(st, buffer_name, k, val):
+    SentryLiteralArgs(['buffer_name']).for_function(setitem_buffer).bind(st, buffer_name, k, val)
+    def impl(st, buffer_name, k, val):
+        buffer = lower_getattr(st, buffer_name)
+        buff_len = len(buffer)
+        if(k >= buff_len):
+            expand = max(k-buff_len, buff_len)
+            new_buffer = np.empty(expand+buff_len,dtype=np.int64)
+            new_buffer[:buff_len] = buffer
+            lower_setattr(st, buffer_name, new_buffer) 
+        buffer[k] = val        
+    return impl
     
 
 @njit(cache=True)
@@ -1291,8 +1294,7 @@ def parse_change_queue(r_graph):
 
         elif(not change_event.was_retracted):
             k = len(root_mem.change_inds)
-            root_mem.change_buffer = setitem_buffer(
-                    root_mem.change_buffer, k, encode_idrec(t_id,f_id,0))
+            setitem_buffer(root_mem, 'change_buffer', k, i8(f_id))
             root_mem.change_inds = root_mem.change_buffer[:k+1]
 
             idrec = encode_idrec(t_id,f_id,0)# if(a_id != RETRACT) else u8(0)
@@ -1303,8 +1305,7 @@ def parse_change_queue(r_graph):
         else:
             
             k = len(root_mem.remove_inds)
-            root_mem.remove_buffer = setitem_buffer(
-                    root_mem.remove_buffer, k, encode_idrec(t_id,f_id,RETRACT))
+            setitem_buffer(root_mem, 'remove_buffer', k, i8(f_id))
             root_mem.remove_inds = root_mem.remove_buffer[:k+1]
 
             print("RETRACT", t_id,f_id, root_mem.remove_inds)

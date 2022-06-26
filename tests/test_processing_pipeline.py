@@ -107,14 +107,15 @@ def new_mc_addition_state(upper, lower, ):
 
     tf_config = {"type": "TextField", "width" : 100, "height" : 100, "value" : ""}
     comp_config = {"type": "Component", "width" : 100, "height" : 100}
+    hidden_config = {**tf_config, 'locked' : True}
 
     d_state = {
         "operator" : {"id" : "operator", "x" :-110,"y" : 220 , **comp_config},
         # "line" :     {"id" : "line", "x" :0,   "y" : 325 , **comp_config, "height" : 5},
         "done" :     {"id" : "done", "x" :0, "y" : 440 , **comp_config, "type": "Button"},
-        "hidey1" :   {"id" : "hidey1", "x" :n * 110, "y" : 0 , **tf_config},
-        "hidey2" :   {"id" : "hidey2", "x" :0,   "y" : 110 , **tf_config},
-        "hidey3" :   {"id" : "hidey3", "x" :0,   "y" : 220 , **tf_config},
+        "hidey1" :   {"id" : "hidey1", "x" :n * 110, "y" : 0 , **hidden_config},
+        "hidey2" :   {"id" : "hidey2", "x" :0,   "y" : 110 , **hidden_config},
+        "hidey3" :   {"id" : "hidey3", "x" :0,   "y" : 220 , **hidden_config},
     }
 
     for i in range(n):
@@ -367,7 +368,7 @@ def test_condition_generalizing():
         assert ['2_carry', '1_upper', '1_lower'] in match_names 
         assert ['3_carry', '2_upper', '2_lower'] in match_names 
 
-        # Modify the state to make some not match
+        # Check matching responds to modify
         wm.modify(fact_map['1_carry'],'value', '1')
         wm.modify(fact_map['1_carry'],'locked', True)
         wm.modify(fact_map['2_carry'],'value', '1')
@@ -380,6 +381,22 @@ def test_condition_generalizing():
 
         with PrintElapse("Q"):
             [match for match in c_abc.get_matches(wm)]
+        print("\n\n\n")
+
+        # Check matching responds to retractions
+        # wm.modify(fact_map['2_carry'],'value', '')
+        # wm.modify(fact_map['2_carry'],'locked', False)
+        wm.retract(fact_map['3_carry'])
+        wm.modify(fact_map['2_carry'],'to_left', None)
+        wm.modify(fact_map['hidey2'],'above', None)
+        # wm.retract(fact_map['2_carry'])
+        wm.modify(fact_map['1_carry'],'value', '')
+        wm.modify(fact_map['1_carry'],'locked', False)
+
+        match_names = [[x.id for x in match][:3] for match in c_abc.get_matches(wm)]
+        print(match_names)
+        assert match_names == [['1_carry', '0_upper', '0_lower']] #??
+
 
 
 

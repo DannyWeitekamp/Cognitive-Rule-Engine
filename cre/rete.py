@@ -99,7 +99,8 @@ _input_state_type = np.dtype([
     ('idrec', np.int64),
     ('true_count', np.int64),
     ('head_was_valid', np.uint8), 
-    ('is_inserted', np.uint8),
+    ('recently_inserted', np.uint8),
+    ('recently_removed', np.uint8),
     ('is_removed', np.uint8),
     # The input had a match in the previous match cycle 
     ('true_was_nonzero', np.uint8), 
@@ -111,7 +112,7 @@ _input_state_type = np.dtype([
     # Pad to align w/ i8[:3]
     ('_padding0', np.uint8),
     ('_padding1', np.uint8),
-    ('_padding2', np.uint8),
+    # ('_padding2', np.uint8),
 ])
     
 input_state_type = numba.from_dtype(_input_state_type)
@@ -144,7 +145,7 @@ base_rete_node_field_dict = {
     # "vars" : ListType(GenericVarType),
     "idrecs_to_inds" : ListType(DictType(u8,i8)),
     "retracted_inds" : ListType(VectorType),
-    "widths" : i8[::1],
+    "inp_widths" : i8[::1],
     "head_ptr_buffers" : ListType(i8[:,::1]),
     "input_state_buffers" : ListType(input_state_type[::1]),
     
@@ -274,7 +275,7 @@ def node_ctor(ms, t_ids, var_inds,lit=None):
     st.idrecs_to_inds = List.empty_list(u8_i8_dict_type) 
     st.retracted_inds = List.empty_list(VectorType) 
     # st.change_pairs = List.empty_list(idrec_ind_pair_arr_type) 
-    st.widths = np.zeros(2,dtype=np.int64)
+    st.inp_widths = np.zeros(2,dtype=np.int64)
     #  "idrecs_to_inds" : ListType(DictType(u8,i8)),
     # "retracted_inds" : ListType(VectorType),
     # "widths" : i8[::1],
@@ -464,15 +465,22 @@ def validate_head_or_retract(self, arg_ind, idrec, head_ptrs, r):
 #         modify_idrecs.head = 0
 
 
+### STREAM OF CONCIOUSNESS NOTES --- REMOVE
+'''
+Inputs are fixed width. They are intended to have holes. Each node
+has an input state for its inputs 
 
+'''
+####
 
 @njit(cache=True)
 def update_input_changes(self):
     '''Given upstream changes fills the changed and unchanged inds for a node.'''
     for i, inp in enumerate(self.inputs):
-        
+
+
         # Extract values used below
-        w_i = self.widths[i]
+        w_i = self.inp_widths[i]
         idrecs_to_inds_i = self.idrecs_to_inds[i]
         retracted_inds_i = self.retracted_inds[i]
         head_ptr_buffers_i = self.head_ptr_buffers[i]
@@ -482,15 +490,33 @@ def update_input_changes(self):
         head_range_i = self.op.head_ranges[i]
         modify_idrecs_i = self.modify_idrecs[i]
 
+        # Clear input_states of properties only meant to last one cycle
+        # c = 0
+        for k in range(w_i):
+            # if(c != k):
+            #     input_state_buffers_i[c:c+1] = input_state_buffers_i[k:k+1]
+            input_state = input_state_buffers_i[k]
+
+            # if(input_state.is_removed):
+            #     w_i -= 1
+            # else:
+            #     c += 1
+
+            input_state.recently_removed = False
+            input_state.recently_inserted = False
+                
+
         # Collection of various sources of changes as (idrec, ind) pairs.
         change_pairs = np.empty(len(inp.insert_set)+len(inp.remove_set)+
             len(modify_idrecs_i),dtype=idrec_ind_pair_type)
-        # print("insrt", inp.insert_set)
-        # print("remove", inp.remove_set)
-        # print("modify", modify_idrecs_i.data[:modify_idrecs_i.head])
+        print("i :", i)
+        print("inp", np.array([decode_idrec(x.idrec)[1] for x in  input_state_buffers_i]))
+        print("insrt", np.array([decode_idrec(x)[1] for x in  inp.insert_set]))
+        print("remove", np.array([decode_idrec(x)[1] for x in  inp.remove_set]))
+        print("modify", np.array([decode_idrec(x)[1] for x in  modify_idrecs_i.data[:modify_idrecs_i.head] ]))
 
         # Insert the insert_set of this input into change_pairs
-        #  and insert into idrecs_to_inds.
+        #  and add into idrecs_to_inds.
         c = 0
         for idrec in inp.insert_set:
             ind = idrecs_to_inds_i.get(idrec,-1)
@@ -510,13 +536,14 @@ def update_input_changes(self):
         mod_cutoff = c
         for k in range(modify_idrecs_i.head):
             t_id, f_id, a_id = decode_idrec(modify_idrecs_i.data[k])
-            # print(t_id, f_id, a_id)
+            print(t_id, f_id, a_id)
             idrec = encode_idrec(t_id, f_id, 0)
             ind = idrecs_to_inds_i.get(idrec,-1)
             if(ind != -1):
                 change_pairs[c].idrec = idrec
                 change_pairs[c].ind = idrecs_to_inds_i[idrec]
                 c += 1
+        modify_idrecs_i.head = 0
 
         # Insert the remove_set of this input into change_pairs
         #  and set a -1 placeholder into idrecs_to_inds.
@@ -535,13 +562,13 @@ def update_input_changes(self):
         
 
         change_pairs = change_pairs[:c]
-        # print(len(change_pairs))     
+        # print("len(change_pairs): ", len(change_pairs))     
         
         # Ensure various buffers are large enough (3 us).
         curr_len, curr_w = head_ptr_buffers_i.shape
-        self.widths[i] = w_i
-        if(self.widths[i] > curr_len):
-            expand = max(self.widths[i]-curr_len, curr_len)
+        self.inp_widths[i] = w_i
+        if(self.inp_widths[i] > curr_len):
+            expand = max(self.inp_widths[i]-curr_len, curr_len)
             new_head_ptr_buff = np.empty((curr_len+expand,curr_w),dtype=np.int64)
             new_head_ptr_buff[:curr_len] = head_ptr_buffers_i
             head_ptr_buffers_i = self.head_ptr_buffers[i] = new_head_ptr_buff
@@ -561,12 +588,12 @@ def update_input_changes(self):
         # For each fact in the change_pairs apply deref chains associated 
         #  with the base var for this input. Mark as a newly inserted/removed
         #  input as appropriate.
-        num_inserts = 0
-        num_removes = 0
+        # num_inserts = 0
+        # num_removes = 0
         for k, pair in enumerate(change_pairs):
             idrec, ind = pair.idrec, pair.ind
 
-            was_valid, is_valid = False, False
+            is_valid = False
             is_modify = (k >= mod_cutoff) & (k < rem_cutoff)
             input_state = input_state_buffers_i[ind]
 
@@ -576,48 +603,64 @@ def update_input_changes(self):
                 head_ptrs = head_ptr_buffers_i[ind]
                 was_valid = input_state.head_was_valid
                 is_valid = validate_head_or_retract(self, i, idrec, head_ptrs, head_range_i)
-                is_removed = was_valid & ~is_valid & ~is_modify
-                is_inserted = (~was_valid & is_valid) | is_modify
+                print(">> is_valid:", decode_idrec(idrec)[1], is_valid)
+                is_removed = ~is_valid #& ~is_modify
+                recently_inserted = (~was_valid & is_valid) | is_modify
 
             # Otherwise it is an upstream remove.
             else:
-                is_inserted, is_removed = False, True 
+                recently_inserted, is_removed = False, True
 
-            # print("change_pairs", decode_idrec(idrec), is_modify, is_inserted, k, mod_cutoff)
+            # print("change_pairs", decode_idrec(idrec), is_modify, recently_inserted, k, mod_cutoff)
 
             # Assign to the input_state struct
             input_state.idrec = idrec
-            input_state.is_inserted = is_inserted
+            if(not input_state.is_removed and is_removed):
+                input_state.recently_removed = True    
+            input_state.recently_inserted = recently_inserted
             input_state.is_removed = is_removed
             input_state.head_was_valid = is_valid
 
-            num_inserts += is_inserted
-            num_removes += is_removed
+            # if(not is_modify and recently_inserted): 
+                # num_inserts += 1
+            # num_removes += is_removed
 
-        inserted_inds_i = self.inserted_inds[i] = self.inds_insert_buffers[i][:num_inserts]
-        unchanged_inds_i = self.unchanged_inds[i] = self.inds_insert_buffers[i][num_inserts:w_i]
-        removed_inds_i = self.removed_inds[i] = self.inds_remove_buffers[i][:num_removes]
+        # inserted_inds_i = self.inserted_inds[i] = self.inds_insert_buffers[i][:num_inserts]
+        # unchanged_inds_i = self.unchanged_inds[i] = self.inds_insert_buffers[i][num_inserts:w_i]
+        # removed_inds_i = self.removed_inds[i] = self.inds_remove_buffers[i][:num_removes]
 
         # Fill the insert, remove, and unchanged inds arrays (<1 us).
         c, r, u = 0, 0, 0
-        for j in range(self.widths[i]):
+        for j in range(self.inp_widths[i]):
             input_state = input_state_buffers_i[j]
-            if(input_state.is_inserted):
-                inserted_inds_i[c] = j; c += 1;
-            elif(input_state.is_removed):
-                removed_inds_i[r] = j; r += 1;
-            else:
-                unchanged_inds_i[u] = j; u += 1;
+            if(input_state.recently_inserted):
+                inds_insert_buffers_i[c] = j; c += 1;
+            elif(input_state.recently_removed):
+                inds_remove_buffers_i[r] = j; r += 1;
+
+        for j in range(self.inp_widths[i]):
+            input_state = input_state_buffers_i[j]
+            if(not input_state.recently_inserted and not input_state.recently_removed):
+                inds_insert_buffers_i[c+u] = j; u += 1;
+
+        self.inserted_inds[i] = inds_insert_buffers_i[:c]
+        self.unchanged_inds[i] = inds_insert_buffers_i[c:c+u]
+        self.removed_inds[i] = inds_remove_buffers_i[:r]
+
         
-        # print("removed_inds_i: ", removed_inds_i)
-        # print("inserted_inds_i: ", inserted_inds_i)
+        print("removed_inds_i: ", self.removed_inds[i])
+        print("inserted_inds_i: ", self.inserted_inds[i])
+        print("unchanged_inds_i: ", self.unchanged_inds[i])
+    print()
+        # print(num_inserts, c)
+        # print(num_removes, r)
 
 
 @njit(cache=True)
 def resize_truth_table(self):
     s0,s1 = self.truth_table.shape
-    expand0 = max(0,self.widths[0]-s0)
-    expand1 = max(0,self.widths[1]-s1)
+    expand0 = max(0,self.inp_widths[0]-s0)
+    expand1 = max(0,self.inp_widths[1]-s1)
     if(expand0 and expand0):
         expand0 = max(s0,expand0)
         expand1 = max(s1,expand1)
@@ -736,8 +779,8 @@ def update_node(self):
     if(self.op is None): return
 
     # Note: Keep these print statements for debugging
-    # print("-----------------------")
-    # print("Update", self.lit)
+    print("-----------------------")
+    print("Update", self.lit)
     
     # Go through each idrec in the insert_set and identify changes in
     #  the set of candidate facts for this node's variables. 
@@ -824,7 +867,7 @@ def update_node(self):
 
                     if(j > i):
                         # Update the whole row/column
-                        for ind_j in range(self.widths[j]):
+                        for ind_j in range(self.inp_widths[j]):
                             input_state_j = inp_buffers_j[ind_j]
                             if(not _upstream_true(u_tt, aligned, pind_i, pinds_j[ind_j])):
                                 match_inds[j] = ind_j
@@ -860,7 +903,7 @@ def update_node(self):
                 else:
                     if(j > i):
                         # Update the whole row/column
-                        for ind_j in range(self.widths[j]):
+                        for ind_j in range(self.inp_widths[j]):
                             input_state_j = inp_buffers_j[ind_j]
                             if(input_state_j.head_was_valid):
                                 match_inds[j] = ind_j
@@ -902,7 +945,7 @@ def update_node(self):
         input_state_buffers_i = self.input_state_buffers[i]
         
         # Update each slot k for match candidates for the ith Var.
-        for k in range(self.widths[i]):
+        for k in range(self.inp_widths[i]):
             # Extract t_id, f_id, a_id for the input at k.
             input_state_k = input_state_buffers_i[k]
             idrec_k = input_state_k.idrec
@@ -913,23 +956,38 @@ def update_node(self):
             input_state_k.true_ever_nonzero |= true_is_nonzero
 
             # If we have then we'll slot it into the output.
+            print("??", f_id_k, true_is_nonzero, not input_state_k.is_removed)
             if(input_state_k.true_ever_nonzero):
-                idrec = encode_idrec(t_id_k, f_id_k, DECLARE) if true_is_nonzero else u8(0)
+                if(true_is_nonzero and not input_state_k.is_removed):
+                    idrec = encode_idrec(t_id_k, f_id_k, DECLARE)
+                else:
+                    idrec = u8(0) 
                 node_memory_insert_match_buffers(out_i, match_ind, idrec, k)
                 match_ind += 1
 
             # print("<<", k, t_id_k, f_id_k, a_id_k, input_state_k.is_removed, input_state_k.true_was_nonzero, true_is_nonzero)
 
-            # When a candidate flips whether it has matched add to the insert_set.
+            # When 
             t_id_k, f_id_k, _ = decode_idrec(idrec_k)
-            if(input_state_k.is_removed or (input_state_k.true_was_nonzero and ~true_is_nonzero)):
+            if( input_state_k.recently_removed or
+               (input_state_k.true_was_nonzero and ~true_is_nonzero)):
+                print("RETRACT", f_id_k, input_state_k.is_removed, input_state_k.true_was_nonzero, ~true_is_nonzero)
                 out_i.remove_buffer = setitem_buffer(out_i.remove_buffer,
                     remove_ind, encode_idrec(t_id_k, f_id_k, RETRACT))
                 remove_ind += 1
+
+                # ind = np.nonzero(out_i.match_idrecs == idrec_k)[0][0]
+                # node_memory_insert_match_buffers(out_i, ind, u8(0), -1)
+
+            # When a candidate flips to matching add the insert_set.
             elif(input_state_k.true_was_nonzero != true_is_nonzero):
                 out_i.insert_buffer = setitem_buffer(out_i.insert_buffer,
                     insert_ind, encode_idrec(t_id_k, f_id_k, DECLARE))
                 insert_ind += 1
+
+                # idrec = encode_idrec(t_id_k, f_id_k, DECLARE)
+                # node_memory_insert_match_buffers(out_i, match_ind, idrec, k)
+                # match_ind += 1
 
             input_state_k.true_was_nonzero = true_is_nonzero
         
@@ -940,11 +998,11 @@ def update_node(self):
         out_i.remove_set = out_i.remove_buffer[:remove_ind]
 
         # Note: Keep these print statements for debugging
-        # print("i :", i)
-        # print("match_idrecs.f_id", np.array([decode_idrec(x)[1] for x in out_i.match_idrecs]))
-        # print("match_inds", out_i.match_inds)
-        # print("insert_set.f_id", np.array([decode_idrec(x)[1] for x in out_i.insert_set]))
-        # print("remove_set.f_id", np.array([decode_idrec(x)[1] for x in out_i.remove_set]))
+        print("i :", i)
+        print("match_idrecs.f_id", np.array([decode_idrec(x)[1] for x in out_i.match_idrecs]))
+        print("match_inds", out_i.match_inds)
+        print("insert_set.f_id", np.array([decode_idrec(x)[1] for x in out_i.insert_set]))
+        print("remove_set.f_id", np.array([decode_idrec(x)[1] for x in out_i.remove_set]))
         # print(self.truth_table)
             
 
@@ -1244,51 +1302,50 @@ def parse_change_queue(r_graph):
     zeros.append(u1(0))
 
     for change_event in change_events:
-
+        print("change_event", change_event)
         # idrec = u8(change_queue[i])
         t_id, f_id, _ = decode_idrec(change_event.idrec)
 
+        
+        # print("idrec", t_id, f_id, a_id)
 
-        a_ids = change_event.a_ids if change_event.was_modified else zeros
-        for a_id in a_ids:
-            # print("idrec", t_id, f_id, a_id)
+        # Add this idrec to insert_set of root nodes
+        if(t_id not in global_t_id_root_memory_map): continue
+        root_mem = global_t_id_root_memory_map[t_id]
 
-
-            # Add this idrec to insert_set of root nodes
-            if(t_id in global_t_id_root_memory_map):
-                # print("T_ID", t_id)
-                root_mem = global_t_id_root_memory_map[t_id]
-
-                # if(a_id != RETRACT):
-                k = len(root_mem.insert_set)
-                root_mem.insert_buffer = setitem_buffer(
-                        root_mem.insert_buffer, k, encode_idrec(t_id,f_id,0))
-
-                root_mem.insert_set = root_mem.insert_buffer[:k+1]
-                # root_mem.remove_set = root_mem.remove_buffer[:k+1]
-
-                idrec = encode_idrec(t_id,f_id,0) if(a_id != RETRACT) else u8(0)
-                node_memory_insert_match_buffers(root_mem, i8(f_id), idrec, i8(f_id))
-                if(i8(f_id) >= len(root_mem.match_idrecs)):
-                    root_mem.match_idrecs = root_mem.match_idrecs_buffer[:i8(f_id)+1]
-                    root_mem.match_inds = root_mem.match_inds_buffer[:i8(f_id)+1]
-                # else:
-                #     # TODO: Doesn't seem complete
-                #     k = len(root_mem.remove_set)
-                #     setitem_buffer(root_mem.remove_buffer, k, encode_idrec(t_id,f_id,0))
-                #     root_mem.remove_set = root_mem.remove_buffer[:k+1]
-
-
-                # print(root_mem.insert_set)
-
-            if(change_event.was_modified):
+        if(change_event.was_modified):
+            for a_id in change_event.a_ids:
                 # Add this idrec to relevant deref idrecs
                 idrec_pattern = encode_idrec(t_id, 0, a_id)
                 node_arg_pairs = global_modify_map.get(idrec_pattern,None)
                 if(node_arg_pairs is not None):
                     for (node,arg_ind) in node_arg_pairs:
-                        # print("added: ", node.lit, 't_id=', t_id, 'f_id=', f_id, 'a_id=', a_id)
+                        print("added: ", node.lit, 't_id=', t_id, 'f_id=', f_id, 'a_id=', a_id)
                         node.modify_idrecs[arg_ind].add(encode_idrec(t_id, f_id, a_id))
+
+        elif(not change_event.was_retracted):
+            k = len(root_mem.insert_set)
+            root_mem.insert_buffer = setitem_buffer(
+                    root_mem.insert_buffer, k, encode_idrec(t_id,f_id,0))
+            root_mem.insert_set = root_mem.insert_buffer[:k+1]
+
+            idrec = encode_idrec(t_id,f_id,0)# if(a_id != RETRACT) else u8(0)
+            node_memory_insert_match_buffers(root_mem, i8(f_id), idrec, i8(f_id))
+            if(i8(f_id) >= len(root_mem.match_idrecs)):
+                root_mem.match_idrecs = root_mem.match_idrecs_buffer[:i8(f_id)+1]
+                root_mem.match_inds = root_mem.match_inds_buffer[:i8(f_id)+1]
+        else:
+            
+            k = len(root_mem.remove_set)
+            root_mem.remove_buffer = setitem_buffer(
+                    root_mem.remove_buffer, k, encode_idrec(t_id,f_id,RETRACT))
+            root_mem.remove_set = root_mem.remove_buffer[:k+1]
+
+            print("RETRACT", t_id,f_id, root_mem.remove_set)
+
+            node_memory_insert_match_buffers(root_mem, i8(f_id), u8(0), i8(0))
+                
+
 
     r_graph.change_head = change_queue.head
 
@@ -1617,7 +1674,7 @@ def update_from_upstream_match(m_iter, m_node):
 def update_no_depends(m_node):
     # From the output associated with m_node make a copy of match_idrecs
     #  that omits all of the zeros. 
-    # print("UPDA TERMINAL")
+    print("UPDA TERMINAL")
     cnt = 0
     associated_output = m_node.node.outputs[m_node.associated_arg_ind]
     matches = associated_output.match_idrecs
@@ -1625,19 +1682,20 @@ def update_no_depends(m_node):
     for j, idrec in enumerate(matches):
         if(idrec == 0): continue
         idrecs[cnt] = idrec; cnt += 1;
-
+    print(m_node.node.lit, m_node.associated_arg_ind, idrecs)
     # If the output only had zeros then prematurely mark m_node as empty.
     if(cnt == 0):
         return False
 
     # Otherwise update the idrecs for the matches of m_node.
     m_node.idrecs = idrecs[:cnt]
-    # print("END UPDA TERMINAL")
+    print("END UPDA TERMINAL")
     return True
 
 
 @njit(u8[::1](GenericMatchIteratorType),cache=True)
 def match_iter_next_idrecs(m_iter):
+    print("START", m_iter.is_empty)
     n_vars = len(m_iter.iter_nodes)
     # Increment the m_iter nodes until satisfying all upstream
     while(not m_iter.is_empty):
@@ -1683,8 +1741,8 @@ def match_iter_next_idrecs(m_iter):
             if(len(m_node.idrecs) == 0): idrec_sets_are_nonzero = False;
 
         # Note: Keep these prints for debugging
-        # print("<< it: ", np.array([y.curr_ind for y in m_iter.iter_nodes]))        
-        # print("<< lens", np.array([len(m_iter.iter_nodes[i].idrecs) for i in range(n_vars)]))    
+        print("<< it: ", np.array([y.curr_ind for y in m_iter.iter_nodes]))        
+        print("<< lens", np.array([len(m_iter.iter_nodes[i].idrecs) for i in range(n_vars)]))    
 
         # If each m_node has a non-zero idrec set we can yield a match
         #  otherwise we need to keep iterating
@@ -1698,6 +1756,7 @@ def match_iter_next_idrecs(m_iter):
         m_node = m_iter.iter_nodes[i]
         idrecs[m_node.var_ind] = m_node.idrecs[m_node.curr_ind]
 
+    print("END")
     return idrecs
 
 # @njit(u8[::1](GenericMatchIteratorType),cache=True)

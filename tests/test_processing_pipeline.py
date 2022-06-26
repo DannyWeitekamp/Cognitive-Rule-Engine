@@ -368,14 +368,15 @@ def test_condition_generalizing():
         assert ['3_carry', '2_upper', '2_lower'] in match_names 
 
         # Modify the state to make some not match
-        wm.modify(fact_map['1_carry'],'value', '4')
+        wm.modify(fact_map['1_carry'],'value', '1')
         wm.modify(fact_map['1_carry'],'locked', True)
-        wm.modify(fact_map['2_carry'],'value', '5')
+        wm.modify(fact_map['2_carry'],'value', '1')
         wm.modify(fact_map['2_carry'],'locked', True)
 
         match_names = [[x.id for x in match][:3] for match in c_abc.get_matches(wm)]
         print(match_names)
-        assert ['3_carry', '2_upper', '2_lower'] in match_names 
+        assert match_names == [['3_carry', '2_upper', '22_lower']]
+        # assert ['3_carry', '2_upper', '2_lower'] in match_names 
 
         with PrintElapse("Q"):
             [match for match in c_abc.get_matches(wm)]

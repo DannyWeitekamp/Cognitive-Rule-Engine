@@ -309,7 +309,18 @@ def test_condition_generalizing():
         
         assert match_names == [['0_answer', '0_upper', '0_lower'], ['1_answer', '1_upper', '1_lower'], ['2_answer', '2_upper', '2_lower']]
 
-        # raise ValueError()
+        # Modify the state to make some not match
+        wm.modify(fact_map['0_answer'],'value', '4')
+        wm.modify(fact_map['0_answer'],'locked', True)
+        wm.modify(fact_map['1_answer'],'value', '5')
+        wm.modify(fact_map['1_answer'],'locked', True)
+
+        print(wm)
+
+        match_names = [[x.id for x in match][:3] for match in c_ab.get_matches(wm)]
+        print(match_names)
+        assert match_names == [['2_answer', '2_upper', '2_lower']]
+
         # -----------------
         # : Carry2
         varz = [Var(TextField,'Sel'), Var(TextField,'Arg0'), Var(TextField,'Arg1')]
@@ -346,8 +357,6 @@ def test_condition_generalizing():
         c_c = Conditions.from_facts([sel_c, arg_c0, arg_c1], varz)
         c_abc = c_ab.antiunify(c_c)
 
-        # print(c_abc)
-
         print(repr(c_abc))
         
         match_names = [[x.id for x in match][:3] for match in c_abc.get_matches(wm)]
@@ -357,6 +366,20 @@ def test_condition_generalizing():
         assert ['1_carry', '0_upper', '0_lower'] in match_names 
         assert ['2_carry', '1_upper', '1_lower'] in match_names 
         assert ['3_carry', '2_upper', '2_lower'] in match_names 
+
+        # Modify the state to make some not match
+        wm.modify(fact_map['1_carry'],'value', '4')
+        wm.modify(fact_map['1_carry'],'locked', True)
+        wm.modify(fact_map['2_carry'],'value', '5')
+        wm.modify(fact_map['2_carry'],'locked', True)
+
+        match_names = [[x.id for x in match][:3] for match in c_abc.get_matches(wm)]
+        print(match_names)
+        assert ['3_carry', '2_upper', '2_lower'] in match_names 
+
+        with PrintElapse("Q"):
+            [match for match in c_abc.get_matches(wm)]
+
 
 
 

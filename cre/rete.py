@@ -435,24 +435,24 @@ def validate_head_or_retract(self, arg_ind, idrec, head_ptrs, r):
             
 
 
-@njit(cache=True)
-def update_changes_deref_dependencies(self, arg_insert_sets):
-     ### 'modify_idrecs' is the set of self.mem.change_queue
-    # items relevant to intermediate derefs computed for this literal,
-    # and modification of the head attribute. Shouldn't happen frequently ###
-    for i in range(self.modify_idrecs.head):
-        idrec = self.modify_idrecs[i]
-        if(idrec in self.deref_depends):
-            deref_records = self.deref_depends[idrec]
+# @njit(cache=True)
+# def update_changes_deref_dependencies(self, arg_insert_sets):
+#      ### 'modify_idrecs' is the set of self.mem.change_queue
+#     # items relevant to intermediate derefs computed for this literal,
+#     # and modification of the head attribute. Shouldn't happen frequently ###
+#     for i in range(self.modify_idrecs.head):
+#         idrec = self.modify_idrecs[i]
+#         if(idrec in self.deref_depends):
+#             deref_records = self.deref_depends[idrec]
 
-            # Invalidate old DerefRecords
-            for r_ptr in deref_records:
-                r = _struct_from_ptr(DerefRecordType,r_ptr)
-                invalidate_head_ptr_rec(r)
+#             # Invalidate old DerefRecords
+#             for r_ptr in deref_records:
+#                 r = _struct_from_ptr(DerefRecordType,r_ptr)
+#                 invalidate_head_ptr_rec(r)
 
-                # Any change in the deref chain counts as a MODIFY
-                # TODO: This is for sure wrong
-                arg_insert_sets[r.arg_ind][r.base_idrec] = 1 #MODIFY
+#                 # Any change in the deref chain counts as a MODIFY
+#                 # TODO: This is for sure wrong
+#                 arg_insert_sets[r.arg_ind][r.base_idrec] = 1 #MODIFY
 
 
 # @njit(cache=True)
@@ -506,6 +506,18 @@ def update_input_changes(self):
                 change_pairs[c].ind = ind
                 c += 1
 
+        # Insert any modify changes specifically routed to this node.
+        mod_cutoff = c
+        for k in range(modify_idrecs_i.head):
+            t_id, f_id, a_id = decode_idrec(modify_idrecs_i.data[k])
+            # print(t_id, f_id, a_id)
+            idrec = encode_idrec(t_id, f_id, 0)
+            ind = idrecs_to_inds_i.get(idrec,-1)
+            if(ind != -1):
+                change_pairs[c].idrec = idrec
+                change_pairs[c].ind = idrecs_to_inds_i[idrec]
+                c += 1
+
         # Insert the remove_set of this input into change_pairs
         #  and set a -1 placeholder into idrecs_to_inds.
         rem_cutoff = c
@@ -520,18 +532,10 @@ def update_input_changes(self):
                 change_pairs[c].ind = ind
                 c += 1
 
-        # Insert any modify changes specifically routed to this node.
-        mod_cutoff = c
-        for k in range(modify_idrecs_i.head):
-            t_id, f_id, a_id = decode_idrec(modify_idrecs_i.data[k])
-            idrec = encode_idrec(t_id, f_id, 0)
-            ind = idrecs_to_inds_i.get(idrec,-1)
-            if(ind != -1):
-                change_pairs[c].idrec = idrec
-                change_pairs[c].ind = idrecs_to_inds_i[idrec]
-                c += 1
+        
 
-        change_pairs = change_pairs[:c]     
+        change_pairs = change_pairs[:c]
+        # print(len(change_pairs))     
         
         # Ensure various buffers are large enough (3 us).
         curr_len, curr_w = head_ptr_buffers_i.shape
@@ -563,12 +567,12 @@ def update_input_changes(self):
             idrec, ind = pair.idrec, pair.ind
 
             was_valid, is_valid = False, False
-            is_modify = (k >= mod_cutoff)
+            is_modify = (k >= mod_cutoff) & (k < rem_cutoff)
             input_state = input_state_buffers_i[ind]
 
             # If from upstream insert or a modify then check if the deref 
             #  chain(s) are valid to determine if is insert/remove/unchanged.
-            if(k < rem_cutoff or is_modify):
+            if(k < rem_cutoff):
                 head_ptrs = head_ptr_buffers_i[ind]
                 was_valid = input_state.head_was_valid
                 is_valid = validate_head_or_retract(self, i, idrec, head_ptrs, head_range_i)
@@ -578,6 +582,8 @@ def update_input_changes(self):
             # Otherwise it is an upstream remove.
             else:
                 is_inserted, is_removed = False, True 
+
+            # print("change_pairs", decode_idrec(idrec), is_modify, is_inserted, k, mod_cutoff)
 
             # Assign to the input_state struct
             input_state.idrec = idrec
@@ -912,17 +918,18 @@ def update_node(self):
                 node_memory_insert_match_buffers(out_i, match_ind, idrec, k)
                 match_ind += 1
 
+            # print("<<", k, t_id_k, f_id_k, a_id_k, input_state_k.is_removed, input_state_k.true_was_nonzero, true_is_nonzero)
+
             # When a candidate flips whether it has matched add to the insert_set.
-            if(input_state_k.is_removed or input_state_k.true_was_nonzero != true_is_nonzero):
-                t_id_k, f_id_k, _ = decode_idrec(idrec_k)
-                if(input_state_k.is_removed or ~true_is_nonzero):
-                    out_i.insert_buffer = setitem_buffer(out_i.remove_buffer,
-                        remove_ind, encode_idrec(t_id_k, f_id_k, RETRACT))
-                    remove_ind += 1
-                else:
-                    out_i.insert_buffer = setitem_buffer(out_i.insert_buffer,
-                        insert_ind, encode_idrec(t_id_k, f_id_k, DECLARE))
-                    insert_ind += 1
+            t_id_k, f_id_k, _ = decode_idrec(idrec_k)
+            if(input_state_k.is_removed or (input_state_k.true_was_nonzero and ~true_is_nonzero)):
+                out_i.remove_buffer = setitem_buffer(out_i.remove_buffer,
+                    remove_ind, encode_idrec(t_id_k, f_id_k, RETRACT))
+                remove_ind += 1
+            elif(input_state_k.true_was_nonzero != true_is_nonzero):
+                out_i.insert_buffer = setitem_buffer(out_i.insert_buffer,
+                    insert_ind, encode_idrec(t_id_k, f_id_k, DECLARE))
+                insert_ind += 1
 
             input_state_k.true_was_nonzero = true_is_nonzero
         
@@ -1281,7 +1288,7 @@ def parse_change_queue(r_graph):
                 if(node_arg_pairs is not None):
                     for (node,arg_ind) in node_arg_pairs:
                         # print("added: ", node.lit, 't_id=', t_id, 'f_id=', f_id, 'a_id=', a_id)
-                        node.modify_idrecs[arg_ind].add(idrec)
+                        node.modify_idrecs[arg_ind].add(encode_idrec(t_id, f_id, a_id))
 
     r_graph.change_head = change_queue.head
 

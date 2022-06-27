@@ -1552,7 +1552,7 @@ def update_from_upstream_match(m_iter, m_node):
     if(multiple_deps):
         idrecs_set = Dict.empty(u8,u1)
     
-    # print("-- UPDATE FROM UPSTREAM:", _struct_from_ptr(GenericVarType, m_node.node.lit.var_base_ptrs[m_node.associated_arg_ind]).alias, "--")
+    print("-- UPDATE FROM UPSTREAM:", _struct_from_ptr(GenericVarType, m_node.node.lit.var_base_ptrs[m_node.associated_arg_ind]).alias, "--")
 
     for i, dep_m_node_ind in enumerate(m_node.dep_m_node_inds):
         # Each dep_node is the terminal beta node (i.e. a graph node not an iter node) 
@@ -1563,7 +1563,7 @@ def update_from_upstream_match(m_iter, m_node):
         dep_m_node = m_iter.iter_nodes[dep_m_node_ind]
         assoc_arg_ind = 1 if dep_arg_ind == 0 else 0
 
-        # print("\tdep on", dep_node.lit, dep_arg_ind)
+        print("\tdep on", dep_node.lit, dep_arg_ind)
         
         # Determine the index of the fixed downstream match within this node
         if(_raw_ptr_from_struct(m_node.node) == _raw_ptr_from_struct(dep_node)):
@@ -1582,7 +1582,7 @@ def update_from_upstream_match(m_iter, m_node):
         fixed_var = _struct_from_ptr(GenericVarType, dep_node.lit.var_base_ptrs[dep_arg_ind])
         fixed_idrec = dep_node.input_state_buffers[dep_arg_ind][fixed_intern_ind].idrec
 
-        # print("\tFixed:",  fixed_var.alias, "==", m_iter.graph.memset.get_fact(fixed_idrec))
+        print("\tFixed:",  fixed_var.alias, "==", m_iter.graph.memset.get_fact(fixed_idrec))
         
         # Consult the dep_node's truth_table to fill 'idrecs'.
         inp_states = dep_node.input_state_buffers[assoc_arg_ind]        
@@ -1617,7 +1617,7 @@ def update_from_upstream_match(m_iter, m_node):
             for i, x in enumerate(idrecs_set):
                 set_f_ids[i] = decode_idrec(x)[1]
 
-            # print("i", i, "set", set_f_ids, 'new', np.array([decode_idrec(x)[1] for x in idrecs]))
+            print("i", i, "set", set_f_ids, 'new', np.array([decode_idrec(x)[1] for x in idrecs]))
         else:
             m_node.idrecs = idrecs
 

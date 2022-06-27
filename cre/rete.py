@@ -127,10 +127,13 @@ _input_state_type = np.dtype([
     #  where holes should be kept in this input's corresponding output. 
     ('true_ever_nonzero', np.uint8),
 
+    # Some change to this input fact has occured this cycle.
+    ('changed', np.uint8),
+
     # Pad to align w/ i8[:3]
     ('_padding0', np.uint8),
-    ('_padding1', np.uint8),
-    ('_padding2', np.uint8),
+    # ('_padding1', np.uint8),
+    # ('_padding2', np.uint8),
 ])
     
 input_state_type = numba.from_dtype(_input_state_type)
@@ -242,8 +245,8 @@ def node_ctor(ms, t_ids, var_inds,lit=None):
     if(lit is not None):
         st.op = op = lit.op
         n_vars = st.n_vars = len(op.base_var_map)
-        print("INIT:", lit, n_vars)
-        print(lit)
+        # print("INIT:", lit, n_vars)
+        # print(lit)
         for i in range(n_vars):
             l = op.head_ranges[i].length
             st.head_ptr_buffers.append(np.empty((INIT_BUFF_LEN,l),dtype=np.int64))
@@ -496,7 +499,8 @@ has an input state for its inputs
 '''
 ####
 
-@njit(cache=True)
+# NOTE: locals={'ind' : i8} necessary because typing bug w/ dict.getitem
+@njit(cache=True, locals={'ind' : i8})
 def update_input_changes(self):
     '''Given upstream changes fills the changed and unchanged inds for a node.'''
     for i, inp in enumerate(self.inputs):
@@ -527,13 +531,14 @@ def update_input_changes(self):
 
 
         # Clear input_states of properties only meant to last one cycle
-        # c = 0
         for k in range(len(inp.match_idrecs)):
             input_state = input_state_buffers_i[k]
             input_state.recently_invalid = False
             input_state.recently_inserted = False
             input_state.recently_modified = False
+            input_state.changed = False
 
+        # NOTE: Keep prints for debugging
         # print("i :", i)
         # print("inp", np.array([decode_idrec(x)[1] for x in inp.match_idrecs]))
         # print("insrt", np.array([decode_idrec(inp.match_idrecs[x])[1] for x in  inp.change_inds]))
@@ -551,9 +556,12 @@ def update_input_changes(self):
                 # input_state.true_was_nonzero = False
                 input_state.recently_invalid = True
             input_state.is_valid = False
+            input_state.changed = True
 
         change_inds = np.empty(len(inp.change_inds)+len(modify_idrecs_i),dtype=np.int64)
         c = len(inp.change_inds)
+        for ind in inp.change_inds:
+            input_state_buffers_i[ind].changed = True
         change_inds[:c] = inp.change_inds
 
         # Add to change_inds any modifies specifically routed to this node. 
@@ -561,9 +569,14 @@ def update_input_changes(self):
         for k in range(modify_idrecs_i.head):
             t_id, f_id, a_id = decode_idrec(modify_idrecs_i.data[k])
             idrec = encode_idrec(t_id, f_id, 0)
-            ind = inp.idrecs_to_inds.get(idrec,-1)
-            if(ind != -1): change_inds[c] = ind; c += 1;
-                
+            ind = inp.idrecs_to_inds.get(idrec,-1)            
+            if(ind != -1):
+                input_state = input_state_buffers_i[ind]
+                # Don't add the modify if fact changed/removed upstream.
+                if(not input_state.changed):
+                    change_inds[c] = ind; c += 1;
+                    input_state.changed = True
+                    
         # Buffer is consumed -> set head to zero.
         modify_idrecs_i.head = 0
 
@@ -593,6 +606,9 @@ def update_input_changes(self):
             input_state.recently_modified = recently_modified
             input_state.is_valid = is_valid
 
+            # NOTE: Keep print for debugging
+            # print(self.lit, "is_valid", decode_idrec(idrec)[1], is_valid, input_state.recently_inserted, input_state.recently_modified)
+
         
         # Fill the insert, remove, and unchanged inds arrays (<1 us).
         c, r, u = 0, 0, 0
@@ -613,11 +629,11 @@ def update_input_changes(self):
         self.changed_inds[i] = inds_change_buffers_i[r:r+c]
         self.unchanged_inds[i] = inds_change_buffers_i[r+c:r+c+u]
 
+        # NOTE: Keep prints for debugging
         # print("removed_inds_i: ", self.removed_inds[i])
         # print("changed_inds_i: ", self.changed_inds[i])
         # print("unchanged_inds_i: ", self.unchanged_inds[i])
-        # print(num_inserts, c)
-        # print(num_removes, r)
+        # print()
 
 
 @njit(cache=True)
@@ -735,7 +751,8 @@ def _update_truth_table(tt, is_match, match_inds, inp_state_i, inp_state_j):
     inp_state_i.true_count += count_diff
     inp_state_j.true_count += count_diff
 
-
+#NOTES: Can probably avoid situations where need to do O(N) copies
+# in update_node() and in update_input_changes().
 
 @njit(cache=True)
 def update_node(self):
@@ -743,8 +760,8 @@ def update_node(self):
     if(self.op is None): return
 
     # Note: Keep these print statements for debugging
-    print("-----------------------")
-    print("Update", self.lit)
+    # print("-----------------------")
+    # print("Update", self.lit)
     
     # Go through each idrec in the change_inds and identify changes in
     #  the set of candidate facts for this node's variables. 
@@ -920,29 +937,33 @@ def update_node(self):
             true_is_nonzero = (input_state_k.true_count != 0)
             input_state_k.true_ever_nonzero |= true_is_nonzero
 
-            # If we have then we'll slot it into the output.
+            # If we have then we'll 
             # print("??", f_id_k, true_is_nonzero, input_state_k.is_valid)
             
 
             # print("<<", k, t_id_k, f_id_k, a_id_k, input_state_k.is_removed, input_state_k.true_was_nonzero, true_is_nonzero)
 
             if(input_state_k.true_ever_nonzero):
-                # When 
+                # If a candidate is invalidated on this cycle or goes 
+                #  from matching to unmatching mark as removed.
                 t_id_k, f_id_k, _ = decode_idrec(idrec_k)
                 if( input_state_k.recently_invalid or
                    (input_state_k.true_was_nonzero and not true_is_nonzero)):
-                    print("RETRACT", f_id_k, input_state_k.recently_invalid, input_state_k.true_was_nonzero, ~true_is_nonzero)
                     setitem_buffer(out_i, "remove_buffer", remove_ind, match_ind)
                     remove_ind += 1
                     idrecs_to_inds_i[idrec_k] = -1
 
-                # When a candidate flips to matching add the change_inds.
-                elif(input_state_k.true_was_nonzero != true_is_nonzero):
+                # If a candidate goes from unmatching to matching or matches
+                #  and was recently inserted then mark as change.
+                elif(input_state_k.true_was_nonzero != true_is_nonzero or
+                    (true_is_nonzero and input_state_k.recently_inserted)):
                     setitem_buffer(out_i, "change_buffer", change_ind, match_ind)
                     change_ind += 1
                     if(true_is_nonzero): 
                         idrecs_to_inds_i[idrec_k] = match_ind                    
-            
+                
+                # Any facts that have ever been nonzero go into output but 
+                #  invalid/unmatching ones still occupy holes.
                 if(true_is_nonzero and input_state_k.is_valid):
                     idrec = encode_idrec(t_id_k, f_id_k, DECLARE)
                 else:
@@ -959,12 +980,12 @@ def update_node(self):
         out_i.remove_inds = out_i.remove_buffer[:remove_ind]
 
         # Note: Keep these print statements for debugging
-        print("i :", i)
+        # print("i :", i)
         # print("idrec_to_inds", out_i.idrecs_to_inds)
-        print("match_idrecs.f_id", np.array([decode_idrec(x)[1] for x in out_i.match_idrecs]))
-        print("match_inds", out_i.match_inds)
-        print("change_inds.f_id", np.array([decode_idrec(out_i.match_idrecs[x])[1] for x in out_i.change_inds]))
-        print("remove_inds.f_id", np.array([decode_idrec(out_i.match_idrecs[x])[1] for x in out_i.remove_inds]))
+        # print("match_idrecs.f_id", np.array([decode_idrec(x)[1] for x in out_i.match_idrecs]))
+        # print("match_inds", out_i.match_inds)
+        # print("change_inds.f_id", np.array([decode_idrec(out_i.match_idrecs[x])[1] for x in out_i.change_inds]))
+        # print("remove_inds.f_id", np.array([decode_idrec(out_i.match_idrecs[x])[1] for x in out_i.remove_inds]))
         # print(self.truth_table)
             
 
@@ -1261,19 +1282,12 @@ def parse_change_queue(r_graph):
 
     change_events = accumulate_change_events(change_queue, r_graph.change_head, -1)
 
-    # print("**:", change_queue.data[:change_queue.head])
-    # print("**:", global_t_id_root_memory_map)
-    # for i in range(r_graph.change_head, change_queue.head):
     zeros = List.empty_list(u1)
     zeros.append(u1(0))
 
     for change_event in change_events:
-        print("change_event", change_event)
-        # idrec = u8(change_queue[i])
+        # print("change_event", change_event)
         t_id, f_id, _ = decode_idrec(change_event.idrec)
-
-        
-        # print("idrec", t_id, f_id, a_id)
 
         # Add this idrec to change_inds of root nodes
         if(t_id not in global_t_id_root_memory_map): continue
@@ -1287,7 +1301,7 @@ def parse_change_queue(r_graph):
                 node_arg_pairs = global_modify_map.get(idrec_pattern,None)
                 if(node_arg_pairs is not None):
                     for (node,arg_ind) in node_arg_pairs:
-                        print("added: ", node.lit, 't_id=', t_id, 'f_id=', f_id, 'a_id=', a_id)
+                        # print("added: ", node.lit, 't_id=', t_id, 'f_id=', f_id, 'a_id=', a_id)
                         node.modify_idrecs[arg_ind].add(encode_idrec(t_id, f_id, a_id))
 
         elif(change_event.was_declared):
@@ -1307,11 +1321,11 @@ def parse_change_queue(r_graph):
             setitem_buffer(root_mem, 'remove_buffer', k, i8(f_id))
             root_mem.remove_inds = root_mem.remove_buffer[:k+1]
 
-            print("RETRACT", t_id,f_id, root_mem.remove_inds)
+            # print("RETRACT", t_id,f_id, root_mem.remove_inds)
 
             node_memory_insert_match_buffers(root_mem, i8(f_id), u8(0), i8(0))
                 
-    print("END ROOT")
+    # print("END ROOT")
 
     r_graph.change_head = change_queue.head
 
@@ -1552,7 +1566,7 @@ def update_from_upstream_match(m_iter, m_node):
     if(multiple_deps):
         idrecs_set = Dict.empty(u8,u1)
     
-    print("-- UPDATE FROM UPSTREAM:", _struct_from_ptr(GenericVarType, m_node.node.lit.var_base_ptrs[m_node.associated_arg_ind]).alias, "--")
+    # print("-- UPDATE FROM UPSTREAM:", _struct_from_ptr(GenericVarType, m_node.node.lit.var_base_ptrs[m_node.associated_arg_ind]).alias, "--")
 
     for i, dep_m_node_ind in enumerate(m_node.dep_m_node_inds):
         # Each dep_node is the terminal beta node (i.e. a graph node not an iter node) 
@@ -1563,7 +1577,7 @@ def update_from_upstream_match(m_iter, m_node):
         dep_m_node = m_iter.iter_nodes[dep_m_node_ind]
         assoc_arg_ind = 1 if dep_arg_ind == 0 else 0
 
-        print("\tdep on", dep_node.lit, dep_arg_ind)
+        # print("\tdep on", dep_node.lit, dep_arg_ind)
         
         # Determine the index of the fixed downstream match within this node
         if(_raw_ptr_from_struct(m_node.node) == _raw_ptr_from_struct(dep_node)):
@@ -1582,7 +1596,7 @@ def update_from_upstream_match(m_iter, m_node):
         fixed_var = _struct_from_ptr(GenericVarType, dep_node.lit.var_base_ptrs[dep_arg_ind])
         fixed_idrec = dep_node.input_state_buffers[dep_arg_ind][fixed_intern_ind].idrec
 
-        print("\tFixed:",  fixed_var.alias, "==", m_iter.graph.memset.get_fact(fixed_idrec))
+        # print("\tFixed:",  fixed_var.alias, "==", decode_idrec(fixed_idrec)[1])#m_iter.graph.memset.get_fact(fixed_idrec))
         
         # Consult the dep_node's truth_table to fill 'idrecs'.
         inp_states = dep_node.input_state_buffers[assoc_arg_ind]        
@@ -1617,7 +1631,7 @@ def update_from_upstream_match(m_iter, m_node):
             for i, x in enumerate(idrecs_set):
                 set_f_ids[i] = decode_idrec(x)[1]
 
-            print("i", i, "set", set_f_ids, 'new', np.array([decode_idrec(x)[1] for x in idrecs]))
+            # print("i", i, "set", set_f_ids, 'new', np.array([decode_idrec(x)[1] for x in idrecs]))
         else:
             m_node.idrecs = idrecs
 
@@ -1640,7 +1654,7 @@ def update_from_upstream_match(m_iter, m_node):
 def update_no_depends(m_node):
     # From the output associated with m_node make a copy of match_idrecs
     #  that omits all of the zeros. 
-    print("UPDA TERMINAL")
+    # print("UPDA TERMINAL")
     cnt = 0
     associated_output = m_node.node.outputs[m_node.associated_arg_ind]
     matches = associated_output.match_idrecs
@@ -1648,20 +1662,19 @@ def update_no_depends(m_node):
     for j, idrec in enumerate(matches):
         if(idrec == 0): continue
         idrecs[cnt] = idrec; cnt += 1;
-    print(m_node.node.lit, m_node.associated_arg_ind, idrecs)
+    # print(m_node.node.lit, m_node.associated_arg_ind, idrecs)
     # If the output only had zeros then prematurely mark m_node as empty.
     if(cnt == 0):
         return False
 
     # Otherwise update the idrecs for the matches of m_node.
     m_node.idrecs = idrecs[:cnt]
-    print("END UPDA TERMINAL")
+    # print("END UPDA TERMINAL")
     return True
 
 
 @njit(u8[::1](GenericMatchIteratorType),cache=True)
 def match_iter_next_idrecs(m_iter):
-    print("START", m_iter.is_empty)
     n_vars = len(m_iter.iter_nodes)
     # Increment the m_iter nodes until satisfying all upstream
     while(not m_iter.is_empty):
@@ -1707,8 +1720,8 @@ def match_iter_next_idrecs(m_iter):
             if(len(m_node.idrecs) == 0): idrec_sets_are_nonzero = False;
 
         # Note: Keep these prints for debugging
-        print("<< it: ", np.array([y.curr_ind for y in m_iter.iter_nodes]))        
-        print("<< lens", np.array([len(m_iter.iter_nodes[i].idrecs) for i in range(n_vars)]))    
+        # print("<< it: ", np.array([y.curr_ind for y in m_iter.iter_nodes]))        
+        # print("<< lens", np.array([len(m_iter.iter_nodes[i].idrecs) for i in range(n_vars)]))    
 
         # If each m_node has a non-zero idrec set we can yield a match
         #  otherwise we need to keep iterating
@@ -1722,7 +1735,6 @@ def match_iter_next_idrecs(m_iter):
         m_node = m_iter.iter_nodes[i]
         idrecs[m_node.var_ind] = m_node.idrecs[m_node.curr_ind]
 
-    print("END")
     return idrecs
 
 # @njit(u8[::1](GenericMatchIteratorType),cache=True)

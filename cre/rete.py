@@ -467,47 +467,22 @@ def validate_head_or_retract(self, arg_ind, idrec, head_ptrs, r):
             
 
 
-# @njit(cache=True)
-# def update_changes_deref_dependencies(self, arg_change_indss):
-#      ### 'modify_idrecs' is the set of self.mem.change_queue
-#     # items relevant to intermediate derefs computed for this literal,
-#     # and modification of the head attribute. Shouldn't happen frequently ###
-#     for i in range(self.modify_idrecs.head):
-#         idrec = self.modify_idrecs[i]
-#         if(idrec in self.deref_depends):
-#             deref_records = self.deref_depends[idrec]
-
-#             # Invalidate old DerefRecords
-#             for r_ptr in deref_records:
-#                 r = _struct_from_ptr(DerefRecordType,r_ptr)
-#                 invalidate_head_ptr_rec(r)
-
-#                 # Any change in the deref chain counts as a MODIFY
-#                 # TODO: This is for sure wrong
-#                 arg_change_indss[r.arg_ind][r.base_idrec] = 1 #MODIFY
-
-
-# @njit(cache=True)
-# def update_modify_changes(self):
-#     print("modify_idrecs:",self.lit)
-#     for arg_ind, modify_idrecs in enumerate(self.modify_idrecs):
-#         arr = modify_idrecs.data[:modify_idrecs.head]
-#         print("\t", arg_ind, modify_idrecs.head, np.array([decode_idrec(x)[1] for x in arr]))
-#         modify_idrecs.head = 0
-
-
-### STREAM OF CONCIOUSNESS NOTES --- REMOVE
-'''
-Inputs are fixed width. They are intended to have holes. Each node
-has an input state for its inputs 
-
-'''
-####
-
 # NOTE: locals={'ind' : i8} necessary because typing bug w/ dict.getitem
 @njit(cache=True, locals={'ind' : i8})
 def update_input_changes(self):
-    '''Given upstream changes fills the changed and unchanged inds for a node.'''
+    ''' 
+    Updated the input_state structs for each fact in each input and 
+    populates for each input the set of removed_inds, changed_inds, and 
+    unchanged_inds that are used decide which facts or fact pairs need to 
+    be rechecked in check_matches(). removed_inds consists of those facts  
+    that were removed upstream or that are now invalid for this node
+    because of a head validation failure (i.e. cannot dereference attribute 
+    chains in one of the vars). changed_inds corresponds to facts that
+    were newly inserted upstream, or to facts that had an attribute modified 
+    that is relevant to this node, or to facts that have a new successful
+    validation in the current match cylce. unchanged_inds comprises the rest.
+    NOTE: Might not actually need to fill 'removed_inds'
+    '''
     for i, inp in enumerate(self.inputs):
         self.inp_widths[i] = len(inp.match_idrecs)
 
@@ -640,6 +615,82 @@ def update_input_changes(self):
         # print("unchanged_inds_i: ", self.unchanged_inds[i])
         # print()
 
+@njit(cache=True)
+def update_output_changes(self):
+    # Update each of (the at most 2) outputs (one for each Var).
+    for i, out_i in enumerate(self.outputs):
+        change_ind = 0
+        remove_ind = 0
+        input_state_buffers_i = self.input_state_buffers[i]
+        idrecs_to_inds_i = out_i.idrecs_to_inds
+        
+        # Update each slot k for match candidates for the ith Var.
+        #  Performance Note: We almost always need to recheck every input
+        #  for at least one var so gating with true_ever_nonzero instead of
+        #  iterating over changed_inds / removed_inds makes sense.
+        for k in range(self.inp_widths[i]):
+            # Extract t_id, f_id, a_id for the input at k.
+            input_state_k = input_state_buffers_i[k]
+            idrec_k = input_state_k.idrec
+            t_id_k, f_id_k, a_id_k = decode_idrec(idrec_k)
+
+            # Determine if we've ever found a match for this candidate
+            true_is_nonzero = (input_state_k.true_count != 0)
+            input_state_k.true_ever_nonzero |= true_is_nonzero
+
+            if(input_state_k.true_ever_nonzero):
+                # If a candidate is invalidated on this cycle or goes 
+                #  from matching to unmatching mark as removed.
+                t_id_k, f_id_k, _ = decode_idrec(idrec_k)
+                if( input_state_k.recently_invalid or
+                   (input_state_k.true_was_nonzero and not true_is_nonzero)):
+
+                    output_ind = input_state_k.output_ind
+                    setitem_buffer(out_i, "remove_buffer", remove_ind, output_ind)
+                    node_memory_insert_match_buffers(out_i, output_ind, u8(0), k)
+                    out_i.match_holes.add(output_ind)
+                    
+                    idrecs_to_inds_i[idrec_k] = -1
+                    input_state_k.output_ind = -1
+                    remove_ind += 1
+
+                # If a candidate goes from unmatching to matching or was 
+                #  recently inserted and matches then mark as change.
+                elif(not input_state_k.true_was_nonzero and true_is_nonzero or
+                    (true_is_nonzero and input_state_k.recently_inserted)):
+
+                    if(len(out_i.match_holes) > 0):
+                        output_ind = out_i.match_holes.pop()
+                    else:
+                        output_ind = out_i.max_matches
+                        out_i.max_matches += 1
+
+                    setitem_buffer(out_i, "change_buffer", change_ind, output_ind)
+                    node_memory_insert_match_buffers(out_i, output_ind, idrec_k, k)
+                    
+                    idrecs_to_inds_i[idrec_k] = output_ind
+                    input_state_k.output_ind = output_ind
+                    change_ind += 1
+
+            input_state_k.true_was_nonzero = true_is_nonzero
+            
+        
+        # To avoid reallocations the arrays in each output are slices of larger buffers.
+        out_i.match_idrecs = out_i.match_idrecs_buffer[:out_i.max_matches]
+        out_i.match_inp_inds = out_i.match_inp_inds_buffer[:out_i.max_matches]
+        out_i.change_inds = out_i.change_buffer[:change_ind]
+        out_i.remove_inds = out_i.remove_buffer[:remove_ind]
+
+        # Note: Keep these print statements for debugging
+        # print("i :", i)
+        # print("idrec_to_inds", out_i.idrecs_to_inds)
+        # print("match_idrecs.f_id", np.array([decode_idrec(x)[1] for x in out_i.match_idrecs]))
+        # print("match_inp_inds", out_i.match_inp_inds)
+        # print("change_inds.f_id", np.array([decode_idrec(out_i.match_idrecs[x])[1] for x in out_i.change_inds]))
+        # print("remove_inds.f_id", np.array([decode_idrec(out_i.match_idrecs[x])[1] for x in out_i.remove_inds]))
+        # print(self.truth_table)
+
+
 
 @njit(cache=True)
 def resize_truth_table(self):
@@ -682,26 +733,6 @@ u8_i8_dict_type = DictType(u8,i8)
 @njit(cache=True)
 def _ld_dict(ptr):
     return _dict_from_ptr(u8_i8_dict_type, ptr)     
-
-# TODO: is dead?
-@njit(cache=True, locals={'ptr0':i8,'ptr1':i8,})
-def invalidate_beta_match(self, match_idrecs):
-    idrec0,idrec1 = match_idrecs[0], match_idrecs[1]
-    outputs = self.outputs
-    was_match = False
-    ptr0 = outputs[0].matches.get(idrec0,0)
-    if(ptr0 != 0):
-        d = _ld_dict(ptr0)
-        if(d.get(idrec1,0) != 0):
-            was_match = True
-            d[idrec1] = 0
-    ptr1 = outputs[1].matches.get(idrec1,0)
-    if(ptr1 != 0):
-        d = _ld_dict(ptr1)
-        if(d.get(idrec0,0) != 0):
-            was_match = True
-            d[idrec0] = 0
-    return was_match
 
 
 @njit(cache=True)
@@ -756,22 +787,9 @@ def _update_truth_table(tt, is_match, match_inp_inds, inp_state_i, inp_state_j):
     inp_state_i.true_count += count_diff
     inp_state_j.true_count += count_diff
 
-#NOTES: Can probably avoid situations where need to do O(N) copies
-# in update_node() and in update_input_changes().
 
 @njit(cache=True)
-def update_node(self):
-    # If the node is an identity node then skip since the input is hardwired to the output
-    if(self.op is None): return
-
-    # Note: Keep these print statements for debugging
-    # print("-----------------------")
-    # print("Update", self.lit)
-    
-    # Go through each idrec in the change_inds and identify changes in
-    #  the set of candidate facts for this node's variables. 
-    update_input_changes(self)
-
+def check_matches(self):
     head_ranges = self.op.head_ranges
     n_vars = len(head_ranges)    
     negated = self.lit.negated
@@ -923,78 +941,39 @@ def update_node(self):
                 is_match = match_head_ptrs_func(match_inp_ptrs) ^ negated
                 inp_state_i.true_count = i8(is_match)
 
-    # Update each of (the at most 2) outputs (one for each Var).
-    for i, out_i in enumerate(self.outputs):
-        change_ind = 0
-        remove_ind = 0
-        input_state_buffers_i = self.input_state_buffers[i]
-        idrecs_to_inds_i = out_i.idrecs_to_inds
-        
-        # Update each slot k for match candidates for the ith Var.
-        #  Performance Note: We almost always need to recheck every input
-        #  for at least one var so gating with true_ever_nonzero instead of
-        #  iterating over changed_inds / removed_inds makes sense.
-        for k in range(self.inp_widths[i]):
-            # Extract t_id, f_id, a_id for the input at k.
-            input_state_k = input_state_buffers_i[k]
-            idrec_k = input_state_k.idrec
-            t_id_k, f_id_k, a_id_k = decode_idrec(idrec_k)
 
-            # Determine if we've ever found a match for this candidate
-            true_is_nonzero = (input_state_k.true_count != 0)
-            input_state_k.true_ever_nonzero |= true_is_nonzero
+#NOTES: Can probably avoid situations where need to do O(N) copies
+# in update_node() and in update_input_changes().
 
-            if(input_state_k.true_ever_nonzero):
-                # If a candidate is invalidated on this cycle or goes 
-                #  from matching to unmatching mark as removed.
-                t_id_k, f_id_k, _ = decode_idrec(idrec_k)
-                if( input_state_k.recently_invalid or
-                   (input_state_k.true_was_nonzero and not true_is_nonzero)):
+@njit(cache=True)
+def update_node(self):
+    '''Updates a graph node. Updates the node's outputs based on upstream
+         change to its inputs or from directly routed modifications. For 
+         beta nodes their truth table is updated in the process. Each node
+         output (one for each var) holds the current matching idrecs, 
+         the their indicies in the node's input, and sets of change_inds,
+         and remove_inds to signal how downstream nodes should update based
+         on the output changes.'''
 
-                    output_ind = input_state_k.output_ind
-                    setitem_buffer(out_i, "remove_buffer", remove_ind, output_ind)
-                    node_memory_insert_match_buffers(out_i, output_ind, u8(0), k)
-                    out_i.match_holes.add(output_ind)
-                    
-                    idrecs_to_inds_i[idrec_k] = -1
-                    input_state_k.output_ind = -1
-                    remove_ind += 1
+    # If the node is an identity node then skip since the input is hardwired to the output
+    if(self.op is None): return
 
-                # If a candidate goes from unmatching to matching or was 
-                #  recently inserted and matches then mark as change.
-                elif(not input_state_k.true_was_nonzero and true_is_nonzero or
-                    (true_is_nonzero and input_state_k.recently_inserted)):
+    # Note: Keep these print statements for debugging
+    # print("-----------------------")
+    # print("Update", self.lit)
+    
+    # Updates input_states and produces changed_inds and unchanged_inds.
+    update_input_changes(self)
 
-                    if(len(out_i.match_holes) > 0):
-                        output_ind = out_i.match_holes.pop()
-                    else:
-                        output_ind = out_i.max_matches
-                        out_i.max_matches += 1
+    # For beta nodes recheck the changed_inds for one var against the
+    #   changed_inds and unchanged_inds of the other. Alpha nodes just check 
+    #   the changed_inds. Fills true_count (i.e. number of consistent match pairs)
+    #   for each input fact.
+    check_matches(self)    
 
-                    setitem_buffer(out_i, "change_buffer", change_ind, output_ind)
-                    node_memory_insert_match_buffers(out_i, output_ind, idrec_k, k)
-                    
-                    idrecs_to_inds_i[idrec_k] = output_ind
-                    input_state_k.output_ind = output_ind
-                    change_ind += 1
-
-            input_state_k.true_was_nonzero = true_is_nonzero
-            
-        
-        # To avoid reallocations the arrays in each output are slices of larger buffers.
-        out_i.match_idrecs = out_i.match_idrecs_buffer[:out_i.max_matches]
-        out_i.match_inp_inds = out_i.match_inp_inds_buffer[:out_i.max_matches]
-        out_i.change_inds = out_i.change_buffer[:change_ind]
-        out_i.remove_inds = out_i.remove_buffer[:remove_ind]
-
-        # Note: Keep these print statements for debugging
-        # print("i :", i)
-        # print("idrec_to_inds", out_i.idrecs_to_inds)
-        # print("match_idrecs.f_id", np.array([decode_idrec(x)[1] for x in out_i.match_idrecs]))
-        # print("match_inp_inds", out_i.match_inp_inds)
-        # print("change_inds.f_id", np.array([decode_idrec(out_i.match_idrecs[x])[1] for x in out_i.change_inds]))
-        # print("remove_inds.f_id", np.array([decode_idrec(out_i.match_idrecs[x])[1] for x in out_i.remove_inds]))
-        # print(self.truth_table)
+    # Ensure that idrecs for facts with true_count > 0 represented in 
+    #  outputs. Track removals/changes for updating downstream nodes. 
+    update_output_changes(self)
             
 
 
@@ -1745,58 +1724,6 @@ def match_iter_next_idrecs(m_iter):
 
     return idrecs
 
-# @njit(u8[::1](GenericMatchIteratorType),cache=True)
-# def match_iter_next_idrecs(m_iter):
-#     n_vars = len(m_iter.iter_nodes)
-#     end = len(m_iter.iter_nodes)-1
-#     if(m_iter.is_empty or n_vars == 0): raise StopIteration()
-
-#     # Build an array 'idrecs' for the idrecs of the next match set of Facts.
-#     idrecs = np.empty(n_vars,dtype=np.uint64)
-
-#     # For each 
-#     most_upstream_overflow = -1
-#     # for i, m_node in enumerate(m_iter.iter_nodes):
-#     for i in range(end ,-1,-1):
-#         m_node = m_iter.iter_nodes[i]
-        
-
-        
-
-#         print(i, "v:", m_node.var_ind, m_node.curr_ind, np.array([decode_idrec(x)[1] for x in m_node.idrecs]) ,most_upstream_overflow)
-#         # Fill the next idrec
-#         # print("B")
-#         # print(i, m_node.var_ind, decode_idrec(m_node.idrecs[m_node.curr_ind])[0])
-#         idrecs[m_node.var_ind] = m_node.idrecs[m_node.curr_ind]
-
-#         # Increment the current index for the m_node
-#         if(i == end or most_upstream_overflow == i+1):
-#             m_node.curr_ind += 1
-        
-#         # Track whether incrementing overflowed the m_node.
-#         if(m_node.curr_ind >= len(m_node.idrecs)):
-#             # If the last m_node overflows then iteration is finished.
-#             if(i == 0):
-#                 m_iter.is_empty = True
-#                 return idrecs
-
-#             if(m_node.dep_m_node_ind != -1):
-#                 dep_m_node = m_iter.iter_nodes[m_node.dep_m_node_ind]
-#                 update_from_upstream_match(m_node, dep_m_node)
-                
-#             m_node.curr_ind = 0
-#             most_upstream_overflow = i
-
-        
-
-#         # print(i, most_upstream_overflow)
-#     print("idrecs:", np.array([decode_idrec(x)[1] for x in idrecs]))
-    # if(most_upstream_overflow != -1):
-    #     # print("restich")
-    #     restitch_match_iter(m_iter, most_upstream_overflow)
-
-    return idrecs
-
 @njit(i8[::1](GenericMatchIteratorType), cache=True)
 def match_iter_next_ptrs(m_iter):
     ms, graph = m_iter.graph.memset, m_iter.graph
@@ -1827,38 +1754,7 @@ def fact_ptrs_as_tuple(typs, ptr_arr):
     # print("AFTER",tup)
     return tup
 
-# @generated_jit(cache=True,nopython=True)
-# def _get_matches(conds, struct_types, mem=None):
-#     print(type(struct_types))
-#     print(struct_types)
-#     if(isinstance(struct_types, UniTuple)):
-#         typs = tuple([struct_types.dtype.instance_type] * struct_types.count)
-#         out_type =  UniTuple(struct_types.dtype.instance_type,struct_types.count)
-#     else:
-#         raise NotImplemented("Need to write intrinsic for multi-type ")
 
-    # print(typs)
-# @njit(cache=True, locals={"ptr_set" : i8[::1]})
-# def match_iter_next(m_iter, struct_types):
-#     ptrs = match_iter_next_ptrs(m_iter)
-#     return _struct_tuple_from_pointer_arr(struct_types, ptr_set)
-
-
-# @njit(cache=True)
-# def match_iter_next(m_iter, types):
-#     mem, graph = m_iter.graph.mem, m_iter.graph
-#     idrecs = match_iter_next_idrecs(m_iter)
-#     ptrs = np.empty(len(idrecs),dtype=np.int64)
-#     for i, idrec in enumerate(idrecs):
-#         t_id, f_id, _  = decode_idrec(idrec)
-#         facts = _struct_from_ptr(VectorType, mem.mem_data.facts[t_id])
-#         ptrs[i] = facts.data[f_id]
-#     return ptrs
-
-
-# @njit(cache=True)
-# def match_iter_next(m_iter):
-#     return match_iter_next_ptrs(m_iter)
 
 @njit(cache=True)
 def update_graph(graph):
@@ -1917,25 +1813,3 @@ if __name__ == "__main__":
     # node_ctor()
 
 
-
-
-
-
-
-"""
-
-Notes: 
-
-What is needed by 
-
-    
-
-
-
-
-
-
-
-
-
-"""

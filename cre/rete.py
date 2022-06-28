@@ -29,53 +29,56 @@ from numba.core.imputils import (lower_cast)
 RETRACT = u1(0xFF)# u1(0)
 DECLARE = u1(0)
 
-deref_record_field_dict = {
-    # Weak Pointers to the Dict(i8,u1)s inside deref_depends
-    "parent_ptrs" : i8[::1], 
-    "arg_ind" : i8,
-    "base_idrec" : u8,
-    "was_successful" : u1,
-}
 
-DerefRecord, DerefRecordType = define_structref("DerefRecord", deref_record_field_dict)
+# -----------------------------------------------------------------------
+# : ReteNode
 
 
+# -----------------------------------------------------------------------
+# : NodeIO (i.e. input/output to node)
 
-node_memory_field_dict = {
-    # If it is a root then we should
-    # check the facts of the mem linked to the graph 
+node_io_field_dict = {
+    # Whether or not is a first (i.e. most upstream) input.
     "is_root" : types.boolean,
 
-    "change_buffer" : i8[::1],#DictType(u8,u1), 
-    "change_inds" : i8[::1],#DictType(u8,u1), 
+    # Note: these are pairs of buffer + slices into them
 
-    "remove_buffer" : i8[::1],#DictType(u8,u1), 
-    "remove_inds" : i8[::1],#DictType(u8,u1), 
+    # Indicies changed in this match cycle.
+    "change_buffer" : i8[::1],
+    "change_inds" : i8[::1],
+
+    # Indices removed in this match cycle.
+    "remove_buffer" : i8[::1],
+    "remove_inds" : i8[::1],
     
+    # The set of idrecs held by this input/output.
     "match_idrecs_buffer" : u8[::1], 
     "match_idrecs" : u8[::1], 
 
+    # The indicies in the input of associated output facts.
     "match_inp_inds_buffer" : i8[::1], 
     "match_inp_inds" : i8[::1], 
 
+    # A mapping of idrecs to their indicies in the output.
     "idrecs_to_inds" : DictType(u8,i8),
+
+    # A vector that keeps track indicies of holes in the output.  
     "match_holes" : VectorType,
-    "max_matches" : i8,
 
+    # The size of the output including holes.  
+    "width" : i8,
 
-    # Weak pointer to the node that owns this memory
+    # Weak pointer to the node that owns this memory.
     "parent_node_ptr" : i8,
-
 }
 
-NodeMemory, NodeMemoryType = define_structref("NodeMemory", node_memory_field_dict)
+NodeIO, NodeIOType = define_structref("NodeIO", node_io_field_dict)
 
 
 @njit(cache=True)
-def new_node_mem():
+def new_NodeIO():
     # print("NEW NODE")
-    st = new(NodeMemoryType)
-    #Placeholders 
+    st = new(NodeIOType)
     st.change_buffer = np.empty(8,dtype=np.int64)#Dict.empty(u8,u1)
     st.change_inds = st.change_buffer[:0]
 
@@ -89,16 +92,10 @@ def new_node_mem():
 
     st.idrecs_to_inds = Dict.empty(u8,i8)
     st.match_holes = new_vector(8)
-    st.max_matches = 0
+    st.width = 0
     # st.match_holes = new_vector(2)#Dict.empty(u8,i8)
     st.is_root = False
     st.parent_node_ptr = 0
-    return st
-
-@njit(cache=True)
-def new_root_node_mem():
-    st = new_node_mem()
-    st.is_root = True
     return st
 
 
@@ -112,8 +109,11 @@ _input_state_type = np.dtype([
     # The index of input fact in the associated output.
     ('output_ind', np.int64),
 
-    # The input fact is not removed and its relevant attributes
-    #  have been successfully dereferenced.
+    # Some change to this input fact has occured this cycle.
+    ('changed', np.uint8),
+
+    # Indicates that the input fact is not removed and its relevant 
+    #  attributes have been successfully dereferenced.
     ('is_valid', np.uint8), 
     
     # The input fact was inserted in this match cycle.
@@ -132,189 +132,151 @@ _input_state_type = np.dtype([
     #  where holes should be kept in this input's corresponding output. 
     ('true_ever_nonzero', np.uint8),
 
-    # Some change to this input fact has occured this cycle.
-    ('changed', np.uint8),
-
-    # Pad to align w/ i8[:3]
+    # Pad to align w/ i8[:4]
     ('_padding0', np.uint8),
     # ('_padding1', np.uint8),
     # ('_padding2', np.uint8),
 ])
     
 input_state_type = numba.from_dtype(_input_state_type)
-
-
 dict_i8_u1_type = DictType(i8,u1)
-dict_u8_i8_arr_type = DictType(u8,i8[::1])
 deref_dep_typ = DictType(u8,DictType(ptr_t,u1))
 
-
-# outputs_item_typ = DictType(u8,DictType(u8,u1))
-dict_u8_u1_type = DictType(u8,u1)
-# outputs_typ = DictType(u8,DictType(u8,u1))
-
-_idrec_ind_pair = np.dtype([('idrec', np.uint64),  ('ind', np.int64)])
-idrec_ind_pair_type = numba.from_dtype(_idrec_ind_pair)
-
 base_rete_node_field_dict = {
-    # Pointers to the Dict(i8,u1)s inside deref_depends
+    
+    # The working memory for this graph 
     "memset" : MemSetType, 
-    "has_op" : types.boolean,
+
+    # The Literal associated with this node
     "lit" : types.optional(LiteralType),
+
+    # The Op for the node's literal
     "op" : types.optional(GenericOpType),
+
+    # ???
     "deref_depends" : deref_dep_typ, 
     
+    # The number of Vars (1 for alpha or 2 for beta)
     "n_vars" : i8,
 
+    # The var_inds for the vars handled by this node 
     "var_inds" : i8[::1],
+
+    # The t_ids for the vars handled by this node 
     "t_ids" : u2[::1],
-    # "vars" : ListType(GenericVarType),
-    # "idrecs_to_inds" : ListType(DictType(u8,i8)),
-    # "match_holes" : ListType(VectorType),
+
+    # The widths of each othe node's inputs.
     "inp_widths" : i8[::1],
+
+    # For each input the resolved head pointers (i.e. pointers to 
+    #  the heads of deref chains like A.next.next.value).  
     "head_ptr_buffers" : ListType(i8[:,::1]),
+
+    # For each input a buffer holding the set of input_state structs 
+    #  for each of the input's input facts. 
     "input_state_buffers" : ListType(input_state_type[::1]),
-    
-
-
-    # "idrecs_change_buffers" : ListType(u8[::1]),
+        
+    # For each input a buffer from which removed_inds, changed_inds, 
+    #   and unchanged_inds are slices.
     "inds_change_buffers" : ListType(i8[::1]),
-    # "inds_remove_buffers" : ListType(i8[::1]),
-    # "changed_idrecs" : ListType(u8[::1]),
-    # "unchanged_idrecs" : ListType(u8[::1]),
+
+    # For each input the indicies of facts that have changed 
+    #  or been inserted upstream in this match cycle.
     "changed_inds" : ListType(i8[::1]),
+
+    # For each input the indicies of facts that have not changed
     "unchanged_inds" : ListType(i8[::1]),
+
+    # For each input the indicies of facts that been removed upstream
+    #  or been invalidated in this match cycle.
     "removed_inds" : ListType(i8[::1]),
 
-    # "idrecs_match_buffers" : ListType(u8[::1]),
-    # "inds_match_buffers" : ListType(i8[::1]),
+    # The 1 or 2 inputs.
+    "inputs" : ListType(NodeIOType),
 
-    # "head_ptr_buffers" : i8[:,::1],
+    # The associated 1 or 2 outputs.
+    "outputs" : ListType(NodeIOType), #DictType(u8,DictType(u8,u1))
 
-    # "head_ptrs" : ListType(DictType(u8,i8[::1])),
-    "inputs" : ListType(NodeMemoryType),
-    "outputs" : ListType(NodeMemoryType), #DictType(u8,DictType(u8,u1))
+    # For beta nodes a size (width[0], width[1]) boolean table
+    #  indicating whether a pair of match candidates match.
     "truth_table" : u1[:, ::1],
 
     # True if the inputs to this node both come from the same beta node
     # e.g. like in the case of (a.v < b.v) & (a.v != b.v)
     "upstream_same_parents" : u1,
+
+    # True if 'upstream_same_parents' and the inputs are the same 
+    #  with respect to which one is the 0th/1st input.
     "upstream_aligned" : u1,
 
     # A weak pointer to the node upstream to this one
     "upstream_node_ptr" : i8,
 
-    # # A temporary record array of inds and idrecs of upstream changes
-    # "change_pairs" : ListType(idrec_ind_pair_type[::1])
-
+    # A vector of idrecs that is filled directly in parse_change_events()
+    #  on each match cycle to indicate a modify() relevant to this node.
     "modify_idrecs" : ListType(VectorType),
 
 }
 
-BaseReteNode, BaseReteNodeType = define_structref("BaseReteNode", base_rete_node_field_dict, define_constructor=False)
+ReteNode, ReteNodeType = define_structref("ReteNode", base_rete_node_field_dict, define_constructor=False)
 
 
 u8_arr_typ = u8[::1]
 i8_arr_typ = i8[::1]
 i8_x2_arr_typ = i8[:,::1]
 input_state_arr_type = input_state_type[::1]
-idrec_ind_pair_arr_type = idrec_ind_pair_type[::1]
 
 @njit(cache=True)
 def node_ctor(ms, t_ids, var_inds,lit=None):
-    # print("NEW RETE NODE")
-    st = new(BaseReteNodeType)
+    st = new(ReteNodeType)
     st.memset = ms
     st.deref_depends = Dict.empty(u8,dict_i8_u1_type)
     st.modify_idrecs = List.empty_list(VectorType)
     st.var_inds = var_inds
     st.t_ids = t_ids
 
-    # if(lit is not None):
     st.head_ptr_buffers = List.empty_list(i8_x2_arr_typ)
     st.input_state_buffers = List.empty_list(input_state_arr_type)
 
-    # st.idrecs_change_buffers = List.empty_list(u8_arr_typ)
-    # st.changed_idrecs = List.empty_list(u8_arr_typ)
-    # st.unchanged_idrecs = List.empty_list(u8_arr_typ)
     st.inds_change_buffers = List.empty_list(i8_arr_typ)
-    # st.inds_remove_buffers = List.empty_list(i8_arr_typ)
     st.changed_inds = List.empty_list(i8_arr_typ)
     st.unchanged_inds = List.empty_list(i8_arr_typ)
     st.removed_inds = List.empty_list(i8_arr_typ)
 
-    # st.idrecs_match_buffers = List.empty_list(u8_arr_typ)
-    # st.inds_match_buffers = List.empty_list(i8_arr_typ)
     INIT_BUFF_LEN = 8
     st.lit = lit
     if(lit is not None):
         st.op = op = lit.op
         n_vars = st.n_vars = len(op.base_var_map)
-        # print("INIT:", lit, n_vars)
-        # print(lit)
         for i in range(n_vars):
             l = op.head_ranges[i].length
             st.head_ptr_buffers.append(np.empty((INIT_BUFF_LEN,l),dtype=np.int64))
             st.input_state_buffers.append(np.zeros(INIT_BUFF_LEN, dtype=input_state_type))
 
-            # idrec_change_buff = np.empty(8, dtype=np.uint64)
             ind_change_buff = np.empty(INIT_BUFF_LEN, dtype=np.int64)
-            # ind_remove_buff = np.empty(8, dtype=np.int64)
-            # st.idrecs_change_buffers.append(idrec_change_buff)
-            # st.changed_idrecs.append(idrec_change_buff)
-            # st.unchanged_idrecs.append(idrec_change_buff)
             st.inds_change_buffers.append(ind_change_buff)
-            placeholder = np.empty(8, dtype=np.int64)
-            # st.inds_remove_buffers.append(ind_remove_buff)
+            placeholder = np.empty(INIT_BUFF_LEN, dtype=np.int64)
             st.changed_inds.append(ind_change_buff)
             st.removed_inds.append(ind_change_buff)
             st.unchanged_inds.append(ind_change_buff)
-            st.modify_idrecs.append(new_vector(4))
+            st.modify_idrecs.append(new_vector(INIT_BUFF_LEN))
 
-            # idrec_buff = np.empty(8, dtype=np.uint64)
-            # ind_buff = np.empty(8, dtype=np.int64)
-            # st.idrecs_match_buffers.append(idrec_buff)
-            # st.inds_match_buffers.append(ind_buff)
     else:
         st.op = None
         n_vars = 1
 
-    # st.head_ptr_buffers = head_ptr_buffers
-    # st.input_state_buffers = input_state_buffers
-    # st.idrecs_change_buffers = idrecs_change_buffers
-    # st.changed_idrecs = changed_idrecs
-    # st.unchanged_idrecs = unchanged_idrecs
-    # st.inds_change_buffers = inds_change_buffers
-    # st.changed_inds = changed_inds
-    # st.unchanged_inds = unchanged_inds
-
-    outputs = List.empty_list(NodeMemoryType)
+    outputs = List.empty_list(NodeIOType)
     
 
     self_ptr = _raw_ptr_from_struct(st)
     for i in range(n_vars):
-        # outputs.append(Dict.empty(u8,dict_u8_u1_type))
-        node_mem = new_node_mem()
-        node_mem.parent_node_ptr = self_ptr
-        outputs.append(node_mem)
+        node_out = new_NodeIO()
+        node_out.parent_node_ptr = self_ptr
+        outputs.append(node_out)
         
     st.outputs = outputs
-
     st.truth_table = np.zeros((8,8), dtype=np.uint8)
-    # st.idrecs_to_inds = List.empty_list(u8_i8_dict_type) 
-    # st.match_holes = List.empty_list(VectorType) 
-    # st.change_pairs = List.empty_list(idrec_ind_pair_arr_type) 
     st.inp_widths = np.zeros(2,dtype=np.int64)
-    #  "idrecs_to_inds" : ListType(DictType(u8,i8)),
-    # "match_holes" : ListType(VectorType),
-    # "widths" : i8[::1],
-
-    # for i in range(n_vars):
-    #     st.outputs[i].idrecs_to_inds = Dict.empty(u8,i8)
-    #     st.outputs[i].match_holes = new_vector(8)
-    #     st.idrecs_to_inds.append(Dict.empty(u8,i8))
-    #     st.match_holes.append(new_vector(8))
-        # st.change_pairs.append(np.empty(0,dtype=idrec_ind_pair_type))
 
     # Just make False by default, can end up being True after linking
     st.upstream_same_parents = False
@@ -325,58 +287,373 @@ def node_ctor(ms, t_ids, var_inds,lit=None):
     return st
 
 
-@njit(i8(i8, deref_info_type[::1]), cache=True,locals={"data_ptr":i8, "inst_ptr":i8})
-def deref_head_and_relevant_idrecs(inst_ptr, deref_infos):
-    ''' '''
+# -----------------------------------------------------------------------
+# : ReteGraph
+
+node_arg_pair_type = Tuple((ReteNodeType,i8))
+node_arg_list_type = ListType(node_arg_pair_type)
+node_io_list_type = ListType(NodeIOType)
+rete_graph_field_dict = {
+    # The change_head of the working memory at the last graph update.
+    "change_head" : i8,
+
+    # The working memory memset.
+    "memset" : MemSetType,
+
+    # All graph nodes organized by [[...alphas],[...betas],[...etc]]
+    "nodes_by_nargs" : ListType(ListType(ReteNodeType)),
+
+    # Maps a var_ind to its associated root node (i.e. the node that 
+    #  holds all match candidates for a fact_type before filtering).
+    "var_root_nodes" : DictType(i8,ReteNodeType),
+
+    # TODO: Replace with list/array for speed?
+    # The map a var_ind to the most downstream node that constrains that var.
+    "var_end_nodes" : DictType(i8,ReteNodeType),
+
+    # A matrix of size (n_var, n_var) with weak pointers to the most 
+    #  downstream beta nodes connecting each pair of vars. 
+    "var_end_join_ptrs" : i8[::,::1],
+
+    # Maps (t_id, 0, a_id) idrec patterns to (node,arg_ind) that should be 
+    #  rechecked based on that pattern.
+    "global_modify_map" : DictType(u8, node_arg_list_type),
+
+    # Maps t_ids to the root node outputs associated with facts of that t_id.
+    "global_t_id_root_map" : DictType(u2, NodeIOType),
+
+    # A strong pointer the prototype instance for match iterators on this graph.
+    "match_iter_prototype_ptr" : ptr_t, #NOTE: Should really use deferred type
+}
+
+
+ReteGraph, ReteGraphType = define_structref("ReteGraph", rete_graph_field_dict, define_constructor=False)
+
+
+
+@njit(cache=True)
+def rete_graph_ctor(ms, conds, nodes_by_nargs, var_root_nodes, var_end_nodes,
+                var_end_join_ptrs, global_modify_map, global_t_id_root_map):
+    st = new(ReteGraphType)
+    st.change_head = 0
+    st.memset = ms
+    st.nodes_by_nargs = nodes_by_nargs
+    st.var_root_nodes = var_root_nodes
+    st.var_end_nodes = var_end_nodes
+    st.var_end_join_ptrs = var_end_join_ptrs
+    st.global_modify_map = global_modify_map
+    st.global_t_id_root_map = global_t_id_root_map
+    st.match_iter_prototype_ptr = 0
     
-    # relevant_idrecs = np.zeros((max((len(deref_infos)-1)*2+1,0),), dtype=np.uint64)
-    # print("N", len(relevant_idrecs))
-    k = -1
+    return st
 
-    # ok = True
 
-    for deref in deref_infos[:-1]:
-        # print("ENTERED")
-        if(inst_ptr == 0): break;
-        if(deref.type == u1(DEREF_TYPE_ATTR)):
-            data_ptr = _ptr_to_data_ptr(inst_ptr)
-        else:
-            data_ptr = _list_base_from_ptr(inst_ptr)
-        t_id, f_id, _ = decode_idrec(u8(_load_ptr(u8, data_ptr)))
-        # if(k >= 0):
-        #     relevant_idrecs[k] = encode_idrec(t_id, f_id, RETRACT);
-        # k += 1
-        # relevant_idrecs[k] = encode_idrec(t_id, f_id, deref.a_id); k += 1
+@njit(cache=False)
+def conds_get_rete_graph(self):
+    if(not self.matcher_inst_ptr == 0):
+        return _struct_from_ptr(ReteGraphType,self.matcher_inst_ptr)
+    return None
 
-        inst_ptr = _load_ptr(i8, data_ptr+deref.offset)
+
+# --------------------------------------
+# : build_rete_graph()
+
+@njit(cache=True)
+def _get_degree_order(c, index_map):
+    ''' Order vars by decreasing beta degree --- the number of other 
+        vars that they share beta literals with. Implements heuristic
+        that the most beta-constrained nodes are matched first. 
+     '''
+    has_pairs = np.zeros((len(c.vars),len(c.vars)),dtype=np.uint8)
+    for distr_conjunct in c.distr_dnf:
+        for j, var_conjuct in enumerate(distr_conjunct):
+            for lit in var_conjuct:
+                var_inds = np.empty((len(lit.var_base_ptrs),),dtype=np.int64)
+                for i, base_var_ptr in enumerate(lit.var_base_ptrs):
+                    var_inds[i] = index_map[i8(base_var_ptr)]
+                if(len(var_inds) > 1):
+                    has_pairs[var_inds[0],var_inds[1]] = 1
+                    has_pairs[var_inds[1],var_inds[0]] = 1
+    degree = has_pairs.sum(axis=1)
+    degree_order = np.argsort(-degree)
+    return degree_order
+
+
+@njit(cache=True)
+def _ensure_long_enough(nodes_by_nargs, nargs):
+    while(len(nodes_by_nargs) <= nargs-1):
+        nodes_by_nargs.append(List.empty_list(ReteNodeType))
+
+@njit(cache=True)
+def _mod_map_insert(idrec, mod_map, node, arg_ind):
+    if(idrec not in mod_map):
+        mod_map[idrec] = List.empty_list(node_arg_pair_type)
+    mod_map[idrec].append((node, arg_ind))
+
+ReteNode_List_type = ListType(ReteNodeType)
+
+@njit(cache=True,locals={})
+def _make_rete_nodes(ms, c, index_map):
+    nodes_by_nargs = List.empty_list(ReteNode_List_type)
+    nodes_by_nargs.append(List.empty_list(ReteNodeType))
+    global_modify_map = Dict.empty(u8, node_arg_list_type)
+
+    # Make an identity node (i.e. lit,op=None) so there are always alphas
+    for j in range(len(c.vars)):
+        t_ids = np.empty((1,),dtype=np.uint16)
+        var_inds = np.empty((1,),dtype=np.int64)
+        base_var = c.vars[j]
+        t_ids[0] = base_var.base_t_id
+        var_inds[0] = index_map[i8(base_var.base_ptr)]
+        nodes_by_nargs[0].append(node_ctor(ms, t_ids, var_inds,lit=None))
+
+    degree_order = _get_degree_order(c, index_map)
+
+    # print("degree_order", degree_order)
+
+    for distr_conjunct in c.distr_dnf:
+        for j, var_ind in enumerate(degree_order):
+            var_conjuct = distr_conjunct[var_ind]
+
+            for lit in var_conjuct:
+                nargs = len(lit.var_base_ptrs)
+                _ensure_long_enough(nodes_by_nargs, nargs)
+                # print("A")
+                t_ids = np.empty((nargs,),dtype=np.uint16)
+                var_inds = np.empty((nargs,),dtype=np.int64)
+                for i, base_var_ptr in enumerate(lit.var_base_ptrs):
+                    var_inds[i] = index_map[i8(base_var_ptr)]
+                    base_var = _struct_from_ptr(GenericVarType, base_var_ptr)
+                    t_id = base_var.base_t_id
+                    t_ids[i] = t_id
+                # print("B")
+                # print("t_ids", t_ids)
+                node = node_ctor(ms, t_ids, var_inds, lit)
+                nodes_by_nargs[nargs-1].append(node)
+                # print("<< aft", lit.op.head_var_ptrs)
+                for i, head_var_ptr in enumerate(lit.op.head_var_ptrs):
+                    head_var = _struct_from_ptr(GenericVarType, head_var_ptr)
+                    arg_ind = np.min(np.nonzero(lit.var_base_ptrs==i8(head_var.base_ptr))[0])
+                    t_id = t_ids[arg_ind]
+                    # print("START")
+                    for d_offset in head_var.deref_infos:
+                        idrec1 = encode_idrec(u2(t_id),0,u1(d_offset.a_id))
+                        _mod_map_insert(idrec1, global_modify_map, node, arg_ind)
+
+                        t_id = d_offset.t_id
+                        idrec2 = encode_idrec(u2(t_id),0,0)
+                        _mod_map_insert(idrec2, global_modify_map, node, arg_ind)
+                                
+    return nodes_by_nargs, global_modify_map
+
+optional_node_mem_type = types.optional(NodeIOType)
+
+@njit(cache=True)
+def arr_is_unique(arr):
+    for i in range(len(arr)):
+        for j in range(len(arr)):
+            if(i != j and arr[i]==arr[j]):
+                return False
+    return True
+
+
+@njit(cache=True)
+def build_rete_graph(ms, c):
+    # Build a map from base var ptrs to indicies
+    index_map = Dict.empty(i8, i8)
+    for i, v in enumerate(c.vars):
+        index_map[i8(v.base_ptr)] = i
+
+    # Reorganize the dnf into a distributed dnf with one dnf per var
+    if(not c.has_distr_dnf):
+        build_distributed_dnf(c,index_map)
     
-    # print(inst_ptr)
-    if(inst_ptr != 0):
-        deref = deref_infos[-1]
-        if(deref.type == u1(DEREF_TYPE_ATTR)):
-            data_ptr = _ptr_to_data_ptr(inst_ptr)
-        else:
-            data_ptr = _list_base_from_ptr(inst_ptr)
-        t_id, f_id, _ = decode_idrec(u8(_load_ptr(u8, data_ptr)))
-        # relevant_idrecs[k] = encode_idrec(t_id, f_id, RETRACT); k += 1
-        # relevant_idrecs[k] = encode_idrec(t_id, f_id, deref.a_id); k += 1
+    # Make all of the RETE nodes
+    nodes_by_nargs, global_modify_map = \
+         _make_rete_nodes(ms, c, index_map)
 
-        head_ptr = data_ptr+deref.offset
-        # print("head_ptr",head_ptr, relevant_idrecs)
-        return head_ptr#, relevant_idrecs
-    else:
-        # print("nope")
-        return 0#, relevant_idrecs[:k]
+    global_t_id_root_map = Dict.empty(u2, NodeIOType)
+    var_end_join_ptrs = np.zeros((len(c.vars),len(c.vars)),dtype=np.int64)
+    var_end_nodes = Dict.empty(i8,ReteNodeType)
+    var_root_nodes = Dict.empty(i8,ReteNodeType)
+
+    # Link nodes together. 'nodes_by_nargs' should already be ordered
+    # so that alphas are before 2-way, 3-way, etc. betas. 
+    for i, nodes in enumerate(nodes_by_nargs):
+        for node in nodes:
+            # print("node", node.lit)
+            inputs = List.empty_list(NodeIOType)
+            for j, var_ind in enumerate(node.var_inds):
+                # print("ind", ind)
+                if(var_ind in var_end_nodes):
+                    # Set the .inputs of this node to be the NodeIOs from the
+                    #   .outputs of the last node in the graph to check against 'var_ind' 
+                    e_node = var_end_nodes[var_ind]
+                    om = e_node.outputs[np.min(np.nonzero(e_node.var_inds==var_ind)[0])]
+                    inputs.append(om)
+                    node.upstream_node_ptr = _raw_ptr_from_struct(e_node)
+                    # print("wire", var_ind, e_node.lit, '[', np.min(np.nonzero(e_node.var_inds==var_ind)[0]),']', "->",  node.lit, "[", j, "]")
+                else:
+
+                    t_id = node.t_ids[j]
+                    if(t_id not in global_t_id_root_map):
+                        root = new_NodeIO()
+                        root.is_root = True
+
+                        global_t_id_root_map[t_id] = root
+                    root = global_t_id_root_map[t_id]
+
+                    inputs.append(root)
+                    var_root_nodes[var_ind] = node
+
+            node.inputs = inputs
+
+            if(len(inputs) == 2):
+                p1, p2 = inputs[0].parent_node_ptr, inputs[1].parent_node_ptr
+                node.upstream_same_parents = (p1 != 0 and p1 == p2)
+                if(node.upstream_same_parents):
+                    parent = _struct_from_ptr(ReteNodeType, p1)
+                    node.upstream_aligned = np.all(node.var_inds==parent.var_inds)   
+
+                # Fill in end joins
+                vi_a, vi_b = node.var_inds[0],node.var_inds[1]
+                var_end_join_ptrs[vi_a, vi_b] = _raw_ptr_from_struct(node)
+                var_end_join_ptrs[vi_b, vi_a] = _raw_ptr_from_struct(node)
+
+                # print("Assign end join:", vi_a if vi_a < vi_b else vi_b,
+                #      vi_b if vi_a < vi_b else vi_a, node.lit)
+                
+
+            # Short circut the input to the output for identity nodes
+            if(node.lit is None):
+                node.outputs = node.inputs
+
+            # Make this node the new end node for the vars it takes as inputs
+            for var_ind in node.var_inds:
+                var_end_nodes[var_ind] = node
+            
+    return rete_graph_ctor(ms, c, nodes_by_nargs, var_root_nodes, var_end_nodes,
+              var_end_join_ptrs, global_modify_map, global_t_id_root_map)
 
 
-#Example Deref a.B.B.B.A
-# dep_idrecs = [(1, MOD[a.B]), (2, RETRACT[a.B]),
-#               (2, MOD[a.B.B]), (3, RETRACT[a.B.B]),
-#                (3, MOD[a.B.B.B]), (4, RETRACT[a.B.B.B]),
-#                (4, MOD[a.B.B.B.A])
-#                     ]
+# -----------------------------------------------------------------------
+# : update_graph()
+
+# -------------------------------------------
+# : parse_change_events()
+
+@generated_jit(cache=True)
+def setitem_buffer(st, buffer_name, k, val):
+    SentryLiteralArgs(['buffer_name']).for_function(setitem_buffer).bind(st, buffer_name, k, val)
+    def impl(st, buffer_name, k, val):
+        buffer = lower_getattr(st, buffer_name)
+        buff_len = len(buffer)
+        if(k >= buff_len):
+            new_len = max(k+1, 2*buff_len)
+            new_buffer = np.empty((new_len,), dtype=np.int64)
+            new_buffer[:buff_len] = buffer
+            lower_setattr(st, buffer_name, new_buffer) 
+            buffer = new_buffer
+        buffer[k] = val        
+    return impl
+    
+
+@njit(cache=True)
+def node_memory_insert_match_buffers(self, k, idrec, ind):
+    buff_len = len(self.match_idrecs_buffer)
+    if(k >= buff_len):
+        expand = max(k-buff_len, buff_len)
+
+        new_idrecs_buffer = np.empty(expand+buff_len, dtype=np.uint64)
+        new_idrecs_buffer[:buff_len] = self.match_idrecs_buffer
+        self.match_idrecs_buffer = new_idrecs_buffer
+
+        new_inds_buffer = np.empty(expand+buff_len, dtype=np.int64)
+        new_inds_buffer[:buff_len] = self.match_inp_inds_buffer
+        self.match_inp_inds_buffer = new_inds_buffer
+
+        
+    self.match_idrecs_buffer[k] = idrec
+    self.match_inp_inds_buffer[k] = ind
 
 
+from cre.processing.incr_processor import accumulate_change_events
+
+@njit(cache=True,locals={"t_id" : u2, "f_id":u8, "a_id":u1})
+def parse_change_events(r_graph):
+
+    # Extract values used below
+    global_modify_map = r_graph.global_modify_map
+    global_t_id_root_map = r_graph.global_t_id_root_map
+    change_queue = r_graph.memset.change_queue
+
+    
+    for t_id, root_mem in global_t_id_root_map.items():
+        root_mem.change_inds = root_mem.change_buffer[:0]
+        root_mem.remove_inds = root_mem.remove_buffer[:0]
+
+
+    change_events = accumulate_change_events(change_queue, r_graph.change_head, -1)
+
+    zeros = List.empty_list(u1)
+    zeros.append(u1(0))
+
+    for change_event in change_events:
+        # print("change_event", change_event)
+        t_id, f_id, _ = decode_idrec(change_event.idrec)
+
+        # Add this idrec to change_inds of root nodes
+        if(t_id not in global_t_id_root_map): continue
+        root_mem = global_t_id_root_map[t_id]
+
+        # Declare Case
+        if(change_event.was_modified):
+            for a_id in change_event.a_ids:
+                # Add this idrec to relevant deref idrecs
+                idrec_pattern = encode_idrec(t_id, 0, a_id)
+                node_arg_pairs = global_modify_map.get(idrec_pattern,None)
+                if(node_arg_pairs is not None):
+                    for (node,arg_ind) in node_arg_pairs:
+                        # print("added: ", node.lit, 't_id=', t_id, 'f_id=', f_id, 'a_id=', a_id)
+                        node.modify_idrecs[arg_ind].add(encode_idrec(t_id, f_id, a_id))
+
+        elif(change_event.was_declared):
+            k = len(root_mem.change_inds)
+            setitem_buffer(root_mem, 'change_buffer', k, i8(f_id))
+            root_mem.change_inds = root_mem.change_buffer[:k+1]
+
+            idrec = encode_idrec(t_id,f_id,0)# if(a_id != RETRACT) else u8(0)
+            root_mem.idrecs_to_inds[idrec] = i8(f_id)
+
+            node_memory_insert_match_buffers(root_mem, i8(f_id), idrec, i8(f_id))
+            if(i8(f_id) >= len(root_mem.match_idrecs)):
+                root_mem.match_idrecs = root_mem.match_idrecs_buffer[:i8(f_id)+1]
+                root_mem.match_inp_inds = root_mem.match_inp_inds_buffer[:i8(f_id)+1]
+        else:            
+            k = len(root_mem.remove_inds)
+            setitem_buffer(root_mem, 'remove_buffer', k, i8(f_id))
+            root_mem.remove_inds = root_mem.remove_buffer[:k+1]
+
+            # print("RETRACT", t_id,f_id, root_mem.remove_inds)
+
+            node_memory_insert_match_buffers(root_mem, i8(f_id), u8(0), i8(0))
+                
+    # print("END ROOT")
+
+    r_graph.change_head = change_queue.head
+
+# -------------------------------------------
+# : update_input_changes()
+
+deref_record_field_dict = {
+    # Weak Pointers to the Dict(i8,u1)s inside deref_depends
+    "parent_ptrs" : i8[::1], 
+    "arg_ind" : i8,
+    "base_idrec" : u8,
+    "was_successful" : u1,
+}
+
+DerefRecord, DerefRecordType = define_structref("DerefRecord", deref_record_field_dict)
 
 @njit(cache=True)
 def invalidate_head_ptr_rec(rec):
@@ -402,11 +679,12 @@ def deref_once(deref,inst_ptr):
         return _list_base_from_ptr(inst_ptr)
 
 
-# @njit(i8(BaseReteNodeType, u2, u8, deref_info_type[::1]),cache=True)
+# @njit(i8(ReteNodeType, u2, u8, deref_info_type[::1]),cache=True)
 @njit(cache=True)
 def resolve_head_ptr(self, arg_ind, base_t_id, f_id, deref_infos):
-    '''Try to get the head_ptr of 'f_id' in input 'arg_ind'. Inject a DerefRecord regardless of the result 
-        Keep in mind that a head_ptr is the pointer to the address where the data is stored not the data itself.
+    '''Try to get the head_ptr of 'f_id' in input 'arg_ind'. Inject a DerefRecord 
+         regardless of the result Keep in mind that a head_ptr is the pointer
+         to the address where the data is stored not the data itself.
     '''
     facts = _struct_from_ptr(VectorType, self.memset.facts[base_t_id])
     if(len(deref_infos) > 0):
@@ -442,7 +720,7 @@ def resolve_head_ptr(self, arg_ind, base_t_id, f_id, deref_infos):
     else:
         return _get_array_raw_data_ptr(facts.data) + (f_id * 8) #assuming 8 byte ptrs
 
-# @njit(void(BaseReteNodeType, i8,u8,u1),locals={"f_id" : u8}, cache=True)
+# @njit(void(ReteNodeType, i8,u8,u1),locals={"f_id" : u8}, cache=True)
 @njit(locals={"f_id" : u8, "a_id" : u8}, cache=True)
 def validate_head_or_retract(self, arg_ind, idrec, head_ptrs, r):
     '''Update the head_ptr dictionaries by following the deref
@@ -615,85 +893,15 @@ def update_input_changes(self):
         # print("unchanged_inds_i: ", self.unchanged_inds[i])
         # print()
 
-@njit(cache=True)
-def update_output_changes(self):
-    # Update each of (the at most 2) outputs (one for each Var).
-    for i, out_i in enumerate(self.outputs):
-        change_ind = 0
-        remove_ind = 0
-        input_state_buffers_i = self.input_state_buffers[i]
-        idrecs_to_inds_i = out_i.idrecs_to_inds
-        
-        # Update each slot k for match candidates for the ith Var.
-        #  Performance Note: We almost always need to recheck every input
-        #  for at least one var so gating with true_ever_nonzero instead of
-        #  iterating over changed_inds / removed_inds makes sense.
-        for k in range(self.inp_widths[i]):
-            # Extract t_id, f_id, a_id for the input at k.
-            input_state_k = input_state_buffers_i[k]
-            idrec_k = input_state_k.idrec
-            t_id_k, f_id_k, a_id_k = decode_idrec(idrec_k)
-
-            # Determine if we've ever found a match for this candidate
-            true_is_nonzero = (input_state_k.true_count != 0)
-            input_state_k.true_ever_nonzero |= true_is_nonzero
-
-            if(input_state_k.true_ever_nonzero):
-                # If a candidate is invalidated on this cycle or goes 
-                #  from matching to unmatching mark as removed.
-                t_id_k, f_id_k, _ = decode_idrec(idrec_k)
-                if( input_state_k.recently_invalid or
-                   (input_state_k.true_was_nonzero and not true_is_nonzero)):
-
-                    output_ind = input_state_k.output_ind
-                    setitem_buffer(out_i, "remove_buffer", remove_ind, output_ind)
-                    node_memory_insert_match_buffers(out_i, output_ind, u8(0), k)
-                    out_i.match_holes.add(output_ind)
-                    
-                    idrecs_to_inds_i[idrec_k] = -1
-                    input_state_k.output_ind = -1
-                    remove_ind += 1
-
-                # If a candidate goes from unmatching to matching or was 
-                #  recently inserted and matches then mark as change.
-                elif(not input_state_k.true_was_nonzero and true_is_nonzero or
-                    (true_is_nonzero and input_state_k.recently_inserted)):
-
-                    if(len(out_i.match_holes) > 0):
-                        output_ind = out_i.match_holes.pop()
-                    else:
-                        output_ind = out_i.max_matches
-                        out_i.max_matches += 1
-
-                    setitem_buffer(out_i, "change_buffer", change_ind, output_ind)
-                    node_memory_insert_match_buffers(out_i, output_ind, idrec_k, k)
-                    
-                    idrecs_to_inds_i[idrec_k] = output_ind
-                    input_state_k.output_ind = output_ind
-                    change_ind += 1
-
-            input_state_k.true_was_nonzero = true_is_nonzero
-            
-        
-        # To avoid reallocations the arrays in each output are slices of larger buffers.
-        out_i.match_idrecs = out_i.match_idrecs_buffer[:out_i.max_matches]
-        out_i.match_inp_inds = out_i.match_inp_inds_buffer[:out_i.max_matches]
-        out_i.change_inds = out_i.change_buffer[:change_ind]
-        out_i.remove_inds = out_i.remove_buffer[:remove_ind]
-
-        # Note: Keep these print statements for debugging
-        # print("i :", i)
-        # print("idrec_to_inds", out_i.idrecs_to_inds)
-        # print("match_idrecs.f_id", np.array([decode_idrec(x)[1] for x in out_i.match_idrecs]))
-        # print("match_inp_inds", out_i.match_inp_inds)
-        # print("change_inds.f_id", np.array([decode_idrec(out_i.match_idrecs[x])[1] for x in out_i.change_inds]))
-        # print("remove_inds.f_id", np.array([decode_idrec(out_i.match_idrecs[x])[1] for x in out_i.remove_inds]))
-        # print(self.truth_table)
-
+# -------------------------------------------
+# : check_matches()
 
 
 @njit(cache=True)
 def resize_truth_table(self):
+    ''' Ensures that the truth table is large enough for the widths of 
+        the inputs.
+    '''
     s0,s1 = self.truth_table.shape
     expand0 = max(0,self.inp_widths[0]-s0)
     expand1 = max(0,self.inp_widths[1]-s1)
@@ -731,17 +939,12 @@ u8_i8_dict_type = DictType(u8,i8)
 
 
 @njit(cache=True)
-def _ld_dict(ptr):
-    return _dict_from_ptr(u8_i8_dict_type, ptr)     
-
-
-@njit(cache=True)
 def beta_matches_to_str(matches):
     s = ""
     for match0, others_ptr in matches.items():
         others_str = ""
         t_id0, f_id0, a0 = decode_idrec(match0)
-        others = _ld_dict(others_ptr)
+        others = _dict_from_ptr(u8_i8_dict_type, others_ptr)
         for match1, ok in others.items():
             t_id1, f_id1, _ = decode_idrec(match1)
             if(ok): others_str += f"({t_id1},{f_id1}),"
@@ -852,9 +1055,9 @@ def check_matches(self):
                 pind_i = pinds_i[ind_i]
 
                 # Clear a_id from idrec_i
-                idrec_i = inp_state_i.idrec
-                t_id_i, f_id_i, a_id_i = decode_idrec(idrec_i)
-                idrec_i = encode_idrec(t_id_i, f_id_i, 0)
+                # idrec_i = inp_state_i.idrec
+                # t_id_i, f_id_i, a_id_i = decode_idrec(idrec_i)
+                # idrec_i = encode_idrec(t_id_i, f_id_i, 0)
                 
                 # Fill in the 'i' part of ptrs, indrecs, inds 
                 match_inp_ptrs[i_strt:i_strt+i_len] = head_ptrs_i[ind_i]
@@ -866,7 +1069,7 @@ def check_matches(self):
                 # If there is a beta node upstream of to this one that shares the same
                 #  variables then we'll need to make sure we also check its truth table.
                 if(self.upstream_same_parents):
-                    upstream_node = _struct_from_ptr(BaseReteNodeType, self.upstream_node_ptr)
+                    upstream_node = _struct_from_ptr(ReteNodeType, self.upstream_node_ptr)
                     u_tt = upstream_node.truth_table
 
                     if(j > i):
@@ -942,8 +1145,82 @@ def check_matches(self):
                 inp_state_i.true_count = i8(is_match)
 
 
-#NOTES: Can probably avoid situations where need to do O(N) copies
-# in update_node() and in update_input_changes().
+# -------------------------------------------
+# : update_output_changes()
+
+@njit(cache=True)
+def update_output_changes(self):
+    # Update each of (the at most 2) outputs (one for each Var).
+    for i, out_i in enumerate(self.outputs):
+        change_ind = 0
+        remove_ind = 0
+        input_state_buffers_i = self.input_state_buffers[i]
+        idrecs_to_inds_i = out_i.idrecs_to_inds
+        
+        # Update each slot k for match candidates for the ith Var.
+        #  Performance Note: We almost always need to recheck every input
+        #  for at least one var so gating with true_ever_nonzero instead of
+        #  iterating over changed_inds / removed_inds makes sense.
+        for k in range(self.inp_widths[i]):
+            # Extract t_id, f_id, a_id for the input at k.
+            input_state_k = input_state_buffers_i[k]
+            idrec_k = input_state_k.idrec
+
+            # Determine if we've ever found a match for this candidate
+            true_is_nonzero = (input_state_k.true_count != 0)
+            input_state_k.true_ever_nonzero |= true_is_nonzero
+
+            if(input_state_k.true_ever_nonzero):
+                # If a candidate is invalidated on this cycle or goes 
+                #  from matching to unmatching mark as removed.
+                if( input_state_k.recently_invalid or
+                   (input_state_k.true_was_nonzero and not true_is_nonzero)):
+
+                    output_ind = input_state_k.output_ind
+                    setitem_buffer(out_i, "remove_buffer", remove_ind, output_ind)
+                    node_memory_insert_match_buffers(out_i, output_ind, u8(0), k)
+                    out_i.match_holes.add(output_ind)
+                    
+                    idrecs_to_inds_i[idrec_k] = -1
+                    input_state_k.output_ind = -1
+                    remove_ind += 1
+
+                # If a candidate goes from unmatching to matching or was 
+                #  recently inserted and matches then mark as change.
+                elif(not input_state_k.true_was_nonzero and true_is_nonzero or
+                    (true_is_nonzero and input_state_k.recently_inserted)):
+
+                    if(len(out_i.match_holes) > 0):
+                        output_ind = out_i.match_holes.pop()
+                    else:
+                        output_ind = out_i.width
+                        out_i.width += 1
+
+                    setitem_buffer(out_i, "change_buffer", change_ind, output_ind)
+                    node_memory_insert_match_buffers(out_i, output_ind, idrec_k, k)
+                    
+                    idrecs_to_inds_i[idrec_k] = output_ind
+                    input_state_k.output_ind = output_ind
+                    change_ind += 1
+
+            input_state_k.true_was_nonzero = true_is_nonzero
+            
+        
+        # To avoid reallocations the arrays in each output are slices of larger buffers.
+        out_i.match_idrecs = out_i.match_idrecs_buffer[:out_i.width]
+        out_i.match_inp_inds = out_i.match_inp_inds_buffer[:out_i.width]
+        out_i.change_inds = out_i.change_buffer[:change_ind]
+        out_i.remove_inds = out_i.remove_buffer[:remove_ind]
+
+        # Note: Keep these print statements for debugging
+        # print("i :", i)
+        # print("idrec_to_inds", out_i.idrecs_to_inds)
+        # print("match_idrecs.f_id", np.array([decode_idrec(x)[1] for x in out_i.match_idrecs]))
+        # print("match_inp_inds", out_i.match_inp_inds)
+        # print("change_inds.f_id", np.array([decode_idrec(out_i.match_idrecs[x])[1] for x in out_i.change_inds]))
+        # print("remove_inds.f_id", np.array([decode_idrec(out_i.match_idrecs[x])[1] for x in out_i.remove_inds]))
+        # print(self.truth_table)
+
 
 @njit(cache=True)
 def update_node(self):
@@ -978,344 +1255,16 @@ def update_node(self):
 
 
 
-node_arg_pair_type = Tuple((BaseReteNodeType,i8))
-node_arg_list_type = ListType(node_arg_pair_type)
-node_mem_list_type = ListType(NodeMemoryType)
-rete_graph_field_dict = {
-    # The change_head of the working memory at the last graph update.
-    "change_head" : i8,
-
-    # The working memory memset.
-    "memset" : MemSetType,
-
-    # All graph nodes organized by [[...alphas],[...betas],[...etc]]
-    "nodes_by_nargs" : ListType(ListType(BaseReteNodeType)),
-
-    # Maps a var_ind to its associated root node (i.e. the node that 
-    #  holds all match candidates for a fact_type before filtering).
-    "var_root_nodes" : DictType(i8,BaseReteNodeType),
-
-    # TODO: Replace with list/array for speed?
-    # The map a var_ind to the most downstream node that constrains that var.
-    "var_end_nodes" : DictType(i8,BaseReteNodeType),
-
-    # A matrix of size (n_var, n_var) with weak pointers to the most 
-    #  downstream beta nodes connecting each pair of vars. 
-    "var_end_join_ptrs" : i8[::,::1],
-
-    # Maps (t_id, 0, a_id) idrec patterns to (node,arg_ind) that should be 
-    #  rechecked based on that pattern.
-    "global_modify_map" : DictType(u8, node_arg_list_type),
-
-    # Maps t_ids to the root node memories associated with facts of that t_id.
-    "global_t_id_root_memory_map" : DictType(u2, NodeMemoryType),
-
-    # A strong pointer the prototype instance for match iterators on this graph.
-    "match_iter_prototype_ptr" : ptr_t, #NOTE: Should really use deferred type
-}
-
-
-ReteGraph, ReteGraphType = define_structref("ReteGraph", rete_graph_field_dict, define_constructor=False)
 
 @njit(cache=True)
-def rete_graph_ctor(ms, conds, nodes_by_nargs, var_root_nodes, var_end_nodes,
-                var_end_join_ptrs, global_modify_map, global_t_id_root_memory_map):
-    st = new(ReteGraphType)
-    st.change_head = 0
-    st.memset = ms
-    st.nodes_by_nargs = nodes_by_nargs
-    st.var_root_nodes = var_root_nodes
-    st.var_end_nodes = var_end_nodes
-    st.var_end_join_ptrs = var_end_join_ptrs
-    st.global_modify_map = global_modify_map
-    st.global_t_id_root_memory_map = global_t_id_root_memory_map
-    st.match_iter_prototype_ptr = 0
-    
-    return st
-
-
-@njit(cache=False)
-def conds_get_rete_graph(self):
-    if(not self.matcher_inst_ptr == 0):
-        return _struct_from_ptr(ReteGraphType,self.matcher_inst_ptr)
-    return None
-
-
-@njit(cache=True)
-def _get_degree_order(c, index_map):
-    ''' Order vars by decreasing beta degree --- the number of other 
-        vars that they share beta literals with. Implements heuristic
-        that the most constrained nodes are matched first. 
-     '''
-    has_pairs = np.zeros((len(c.vars),len(c.vars)),dtype=np.uint8)
-    for distr_conjunct in c.distr_dnf:
-        for j, var_conjuct in enumerate(distr_conjunct):
-            for lit in var_conjuct:
-                var_inds = np.empty((len(lit.var_base_ptrs),),dtype=np.int64)
-                for i, base_var_ptr in enumerate(lit.var_base_ptrs):
-                    var_inds[i] = index_map[i8(base_var_ptr)]
-                if(len(var_inds) > 1):
-                    has_pairs[var_inds[0],var_inds[1]] = 1
-                    has_pairs[var_inds[1],var_inds[0]] = 1
-    degree = has_pairs.sum(axis=1)
-    degree_order = np.argsort(-degree)
-    return degree_order
-
-
-@njit(cache=True)
-def _ensure_long_enough(nodes_by_nargs, nargs):
-    while(len(nodes_by_nargs) <= nargs-1):
-        nodes_by_nargs.append(List.empty_list(BaseReteNodeType))
-
-@njit(cache=True)
-def _mod_map_insert(idrec, mod_map, node, arg_ind):
-    if(idrec not in mod_map):
-        mod_map[idrec] = List.empty_list(node_arg_pair_type)
-    mod_map[idrec].append((node, arg_ind))
-
-ReteNode_List_type = ListType(BaseReteNodeType)
-
-@njit(cache=True,locals={})
-def _make_rete_nodes(mem, c, index_map):
-    nodes_by_nargs = List.empty_list(ReteNode_List_type)
-    nodes_by_nargs.append(List.empty_list(BaseReteNodeType))
-    global_modify_map = Dict.empty(u8, node_arg_list_type)
-
-    # Make an identity node (i.e. lit,op=None) so there are always alphas
-    for j in range(len(c.vars)):
-        t_ids = np.empty((1,),dtype=np.uint16)
-        var_inds = np.empty((1,),dtype=np.int64)
-        base_var = c.vars[j]
-        t_ids[0] = base_var.base_t_id#_get_var_t_id(mem, base_var)
-        var_inds[0] = index_map[i8(base_var.base_ptr)]
-        nodes_by_nargs[0].append(node_ctor(mem, t_ids, var_inds,lit=None))
-
-    degree_order = _get_degree_order(c, index_map)
-
-    # print("degree_order", degree_order)
-
-    for distr_conjunct in c.distr_dnf:
-        for j, var_ind in enumerate(degree_order):
-            var_conjuct = distr_conjunct[var_ind]
-
-            for lit in var_conjuct:
-                nargs = len(lit.var_base_ptrs)
-                _ensure_long_enough(nodes_by_nargs, nargs)
-                # print("A")
-                t_ids = np.empty((nargs,),dtype=np.uint16)
-                var_inds = np.empty((nargs,),dtype=np.int64)
-                for i, base_var_ptr in enumerate(lit.var_base_ptrs):
-                    var_inds[i] = index_map[i8(base_var_ptr)]
-                    base_var = _struct_from_ptr(GenericVarType, base_var_ptr)
-                    t_id = base_var.base_t_id#_get_var_t_id(mem, base_var)
-                    t_ids[i] = t_id
-                # print("B")
-                # print("t_ids", t_ids)
-                node = node_ctor(mem, t_ids, var_inds, lit)
-                nodes_by_nargs[nargs-1].append(node)
-                # print("<< aft", lit.op.head_var_ptrs)
-                for i, head_var_ptr in enumerate(lit.op.head_var_ptrs):
-                    head_var = _struct_from_ptr(GenericVarType, head_var_ptr)
-                    arg_ind = np.min(np.nonzero(lit.var_base_ptrs==i8(head_var.base_ptr))[0])
-                    t_id = t_ids[arg_ind]
-                    # print("START")
-                    for d_offset in head_var.deref_infos:
-                        idrec1 = encode_idrec(u2(t_id),0,u1(d_offset.a_id))
-                        _mod_map_insert(idrec1, global_modify_map, node, arg_ind)
-
-                        t_id = d_offset.t_id
-                        idrec2 = encode_idrec(u2(t_id),0,0)
-                        _mod_map_insert(idrec2, global_modify_map, node, arg_ind)
-                                
-    return nodes_by_nargs, global_modify_map
-
-optional_node_mem_type = types.optional(NodeMemoryType)
-
-@njit(cache=True)
-def arr_is_unique(arr):
-    for i in range(len(arr)):
-        for j in range(len(arr)):
-            if(i != j and arr[i]==arr[j]):
-                return False
-    return True
-
-
-@njit(cache=True)
-def build_rete_graph(ms, c):
-    # Build a map from base var ptrs to indicies
-    index_map = Dict.empty(i8, i8)
-    for i, v in enumerate(c.vars):
-        index_map[i8(v.base_ptr)] = i
-
-    # Reorganize the dnf into a distributed dnf with one dnf per var
-    if(not c.has_distr_dnf):
-        build_distributed_dnf(c,index_map)
-    
-    # Make all of the RETE nodes
-    nodes_by_nargs, global_modify_map = \
-         _make_rete_nodes(ms, c, index_map)
-
-    global_t_id_root_memory_map = Dict.empty(u2, NodeMemoryType)
-    var_end_join_ptrs = np.zeros((len(c.vars),len(c.vars)),dtype=np.int64)
-    var_end_nodes = Dict.empty(i8,BaseReteNodeType)
-    var_root_nodes = Dict.empty(i8,BaseReteNodeType)
-
-    # Link nodes together. 'nodes_by_nargs' should already be ordered
-    # so that alphas are before 2-way, 3-way, etc. betas. 
-    for i, nodes in enumerate(nodes_by_nargs):
-        for node in nodes:
-            # print("node", node.lit)
-            inputs = List.empty_list(NodeMemoryType)
-            for j, var_ind in enumerate(node.var_inds):
-                # print("ind", ind)
-                if(var_ind in var_end_nodes):
-                    # Set the .inputs of this node to be the NodeMemorys from the
-                    #   .outputs of the last node in the graph to check against 'var_ind' 
-                    e_node = var_end_nodes[var_ind]
-                    om = e_node.outputs[np.min(np.nonzero(e_node.var_inds==var_ind)[0])]
-                    inputs.append(om)
-                    node.upstream_node_ptr = _raw_ptr_from_struct(e_node)
-                    # print("wire", var_ind, e_node.lit, '[', np.min(np.nonzero(e_node.var_inds==var_ind)[0]),']', "->",  node.lit, "[", j, "]")
-                else:
-
-                    t_id = node.t_ids[j]
-                    if(t_id not in global_t_id_root_memory_map):
-                        root = new_root_node_mem()
-                        global_t_id_root_memory_map[t_id] = root
-                    root = global_t_id_root_memory_map[t_id]
-
-                    inputs.append(root)
-                    var_root_nodes[var_ind] = node
-
-            node.inputs = inputs
-
-            if(len(inputs) == 2):
-                p1, p2 = inputs[0].parent_node_ptr, inputs[1].parent_node_ptr
-                node.upstream_same_parents = (p1 != 0 and p1 == p2)
-                if(node.upstream_same_parents):
-                    parent = _struct_from_ptr(BaseReteNodeType, p1)
-                    node.upstream_aligned = np.all(node.var_inds==parent.var_inds)   
-
-                # Fill in end joins
-                vi_a, vi_b = node.var_inds[0],node.var_inds[1]
-                var_end_join_ptrs[vi_a, vi_b] = _raw_ptr_from_struct(node)
-                var_end_join_ptrs[vi_b, vi_a] = _raw_ptr_from_struct(node)
-
-                # print("Assign end join:", vi_a if vi_a < vi_b else vi_b,
-                #      vi_b if vi_a < vi_b else vi_a, node.lit)
-                
-
-            # Short circut the input to the output for identity nodes
-            if(node.lit is None):
-                node.outputs = node.inputs
-
-            # Make this node the new end node for the vars it takes as inputs
-            for var_ind in node.var_inds:
-                var_end_nodes[var_ind] = node
-            
-    return rete_graph_ctor(ms, c, nodes_by_nargs, var_root_nodes, var_end_nodes,
-              var_end_join_ptrs, global_modify_map, global_t_id_root_memory_map)
-
-@generated_jit(cache=True)
-def setitem_buffer(st, buffer_name, k, val):
-    SentryLiteralArgs(['buffer_name']).for_function(setitem_buffer).bind(st, buffer_name, k, val)
-    def impl(st, buffer_name, k, val):
-        buffer = lower_getattr(st, buffer_name)
-        buff_len = len(buffer)
-        if(k >= buff_len):
-            new_len = max(k+1, 2*buff_len)
-            new_buffer = np.empty((new_len,), dtype=np.int64)
-            new_buffer[:buff_len] = buffer
-            lower_setattr(st, buffer_name, new_buffer) 
-            buffer = new_buffer
-        buffer[k] = val        
-    return impl
-    
-
-@njit(cache=True)
-def node_memory_insert_match_buffers(self, k, idrec, ind):
-    buff_len = len(self.match_idrecs_buffer)
-    if(k >= buff_len):
-        expand = max(k-buff_len, buff_len)
-
-        new_idrecs_buffer = np.empty(expand+buff_len, dtype=np.uint64)
-        new_idrecs_buffer[:buff_len] = self.match_idrecs_buffer
-        self.match_idrecs_buffer = new_idrecs_buffer
-
-        new_inds_buffer = np.empty(expand+buff_len, dtype=np.int64)
-        new_inds_buffer[:buff_len] = self.match_inp_inds_buffer
-        self.match_inp_inds_buffer = new_inds_buffer
-
-        
-    self.match_idrecs_buffer[k] = idrec
-    self.match_inp_inds_buffer[k] = ind
-
-
-from cre.processing.incr_processor import accumulate_change_events
-
-@njit(cache=True,locals={"t_id" : u2, "f_id":u8, "a_id":u1})
-def parse_change_queue(r_graph):
-
-    # Extract values used below
-    global_modify_map = r_graph.global_modify_map
-    global_t_id_root_memory_map = r_graph.global_t_id_root_memory_map
-    change_queue = r_graph.memset.change_queue
-
-    
-    for t_id, root_mem in global_t_id_root_memory_map.items():
-        root_mem.change_inds = root_mem.change_buffer[:0]
-        root_mem.remove_inds = root_mem.remove_buffer[:0]
-
-
-    change_events = accumulate_change_events(change_queue, r_graph.change_head, -1)
-
-    zeros = List.empty_list(u1)
-    zeros.append(u1(0))
-
-    for change_event in change_events:
-        # print("change_event", change_event)
-        t_id, f_id, _ = decode_idrec(change_event.idrec)
-
-        # Add this idrec to change_inds of root nodes
-        if(t_id not in global_t_id_root_memory_map): continue
-        root_mem = global_t_id_root_memory_map[t_id]
-
-        # Declare Case
-        if(change_event.was_modified):
-            for a_id in change_event.a_ids:
-                # Add this idrec to relevant deref idrecs
-                idrec_pattern = encode_idrec(t_id, 0, a_id)
-                node_arg_pairs = global_modify_map.get(idrec_pattern,None)
-                if(node_arg_pairs is not None):
-                    for (node,arg_ind) in node_arg_pairs:
-                        # print("added: ", node.lit, 't_id=', t_id, 'f_id=', f_id, 'a_id=', a_id)
-                        node.modify_idrecs[arg_ind].add(encode_idrec(t_id, f_id, a_id))
-
-        elif(change_event.was_declared):
-            k = len(root_mem.change_inds)
-            setitem_buffer(root_mem, 'change_buffer', k, i8(f_id))
-            root_mem.change_inds = root_mem.change_buffer[:k+1]
-
-            idrec = encode_idrec(t_id,f_id,0)# if(a_id != RETRACT) else u8(0)
-            root_mem.idrecs_to_inds[idrec] = i8(f_id)
-
-            node_memory_insert_match_buffers(root_mem, i8(f_id), idrec, i8(f_id))
-            if(i8(f_id) >= len(root_mem.match_idrecs)):
-                root_mem.match_idrecs = root_mem.match_idrecs_buffer[:i8(f_id)+1]
-                root_mem.match_inp_inds = root_mem.match_inp_inds_buffer[:i8(f_id)+1]
-        else:            
-            k = len(root_mem.remove_inds)
-            setitem_buffer(root_mem, 'remove_buffer', k, i8(f_id))
-            root_mem.remove_inds = root_mem.remove_buffer[:k+1]
-
-            # print("RETRACT", t_id,f_id, root_mem.remove_inds)
-
-            node_memory_insert_match_buffers(root_mem, i8(f_id), u8(0), i8(0))
-                
-    # print("END ROOT")
-
-    r_graph.change_head = change_queue.head
-
+def update_graph(graph):
+    # print("START UP")
+    parse_change_events(graph)
+    # print("PARSED")
+    for lst in graph.nodes_by_nargs:
+        for node in lst:
+            # print(node)
+            update_node(node)        
 
 
 # ----------------------------------------------------------------------
@@ -1323,7 +1272,7 @@ def parse_change_queue(r_graph):
 
 match_iterator_node_field_dict = {
     # "graph" : ReteGraphType,
-    "node" : BaseReteNodeType,
+    "node" : ReteNodeType,
     "associated_arg_ind" : i8,
     "var_ind" : i8,
     "m_node_ind" : i8,
@@ -1497,7 +1446,7 @@ def new_match_iter(graph):
                     dep_m_node_inds[c] = dep_m_node.m_node_ind
                     dep_node_ptrs[c] = ptr
 
-                    dep_node = _struct_from_ptr(BaseReteNodeType, ptr)
+                    dep_node = _struct_from_ptr(ReteNodeType, ptr)
                     dep_arg_inds[c] = np.argmax(dep_node.var_inds==j)
                     # print(j, "Make", m_node.node.lit, m_node.associated_arg_ind, "dep on", dep_node.lit, dep_arg_inds[c])
                     c +=1
@@ -1559,7 +1508,7 @@ def update_from_upstream_match(m_iter, m_node):
         # Each dep_node is the terminal beta node (i.e. a graph node not an iter node) 
         #  between the vars iterated by m_node and dep_m_node, and might not be the same
         #  as dep_m_node.node.
-        dep_node = _struct_from_ptr(BaseReteNodeType, m_node.dep_node_ptrs[i])
+        dep_node = _struct_from_ptr(ReteNodeType, m_node.dep_node_ptrs[i])
         dep_arg_ind = m_node.dep_arg_inds[i]
         dep_m_node = m_iter.iter_nodes[dep_m_node_ind]
         assoc_arg_ind = 1 if dep_arg_ind == 0 else 0
@@ -1756,15 +1705,7 @@ def fact_ptrs_as_tuple(typs, ptr_arr):
 
 
 
-@njit(cache=True)
-def update_graph(graph):
-    # print("START UP")
-    parse_change_queue(graph)
-    # print("PARSED")
-    for lst in graph.nodes_by_nargs:
-        for node in lst:
-            # print(node)
-            update_node(node)        
+
 
 
 @njit(GenericMatchIteratorType(MemSetType, ConditionsType), cache=True)

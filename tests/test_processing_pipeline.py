@@ -387,8 +387,8 @@ def test_condition_generalizing():
         # wm.modify(fact_map['2_carry'],'value', '')
         # wm.modify(fact_map['2_carry'],'locked', False)
         wm.retract(fact_map['3_carry'])
-        # wm.modify(fact_map['2_carry'],'to_left', None)
-        # wm.modify(fact_map['hidey2'],'above', None)
+        wm.modify(fact_map['2_carry'],'to_left', None)
+        wm.modify(fact_map['hidey2'],'above', None)
         # wm.retract(fact_map['2_carry'])
         wm.modify(fact_map['1_carry'],'value', '')
         wm.modify(fact_map['1_carry'],'locked', False)
@@ -397,12 +397,6 @@ def test_condition_generalizing():
         print(match_names)
         print({decode_idrec(f.idrec)[1] : f.id for f in  fact_map.values()})
         assert match_names == [['1_carry', '0_upper', '0_lower']] #??
-
-
-
-
-
-
 
 
 

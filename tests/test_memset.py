@@ -12,7 +12,7 @@ import numpy as np
 import pytest
 from collections import namedtuple
 from cre.subscriber import BaseSubscriberType, init_base_subscriber
-from cre.utils import _struct_from_meminfo
+from cre.utils import _struct_from_meminfo, PrintElapse
 import gc
 from numba.core.runtime.nrt import rtsys
 from weakref import WeakKeyDictionary
@@ -239,7 +239,43 @@ def test_retroactive_register():
         # assert np.array_equal(c.get_child_t_ids(t_id=b2_t_id),[b2_t_id,b3_t_id])
         # assert np.array_equal(c.get_child_t_ids(t_id=b1_t_id),[b1_t_id,b2_t_id,b3_t_id])
 
-       
+
+from cre.memset import new_indexer, indexer_update, indexer_get_facts, indexer_get_fact
+def test_indexer():
+    with cre_context("test_indexer"):
+        spec1 = {"A" : "string", "B" : "number"}
+        BOOP1 = define_fact("BOOP1", spec1)
+        spec2 = {"inherit_from" : BOOP1, "C" : "number"}
+        BOOP2 = define_fact("BOOP2", spec2)
+        spec3 = {"inherit_from" : BOOP2, "D" : "number"}
+        BOOP3 = define_fact("BOOP3", spec3)        
+
+        ms = MemSet()
+        ms.declare(BOOP1("a", 1))
+        ms.declare(BOOP2("a", 2))
+        ms.declare(BOOP3("a", 3))
+        ms.declare(BOOP1("b", 1))
+        ms.declare(BOOP2("b", 2))
+        ms.declare(BOOP3("b", 3))
+
+        indexer = new_indexer("A")
+        indexer_update(indexer, ms)
+        facts = indexer_get_facts(indexer, ms,"a")
+
+        assert len(facts) == 3
+        assert all([x.A == 'a' for x in facts])
+
+        facts = ms.get_facts(A='b')
+        assert len(facts) == 3
+        assert all([x.A == 'b' for x in facts])
+
+        x = ms.get_fact(B=1)
+        assert x.B == 1
+
+        with pytest.raises(KeyError):
+            x = ms.get_fact(B=4)
+
+
 
 # from itertools import product
 
@@ -507,6 +543,7 @@ def test_b_get_facts_10000(benchmark):
 
 if __name__ == "__main__":
     import faulthandler; faulthandler.enable()
+    test_indexer()
     # test_declare_retract()
     # test_retroactive_register()
     # test_declare_retract_tuple_fact()
@@ -520,4 +557,4 @@ if __name__ == "__main__":
     # test_get_facts()
     # _test_iter_facts()
 
-    _delcare_10000(MemSet())
+    # _delcare_10000(MemSet())

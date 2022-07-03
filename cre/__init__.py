@@ -9,7 +9,7 @@ if(not skip.get()):
 
     # Necessary to import these at package level to ensure that they are defined
     #  before a context is created
-    from cre.fact import define_fact, BaseFact
+    from cre.fact import define_fact, BaseFact, Fact
     from cre.tuple_fact import TupleFact, TF
     from cre.var import Var
     from cre.op import Op

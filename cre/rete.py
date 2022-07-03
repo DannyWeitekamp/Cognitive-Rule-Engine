@@ -303,6 +303,9 @@ rete_graph_field_dict = {
     # All graph nodes organized by [[...alphas],[...betas],[...etc]]
     "nodes_by_nargs" : ListType(ListType(ReteNodeType)),
 
+    # The number of nodes in the graph
+    "n_nodes" : i8,
+
     # Maps a var_ind to its associated root node (i.e. the node that 
     #  holds all match candidates for a fact_type before filtering).
     "var_root_nodes" : DictType(i8,ReteNodeType),
@@ -324,6 +327,8 @@ rete_graph_field_dict = {
 
     # A strong pointer the prototype instance for match iterators on this graph.
     "match_iter_prototype_ptr" : ptr_t, #NOTE: Should really use deferred type
+
+
 }
 
 
@@ -332,12 +337,13 @@ ReteGraph, ReteGraphType = define_structref("ReteGraph", rete_graph_field_dict, 
 
 
 @njit(cache=True)
-def rete_graph_ctor(ms, conds, nodes_by_nargs, var_root_nodes, var_end_nodes,
+def rete_graph_ctor(ms, conds, nodes_by_nargs, n_nodes, var_root_nodes, var_end_nodes,
                 var_end_join_ptrs, global_modify_map, global_t_id_root_map):
     st = new(ReteGraphType)
     st.change_head = 0
     st.memset = ms
     st.nodes_by_nargs = nodes_by_nargs
+    st.n_nodes = n_nodes
     st.var_root_nodes = var_root_nodes
     st.var_end_nodes = var_end_nodes
     st.var_end_join_ptrs = var_end_join_ptrs
@@ -476,6 +482,7 @@ def build_rete_graph(ms, c):
     var_end_join_ptrs = np.zeros((len(c.vars),len(c.vars)),dtype=np.int64)
     var_end_nodes = Dict.empty(i8,ReteNodeType)
     var_root_nodes = Dict.empty(i8,ReteNodeType)
+    n_nodes = 0
 
     # Link nodes together. 'nodes_by_nargs' should already be ordered
     # so that alphas are before 2-way, 3-way, etc. betas. 
@@ -527,12 +534,17 @@ def build_rete_graph(ms, c):
             # Short circut the input to the output for identity nodes
             if(node.lit is None):
                 node.outputs = node.inputs
+            # Only proper nodes contribute to total node count
+            else:
+                n_nodes += 1
 
             # Make this node the new end node for the vars it takes as inputs
             for var_ind in node.var_inds:
                 var_end_nodes[var_ind] = node
+
             
-    return rete_graph_ctor(ms, c, nodes_by_nargs, var_root_nodes, var_end_nodes,
+            
+    return rete_graph_ctor(ms, c, nodes_by_nargs, n_nodes, var_root_nodes, var_end_nodes,
               var_end_join_ptrs, global_modify_map, global_t_id_root_map)
 
 
@@ -577,7 +589,7 @@ def node_memory_insert_match_buffers(self, k, idrec, ind):
     self.match_inp_inds_buffer[k] = ind
 
 
-from cre.processing.incr_processor import accumulate_change_events
+from cre.change_event import accumulate_change_events
 
 @njit(cache=True,locals={"t_id" : u2, "f_id":u8, "a_id":u1})
 def parse_change_events(r_graph):
@@ -1704,20 +1716,19 @@ def fact_ptrs_as_tuple(typs, ptr_arr):
     return tup
 
 
-
-
+@njit(cache=True)
+def get_graph(ms, conds):
+    if(i8(conds.matcher_inst_ptr) == 0):
+        rete_graph = build_rete_graph(ms, conds)
+        conds.matcher_inst_ptr = _ptr_from_struct_incref(rete_graph)
+    rete_graph = _struct_from_ptr(ReteGraphType, conds.matcher_inst_ptr)
+    return rete_graph
 
 
 @njit(GenericMatchIteratorType(MemSetType, ConditionsType), cache=True)
 def get_match_iter(ms, conds):
     # print("START", conds.matcher_inst_ptr)
-    if(i8(conds.matcher_inst_ptr) == 0):
-        rete_graph = build_rete_graph(ms, conds)
-        # conds.matcher_inst_meminfo = _meminfo_from_struct(rete_graph)
-        conds.matcher_inst_ptr = _ptr_from_struct_incref(rete_graph)
-    # print("BUILT", conds.matcher_inst_ptr)
-    rete_graph = _struct_from_ptr(ReteGraphType, conds.matcher_inst_ptr)
-    # print("LOADED")
+    rete_graph = get_graph(ms, conds)
     update_graph(rete_graph)
     # print("UPDATED")
     m_iter = new_match_iter(rete_graph)
@@ -1743,6 +1754,81 @@ def get_match_iter(ms, conds):
     # restitch_match_iter(m_iter, -1)
     return m_iter
 
+
+# ----------------------------------------------------------------------
+# : score_match, check_match
+
+@njit(cache=True)
+def count_matching_nodes(ms, conds, match_idrecs, zero_on_fail=False):
+
+    rete_graph = get_graph(ms, conds)
+
+    n_matches = 0
+    for lst in rete_graph.nodes_by_nargs:
+        for node in lst:
+            if(node.op is None): continue
+            match_inp_ptrs = np.zeros(len(node.op.head_var_ptrs),dtype=np.int64)
+            
+            is_match, all_valid = False, True
+            # Validate
+            for i, var_ind in enumerate(node.var_inds):
+                head_ptr_buffers_i = node.head_ptr_buffers[i]
+                head_ranges_i = node.op.head_ranges[i]
+                
+                head_ptrs = np.empty(head_ptr_buffers_i.shape[1],dtype=np.int64)
+                idrec = match_idrecs[var_ind]
+                is_valid = validate_head_or_retract(node, i, idrec, 
+                     head_ptrs, head_ranges_i)
+
+                if(not is_valid):
+                    all_valid = False
+                    continue
+
+                i_strt, i_len = head_ranges_i[0], head_ranges_i[1]
+                match_inp_ptrs[i_strt:i_strt+i_len] = head_ptrs
+
+            if(all_valid):
+                # Match
+                match_head_ptrs_func = _func_from_address(match_heads_f_type,
+                     node.op.match_head_ptrs_addr)
+
+                is_match = match_head_ptrs_func(match_inp_ptrs) ^ node.lit.negated
+
+            if(is_match):
+                n_matches += 1
+            elif(zero_on_fail):
+                return 0
+    return n_matches
+
+@njit(cache=True)
+def score_match(ms, conds, match_idrecs):
+    rete_graph = get_graph(ms, conds)
+    n_matches = count_matching_nodes(ms, conds, match_idrecs, False)
+    return n_matches / rete_graph.n_nodes
+
+@njit(cache=True)
+def check_match(ms, conds, match_idrecs):
+    return count_matching_nodes(ms, conds, match_idrecs, True) != 0
+
+
+
+
+            
+
+
+
+    # # Note should probably cache this too
+    # index_map = Dict.empty(i8, i8)
+    # for i, v in enumerate(c.vars):
+    #     index_map[i8(v.base_ptr)] = i
+
+
+
+    # # Reorganize the dnf into a distributed dnf with one dnf per var
+    # if(not c.has_distr_dnf):
+    #     build_distributed_dnf(c,index_map)
+
+    # c.distr_dnf
 
 
 

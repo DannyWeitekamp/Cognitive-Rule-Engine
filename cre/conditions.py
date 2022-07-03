@@ -296,6 +296,16 @@ class Conditions(structref.StructRefProxy):
         from cre.rete import MatchIterator
         return MatchIterator(ms, self)
 
+    def check_match(self, match, ms=None):
+        from cre.rete import check_match
+        idrecs = np.array([x.idrec for x in match],dtype=np.uint64)
+        return check_match(ms, self, idrecs)
+
+    def score_match(self, match, ms=None):
+        from cre.rete import score_match
+        idrecs = np.array([x.idrec for x in match],dtype=np.uint64)
+        return score_match(ms, self, idrecs)
+
     def antiunify(self, other, return_score=False, normalize='left'):
         return conds_antiunify(self, other, return_score, normalize) 
     

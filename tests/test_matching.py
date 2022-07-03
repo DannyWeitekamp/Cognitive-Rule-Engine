@@ -162,6 +162,49 @@ def test_ref_matching():
         # cl = get_linked_conditions_instance(c, ms)
         # print(get_ptr_matches(cl))
 
+from cre.rete import check_match, score_match
+def test_check_and_score_match():
+    with cre_context("test_check_match"):
+        BOOP = define_fact("BOOP",{"name": str, "val" : float})    
+
+        bps = []
+        ms = MemSet()
+        for i in range(10):
+            x = BOOP(str(i),i)
+            ms.declare(x)
+            bps.append(x)
+
+        a = Var(BOOP,"a")
+        b = Var(BOOP,"b")
+        c = Var(BOOP,"c")
+
+        conds = a & b & (a.val < b.val) 
+
+        match =[bps[7], bps[9]]
+        assert conds.check_match(match, ms) == True
+        assert conds.score_match(match, ms) == 1.0
+
+        match =[bps[9], bps[7]]
+        assert conds.check_match(match, ms) == False
+        assert conds.score_match(match, ms) == 0.0
+
+        conds = a & b & c & (a.name != "7") & (a.val < b.val) & (b.val < c.val)
+
+        match =[bps[6], bps[7], bps[9]]
+        assert conds.check_match(match, ms) == True
+        assert conds.score_match(match, ms) == 1.0
+
+        match =[bps[7], bps[8],bps[9]]
+        assert conds.check_match(match, ms) == False
+        assert conds.score_match(match, ms) == 2./3
+
+        match =[bps[8], bps[0],bps[9]]
+        assert conds.check_match(match, ms) == False
+        assert conds.score_match(match, ms) == 2./3
+
+        match =[bps[9], bps[4],bps[0]]
+        assert conds.check_match(match, ms) == False
+        assert conds.score_match(match, ms) == 0.0
 
 
 def test_multiple_deref():
@@ -537,7 +580,7 @@ def matching_betas_setup():
 
         return (c,ms), {}
 
-from cre.rete import get_match_iter, update_graph, ReteGraphType, parse_change_queue, update_node, build_rete_graph, new_match_iter#, restitch_match_iter
+from cre.rete import get_match_iter, update_graph, ReteGraphType, update_node, build_rete_graph, new_match_iter#, restitch_match_iter
 def apply_get_matches(c,ms):
     # rete_graph = build_rete_graph(ms, c)
     # update_graph(rete_graph)
@@ -619,7 +662,8 @@ if(__name__ == "__main__"):
     # print(alloc_stats1.alloc-alloc_stats1.free, alloc_stats2.alloc-alloc_stats2.free)
 
 
-    test_ref_matching()
+    # test_ref_matching()
+    # test_check_and_score_match()
     # test_multiple_deref()
     # test_matching_unconditioned()
     # test_list()
@@ -629,6 +673,6 @@ if(__name__ == "__main__"):
     # _test_NOT()
     # test_b_matching_1_t_4_lit()
     # test_multiple_types()
-    test_same_parents()
+    # test_same_parents()
     # test_mem_leaks()
 

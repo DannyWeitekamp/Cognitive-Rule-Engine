@@ -1,5 +1,5 @@
 
-from numba import types, njit, guvectorize,vectorize,prange, generated_jit, literally
+from numba import types, njit, guvectorize,vectorize,prange, generated_jit, literally, literal_unroll
 from numba.experimental import jitclass
 from numba import deferred_type, optional
 from numba import void,b1,u1,u2,u4,u8,i1,i2,i4,i8,f4,f8,c8,c16
@@ -32,7 +32,7 @@ from cre.transform import infer_type
 
 # from cre.subscriber import BaseSubscriberType
 from cre.structref import define_structref, define_boxing, CastFriendlyStructref
-from cre.fact import Fact, BaseFact,BaseFact, cast_fact, get_inheritance_t_ids
+from cre.fact import Fact, BaseFact, cast_fact, get_inheritance_t_ids
 from cre.tuple_fact import TF, TupleFact
 from cre.fact_intrinsics import fact_lower_setattr
 from cre.utils import CastFriendlyMixin, lower_setattr, _cast_structref, _meminfo_from_struct, decode_idrec, encode_idrec, \
@@ -121,6 +121,7 @@ class MemSet(structref.StructRefProxy):
         context = cre_context(context)
         self = memset_ctor(context.context_data)
         self._context = context
+        self.indexers = {}
         return self
 
     @property
@@ -140,11 +141,23 @@ class MemSet(structref.StructRefProxy):
     def retract(self,identifier):
         return memset_retract(self,identifier)
 
-    def get_facts(self,typ=None, no_subtypes=False):
+    def _get_indexer(self, attr):
+        if(attr not in self.indexers):
+            self.indexers[attr] = new_indexer(attr)
+        return self.indexers[attr]
+
+    def get_facts(self,typ=None, no_subtypes=False,**kwargs):
         self.context._ensure_retro_registers()
+
+        # Implement .get_facts(attr=val)
+        if(len(kwargs) > 0):
+            attr, val = list(kwargs.items())[0]
+            indexer = self._get_indexer(attr)
+            return indexer_get_facts(indexer, self, val)
+
+        # Implement .get_facts(type)
         if(isinstance(typ,str)):
             typ = self.context.name_to_type[typ]
-
         return get_facts(self, typ, no_subtypes)
 
     def iter_facts(self,typ):
@@ -153,8 +166,15 @@ class MemSet(structref.StructRefProxy):
             typ = self.context.name_to_type[typ]
         return iter_facts(self, typ)
 
-    def get_fact(self,idrec):
-        return memset_get_fact(self, idrec)
+    def get_fact(self,*args, **kwargs):
+        # Implement .get_fact(attr=val)
+        if(len(kwargs) > 0):
+            attr, val = list(kwargs.items())[0]
+            indexer = self._get_indexer(attr)
+            return indexer_get_fact(indexer, self, val)
+
+        # Implement .get_fact(idrec)
+        return memset_get_fact(self, args[0])
 
     def modify(self, fact, attr, val):
         return memset_modify(self,fact, attr, val)
@@ -369,7 +389,7 @@ def modify(ms,fact,attr,val):
     return ms.modify(fact,attr,val)
 
 
-#### get_facts ####
+#### get_fact ####
 
 @generated_jit(cache=True)
 @overload_method(MemSetTypeClass, "get_fact")
@@ -686,9 +706,157 @@ def fact_iter_next(it):
     return impl
 
 
-# @overload_method(MemoryTypeTemplate, "all_facts_of_type")
-# def mem_all_facts_of_type(self, typ):
-#     def impl(self, typ):
-#         return all_facts_of_type(self,typ)
+# ----------------------------------------------------------------------
+# : Indexer - Allows for .get_facts(attr=val)
 
-#     return impl
+base_indexer_fields = {
+    # Context Data object 
+    "head" : i8,
+    # "t_id_set" : DictType(u2,i8),
+    "mapping" : types.Any,
+    "attr" : types.Any,
+    "types_t_ids" : types.Any,
+    
+    
+}
+
+@structref.register
+class IndexerTypeClass(CastFriendlyStructref):
+    pass
+
+class Indexer(structref.StructRefProxy):
+    pass
+
+
+define_boxing(IndexerTypeClass, Indexer)
+
+def get_base_types_with_attr(attr):
+    context = cre_context()
+    context.children_of
+    base_types = {}
+
+    for fact_type, parents in context.parents_of.items():
+        if(isinstance(fact_type, Fact)):
+            base_type = fact_type
+            while(hasattr(base_type,'parent_type') and
+                  attr in base_type.parent_type.spec):
+                base_type = base_type.parent_type
+            if(attr in base_type.spec and base_type not in base_types):
+                val_type = base_type.spec[attr]['type']
+                # child_t_ids = context.context_data.child_t_ids[base_type.t_id]
+                # child_t_ids = types.literal(tuple([t_id for t_id in child_t_ids]))
+                base_types[base_type] = val_type
+    return Tuple(tuple([(bt, vt) for bt,vt in base_types.items()]))
+
+vec2_type = Tuple((VectorType,VectorType))
+
+def new_indexer(attr):
+    base_types = get_base_types_with_attr(attr)
+    print(base_types)
+    return indexer_ctor(base_types, attr)
+
+@generated_jit(cache=True)
+def indexer_ctor(base_types, attr):
+    SentryLiteralArgs(['attr']).for_function(indexer_ctor).bind(base_types, attr)
+    _base_types = base_types.instance_type
+    if(len(_base_types) == 0):
+        context = cre_context()
+        raise ValueError(f"No fact_types with attribute {attr!r} defined in context {context.name!r}.")
+    val_type = None
+    for _,_val_type in _base_types:    
+        if(val_type is not None and _val_type != val_type):
+            raise ValueError("Cannot use indexer on attribute that differs in type across two fact types.")
+        val_type = _val_type
+
+    indexer_fields = {
+        **base_indexer_fields, 
+        "mapping" : DictType(val_type, vec2_type),
+        "inv_mapping" : DictType(u8, val_type),
+        "attr" : attr,
+        "base_types" : base_types,
+    }
+    indexer_type = IndexerTypeClass([(k,v) for k,v in indexer_fields.items()])
+    indexer_type._base_types = base_types
+    def impl(base_types, attr):
+        st = new(indexer_type)
+        st.head = 0
+        st.mapping = Dict.empty(val_type, vec2_type)
+        st.inv_mapping = Dict.empty(u8, val_type)
+        return st
+    return impl
+
+from cre.fact_intrinsics import fact_lower_getattr
+@njit(cache=True)
+def indexer_update_declare(self, change_event, fact): 
+    val = fact_lower_getattr(fact, self.attr)
+    if(val not in self.mapping):
+        self.mapping[val] = (new_vector(1), new_vector(1))
+    idrec_vec, hole_vec = self.mapping[val]
+
+    # Don't re-add on retract-declare pair
+    if(not change_event.was_retracted):
+        if(len(hole_vec) > 0):
+            idrec_vec[hole_vec.pop()] = change_event.idrec
+        else:
+            idrec_vec.add(change_event.idrec)
+
+    self.inv_mapping[change_event.idrec] = val
+
+@njit(cache=True)
+def indexer_update_retract(self, change_event): 
+    val = self.inv_mapping[change_event.idrec]
+    idrec_vec, hole_vec = self.mapping[val]
+    index = np.nonzero(idrec_vec.data==change_event.idrec)[0][0]
+    hole_vec.add(index)
+    idrec_vec[index] = 0
+
+    del self.inv_mapping[change_event.idrec]
+
+
+from cre.change_event import accumulate_change_events
+@generated_jit(cache=True, nopython=True)
+def indexer_update(self, memset):
+    context_data = cre_context().context_data
+    base_types_t_ids = []
+    for bt,vt in self._base_types.instance_type:
+        base_types_t_ids.append((bt,tuple(context_data.child_t_ids[bt.t_id])))
+    base_types_t_ids = tuple(base_types_t_ids)
+    def impl(self, memset):
+        cq = memset.change_queue
+        for change_event in accumulate_change_events(cq, self.head, cq.head):
+            for tup in literal_unroll(base_types_t_ids):
+                base_type, t_ids = tup
+                if(change_event.t_id in t_ids):
+                    if(change_event.was_declared):
+                        facts = facts_for_t_id(memset, change_event.t_id)
+                        fact = _struct_from_ptr(base_type, facts[change_event.f_id])
+                        indexer_update_declare(self, change_event, fact)
+
+                    elif(change_event.was_retracted):
+                        indexer_update_retract(self, change_event)
+                        
+        self.head = cq.head
+    return impl
+
+@njit(cache=True)
+def indexer_get_facts(self, memset, val):
+    indexer_update(self, memset)
+    facts = List.empty_list(BaseFact)
+    if(val in self.mapping):
+        idrecs, _ = self.mapping[val]
+        for i in range(idrecs.head):
+            idrec = u8(idrecs.data[i])
+            if(idrec != 0):
+                facts.append(memset_get_fact(memset,idrec))
+    return facts
+
+@njit(cache=True)
+def indexer_get_fact(self, memset, val):
+    facts = indexer_get_facts(self, memset, val)
+    if(len(facts) == 0):
+        raise KeyError("No fact found.")
+    return facts[0]
+
+
+
+

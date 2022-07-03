@@ -124,6 +124,7 @@ def get_relative_encoder_type(fact_types, id_attr):
                  "base_fact_type" : types.TypeRef(assert_mutual_base(fact_types, id_attr)), 
                  "id_attr" : types.literal(id_attr),
                  }
+                 
     re_type = RelativeEncoderTypeClass([(k,v) for k,v in field_dict.items()])
     re_type._fact_types = fact_types
     re_type._relational_attrs = relational_fact_attrs

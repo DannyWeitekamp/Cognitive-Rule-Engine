@@ -24,32 +24,8 @@ pprint._sorted = lambda x:x
 # pprint = lambda x : pprint(x, sort_dicts=False)
 
 with cre_context("test_processing_pipeline"):
-    Component = define_fact("Component", {
-        "id" : str,
-        # "x" : {"type" : float, "visible" : False},
-        # "y" : {"type" : float, "visible" : False},
-        # "width" : {"type" : float, "visible" : False},
-        # "height" : {"type" : float, "visible" : False},
-        "above" : "Component", "below" : "Component",
-        "to_left": "Component", "to_right" : "Component",
-        "parents" : "List(Component)"
-    })
+    
 
-    TextField = define_fact("TextField", {
-        "inherit_from" : "Component",
-        "value" : {"type" : str, "visible" : True},
-        "locked" : {"type" : bool, "visible" : True},
-    })
-
-    Button = define_fact("Button", {
-        "inherit_from" : "Component",
-        # "locked" : {"type" : bool, "visible" : True},
-    })
-
-    Container = define_fact("Container", {
-        "inherit_from" : "Component",
-        "children" : "List(Component)"
-    })
 
 def encode_neighbors(objs, l_str='to_left', r_str="to_right", a_str="above", b_str="below", strip_attrs=["x", "y", "width", "height"]):
   # objs = list(_objs.values()) if(isinstance(_objs,dict)) else _objs
@@ -101,7 +77,7 @@ def encode_neighbors(objs, l_str='to_left', r_str="to_right", a_str="above", b_s
 
 
 
-def new_mc_addition_state(upper, lower, ):
+def new_mc_addition_state(upper, lower):
     upper, lower = str(upper), str(lower)
     n = max(len(upper),len(lower))
 

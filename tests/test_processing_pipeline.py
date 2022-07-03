@@ -23,16 +23,16 @@ eq_str = Equals(unicode_type, unicode_type)
 pprint._sorted = lambda x:x
 # pprint = lambda x : pprint(x, sort_dicts=False)
 
-with cre_context("test_processing_pipeline"):
+# with cre_context("test_processing_pipeline"):
     
 
 
 def encode_neighbors(objs, l_str='to_left', r_str="to_right", a_str="above", b_str="below", strip_attrs=["x", "y", "width", "height"]):
-  # objs = list(_objs.values()) if(isinstance(_objs,dict)) else _objs
-  objs_list = list(objs.values())
+    # objs = list(_objs.values()) if(isinstance(_objs,dict)) else _objs
+    objs_list = list(objs.values())
 
-  rel_objs = []
-  for i, obj in enumerate(objs):
+    rel_objs = []
+    for i, obj in enumerate(objs):
     rel_objs.append({
       l_str : [],
       r_str : [], 
@@ -40,7 +40,7 @@ def encode_neighbors(objs, l_str='to_left', r_str="to_right", a_str="above", b_s
       b_str : [],
     })
 
-  for i, a_obj in enumerate(objs_list):
+    for i, a_obj in enumerate(objs_list):
     for j, b_obj in enumerate(objs_list):
       if(i != j):
         if(a_obj['y'] > b_obj['y'] and
@@ -57,9 +57,9 @@ def encode_neighbors(objs, l_str='to_left', r_str="to_right", a_str="above", b_s
             rel_objs[i][r_str].append((dist, j));
             rel_objs[j][l_str].append((dist, i));
 
-  strip_attrs_set = set(strip_attrs)
-  out = {}   
-  for (_id, obj), rel_obj in zip(objs.items(), rel_objs):
+    strip_attrs_set = set(strip_attrs)
+    out = {}   
+    for (_id, obj), rel_obj in zip(objs.items(), rel_objs):
     # print(_id, obj["x"],obj["y"],obj["width"],obj["height"])
     new_obj = {k:v for k,v in obj.items() if k not in strip_attrs}
     new_obj[l_str] = objs_list[sorted(rel_obj[l_str])[0][1]]["id"] if len(rel_obj[l_str]) > 0 else ""
@@ -68,10 +68,10 @@ def encode_neighbors(objs, l_str='to_left', r_str="to_right", a_str="above", b_s
     new_obj[b_str] = objs_list[sorted(rel_obj[b_str])[0][1]]["id"] if len(rel_obj[b_str]) > 0 else ""
     out[_id] = new_obj
 
-  # if(any([obj.get('value',"") != "" and obj.get('value',"")]))  
-  # print()
+    # if(any([obj.get('value',"") != "" and obj.get('value',"")]))  
+    # print()
 
-  return out
+    return out
 
 # def from_dict(d):
 

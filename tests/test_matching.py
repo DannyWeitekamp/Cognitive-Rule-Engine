@@ -204,7 +204,7 @@ def test_check_and_score_match():
 
         match =[bps[9], bps[4],bps[0]]
         assert conds.check_match(match, ms) == False
-        assert conds.score_match(match, ms) == 0.0
+        assert conds.score_match(match, ms) == 1./3
 
 
 def test_multiple_deref():

@@ -113,6 +113,9 @@ def fact_eq(a, b):
     tla = a.num_chr_mbrs
     tlb = b.num_chr_mbrs
 
+    if(_raw_ptr_from_struct(a) == _raw_ptr_from_struct(b)):
+        return True
+
     if(tla != tlb): return False
 
     for (info_a), (info_b) in zip(cre_obj_iter_t_id_item_ptrs(a),cre_obj_iter_t_id_item_ptrs(b)):

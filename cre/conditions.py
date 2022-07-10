@@ -299,12 +299,12 @@ class Conditions(structref.StructRefProxy):
     def check_match(self, match, ms=None):
         from cre.rete import check_match
         idrecs = np.array([x.idrec for x in match],dtype=np.uint64)
-        return check_match(ms, self, idrecs)
+        return check_match(self, idrecs, ms)
 
     def score_match(self, match, ms=None):
         from cre.rete import score_match
         idrecs = np.array([x.idrec for x in match],dtype=np.uint64)
-        return score_match(ms, self, idrecs)
+        return score_match(self, idrecs, ms)
 
     def antiunify(self, other, return_score=False, normalize='left'):
         return conds_antiunify(self, other, return_score, normalize) 
@@ -1211,9 +1211,13 @@ def get_possible_remap_inds(a_ind_set, b_ind_set, n_a, n_b):
     num_remaps_per_a = poss_remap_matrix.sum(axis=1)
     num_remaps_per_b = poss_remap_matrix.sum(axis=0)
 
+    print("<<", num_remaps_per_a, num_remaps_per_b)
+
     n_possibilities = 1
     for n_remaps in num_remaps_per_a:
         if(n_remaps != 0): n_possibilities *= n_remaps
+
+    
     
     # Find the first variable that is remappable 
     first_i = 0
@@ -1258,7 +1262,9 @@ def get_possible_remap_inds(a_ind_set, b_ind_set, n_a, n_b):
 
         remaps[c, :] = remap_inds
         c += 1
-        
+    
+    print("len(remaps)", len(remaps))
+
     return remaps
 
 
@@ -1300,22 +1306,25 @@ i2_arr = i2[::1]
 f8_i2_arr_tup = Tuple((f8,i2[::1]))
 
 @njit(cache=True)
-def score_remaps(lit_set_a, lit_set_b, bpti_a, bpti_b, remap_inds=None, op_key_intersection=None):
+def score_remaps(lit_set_a, lit_set_b, bpti_a, bpti_b,
+     remap_inds=None, op_key_intersection=None, max_remaps=15):
     # print(lit_set_a, lit_set_b)
     if(op_key_intersection is None):
         op_key_intersection = intersect_keys(lit_set_a, lit_set_b)
+
+    # print("Q")
 
     scored_remaps = List.empty_list(f8_i2_arr_tup)
     # For every unique type of literal (e.g. (x<y) & (a<b))
     for k in op_key_intersection:
         # print("<<", k)
         # print(lit_set_a[k])
+        # print("R", k)
 
         a_ind_set = lit_set_to_ind_sets(lit_set_a[k], bpti_a)
         b_ind_set = lit_set_to_ind_sets(lit_set_b[k], bpti_b)
 
         # print(a_ind_set)
-
         remaps = get_possible_remap_inds(a_ind_set, b_ind_set, len(bpti_a), len(bpti_b))
         scores = np.empty(len(remaps),dtype=np.float64)
         for c, remap in enumerate(remaps):
@@ -1323,6 +1332,9 @@ def score_remaps(lit_set_a, lit_set_b, bpti_a, bpti_b, remap_inds=None, op_key_i
             matched_As = get_matched_mask(a_ind_set,b_ind_set,remap)
             scores[c] = np.sum(matched_As)
 
+        # print(len(remaps), remaps)
+
+        # print("T")
         # Order by score, drop remaps that have a score of zero 
         order = np.argsort(scores)
         first_nonzero = 0
@@ -1330,17 +1342,31 @@ def score_remaps(lit_set_a, lit_set_b, bpti_a, bpti_b, remap_inds=None, op_key_i
             if(scores[ind] > 0): break
             first_nonzero +=1
         # print("first_nonzero", first_nonzero)
-        order = order[first_nonzero:][::-1]
+        order = order[first_nonzero:][::-1][:min(max_remaps, len(order))]
+        # order = order[first_nonzero:][::-1]
+
+
+        # if(len(order) > 100):
+        #     raise ValueError()
+        #     print(len(order))
+        # print(len(order))
+        # print(order)
+
+        # print("U")
 
         og_L = len(scored_remaps)
         ref_was_merged = np.zeros(og_L, dtype=np.uint8)
         n_merged = 0
         for i, ind in enumerate(order):
+            
             score, remap = scores[ind], remaps[ind]
             was_merged = False
+            # print("i", i, remap)
             for j in range(len(scored_remaps)):
+                
                 if(not ref_was_merged[j]):
                     ref_score, ref_remap = scored_remaps[j]
+                    # print("j", j, ref_remap)
                     merged_remap = ref_remap.copy()
 
                     # status : 0 = same, 1 = new, 2 = not same
@@ -1365,11 +1391,14 @@ def score_remaps(lit_set_a, lit_set_b, bpti_a, bpti_b, remap_inds=None, op_key_i
             if(not was_merged):
                 scored_remaps.append((score,remap))
 
+        # print("V")
         # Sort the scored_remap list
         scores = np.empty(len(scored_remaps),dtype=np.float64)
         for i,(s,_) in enumerate(scored_remaps): scores[i] = s
         order = np.argsort(scores)[::-1]
         scored_remaps = List([scored_remaps[ind] for ind in order])
+
+        # print("X")
     # print(scored_remaps)
 
     return scored_remaps
@@ -1506,8 +1535,10 @@ def _conds_antiunify(c_a, c_b):
                                     op_key_intersection=op_key_intersection)
         best_score, best_remap = scored_remaps[0]
 
+
         conj = _conj_from_litset_and_remap(ls_as[0], ls_bs[0], 
                  best_remap, op_key_intersection, bpti_a, bpti_b)
+
         dnf = List([conj])
         conds = _conditions_ctor_dnf(dnf)
 
@@ -1573,7 +1604,7 @@ def conds_antiunify(c_a, c_b, return_score=False, normalize='left'):
     normalize = normalize.literal_value
     if(return_score.literal_value):
         def impl(c_a, c_b, return_score=False, normalize='left'):
-            c, score = _conds_antiunify(c_a,c_b)
+            c, score = _conds_antiunify(c_a, c_b)
             if(normalize == 'left'):
                 n_literals_a = count_literals(c_a)
                 return c, score / n_literals_a

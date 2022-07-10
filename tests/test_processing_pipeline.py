@@ -10,10 +10,11 @@ from cre.fact import define_fact
 from cre.default_ops import Equals
 from cre.context import cre_context
 from pprint import pprint
-from cre.processing.flattener import Flattener
-from cre.processing.feature_applier import FeatureApplier
-from cre.processing.relative_encoder import _check_needs_rebuild, RelativeEncoder, get_relational_fact_attrs, next_adjacent
-from cre.processing.vectorizer import Vectorizer
+from cre.transform.flattener import Flattener
+from cre.transform.feature_applier import FeatureApplier
+from cre.transform.relative_encoder import _check_needs_rebuild, RelativeEncoder, get_relational_fact_attrs, next_adjacent
+from cre.transform.vectorizer import Vectorizer
+from cre.transform.memset_builder import MemSetBuilder
 from cre.default_ops import Equals
 from cre.conditions import Conditions
 
@@ -23,33 +24,8 @@ eq_str = Equals(unicode_type, unicode_type)
 pprint._sorted = lambda x:x
 # pprint = lambda x : pprint(x, sort_dicts=False)
 
-with cre_context("test_processing_pipeline"):
-    Component = define_fact("Component", {
-        "id" : str,
-        # "x" : {"type" : float, "visible" : False},
-        # "y" : {"type" : float, "visible" : False},
-        # "width" : {"type" : float, "visible" : False},
-        # "height" : {"type" : float, "visible" : False},
-        "above" : "Component", "below" : "Component",
-        "to_left": "Component", "to_right" : "Component",
-        "parents" : "List(Component)"
-    })
-
-    TextField = define_fact("TextField", {
-        "inherit_from" : "Component",
-        "value" : {"type" : str, "visible" : True},
-        "locked" : {"type" : bool, "visible" : True},
-    })
-
-    Button = define_fact("Button", {
-        "inherit_from" : "Component",
-        # "locked" : {"type" : bool, "visible" : True},
-    })
-
-    Container = define_fact("Container", {
-        "inherit_from" : "Component",
-        "children" : "List(Component)"
-    })
+# with cre_context("test_processing_pipeline"):
+    
 
 def encode_neighbors(objs, l_str='to_left', r_str="to_right", a_str="above", b_str="below", strip_attrs=["x", "y", "width", "height"]):
   # objs = list(_objs.values()) if(isinstance(_objs,dict)) else _objs
@@ -146,69 +122,56 @@ def new_mc_addition_state(upper, lower, ):
     # pprint(d_state)
     return d_state
 
-class DictMemSetConverter():
-    def __init__(self, in_memset=None, context=None):
-        self.context = cre_context(context)
-        self.non_relational_attrs = {}
-        self.relational_attrs = {}
-        self.in_memset = in_memset
 
-    def get_non_relational(self, type_name):
-        if(type_name not in self.non_relational_attrs):
-            fact_type = self.context.get_type(name=type_name)
-            attrs = list(fact_type.filter_spec("~relational").keys())
-            self.non_relational_attrs[type_name] = attrs
-        return self.non_relational_attrs[type_name]
+def setup_fact_types():
+    context = cre_context()
+    if("Component" in context.name_to_type):
+        print("Retrieved!!!")
+        return (context.get_type(name="Component"),
+                context.get_type(name="TextField"),
+                context.get_type(name="Button"),
+                context.get_type(name="Container"),
+                )
+    Component = define_fact("Component", {
+        "id" : str,
+        # "x" : {"type" : float, "visible" : False},
+        # "y" : {"type" : float, "visible" : False},
+        # "width" : {"type" : float, "visible" : False},
+        # "height" : {"type" : float, "visible" : False},
+        "above" : "Component", "below" : "Component",
+        "to_left": "Component", "to_right" : "Component",
+        "parents" : "List(Component)"
+    })
 
-    def get_relational(self, type_name):
-        if(type_name not in self.relational_attrs):
-            fact_type = self.context.get_type(name=type_name)
-            attrs = list(fact_type.filter_spec("relational").keys())
-            self.relational_attrs[type_name] = attrs
-        return self.relational_attrs[type_name]
+    TextField = define_fact("TextField", {
+        "inherit_from" : "Component",
+        "value" : {"type" : str, "visible" : True},
+        "locked" : {"type" : bool, "visible" : True},
+    })
+
+    Button = define_fact("Button", {
+        "inherit_from" : "Component",
+        # "locked" : {"type" : bool, "visible" : True},
+    })
+
+    Container = define_fact("Container", {
+        "inherit_from" : "Component",
+        "children" : "List(Component)"
+    })
+    return (Container, TextField, Component, Button)
 
 
-    def apply(self, state_dict, return_map=False):
-        '''Converts a dictionary of dictionaries each representing a fact into a MemSet'''
-        # Make each fact instance, but skip setting any relational members.
-        fact_instances = {}
-        for _id, config in state_dict.items():
-            fact_type = self.context.get_type(name=config['type'])
-            non_rel_attrs = self.get_non_relational(config['type'])
-            kwargs = {attr:config[attr] for attr in non_rel_attrs if attr in config} 
-            fact = fact_type(**kwargs)
-            fact_instances[_id] = fact
-
-        # Now that all facts exist set any relational attributes
-        for _id, fact in fact_instances.items():
-            config = state_dict[_id]
-            rel_attrs = self.get_relational(config['type'])
-
-            for attr in rel_attrs:
-                if(attr not in config): continue
-                val_name = config[attr]
-                if(not val_name): continue # i.e. skip if None or empty str
-                if(val_name not in fact_instances):
-                    raise ValueError(f"Reference to unspecified fact {val_name}.")
-                setattr(fact, attr, fact_instances[val_name])
-
-        # Declare each fact to a new MemSet
-        ms = self.in_memset if(self.in_memset) else MemSet()
-        for _id, fact in fact_instances.items():
-            ms.declare(fact)
-
-        if(return_map):
-            return ms, fact_instances
-        else:
-            return ms
-
-fact_types = [Container, TextField,Component, Button]
-feat_types = [eq_f8, eq_str]
-val_types = [f8,unicode_type,boolean]
 
 def setup_pipeline():
+    Container, TextField, Component, Button = setup_fact_types()
+    print(TextField.spec)
+
+    fact_types = [Container, TextField,Component, Button]
+    feat_types = [eq_f8, eq_str]
+    val_types = [f8,unicode_type,boolean]
+
     wm = MemSet()
-    conv = DictMemSetConverter(wm)
+    conv = MemSetBuilder(wm)
     fl = Flattener(fact_types, wm, id_attr="id")
     fa = FeatureApplier(feat_types)
     re = RelativeEncoder(fact_types, wm, id_attr="id")
@@ -226,12 +189,12 @@ def setup_pipeline_first_run():
 
 def pipeline_first_run(dict_state, wm, pipeline, match_names, vars):
     conv, fl, fa, re, vr = pipeline
-    wm, fact_map = conv.apply(dict_state, return_map=True) # 1.23 ms
+    wm, fact_map = conv(dict_state, return_map=True) # 1.23 ms
     matches = [fact_map[x] for x in match_names]
-    flat_ms = fl.apply(wm) # 0.07ms
-    feat_ms = fa.apply(flat_ms) # 0.14ms
+    flat_ms = fl(wm) # 0.07ms
+    feat_ms = fa(flat_ms) # 0.14ms
     rel_ms = re.encode_relative_to(feat_ms, matches, vars) # 0.30ms
-    vec = vr.apply(rel_ms) # 0.12ms
+    vec = vr(rel_ms) # 0.12ms
     return vec, matches, fact_map
 
 def setup_pipeline_second_run():
@@ -243,28 +206,31 @@ def setup_pipeline_second_run():
 
 def pipeline_second_run(wm, pipeline, matches, vars):
     conv, fl, fa, re, vr = pipeline
-    flat_ms = fl.apply(wm) # 0.01ms
-    feat_ms = fa.apply(flat_ms) # 0.02ms
+    flat_ms = fl(wm) # 0.01ms
+    print(flat_ms)
+    feat_ms = fa(flat_ms) # 0.02ms
+    print(feat_ms)
     rel_ms = re.encode_relative_to(feat_ms, matches, vars) # 0.78ms
-    vecs = vr.apply(rel_ms) # 0.14ms
+    # print(rel_ms)
+    vecs = vr(rel_ms) # 0.14ms
     return vecs
 
-
-
 def test_pipeline():
-    with cre_context("test_processing_pipeline"):
+    with cre_context("test_pipeline"):
         args,_ = setup_pipeline_first_run()
         (flt, nom), matches, fact_map = pipeline_first_run(*args)
         (dict_state, wm, pipeline, match_names, vars) = args
         conv, fl, fa, re, vr = pipeline
 
         wm.modify(fact_map["0_answer"], "value", "4")
-        (new_flt, new_nom) = pipeline_second_run(wm,pipeline, matches, vars)
+        (new_flt, new_nom) = pipeline_second_run(wm, pipeline, matches, vars)
+        print(nom)
+        print(new_nom)
         assert len(np.unique(new_nom)) > len(np.unique(nom))
         nom = new_nom
 
         wm.modify(fact_map["1_carry"], "value", "1")
-        (new_flt, new_nom) = pipeline_second_run(wm,pipeline, matches, vars)
+        (new_flt, new_nom) = pipeline_second_run(wm, pipeline, matches, vars)
         assert len(np.unique(new_nom)) > len(np.unique(nom))
         nom = new_nom
 
@@ -272,12 +238,14 @@ from operator import itemgetter
 def test_condition_generalizing():
     from cre.rete import repr_match_iter_dependencies
 
-    with cre_context("test_processing_pipeline"):
+    with cre_context("test_condition_generalizing"):
+        (Container, TextField,Component, Button) = setup_fact_types()
+
         dict_state = new_mc_addition_state(567,354)
         # pprint(dict_state)
         wm = MemSet()
-        conv = DictMemSetConverter(wm)
-        wm, fact_map = conv.apply(dict_state, return_map=True)
+        conv = MemSetBuilder(wm)
+        wm, fact_map = conv(dict_state, return_map=True)
 
         print({decode_idrec(f.idrec)[1] : f.id for f in  fact_map.values()})
 
@@ -402,11 +370,11 @@ def test_condition_generalizing():
 
 
 def test_b_pipeline_1st_run(benchmark):
-    with cre_context("test_processing_pipeline"):
+    with cre_context("test_b_pipeline_1st_run"):
         benchmark.pedantic(pipeline_first_run,setup=setup_pipeline_first_run, warmup_rounds=1, rounds=10)
 
 def test_b_pipeline_2nd_run(benchmark):
-    with cre_context("test_processing_pipeline"):
+    with cre_context("test_b_pipeline_2nd_run"):
         benchmark.pedantic(pipeline_second_run,setup=setup_pipeline_second_run, warmup_rounds=1, rounds=10)
 
 
@@ -414,7 +382,7 @@ if __name__ == "__main__":
     import faulthandler; faulthandler.enable()
     print("HI")
 
-    # test_pipeline()
+    test_pipeline()
     test_condition_generalizing()
     # for i in range(2):
     #     args,_ = setup_pipeline_first_run()
@@ -431,7 +399,7 @@ if __name__ == "__main__":
     
 
 
-# ms, facts = conv.apply(ds,return_map=True)
+# ms, facts = conv(ds,return_map=True)
 
 # ms.modify(facts["0_answer"], "value", "4")
 # ms.modify(facts["1_carry"], "value", "1")

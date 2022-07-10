@@ -190,7 +190,7 @@ def test_list_operations():
         v = Var(TList,"v")
         print(v.items[0])
         print(v.items[0] != v.items[1])
-        assert str(v.items[0]) == "Var(TList,'v').items[0]"
+        assert ".items[0]" in str(v.items[0])
 
         c = v.items[0] != v.items[1]
         assert str(c) == "~(v.items[0] == v.items[1])"

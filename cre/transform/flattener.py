@@ -13,12 +13,12 @@ from cre.context import cre_context
 from cre.default_ops import Add, Subtract, Divide
 from cre.var import Var, GenericVarType, var_append_deref, get_var_type
 from cre.op import GenericOpType
-from cre.utils import _func_from_address, _cast_structref, _obj_cast_codegen, _func_from_address, _incref_structref
+from cre.utils import _func_from_address, _raw_ptr_from_struct, _cast_structref, _obj_cast_codegen, _func_from_address, _incref_structref
 from cre.structref import define_structref
 from cre.memset import MemSet, MemSetType
 from cre.structref import CastFriendlyStructref, define_boxing
-from cre.processing.incr_processor import incr_processor_fields, IncrProcessorType, init_incr_processor
-from cre.processing.enumerizer import Enumerizer, EnumerizerType
+from cre.transform.incr_processor import incr_processor_fields, IncrProcessorType, init_incr_processor
+from cre.transform.enumerizer import Enumerizer, EnumerizerType
 from numba.experimental import structref
 from numba.extending import overload_method, overload, lower_cast, SentryLiteralArgs
 from numba.experimental.function_type import _get_wrapper_address
@@ -27,7 +27,9 @@ from cre.gval import get_gval_type, new_gval, gval as gval_type
 from cre.fact import DeferredFactRefType
 
 
-
+@njit(cache=True)
+def get_ptr(x):
+    return _raw_ptr_from_struct(x)
 
 def get_visibile_fact_attrs(fact_types):
     ''' Takes in a set of fact types and returns all (fact, attribute) pairs
@@ -95,7 +97,7 @@ def get_flattener_type(fact_types,id_attr):
                  "id_attr" : types.literal(id_attr)
                  }
     f_type = FlattenerTypeClass([(k,v) for k,v in field_dict.items()])
-    print("<<", fact_visible_attr_pairs)
+    # print("<<", fact_visible_attr_pairs)
     f_type._fact_visible_attr_pairs = fact_visible_attr_pairs
     f_type._id_attr = id_attr
     return f_type
@@ -152,27 +154,46 @@ class Flattener(structref.StructRefProxy):
     def out_memset(self):
         return self._out_memset
 
-    def apply(self, in_memset=None):
+    def transform(self, in_memset=None):
         if(in_memset is not None):
-            set_in_memset(self, in_memset)
+            if(not check_same_in_memset(self, in_memset)):
+                set_in_memset(self, in_memset)
+                flattener_clear(self)
+                self._out_memset = MemSet()
+                set_out_memset(self, self._out_memset)
         self.update()
         return self._out_memset
+
+    def __call__(self, in_memset=None):
+        return self.transform(in_memset)
+
 
     def update(self):
         flattener_update(self)
 
 define_boxing(FlattenerTypeClass, Flattener)
 
+@njit(types.void(GenericFlattenerType),cache=True)
+def flattener_clear(self):
+    self.idrec_map = Dict.empty(u8,u8_list)
+    self.change_queue_head = 0
+    # self.out_memset = MemSet(self.out_memset.context_data)
+
 @njit(types.void(GenericFlattenerType,MemSetType),cache=True)
-def set_in_memset(self, x):
-    self.in_memset = x
+def set_in_memset(self, in_memset):
+    self.in_memset = in_memset
+
+@njit(types.void(GenericFlattenerType,MemSetType),cache=True)
+def set_out_memset(self, out_memset):
+    self.out_memset = out_memset
 
 @njit(MemSetType(GenericFlattenerType),cache=True)
 def get_in_memset(self):
     return self.in_memset
 
-def get_ground_type(head_type,val_type):
-    return 
+@njit(types.boolean(GenericFlattenerType, MemSetType),cache=True)
+def check_same_in_memset(self,in_memset):
+    return _raw_ptr_from_struct(self.in_memset) == _raw_ptr_from_struct(in_memset)
 
 
 
@@ -258,7 +279,7 @@ def flattener_update(self):
     impl_args = tuple(impl_args)
 
     id_attr = self._id_attr
-    # print([tuple(str(x) for x in y) for y in impl_args])
+    print([tuple(str(x) for x in y) for y in impl_args])
     def impl(self):
         # For each change event that occured since the last call to update() 
         for change_event in self.get_changes():
@@ -290,4 +311,3 @@ def flattener_update(self):
 
     return impl
 
-    

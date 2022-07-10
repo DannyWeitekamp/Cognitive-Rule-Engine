@@ -15,7 +15,7 @@ from cre.var import Var, GenericVarType, var_append_deref, get_var_type
 from cre.op import GenericOpType
 from cre.utils import _dict_from_ptr, ptr_t, _func_from_address, _cast_structref, _obj_cast_codegen, _func_from_address, _incref_structref, _ptr_from_struct_incref
 from cre.structref import define_structref
-from cre.processing.incr_processor import incr_processor_fields, IncrProcessorType, init_incr_processor
+from cre.transform.incr_processor import incr_processor_fields, IncrProcessorType, init_incr_processor
 from cre.structref import CastFriendlyStructref, define_boxing
 from numba.experimental import structref
 from numba.extending import overload_method, overload, lower_cast, SentryLiteralArgs
@@ -26,7 +26,7 @@ from cre.gval import get_gval_type, new_gval, gval as gval_type
 
 enumerizer_fields = {
     # Maps a t_id to a Dictionary that maps a value to a u8.
-    "val_maps" : DictType(u2,ptr_t)
+    "val_maps" : DictType(u2, ptr_t)
 }
 
 @structref.register
@@ -77,7 +77,7 @@ def enumerize(self, val, d=None):
         if(d is None):
             d = dict_for_type(self, val_type)
         if(val not in d):
-            d[val] = len(d)
+            d[val] = len(d)+1
         return d[val]
     return impl
 

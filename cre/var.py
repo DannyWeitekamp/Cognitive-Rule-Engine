@@ -111,47 +111,37 @@ class Var(CREObjProxy):
     def __new__(cls, typ, alias=None, skip_assign_alias=False):
         # if(not isinstance(typ, types.StructRef)): typ = typ.fact_type
         typ = _standardize_type(typ, cre_context())
-        # if(hasattr(typ,'fact_type')): typ = typ.fact_type
-        # if(isinstance(typ, Fact)): 
-        #     type_name = typ._fact_name
-        # else:
         base_type_name = str(typ)
-        
-        # print(repr(type_name))
-        typ_ref = types.TypeRef(typ)
-
-        if(getenv("CRE_SPECIALIZE_VAR_TYPE",default=False)):
-            struct_type = get_var_type(typ_ref,typ_ref)
-        else:
-            struct_type = GenericVarType
-
+                
         base_t_id = cre_context().get_t_id(_type=typ)
 
-        st = var_ctor(struct_type, base_t_id, alias)
+        if(getenv("CRE_SPECIALIZE_VAR_TYPE",default=False)):
+            raise ValueError("THIS SHOULDN'T HAPPEN")
+            typ_ref = types.TypeRef(typ)
+            struct_type = get_var_type(typ_ref,typ_ref)
+            st = var_ctor(struct_type, base_t_id, alias)
+        else:
+            st = var_ctor_generic(base_t_id, "" if alias is None else alias)
+        
         st._base_type = typ
         st._head_type = typ
         st._derefs_str = ""
 
-        # if(not skip_assign_alias):
-            # assign_to_falias_in_parent_frame(st,alias)
-
-        # print("after")
         return st
-        # return structref.StructRefProxy.__new__(cls, *args)
         
     def _handle_deref(self, attr_or_ind):
         '''Helper function that... '''
         
         # assert(isinstance(self.base_type,Fact))
         # with PrintElapse("Startup"):
-        base_type = self._base_type
+        base_type = self.base_type
         base_type_name = str(base_type)
         # print("<<",attr_or_ind)
         _derefs_str = self.get_derefs_str()
         # print("_derefs_str", _derefs_str, type(_derefs_str))
         if(isinstance(attr_or_ind, str)):
             # ATTR case
-            curr_head_type = self._head_type
+            curr_head_type = self.head_type
             attr = attr_or_ind
             # fd = curr_head_type.field_dict
             # print("<<", attr_or_ind)
@@ -183,6 +173,7 @@ class Var(CREObjProxy):
 
         # with PrintElapse("new"):
         if(getenv("CRE_SPECIALIZE_VAR_TYPE",default=False)):
+
             if(deref_info_type == DEREF_TYPE_ATTR):
                 struct_type = get_var_type(base_type, head_type)
             else:
@@ -524,9 +515,10 @@ def resolve_deref_attrs(self):
     deref_attrs = []
     typ = self.base_type
     # print("base", typ)
-    for i,x in enumerate(deref_infos):
+    # print("deref_infos", deref_infos)
+    for i, x in enumerate(deref_infos):
         # print(i, "X")
-        
+        # print(typ)
         if(isinstance(typ, ListType)):
             deref_attrs.append(str(x['a_id']))
         else:
@@ -693,18 +685,37 @@ def get_var_type(base_type, head_type=None):
 @njit(cache=True)
 def var_ctor(var_struct_type, base_t_id, alias=""):
     st = new(var_struct_type)
-    st.idrec = encode_idrec(T_ID_VAR,0,0xFF)
-    st.is_not = u1(0)
-    st.conj_ptr = i8(0)
-    st.base_t_id = base_t_id
-    st.head_t_id = base_t_id
-    st.base_ptr = i8(_raw_ptr_from_struct(st))
-    st.base_ptr_ref = ptr_t(0)
-    st.alias =  "" if(alias is  None) else alias
-    st.deref_attrs_str = None
-    # st.deref_attrs = List.empty_list(unicode_type)
-    st.deref_infos = np.empty(0,dtype=deref_info_type)
+
+    lower_setattr(st,'idrec', encode_idrec(T_ID_VAR,0,0xFF))
+    lower_setattr(st,'is_not', u1(0))
+    lower_setattr(st,'conj_ptr', i8(0))
+    lower_setattr(st,'base_t_id', base_t_id)
+    lower_setattr(st,'head_t_id', base_t_id)
+    lower_setattr(st,'base_ptr', i8(_raw_ptr_from_struct(st)))
+    lower_setattr(st,'base_ptr_ref', ptr_t(0))
+    lower_setattr(st,'alias', "" if(alias is  None) else alias)
+    lower_setattr(st,'deref_attrs_str', None)
+    lower_setattr(st,'deref_infos', np.empty(0,dtype=deref_info_type))
+    # base_type_name = lower_getattr(self,"base_type_name")
+    
+
+    # st.idrec = encode_idrec(T_ID_VAR,0,0xFF)
+    # st.is_not = u1(0)
+    # st.conj_ptr = i8(0)
+    # st.base_t_id = base_t_id
+    # st.head_t_id = base_t_id
+    # st.base_ptr = i8(_raw_ptr_from_struct(st))
+    # st.base_ptr_ref = ptr_t(0)
+    # st.alias =  "" if(alias is  None) else alias
+    # st.deref_attrs_str = None
+    # # st.deref_attrs = List.empty_list(unicode_type)
+    # st.deref_infos = np.empty(0,dtype=deref_info_type)
     return st
+
+
+@njit(GenericVarType(u2, unicode_type), cache=True)
+def var_ctor_generic(base_t_id, alias):
+    return var_ctor(GenericVarType, base_t_id, alias)
 
 
 @overload(Var)

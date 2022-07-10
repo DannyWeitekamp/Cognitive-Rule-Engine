@@ -355,10 +355,10 @@ def test_mem_leaks(n=5):
 
 def test_declare_fact():
     with cre_context("test_declare_fact"):
+        # print("vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv")
         BOOP = define_fact("BOOP", {
             "A" : "string",
-            "B" : {"type": "number", "visible":  True, "semantic" : True,
-                    'conversions' : {unicode_type : CastStr}}
+            "B" : {"type": "number", "visible":  True, "semantic" : True}
         })
         
         def declare_em(planner,s="A"):
@@ -369,9 +369,15 @@ def test_declare_fact():
         planner = SetChainingPlanner([BOOP])
         declare_em(planner,"A")
 
+        # print("vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv")
+        # print(summarize_depth_vals(planner, BOOP, 0))
+        # print(summarize_depth_vals(planner, unicode_type, 0))
+        # print(summarize_depth_vals(planner, f8, 0))
+        # print("^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^")
         assert summarize_depth_vals(planner, BOOP, 0)[0] == 5
-        assert summarize_depth_vals(planner, unicode_type, 0)[0] == 5
+        # assert summarize_depth_vals(planner, unicode_type, 0)[0] == 5
         assert summarize_depth_vals(planner, f8, 0)[0] == 5
+
 
         expls = planner.search_for_explanations(36.0, ops=get_base_ops(), search_depth=2)
         A_op_comp_binding_pairs = list(iter(expls))
@@ -381,7 +387,7 @@ def test_declare_fact():
         declare_em(planner,"B")
         
         assert summarize_depth_vals(planner, BOOP, 0)[0] == 10
-        assert summarize_depth_vals(planner, unicode_type, 0)[0] == 5
+        # assert summarize_depth_vals(planner, unicode_type, 0)[0] == 5
         assert summarize_depth_vals(planner, f8, 0)[0] == 5
 
         expls = planner.search_for_explanations(36.0, ops=get_base_ops(), search_depth=2)
@@ -419,6 +425,7 @@ def test_declare_fact_w_conversions():
 
         planner = SetChainingPlanner([BOOP])
         declare_em(planner,"A")
+        print("---------------------------------------------------------")
 
         assert summarize_depth_vals(planner, BOOP, 0)[0] == 6
         assert summarize_depth_vals(planner, unicode_type, 0)[0] == 6
@@ -426,6 +433,10 @@ def test_declare_fact_w_conversions():
 
         expls = planner.search_for_explanations(36.0, ops=get_base_ops(), search_depth=2)
         A_op_comp_binding_pairs = list(iter(expls))
+
+        assert len(A_op_comp_binding_pairs) > 0
+
+        print("---------------------------------------------------------")
 
         planner = SetChainingPlanner([BOOP])
         declare_em(planner,"A")
@@ -448,6 +459,141 @@ def test_declare_fact_w_conversions():
 
             # Flattening takes a while so stop after 3 
             if(i >= 2): break
+
+        print("---------------------------------------------------------")
+        # Check for key error bug when don't have Ops for all decalared types.
+        from cre.default_ops import Add, Multiply
+        Add_f8 = Add(f8, f8)
+        Multiply_f8 = Multiply(f8, f8)
+        ops = [Add_f8, Multiply_f8]
+        planner = SetChainingPlanner([BOOP])
+        
+        for i in range(5):
+            b = BOOP("A",str(i))
+            planner.declare(b)
+
+        expls = planner.search_for_explanations(36.0, ops=ops, search_depth=2)
+        AB_op_comp_binding_pairs = list(iter(expls))
+
+        assert len(AB_op_comp_binding_pairs) > 0
+
+        for i, (op_comp, binding) in enumerate(AB_op_comp_binding_pairs):
+            op = op_comp.flatten()
+            print("<<", op, binding)
+
+            assert(op(*binding)==36.0)
+
+            # Flattening takes a while so stop after 3 
+            if(i >= 2): break
+
+def test_min_stop_depth():
+    with cre_context("test_min_stop_depth"):
+        BOOP = define_fact("BOOP", {
+            "A" : str,
+            "B" : {"type": str, "visible":  True,
+                 "semantic" : True, 'conversions' : {float : CastFloat}}
+        })
+        from cre.default_ops import Add, Multiply
+        Add_f8 = Add(f8, f8)
+        Multiply_f8 = Multiply(f8, f8)
+
+        planner = SetChainingPlanner([BOOP])
+
+        for i in range(5):
+            b = BOOP("A",str(i))
+            planner.declare(b)
+
+        expls = planner.search_for_explanations(36.0, ops=[Add_f8, Multiply_f8], search_depth=2)
+        op_comp, match = list(expls)[0]
+        print(op_comp, match)
+        new_op = op_comp.flatten()
+
+        print(new_op, match)
+
+        planner = SetChainingPlanner([BOOP])
+
+        for i in range(5):
+            b = BOOP("A",str(i))
+            planner.declare(b)
+        planner.declare(BOOP("Q","36"))
+        print("----------------------------------------")
+
+        expls = planner.search_for_explanations(36.0, ops=[new_op], 
+            search_depth=1, min_stop_depth=1)
+        assert len(list(expls)) > 0
+
+        op_comp, match = list(expls)[0]
+
+        print(op_comp, op_comp.op, match)
+
+        planner = SetChainingPlanner([BOOP])
+        for i in range(2,5):
+            b = BOOP("A",str(i))
+            planner.declare(b)
+
+        expls = planner.search_for_explanations(3.0, ops=[new_op], 
+            search_depth=1, min_stop_depth=1)
+
+        assert expls == None
+
+        print("----------------------------------------")
+        planner = SetChainingPlanner([BOOP])
+        for i in range(5):
+            b = BOOP("A",str(i))
+            planner.declare(b)
+        # planner.declare(BOOP("Q","36"))
+
+        expls = planner.search_for_explanations(36.0, ops=[Add_f8, Multiply_f8],
+                    min_stop_depth=1, search_depth=1)
+
+        print(summarize_depth_vals(planner, BOOP, 1))
+        print(summarize_depth_vals(planner, unicode_type, 1))
+        print(summarize_depth_vals(planner, f8, 1))
+        # for i, (op_comp, binding) in enumerate(expls):
+        #     print(op_comp, binding)
+        # raise ValueError()
+
+        print("END")
+
+        expls = planner.search_for_explanations(36.0, ops=[Add_f8, Multiply_f8],
+                    min_stop_depth=1, search_depth=2)
+
+        print(summarize_depth_vals(planner, BOOP, 2))
+        print(summarize_depth_vals(planner, unicode_type, 2))
+        print(summarize_depth_vals(planner, f8, 1))
+        print(summarize_depth_vals(planner, f8, 2))
+
+        all_expls =  list(iter(expls))
+        print(len(all_expls))
+
+        # raise ValueError()
+
+        for i, (op_comp, binding) in enumerate(expls):
+            print(op_comp)
+
+        print("END")
+
+
+
+
+
+
+
+
+
+
+
+
+        # planner = SetChainingPlanner([BOOP])
+        # planner.declare(7.0)
+        # planner.declare(1.0)
+        # planner.declare(6.0)
+        # planner.declare(9.0)
+        # planner.declare(5.0)
+        # planner.declare(4.0)
+        # expls = planner.search_for_explanations(36.0, ops=ops, search_depth=2)
+
+
 
 
 
@@ -553,7 +699,6 @@ if __name__ == "__main__":
     # with PrintElapse("test_search_for_explanations"):
     #     test_search_for_explanations()
 # 
-    # _test_declare_fact()
 
     # pass
     # test_apply_multi()
@@ -562,7 +707,7 @@ if __name__ == "__main__":
     # test_forward_chain_one()
     # test_build_explanation_tree()
     # test_search_for_explanations()
-    # test_declare_fact()
+    test_declare_fact()
     # test_mem_leaks(n=10)
     # benchmark_apply_multi()
     # benchmark_retrace_back_one()
@@ -573,6 +718,7 @@ if __name__ == "__main__":
     # test_declare_fact()
     # test_declare_fact()
     test_declare_fact_w_conversions()
+    test_min_stop_depth()
 # from numba import njit, i8
 # from numba.typed import Dict
 # from numba.types import ListType

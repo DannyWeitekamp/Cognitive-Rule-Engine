@@ -6,6 +6,10 @@ from cre.ptrop import PtrOp
 from cre.utils import _load_ptr, _struct_from_ptr, decode_idrec
 
 
+@Op(shorthand = '({0})')
+def Identity(a):
+    return a
+
 @Op(shorthand = '({0} == {1})', commutes=True)
 def Equals(a, b):
     # print("BEF", a, b)
@@ -102,6 +106,7 @@ def ObjIsNone(ptrs):
 
 
 def check_cast_float(a):
+    if(a == ""): return False
     try:
         float(a)
     except:

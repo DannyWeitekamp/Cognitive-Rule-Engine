@@ -129,7 +129,7 @@ class Fact(CREObjTypeClass):
             if(flag not in attr_filter_registry):
                 raise ValueError(f"No filter registered under flag {flag!r}")
 
-        filtered_spec = {k:v for k,v in attr_filter_registry[flags[0]].get(self,negated[0])}
+        filtered_spec = {k:v for k,v in attr_filter_registry[flags[0]].get(self, negated[0])}
         for i in range(1,len(flags)):
             _fs = attr_filter_registry[flags[i]].get(self,negated[i])
             if(and_or.lower() == "or"):
@@ -912,13 +912,19 @@ def overload_{typ}(self, {param_defaults_seq}):
 {typ}._fact_proxy = {typ}Proxy
 
 
-# @overload({typ}Proxy)
-# def _ctor({param_defaults_seq}):
-#     def impl({param_defaults_seq}):
-#         return ctor({param_seq})
-#     return impl
-
 define_boxing({typ}Class,{typ}Proxy)
+
+
+
+{(f"""from cre.var import GenericVarType, var_ctor
+# @njit(GenericVarType(unicode_type), cache=True)
+# def as_var(alias):
+#     return var_ctor({typ}, {t_id}, alias)
+# {typ}._as_var = as_var
+""") if typ != "BaseFact" else ""
+}
+
+
 '''
     return code
 
@@ -966,9 +972,35 @@ def _fact_from_spec(name, spec, inherit_from=None, specialization_name=None, ret
             is_untyped=is_untyped, return_proxy=return_proxy,
             return_type_class=return_type_class)
 
+def _spec_eq(spec_a, spec_b):
+    print(list(spec_a.keys()), list(spec_b.keys()))
+    for attr_a, attr_b in zip(spec_a, spec_b):
+        if(attr_a != attr_b): 
+            print(attr_a, "!=", attr_b)
+            return False
+        typ_a, typ_b = spec_a[attr_a]['type'], spec_b[attr_a]['type']
+
+        typ_strs = []
+        for typ in [typ_a, typ_b]:
+            if(isinstance(typ, ListType)):
+                if(isinstance(typ.item_type,(DeferredFactRefType, Fact))):
+                    item_str = typ.item_type._fact_name
+                else:
+                    item_str = str(typ.item_type)
+                typ_strs.append(f"List({item_str})")
+
+            elif(isinstance(typ, (DeferredFactRefType, Fact))):
+                typ_strs.append(typ._fact_name)
+            else:
+                typ_strs.append(str(typ))
+
+        if(typ_strs[0] != typ_strs[1]):
+            print(typ_strs[0], "!=", typ_strs[1])
+            return False
+    return True
 
 
-def define_fact(name : str, spec : dict = None, context=None, return_proxy=False, return_type_class=False):
+def define_fact(name : str, spec : dict = None, context=None, return_proxy=False, return_type_class=False, allow_redef=False):
     '''Defines a new fact.'''
 
     from cre.context import cre_context
@@ -977,7 +1009,7 @@ def define_fact(name : str, spec : dict = None, context=None, return_proxy=False
     specialization_name = name
     if(spec is not None):
         spec = _standardize_spec(spec,context,name)
-        spec, inherit_from = _merge_spec_inheritance(spec,context)
+        spec, inherit_from = _merge_spec_inheritance(spec, context)
     
         if(inherit_from is not None and 
             inherit_from._fact_name == name):
@@ -990,7 +1022,7 @@ def define_fact(name : str, spec : dict = None, context=None, return_proxy=False
 
 
     if(specialization_name in context.name_to_type):
-        assert str(context.name_to_type[specialization_name].spec) == str(spec), \
+        assert _spec_eq(context.name_to_type[specialization_name].spec, spec), \
         f"Redefinition of fact '{specialization_name}' in context '{context.name}' not permitted"
         fact_type = context.name_to_type[specialization_name]        
     else:
@@ -1007,6 +1039,10 @@ def define_fact(name : str, spec : dict = None, context=None, return_proxy=False
         fact_type.spec = _spec
         fact_type._fact_proxy.spec = _spec
         fact_type._fact_type_class._spec = _spec
+
+    # Needs to be done because different definitions can share a 
+    #  fact_type object
+    if(hasattr(fact_type,'_clean_spec')): del fact_type._clean_spec
 
     out = [fact_type]
     if(return_proxy): out.append(fact_type._fact_proxy)

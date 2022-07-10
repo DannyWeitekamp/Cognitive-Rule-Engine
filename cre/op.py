@@ -1609,13 +1609,14 @@ class OpComp():
         instructions = {}
         args = []
         arg_types = []
-
+        n_terms = 0
+        depth = 1
         
-        
-
         for i, x in enumerate(py_args):
             if(isinstance(x, Op)): x = x.as_op_comp()
             if(isinstance(x, OpComp)):
+                n_terms += x.n_terms
+                depth = max(x.depth+1, depth)
                 for v_ptr,(v,_,t) in x.base_vars.items():
                     if(v_ptr not in base_vars):
                         base_vars[v_ptr] = (v,len(arg_types),t)
@@ -1632,6 +1633,7 @@ class OpComp():
                         # head_var_ptrs.append(extract_head_ptr(vptr_or_instr))
             else:
                 if(isinstance(x,Var)):
+                    n_terms += 1
                     b_ptr = x.base_ptr
                     if(b_ptr not in base_vars):
                         t = x.base_type
@@ -1656,8 +1658,13 @@ class OpComp():
                     constants[x] = op.signature.args[i]
             args.append(x)
 
+
+        
         head_vars = {k:v for i,(k,v) in enumerate(sorted(head_vars.items(), key=lambda x: x[1][1]))}
+
         # print("<<",_vars)
+        self.n_terms = n_terms
+        self.depth = depth
         self.op = op
         self.base_vars = base_vars
         # print(self.base_vars)
@@ -1676,8 +1683,10 @@ class OpComp():
 
         instructions[self] = op.signature
 
+        # print("Num_terms", n_terms)
         
         self.instructions = instructions
+
 
     def flatten(self, return_class=False):
         ''' Flattens the OpComp into a single Op. Generates the source

@@ -9,9 +9,9 @@ from numba.experimental import structref
 from numba.experimental.structref import new, define_attributes
 from numba.extending import lower_cast, overload, overload_method
 from cre.memset import MemSet,MemSetType
-from cre.utils import  lower_setattr, _ptr_from_struct_incref, decode_idrec, listtype_sizeof_item, _cast_structref, _obj_cast_codegen, DEREF_TYPE_ATTR, DEREF_TYPE_LIST, _memcpy_structref
+from cre.utils import  lower_setattr, _raw_ptr_from_struct, _ptr_from_struct_incref, decode_idrec, listtype_sizeof_item, _cast_structref, _obj_cast_codegen, DEREF_TYPE_ATTR, DEREF_TYPE_LIST, _memcpy_structref
 from cre.vector import VectorType
-from cre.processing.incr_processor import IncrProcessorType, ChangeEventType, incr_processor_fields, init_incr_processor
+from cre.transform.incr_processor import IncrProcessorType, ChangeEventType, incr_processor_fields, init_incr_processor
 from cre.structref import CastFriendlyStructref, define_boxing
 from cre.context import cre_context, CREContextDataType
 from cre.fact import Fact, BaseFact, DeferredFactRefType
@@ -99,10 +99,12 @@ relative_encoder_fields = {
     "id_to_ind" : DictType(unicode_type, i4),
     "var_cache" : DictType(Tuple((i4,i4,i4)),GenericVarType),
     "valid_t_ids" : VectorType,
+    "needs_rebuild" : types.boolean,
     "fact_types" : types.Any,
     "relational_attrs" : types.Any,
     "base_fact_type" : types.Any,
     "id_attr" : types.Any,
+
     
 
 }
@@ -141,6 +143,8 @@ class RelativeEncoder(structref.StructRefProxy):
         return self
 
     def encode_relative_to(self, ms, sources, source_vars):
+        assert len(sources) == len(source_vars), f"{sources},{source_vars}"
+
         source_idrecs = np.empty(len(sources),dtype=np.uint64)
         for i, src in enumerate(sources): 
             source_idrecs[i] = src.idrec
@@ -152,11 +156,19 @@ class RelativeEncoder(structref.StructRefProxy):
         out_ms = encode_relative_to(self, ms, source_idrecs, var_ptrs)
         return out_ms
 
+    @property
+    def in_memset(self):
+        return get_in_memset(self)
+
+    def set_in_memset(self, in_memset):
+        if(not check_same_in_memset(self,in_memset)):
+            set_in_memset(self,in_memset)
+            # RelativeEncoder_reinit(self)
+
     def update(self):
         RelativeEncoder_update(self)
 
 define_boxing(RelativeEncoderTypeClass, RelativeEncoder)
-
 
 @lower_cast(RelativeEncoderTypeClass, GenericRelativeEncoderType)
 @lower_cast(RelativeEncoderTypeClass, IncrProcessorType)
@@ -295,6 +307,7 @@ def RelativeEncoder_ctor(context_data, re_type, in_memset):
     st.lateral_w = f8(1.0)
     st.deref_info_matrix = _build_deref_info_matrix(st)
     st.valid_t_ids = _build_valid_t_ids(st)
+    st.needs_rebuild = False
     return st
 
     
@@ -516,9 +529,10 @@ def RelativeEncoder_update(self):
     # Need rebuild if there were any retractions or modifications to
     #  'relative' attributes. TODO: rebuilds could probably triggered
     #   more conservatively.
-    need_rebuild = _check_needs_rebuild(self,change_events)
+    if(not self.needs_rebuild):
+        self.needs_rebuild = _check_needs_rebuild(self,change_events)
     # print("<<", "need_rebuild", need_rebuild)
-    if(need_rebuild):
+    if(self.needs_rebuild):
         # If need_rebuild start bellman-ford shortest path from scratch
         RelativeEncoder_reinit(self)
         sources = self.in_memset.get_facts(self.base_fact_type)
@@ -540,6 +554,7 @@ def RelativeEncoder_update(self):
         _ensure_dist_matrix_size(self)
         update_relative_to(self, sources)    
 
+    self.needs_rebuild = False
 
 @njit(cache=True)
 def _closest_source(self, ind, s_inds):
@@ -691,3 +706,17 @@ def encode_relative_to(self, gval_ms, source_idrecs, source_var_ptrs):
         rel_ms.declare(fact_copy)
     return rel_ms
             
+
+@njit(types.boolean(GenericRelativeEncoderType, MemSetType),cache=True)
+def check_same_in_memset(self,in_memset):
+    return _raw_ptr_from_struct(self.in_memset) == _raw_ptr_from_struct(in_memset)
+
+@njit(types.void(GenericRelativeEncoderType, MemSetType), cache=True)
+def set_in_memset(self, in_memset):
+    self.in_memset = in_memset
+    self.needs_rebuild = True
+    # update_fact_vecs(self)
+
+@njit(MemSetType(GenericRelativeEncoderType),cache=True)
+def get_in_memset(self):
+    return self.in_memset

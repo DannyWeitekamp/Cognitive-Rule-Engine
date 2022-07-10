@@ -21,7 +21,7 @@ from numba.experimental.function_type import _get_wrapper_address
 import cloudpickle
 from cre.gval import get_gval_type, new_gval, gval as gval_type
 from cre.vector import VectorType, new_vector
-from cre.processing.incr_processor import incr_processor_fields, IncrProcessorType, init_incr_processor, ChangeEventType
+from cre.transform.incr_processor import incr_processor_fields, IncrProcessorType, init_incr_processor, ChangeEventType
 from itertools import chain
 import cre.dynamic_exec
 
@@ -51,8 +51,11 @@ class Vectorizer(structref.StructRefProxy):
         self._val_types = val_types
         return self
 
-    def apply(self,mem):
+    def transform(self, mem):
         return vectorizer_apply(self, mem)
+
+    def __call__(self, mem):
+        return self.transform(mem)
 
     def get_inv_map(self):
         return get_inv_map(self)
@@ -81,7 +84,7 @@ def vectorizer_apply(self, mem):
 
         # Build the numpy arrays 
         flt_vals = np.empty((len(self.head_to_slot_ind),),dtype=np.float64)
-        nom_vals = np.empty((len(self.head_to_slot_ind),),dtype=np.uint64)
+        nom_vals = np.zeros((len(self.head_to_slot_ind),),dtype=np.uint64)
         for i, fact in enumerate(mem.get_facts(gval_type)):
             flt_vals[self.head_to_slot_ind[fact.head]] = fact.flt
             nom_vals[self.head_to_slot_ind[fact.head]] = fact.nom

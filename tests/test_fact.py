@@ -5,7 +5,7 @@ from cre.fact import (_fact_from_spec, _standardize_spec, _merge_spec_inheritanc
 from cre.context import cre_context
 from cre.memset import MemSet
 from cre.cre_object import CREObjType, copy_cre_obj
-from numba import njit, u8, u1
+from numba import njit, u8, u1, generated_jit
 from numba.typed import List
 from numba.types import ListType
 import cre.dynamic_exec
@@ -411,51 +411,38 @@ def test_getattr():
 
 
 def test_protected_mutability():
-    print("RUNTIME1.")
     with cre_context("test_protected_mutability") as context:
-        print("RUNTIME1.2")
         spec = {"A" : "string", "B" : "number"}
         BOOP = define_fact("BOOP", spec)
-        print("RUNTIME1.3")
         ms = MemSet()
-        print("RUNTIME1")
         b1 = BOOP("A",0)
         b2 = BOOP("B",0)
-        print("RUNTIME1")
         @njit
         def edit_it(b):
             b.B += 1
 
-        print("RUNTIME2")
 
         edit_it(b1)
         edit_it(b2)
         # edit_it.py_func(b2)
-        print("RUNTIME3")
         @njit
         def declare_it(ms,b,name):
             ms.declare(b,name)
 
         declare_it(ms,b1,"b1")
-        print("RUNTIME3.2")
         declare_it.py_func(ms,b2,"b2")
 
-        print("RUNTIMEz")
 
         with pytest.raises(AttributeError):
-            print("RUNTIME_PY")
             edit_it.py_func(b1)
 
         with pytest.raises(AttributeError):
-            print("RUNTIME_PY")
             edit_it.py_func(b2)
 
         with pytest.raises(AttributeError):
-            print("RUNTIME_NB", b1.B)
             edit_it(b1)
 
         with pytest.raises(AttributeError):
-            print("RUNTIME_NB", b1.B)
             edit_it(b1)
 
 from cre.utils import lower_setattr, PrintElapse
@@ -828,17 +815,18 @@ def test_copy():
 
 
 
-with cre_context("_b_boop_ctor_10000"):
-    # def _define_boop():
-    #     with cre_context("_b_boop_ctor_1000"):
-    spec = {"A" : "string", "B" : "number"}
-    BOOP = define_fact("BOOP", spec)
-            # return (BOOP,), {}
-
-    @njit(cache=True)
-    def _b_boop_ctor_10000():
+@generated_jit(cache=True)
+def _b_boop_ctor_10000():
+    with cre_context("_b_boop_ctor_10000"):
+        # def _define_boop():
+        #     with cre_context("_b_boop_ctor_1000"):
+        spec = {"A" : "string", "B" : "number"}
+        BOOP = define_fact("BOOP", spec)
+                # return (BOOP,), {}
+    def impl():
         for i in range(10000):
             b = BOOP("HI",i)
+    return impl
 
     
     # py_b_boop_ctor_100 = py_b_boop_ctor_100.py_func

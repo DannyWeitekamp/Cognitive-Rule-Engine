@@ -27,7 +27,6 @@ import cloudpickle
 import __main__
 
 from cre.context import CREContextDataType, CREContext, ensure_inheritance, cre_context
-from cre.transform import infer_type
 
 
 # from cre.subscriber import BaseSubscriberType
@@ -36,7 +35,7 @@ from cre.fact import Fact, BaseFact, cast_fact, get_inheritance_t_ids
 from cre.tuple_fact import TF, TupleFact
 from cre.fact_intrinsics import fact_lower_setattr
 from cre.utils import CastFriendlyMixin, lower_setattr, _cast_structref, _meminfo_from_struct, decode_idrec, encode_idrec, \
- _raw_ptr_from_struct, _ptr_from_struct_incref,  _struct_from_ptr, _decref_ptr, _decref_structref, _raw_ptr_from_struct_incref, _obj_cast_codegen
+ _raw_ptr_from_struct, _ptr_from_struct_incref,  _struct_from_ptr, _decref_ptr, _decref_structref, _raw_ptr_from_struct_incref, _obj_cast_codegen, _incref_structref
 from cre.vector import new_vector, VectorType
 from cre.caching import import_from_cached, source_in_cache, source_to_cache
 
@@ -160,6 +159,9 @@ class MemSet(structref.StructRefProxy):
             typ = self.context.name_to_type[typ]
         return get_facts(self, typ, no_subtypes)
 
+    def __iter__(self):
+        return iter(self.get_facts())
+
     def iter_facts(self,typ):
         self.context._ensure_retro_registers()
         if(isinstance(typ,str)):
@@ -175,6 +177,9 @@ class MemSet(structref.StructRefProxy):
 
         # Implement .get_fact(idrec)
         return memset_get_fact(self, args[0])
+
+    def get_ptr(self):
+        return get_ptr(self)
 
     def modify(self, fact, attr, val):
         return memset_modify(self,fact, attr, val)
@@ -196,11 +201,15 @@ class MemSet(structref.StructRefProxy):
         from cre.utils import PrintElapse
         # with PrintElapse("__REPR__"):
         return self._repr_helper(repr,**kwargs)
+
+    def free(self):
+        memset_dtor(self)
     
 
     def __del__(self):        
         # NOTE: This definitely has bugs
         try:
+            # pass
             memset_dtor(self)
         except Exception as e:
             # If the process is ending then global variables can be sporatically None
@@ -235,6 +244,9 @@ def get_context_data(self):
 def get_change_queue(self):
     return self.change_queue
 
+@njit(cache=True)
+def get_ptr(self):
+    return _raw_ptr_from_struct(self)
 
 @njit(cache=True)
 def facts_for_t_id(ms,t_id):
@@ -738,7 +750,9 @@ def get_base_types_with_attr(attr):
     for fact_type, parents in context.parents_of.items():
         if(isinstance(fact_type, Fact)):
             base_type = fact_type
+            if(not hasattr(base_type,'spec')): continue
             while(hasattr(base_type,'parent_type') and
+                  hasattr(base_type.parent_type, 'spec') and
                   attr in base_type.parent_type.spec):
                 base_type = base_type.parent_type
             if(attr in base_type.spec and base_type not in base_types):
@@ -752,7 +766,6 @@ vec2_type = Tuple((VectorType,VectorType))
 
 def new_indexer(attr):
     base_types = get_base_types_with_attr(attr)
-    print(base_types)
     return indexer_ctor(base_types, attr)
 
 @generated_jit(cache=True)

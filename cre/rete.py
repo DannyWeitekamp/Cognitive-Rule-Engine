@@ -764,7 +764,7 @@ def update_input_changes(self):
     Updated the input_state structs for each fact in each input and 
     populates for each input the set of removed_inds, changed_inds, and 
     unchanged_inds that are used decide which facts or fact pairs need to 
-    be rechecked in check_matches(). removed_inds consists of those facts  
+    be rechecked in update_matches(). removed_inds consists of those facts  
     that were removed upstream or that are now invalid for this node
     because of a head validation failure (i.e. cannot dereference attribute 
     chains in one of the vars). changed_inds corresponds to facts that
@@ -906,7 +906,7 @@ def update_input_changes(self):
         # print()
 
 # -------------------------------------------
-# : check_matches()
+# : update_matches()
 
 
 @njit(cache=True)
@@ -1004,7 +1004,7 @@ def _update_truth_table(tt, is_match, match_inp_inds, inp_state_i, inp_state_j):
 
 
 @njit(cache=True)
-def check_matches(self):
+def update_matches(self):
     head_ranges = self.op.head_ranges
     n_vars = len(head_ranges)    
     negated = self.lit.negated
@@ -1258,7 +1258,7 @@ def update_node(self):
     #   changed_inds and unchanged_inds of the other. Alpha nodes just check 
     #   the changed_inds. Fills true_count (i.e. number of consistent match pairs)
     #   for each input fact.
-    check_matches(self)    
+    update_matches(self)    
 
     # Ensure that idrecs for facts with true_count > 0 represented in 
     #  outputs. Track removals/changes for updating downstream nodes. 
@@ -1695,6 +1695,7 @@ def match_iter_next_ptrs(m_iter):
         t_id, f_id, _  = decode_idrec(idrec)
         facts = _struct_from_ptr(VectorType, ms.facts[t_id])
         ptrs[i] = facts.data[f_id]
+        # print("END")
     # print("SLOOP")
     return ptrs
 
@@ -1769,16 +1770,29 @@ def count_matching_nodes(ms, conds, match_idrecs, zero_on_fail=False):
             if(node.op is None): continue
             match_inp_ptrs = np.zeros(len(node.op.head_var_ptrs),dtype=np.int64)
             
-            is_match, all_valid = False, True
+            is_match, all_valid, skip = False, True, False
             # Validate
             for i, var_ind in enumerate(node.var_inds):
                 head_ptr_buffers_i = node.head_ptr_buffers[i]
                 head_ranges_i = node.op.head_ranges[i]
                 
                 head_ptrs = np.empty(head_ptr_buffers_i.shape[1],dtype=np.int64)
+
+                #TODO: This function could be called with Exists() or a trucated 
+                # match list... for now just skip.
+                if(var_ind >= len(match_idrecs)):
+                    skip = True
+                    continue 
+
                 idrec = match_idrecs[var_ind]
+                if(idrec == 0):
+                    skip = True
+                    continue
+
+                # print("IDREC", idrec)
                 is_valid = validate_head_or_retract(node, i, idrec, 
                      head_ptrs, head_ranges_i)
+                # print("is_valid", is_valid)
 
                 if(not is_valid):
                     all_valid = False
@@ -1787,6 +1801,7 @@ def count_matching_nodes(ms, conds, match_idrecs, zero_on_fail=False):
                 i_strt, i_len = head_ranges_i[0], head_ranges_i[1]
                 match_inp_ptrs[i_strt:i_strt+i_len] = head_ptrs
 
+            if(skip): continue
             if(all_valid):
                 # Match
                 match_head_ptrs_func = _func_from_address(match_heads_f_type,
@@ -1800,14 +1815,26 @@ def count_matching_nodes(ms, conds, match_idrecs, zero_on_fail=False):
                 return 0
     return n_matches
 
+@njit(MemSetType(ConditionsType, types.optional(MemSetType)), cache=True)
+def _ensure_ms(conds, ms):
+    if(ms is None):
+        if(i8(conds.matcher_inst_ptr) == 0):
+            raise ValueError("Cannot check/score matches on Conditions object without assigned MemSet.")
+        rete_graph = _struct_from_ptr(ReteGraphType, conds.matcher_inst_ptr)
+        return rete_graph.memset
+    return ms
+
+
 @njit(cache=True)
-def score_match(ms, conds, match_idrecs):
+def score_match(conds, match_idrecs, ms=None):
+    ms = _ensure_ms(conds, ms)
     rete_graph = get_graph(ms, conds)
     n_matches = count_matching_nodes(ms, conds, match_idrecs, False)
     return n_matches / rete_graph.n_nodes
 
 @njit(cache=True)
-def check_match(ms, conds, match_idrecs):
+def check_match(conds, match_idrecs, ms=None):
+    ms = _ensure_ms(conds, ms)
     return count_matching_nodes(ms, conds, match_idrecs, True) != 0
 
 

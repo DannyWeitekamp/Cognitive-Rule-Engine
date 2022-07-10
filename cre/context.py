@@ -132,9 +132,12 @@ class CREContext(object):
     def __init__(self,name):
         self.name = name
         self.name_to_type = {**DEFAULT_REGISTERED_TYPES}
+        self.name_to_type.update({str(x): x for x in DEFAULT_REGISTERED_TYPES.values()})
 
-        self.t_id_to_type = list(self.name_to_type.values())
+        self.t_id_to_type = list(DEFAULT_REGISTERED_TYPES.values())
         self.type_to_t_id = {typ:i for i,typ in enumerate(self.t_id_to_type)}
+
+        
 
 
 
@@ -191,6 +194,7 @@ class CREContext(object):
 
         # Fill in the python facing 'name_to_type'
         self.name_to_type[name] = typ
+        self.name_to_type[str(typ)] = typ
 
         # Ensure 't_id_to_type' is long enough. In the case of a retroactive
         #  registration there can be holes so fill with None first then assign t_id
@@ -207,6 +211,7 @@ class CREContext(object):
         inh_t_id = inherit_from.t_id if inherit_from is not None else -1
         ensure_inheritance(self.context_data, t_id, inh_t_id)
         self._assign_name_t_id(name, fact_type, t_id)
+
 
         
         # Dispatcher args of type inherit_from also accept fact_type 

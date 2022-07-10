@@ -5,9 +5,9 @@ from numba.typed import List, Dict
 from numba.types import ListType, DictType, unicode_type
 from cre.memset import MemSet
 from cre.var import Var
-from cre.processing.flattener import Flattener
-from cre.processing.feature_applier import FeatureApplier
-from cre.processing.relative_encoder import _check_needs_rebuild, RelativeEncoder, get_relational_fact_attrs, next_adjacent
+from cre.transform.flattener import Flattener
+from cre.transform.feature_applier import FeatureApplier
+from cre.transform.relative_encoder import _check_needs_rebuild, RelativeEncoder, get_relational_fact_attrs, next_adjacent
 from cre.utils import PrintElapse, deref_info_type
 from cre.fact import define_fact
 from cre.default_ops import Equals
@@ -83,9 +83,9 @@ def setup_encoder_w_heir_state():
         ms.declare(p3)
 
         fl = Flattener((Component,Container,), ms, id_attr="id")
-        flat_ms = fl.apply()
+        flat_ms = fl()
         fa = FeatureApplier([eq_f8,eq_str], flat_ms)
-        feat_ms = fa.apply()
+        feat_ms = fa()
 
         re = RelativeEncoder((Component,Container),ms)
         vs = [Var(Container,'p1'),Var(Container,'p2'),Var(Container,'p3')]
@@ -120,9 +120,9 @@ def setup_update():
         end = TestLL(id="q",value="1")
         ms.declare(end)
         fl = Flattener((TestLL,), in_memset=ms, id_attr="id",)
-        flat_ms = fl.apply()
+        flat_ms = fl()
         fa = FeatureApplier([eq_f8,eq_str], flat_ms)
-        feat_ms = fa.apply()
+        feat_ms = fa()
         re = RelativeEncoder((TestLL,), ms, id_attr="id")
         re.update()
 
@@ -132,8 +132,8 @@ def setup_update():
             ms.declare(new_end)
             end = new_end
 
-        flat_ms = fl.apply()
-        feat_ms = fa.apply()
+        flat_ms = fl()
+        feat_ms = fa()
         # print(l)
         
     return (re,ms,end), {}

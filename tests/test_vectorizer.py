@@ -1,14 +1,15 @@
+import numpy as np
 from numba import njit, f8
 from numba.types import unicode_type, boolean
 from cre.utils import decode_idrec 
 from cre.context import cre_context 
 from cre.memset import MemSet 
-from cre.processing.flattener import Flattener, flattener_update
+from cre.transform.flattener import Flattener, flattener_update
 from cre.fact import define_fact
 import pytest_benchmark
 from cre.default_ops import Equals
-from cre.processing.feature_applier import FeatureApplier
-from cre.processing.vectorizer import Vectorizer
+from cre.transform.feature_applier import FeatureApplier
+from cre.transform.vectorizer import Vectorizer
 from pprint import pprint
 
 
@@ -50,36 +51,92 @@ def test_vectorizer():
         print("-------")
 
         fl = Flattener((BOOP1, BOOP2, BOOP3), ms, id_attr="id")
-        flat_ms = fl.apply()
+        flat_ms = fl()
 
         fa = FeatureApplier([eq_f8, eq_str],flat_ms)
-        feat_ms = fa.apply()
-        print(feat_ms)
+        feat_ms = fa()
+        # print(feat_ms)
         
         facts = feat_ms.get_facts()
+        orig_len = len(facts)
         # for fact in facts:
-        #     print(fact)
+            # print(fact)
         print("LEN", len(facts))
         # print(feat_ms)    
-        print()
+        # print()
 
-        floats, noms = vr.apply(feat_ms)
+        
+        # Make sure that the vector has same size as set of gval facts
+        floats, noms = vr(feat_ms)
 
-        # assert len(noms) == 
+        print(noms)
+
+        assert len(noms) == orig_len
+        assert not np.any(noms == 0)
+
+    
+        # Make sure that there are holes when retract facts
+        ms.retract(c)
+        ms.retract(d)
+
+        flat = fl()
+        feat = fa()
+        floats, noms = vr(feat_ms)
+
+        assert len(noms) == orig_len
+        assert np.any(noms == 0)
+
+        print(noms)
+
+        # Make sure that vectors grow when add new facts
+        ms.declare(BOOP3(id="Z",u="q", v=77, q=16, x=106))
+        ms.declare(BOOP3(id="W",u="q", v=77, q=17, x=108))
+
+        flat = fl()
+        feat = fa()
+        floats, noms = vr(feat_ms)
+
+        print(noms)
+
+        assert len(noms) > orig_len
+        assert np.any(noms == 0)
+
+        # Make sure that if we refill holes with equivalent facts that 
+        #  the vectors' holes are filled
+        ms.declare(BOOP2(id="C",u="3", v=3, q=13))
+        ms.declare(BOOP2(id="D",u="1", v=4, q=13))
+
+        flat = fl()
+        feat = fa()
+        floats, noms = vr(feat_ms)
+
+        print(noms)
+
+        assert len(noms) > orig_len
+        assert not np.any(noms == 0)
+
+
+
+
+        # Make sure that get_inv_map works
         inv_map = vr.get_inv_map()
+
+
+
+
 
         # pprint({k:v for k,v in inv_map.items()})
 
 
-        # continuous, nominal = vr.apply(feat_ms)
+        # continuous, nominal = vr(feat_ms)
         # print(continuous, nominal)
         # return
 
         # ms.retract(c)
         # ms.retract(d)
 
-        # flat_ms = fl.apply()
-        # feat_ms = fa.apply()
+        # flat_ms = fl()
+        # feat_ms = fa()
         # print(flat_ms)
         # print(feat_ms)
         # print(len(feat_ms.get_facts()))
@@ -92,8 +149,8 @@ def test_vectorizer():
         # ms.modify(e, "x", 777)
         # ms.modify(f, "u", "Z")
 
-        # flat_ms = fl.apply()
-        # feat_ms = fa.apply()
+        # flat_ms = fl()
+        # feat_ms = fa()
         # print(flat_ms)
         # print(feat_ms)
         # print(len(feat_ms.get_facts()))

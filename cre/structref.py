@@ -219,7 +219,7 @@ def new(typingctx, struct_type, user_dtor_type=None):
     # user_dtor_py_func = user_dtor_type.dispatcher.py_func
 
     # user_dtor = user_dtor_type.dispatcher.get_compile_result(types.void(inst_type)).entry_point
-    print(user_dtor_res)
+    # print(user_dtor_res)
 
     def codegen(context, builder, signature, args):
         # FIXME: mostly the same as jitclass ctor_impl()

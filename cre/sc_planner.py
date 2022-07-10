@@ -39,6 +39,7 @@ import time
 # Ensure that dynamic hash/eq set
 import cre.dynamic_exec
 import warnings
+from cre.default_ops import Identity
 
 
 '''
@@ -275,11 +276,9 @@ class SetChainingPlanner(structref.StructRefProxy):
         self = sc_planner_ctor(typ)
         register_conversions(self, typ)
         self.curr_infer_depth = 0
-        self.max_depth = 0
         return self
 
     def declare(self, val, var=None):
-        # with PrintElapse("planner_declare"):
         return planner_declare(self, val, var)
 
     def search_for_explanations(self, goal, ops=None,
@@ -452,9 +451,7 @@ def planner_declare_conversion(planner, val, op_or_var, source_ind=None):
     return impl 
 
 
-def try_conv(conv_op, val):
-    print(val)
-    
+def try_conv(conv_op, val):    
     try: 
         conv_val = float(val)    
     except Exception:
@@ -476,7 +473,7 @@ def planner_try_delcare_converison(planner, call_f_type, conv_type, val, conv_op
             # return
 
     # if(ok):
-    print("CONV", val, conv_val)
+    # print("CONV", val, conv_val)
         # planner_declare_conversion(planner, conv_val, conv_op, source_ind)
         
 
@@ -528,21 +525,28 @@ def planner_declare(planner, val, var=None):
         into the 0th depth of a planner instance.'''
 
     val_typ = val    
+    # print(">>", val_typ)
+    # if(hasattr(val_typ, 'spec')): 
+    #     print(">>", val_typ.spec)
     if(isinstance(val_typ, Fact)):
         semantic_visible_attrs = get_semantic_visible_attrs(val_typ)
+        # print(semantic_visible_attrs)
         if(len(semantic_visible_attrs) > 0):
-            # print(semantic_visible_attrs)
-            # print("declare: fact + semantic_visible_attrs")
             # Case 1: Declare the fact and its visible-semantic attributes
             def impl(planner, val, var=None):
                 _var = Var(val_typ) if var is None else var
+
+                # Declare the fact
                 planner_declare_val(planner, val, _var)
                 for tup in literal_unroll(semantic_visible_attrs):
                     fact_type, attr,_ = tup
                     attr_val = fact_lower_getattr(val, attr)
                     attr_var = var_append_deref(_var, attr)
 
+                    # Declare the attribute value
                     ind = planner_declare_val(planner, attr_val, attr_var)
+
+                    # Declare any conversion on the value
                     planner_declare_conversions(planner, attr_val, fact_type, attr, ind)
         else:
             # print("declare: fact only")
@@ -573,20 +577,27 @@ def search_for_explanations(self, goal, ops=None,
     context = cre_context(context)
     g_typ = standardize_type(type(goal), context)
 
-    found_at_depth = query_goal(self, g_typ, goal)
-    depth = 1
+    found_at_depth = query_goal(self, g_typ, goal, min_stop_depth)
+    depth = 0
 
-    while(found_at_depth is None):
-        if(depth < self.curr_infer_depth): continue
-        
-        if(found_at_depth is None or 
-            self.curr_infer_depth < min_stop_depth):
-            forward_chain_one(self,ops)
-            found_at_depth = query_goal(self, g_typ, goal)
-        else:
-            break
+    while((found_at_depth is None or 
+          self.curr_infer_depth < min_stop_depth)
+          and (depth < search_depth)):
+
         depth += 1
-        if(depth > search_depth): break
+        if(depth <= self.curr_infer_depth): continue
+            
+        
+        forward_chain_one(self, ops, min_stop_depth)
+
+        if(depth >= min_stop_depth):
+            found_at_depth = query_goal(self, g_typ, goal, min_stop_depth)
+        # print("<< found_at_depth", goal, depth, found_at_depth)
+            # print("found_at_depth", found_at_depth)
+        # else:
+            # break
+        
+        # if(depth >= search_depth): break
     # print(found_at_depth)
     if(found_at_depth is None):
         return None
@@ -596,16 +607,26 @@ def search_for_explanations(self, goal, ops=None,
 
 
 @generated_jit(cache=True, nopython=True)
-def query_goal(self, typ, goal):
+def query_goal(self, typ, goal, min_stop_depth):
     _typ = typ.instance_type
     dict_typ = DictType(_typ,i8_2x_tuple)
     typ_name = str(_typ)
-    def impl(self, typ, goal):
+    def impl(self, typ, goal, min_stop_depth):
         # vtd_ptr_d = self.val_map
         if(typ_name in self.val_map_ptr_dict):
             val_map = _dict_from_ptr(dict_typ, self.val_map_ptr_dict[typ_name])
             if(goal in val_map):
-                depth, _ = val_map[goal]
+
+                depth, entry_ptr = val_map[goal]
+                if(depth < min_stop_depth):
+                    return None
+
+                # while(depth < min_stop_depth):
+                #     rec, entry_ptr, _ = extract_rec_entry(entry_ptr)
+                #     if(entry_ptr == 0):
+                #         return None
+                #     depth = rec.depth
+
                 return depth
             else:
                 return None
@@ -628,6 +649,7 @@ def insert_record(self, rec, ret_type_name, depth):
         self.forward_records.append(
             Dict.empty(unicode_type, record_list_type)
         )
+
     recs_at_depth = self.forward_records[depth]
     recs = recs_at_depth.get(ret_type_name,
             List.empty_list(SC_RecordType))
@@ -664,14 +686,15 @@ def join_records(self, depth, ops):
 #------------------------------
 # : Forward Chaining
 
-def forward_chain_one(self, ops=None):
+def forward_chain_one(self, ops=None, min_stop_depth=-1):
     '''Applies 'ops' on all current inferred values'''
     nxt_depth = self.curr_infer_depth+1
     if(ops is None): ops = self.ops
     for op in ops:
-        rec = apply_multi(op, self, self.curr_infer_depth)
+        rec = apply_multi(op, self, self.curr_infer_depth, min_stop_depth)
         if(rec is not None):
             insert_record(self, rec, op.return_type_name, nxt_depth)
+
     join_records(self, nxt_depth, ops)
     self.curr_infer_depth = nxt_depth
 
@@ -726,7 +749,7 @@ ret_d_typ = DictType(ret_typ,Tuple((i8,i8)))
     src += f'''N_ARGS = {len(args)}
 ENTRY_WIDTH = 4+N_ARGS
 @njit(cache=True)
-def apply_multi(op_inst, planner, depth):
+def apply_multi(op_inst, planner, depth, min_stop_depth):
 '''
 
     for tn, typ_name in enumerate(typs.keys()):
@@ -757,7 +780,7 @@ val_map_defaults = (-1,0)
         src += f'{c_ind}for i{i} in range(stride[{i}][0],stride[{i}][1]):\n'
         c_ind += ind
         if(i in op.right_commutes):
-            ignore_conds = 'or'.join([f"i{i} > i{j}" for j in op.right_commutes[i]])
+            ignore_conds = ' or '.join([f"i{i} > i{j}" for j in op.right_commutes[i]])
             src += f'{c_ind}if({ignore_conds}): continue\n'
         
 
@@ -772,7 +795,10 @@ v = call({_as})
 
 
 prev_depth, prev_entry = val_map.get(v, val_map_defaults)
-if(prev_depth != -1 and prev_depth < nxt_depth): continue
+if(nxt_depth > min_stop_depth and
+   prev_depth != -1 and
+   prev_depth < nxt_depth):
+    continue
 
 data[d_offset +0] = u4(rec_ptr) # get low bits
 data[d_offset +1] = u4(rec_ptr>>32) # get high bits
@@ -806,7 +832,7 @@ def _assert_prepared(self, typ, typ_name, depth):
         self.val_map_ptr_dict[typ_name] = val_map_ptr
     
 
-def apply_multi(op, planner, depth):
+def apply_multi(op, planner, depth, min_stop_depth=-1):
     '''Applies 'op' at 'depth' and returns the SC_Record'''
 
     # If it doesn't already exist generate and inject '_apply_multi' into 'op'
@@ -825,7 +851,7 @@ def apply_multi(op, planner, depth):
     _assert_prepared(planner, typ, typ_name, depth)
 
     am = getattr(op,'_apply_multi')
-    return am(op,planner,depth)
+    return am(op,planner,depth,min_stop_depth)
 
 #------------------------------------------------------------------
 # : Retracing + Explanation Tree Construction 
@@ -898,7 +924,8 @@ def read_inv_val_map(expl_tree, var_ptr, typ):
     def impl(expl_tree, var_ptr, typ):
         inv_val_map_ptr_dict = expl_tree.inv_val_map_ptr_dict
         inv_val_map = _dict_from_ptr(ivm_typ, inv_val_map_ptr_dict[typ_name])
-        return inv_val_map[var_ptr]
+        out = inv_val_map[var_ptr]
+        return out#inv_val_map[var_ptr]
     return impl
 
 define_boxing(ExplanationTreeTypeClass,ExplanationTree)
@@ -932,9 +959,17 @@ class ExplanationTreeIter():
     def __next__(self):
         op_comp = next(self.gen)
         vals = []
-        for var_ptr, val_typ in zip(op_comp.base_vars, op_comp.signature.args):
-            vals.append(read_inv_val_map(self.expl_tree, var_ptr, val_typ))
-        
+        if(isinstance(op_comp, OpComp)):
+            for var_ptr, val_typ in zip(op_comp.base_vars, op_comp.signature.args):
+                vals.append(read_inv_val_map(self.expl_tree, var_ptr, val_typ))
+        else:
+            var = op_comp
+            # print(var)
+            vals.append(read_inv_val_map(self.expl_tree, var.base_ptr, var.base_type))
+            op_comp = OpComp(Identity(var.head_type), var)
+            # print(op_comp)
+            # raise ValueError()
+
         return op_comp, vals
 
 #----------------------------
@@ -962,9 +997,10 @@ i8_et_dict = DictType(i8,ExplanationTreeType)
 @njit(void(
         i8,
         DictType(unicode_type,i8_et_dict),
-        ExplanationTreeType),
+        ExplanationTreeType,
+        i8),
      cache=True)
-def _fill_arg_inds_from_rec_entries(re_ptr, new_arg_inds, expl_tree):
+def _fill_arg_inds_from_rec_entries(re_ptr, new_arg_inds, expl_tree, retrace_depth):
     '''Goes through linked list of record entries and
         adds the argument indicies into new_arg_inds
         with a new instance of an ExplanationTree if needed.
@@ -973,8 +1009,15 @@ def _fill_arg_inds_from_rec_entries(re_ptr, new_arg_inds, expl_tree):
 
     while(re_ptr != 0):
         re_rec, re_next_re_ptr, re_args = extract_rec_entry(re_ptr)
+
+        # Skip any records that 
+        if(re_rec.depth > retrace_depth and re_rec.depth != 0):
+            re_ptr = re_next_re_ptr
+            continue
+        # print(re_rec.depth, retrace_depth)
         if(re_rec.is_op):
             op = re_rec.op 
+            # print(op, op.arg_type_names, re_ptr, re_next_re_ptr, re_args)
             child_arg_ptrs = List.empty_list(ptr_t, len(re_args))#np.empty(len(re_args), dtype=np.int64)
             for i, (arg_type_name, arg_ind) in enumerate(zip(op.arg_type_names, re_args)):
                 #Make sure a set of indicies has been instantied for 'arg_type_name'
@@ -1002,7 +1045,7 @@ def _fill_arg_inds_from_rec_entries(re_ptr, new_arg_inds, expl_tree):
 
 
 @generated_jit(cache=True, nopython=True) 
-def retrace_arg_inds(planner, typ,  goal_expltree_maps, new_arg_inds=None):
+def retrace_arg_inds(planner, typ,  goal_expltree_maps, retrace_depth, new_arg_inds=None):
     '''Find applications of operations that resulted in each 
         goal in goals. Add the indicies of the args as they
         occur in flat_vals.
@@ -1013,7 +1056,7 @@ def retrace_arg_inds(planner, typ,  goal_expltree_maps, new_arg_inds=None):
     val_map_d_typ = DictType(_typ, i8_2x_tuple) 
     _goal_map_d_typ = DictType(_typ, ExplanationTreeType) 
     typ_name = str(_typ)
-    def impl(planner, typ, goal_expltree_maps, new_arg_inds=None):
+    def impl(planner, typ, goal_expltree_maps, retrace_depth, new_arg_inds=None):
         # print("A")
         if(new_arg_inds is None):
             new_arg_inds = Dict.empty(unicode_type, i8_et_dict)
@@ -1022,14 +1065,15 @@ def retrace_arg_inds(planner, typ,  goal_expltree_maps, new_arg_inds=None):
         # print("B")
         _goal_map = _dict_from_ptr(_goal_map_d_typ, goal_expltree_maps[typ_name])
 
-        # print("C", _goal_map)
+        # print("C", typ_name, _goal_map)
         for goal, expl_tree in _goal_map.items():
             # 're' is the head of a linked list of rec_entries
-            _, entry_ptr = val_map[goal]
+            # if(goal not in val_map): continue
+            depth, entry_ptr = val_map[goal]
             # re = rec_entry_from_ptr(entry_ptr)
             # print("Z", goal, entry_ptr)
             _fill_arg_inds_from_rec_entries(entry_ptr,
-                new_arg_inds, expl_tree)
+                new_arg_inds, expl_tree, retrace_depth)
         # print("D")
         return new_arg_inds
     return impl    
@@ -1045,34 +1089,46 @@ def fill_subgoals_from_arg_inds(planner, arg_inds, typ, depth, new_subgoals):
     def impl(planner, arg_inds, typ, depth, new_subgoals):
         _new_subgoals =  Dict.empty(typ, ExplanationTreeType)
         _arg_inds = arg_inds[typ_name]
+
+        # In the event that we haven't produced flat vals for this 
+        #  type then do it now.
+        if((typ_name, depth) not in planner.flat_vals_ptr_dict):
+            join_records_of_type(planner, depth, _typ)
+
         vals = _list_from_ptr(lst_typ, planner.flat_vals_ptr_dict[(typ_name, depth)])
         for ind, expl_tree in _arg_inds.items():
             _new_subgoals[vals[ind]] = expl_tree
+
         # Inject the new subgoals for 'typ' into 'new_subgoals'
         new_subgoals[typ_name] = _ptr_from_struct_incref(_new_subgoals)
+        # print(">> new: ", typ_name, new_subgoals[typ_name])
         return new_subgoals
     return impl
 
 
-def retrace_goals_back_one(planner, goal_expltree_maps):
-    # print("RETRACE")
+def retrace_goals_back_one(planner, goal_expltree_maps, retrace_depth):
+    # print("\nRETRACE:", goal_expltree_maps, planner.curr_infer_depth)
+    context = cre_context()
+
     new_arg_inds = None
     for typ_name in goal_expltree_maps:
-        # fix later 
-        typ = f8 if typ_name == 'float64' else unicode_type
-        new_arg_inds = retrace_arg_inds(planner, typ, goal_expltree_maps, new_arg_inds)
+        
+        typ = context.name_to_type[typ_name]#f8 if typ_name == 'float64' else unicode_type
+        # print("! gem", typ_name, typ)
+        new_arg_inds = retrace_arg_inds(planner, typ, goal_expltree_maps, retrace_depth, new_arg_inds)
+
+    # print(retrace_depth, "new_arg_inds", {k : list(v) for k,v in new_arg_inds.items()})
     if(len(new_arg_inds) == 0):
         return None
     new_subgoals = _init_subgoal_expltree_maps()
 
     for typ_name in new_arg_inds:
-        # fix later 
-        typ = f8 if typ_name == 'float64' else unicode_type
+        typ = context.name_to_type[typ_name]#f8 if typ_name == 'float64' else unicode_type
+        # print("! nai", typ_name, typ)
         new_subgoals = fill_subgoals_from_arg_inds(
                 planner, new_arg_inds, typ,
                 planner.curr_infer_depth, new_subgoals)
 
-    # print(new_subgoals)
     return new_subgoals
 
 @generated_jit(cache=True)
@@ -1095,16 +1151,24 @@ def _init_subgoal_expltree_maps():
     return Dict.empty(unicode_type, ptr_t)
 
 def build_explanation_tree(planner, g_typ, goal):
+    # print("GOAL: ", goal)
     root, goal_expltree_maps = _init_root_goal_expltree_maps(planner, g_typ, goal)
-    subgoal_expltree_maps = retrace_goals_back_one(planner, goal_expltree_maps)    
-    retrace_depth = planner.curr_infer_depth-1
+    # print("GOAL: ", goal_expltree_maps)
+    retrace_depth = planner.curr_infer_depth
+    subgoal_expltree_maps = retrace_goals_back_one(planner, goal_expltree_maps, retrace_depth)
+    # print("GOAL: ", subgoal_expltree_maps)
+    # print("curr_infer_depth", planner.curr_infer_depth)
     while(subgoal_expltree_maps is not None):
+        # print(retrace_depth)
+        retrace_depth -= 1
+
         # Conversions can cause depth zero to be expanded a second time
         if(retrace_depth < 0): retrace_depth = 0
         #     raise RecursionError("Retrace exceeded current inference depth.")
 
-        subgoal_expltree_maps = retrace_goals_back_one(planner, subgoal_expltree_maps)   
-        retrace_depth -= 1
+        subgoal_expltree_maps = retrace_goals_back_one(planner, subgoal_expltree_maps, retrace_depth)   
+        # print(subgoal_expltree_maps)
+        
     
     return root
 

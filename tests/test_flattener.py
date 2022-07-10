@@ -1,8 +1,8 @@
-from numba import njit
+from numba import njit, types
 from cre.utils import decode_idrec 
 from cre.context import cre_context 
-from cre.memset import MemSet 
-from cre.processing.flattener import Flattener, flattener_update
+from cre.memset import MemSet, MemSetType 
+from cre.transform.flattener import Flattener, flattener_update
 from cre.fact import define_fact
 import pytest_benchmark
 
@@ -44,7 +44,7 @@ def test_flatten():
 
         fl = Flattener((BOOP1, BOOP2, BOOP3), ms, id_attr="A")
         
-        out_ms = fl.apply()
+        out_ms = fl()
         values = flat_ms_vals(out_ms)
         print(out_ms)
         print(values)
@@ -53,7 +53,7 @@ def test_flatten():
         ms.retract(c)
         ms.retract(d)
 
-        out_ms = fl.apply()
+        out_ms = fl()
         values = flat_ms_vals(out_ms)
         print(values)
         assert values == {"A", "B", "E" ,"F", 15., 16., 105.,106.}
@@ -61,7 +61,7 @@ def test_flatten():
         ms.modify(e, "D", 777)
         ms.modify(f, "A", "Z")
 
-        out_ms = fl.apply()
+        out_ms = fl()
         values = flat_ms_vals(out_ms)
         print(values)
         assert values == {"A", "B", "E" ,"Z", 15., 16., 777., 106.}
@@ -70,21 +70,34 @@ def test_flatten():
 
 # with cre_context("flat") as context:
 
-with cre_context("flatten_10000"):
-    spec ={ "A" : {"type" : "string", "visible" : True},
-            "B" : {"type" : "number", "visible" : True}
-          }
-    BOOP = define_fact("BOOP", spec)
-            # return (BOOP,), {}
+# with cre_context("flatten_10000"):
+#     spec ={ "A" : {"type" : "string", "visible" : True},
+#             "B" : {"type" : "number", "visible" : True}
+#           }
+#     BOOP = define_fact("BOOP", spec)
+#     print("INIT SPEC", BOOP.spec)
+#             # return (BOOP,), {}
 
-    @njit(cache=True)
-    def _b_dec_10000(ms):
-        for i in range(10000):
-            b = BOOP("HI",i)
-            ms.declare(b)
+#     @njit(cache=True)
+#     def _b_dec_10000(ms):
+#         for i in range(10000):
+#             b = BOOP("HI",i)
+#             ms.declare(b)
 
 def setup_flatten():
-    with cre_context("flatten_10000"):
+    with cre_context("flatten_10000") as context:
+        spec ={ "A" : {"type" : "string", "visible" : True},
+                "B" : {"type" : "number", "visible" : True}
+          }
+        BOOP = define_fact("BOOP", spec)
+
+        @njit(types.void(MemSetType), cache=True)
+        def _b_dec_10000(ms):
+            for i in range(10000):
+                b = BOOP("HI",i)
+                ms.declare(b)
+
+        print("SPEC:", BOOP.spec)
         ms = MemSet()
         ms.declare(BOOP("HI",-1))
         fl = Flattener((BOOP,),in_memset=ms,id_attr="A",)

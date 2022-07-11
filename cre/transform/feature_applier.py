@@ -308,7 +308,7 @@ def iter_arg_gval_ptrs(self, arg_gval_t_ids):
 
             # print(is_new, inds, lengths, gval_ptrs, okay, arr_is_unique(gval_ptrs))
             if(okay and arr_is_unique(gval_ptrs)):
-                gval_ptrs_seq.append(gval_ptrs)
+                gval_ptrs_seq.append(gval_ptrs.copy())
                 # yield gval_ptrs
     return gval_ptrs_seq
 

@@ -979,3 +979,27 @@ def _struct_tuple_from_pointer_arr(typingctx, struct_types, ptr_arr):
         return context.make_tuple(builder,out_type,vals)
 
     return sig,codegen
+
+# Check for https://github.com/numba/numba/issues/6993
+def check_issue_6993():
+    @njit
+    def foo(b):
+        c = 0
+        for i in range(len(b)):
+            yield i
+            c += 1
+
+    @njit(cache=True)
+    def bar(b):
+        c = 0 
+        for i in foo(b):
+            c += i
+        return c
+
+    @njit(cache=True)
+    def get_list():
+        return List([1,3,4,5])
+
+    lst = get_list() #BOOP("A",5)
+    bar(lst)
+    return lst._opaque.refcount > 1

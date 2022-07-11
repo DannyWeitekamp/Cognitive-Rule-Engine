@@ -3,7 +3,7 @@ from numba import f8, u1, u2, i8, u8, types, njit
 from numba.types import FunctionType, unicode_type, ListType, boolean
 from numba.typed import List
 from numba.extending import  overload, overload_method
-from cre.utils import _load_ptr, _struct_from_ptr, _cast_structref, _raw_ptr_from_struct, _raw_ptr_from_struct_incref, CastFriendlyMixin, decode_idrec, _func_from_address, _incref_structref, _struct_get_data_ptr, _sizeof_type
+from cre.utils import _load_ptr, _struct_from_ptr, _cast_structref, _raw_ptr_from_struct, _raw_ptr_from_struct_incref, CastFriendlyMixin, decode_idrec, _func_from_address, _incref_structref, _struct_get_data_ptr, _sizeof_type, _decref_structref
 from cre.structref import define_structref
 from cre.cre_object import CREObjTypeClass, CREObjType, member_info_type, cre_obj_iter_t_id_item_ptrs
 from numba.core.datamodel import default_manager, models

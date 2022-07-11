@@ -106,7 +106,6 @@ class FeatureApplier(structref.StructRefProxy):
                 feature_applier_clear(self)
                 self._out_memset = MemSet()
                 set_out_memset(self, self._out_memset)
-
         self.update()
         return self._out_memset
 
@@ -173,17 +172,46 @@ def add_op(self, op, gval_t_ids):
 
 ##### Update Functions #####
 
+# @njit(cache=True)
+# def range_product(lengths):
+#     ''' Yields the iteration product from zero to 'lengths' 
+#         (e.g. lengths=(2,2) -> [[0,0],[0,1],[1,0],[1,1]])
+#     ''' 
+#     if(not np.all(lengths)): return
+#     inds = np.zeros((len(lengths),),dtype=np.int64)
+#     max_k = k = len(lengths)-1
+#     done = False
+#     while(not done):
+#         yield inds
+#         # Gets next set of indices holding const_position to const_ind
+#         inds[k] += 1
+#         while(inds[k] >= lengths[k]):
+#             inds[k] = 0
+#             k -= 1
+#             if(k < 0): done = True; break;
+#             inds[k] += 1
+#         k = max_k
+
+# NOTE: Generator based implementation is probably way more efficient 
+#  but causes memleak see numba issue 6993
 @njit(cache=True)
 def range_product(lengths):
     ''' Yields the iteration product from zero to 'lengths' 
         (e.g. lengths=(2,2) -> [[0,0],[0,1],[1,0],[1,1]])
     ''' 
-    if(not np.all(lengths)): return
+    if(not np.all(lengths)): 
+        return np.zeros((0, len(lengths),),dtype=np.int64)
+
+    n_inds = int(np.prod(lengths))
+
     inds = np.zeros((len(lengths),),dtype=np.int64)
+    out = np.zeros((n_inds, len(lengths),),dtype=np.int64)
     max_k = k = len(lengths)-1
     done = False
+    c = 0
     while(not done):
-        yield inds
+        out[c,:] = inds[:]
+        # yield inds
         # Gets next set of indices holding const_position to const_ind
         inds[k] += 1
         while(inds[k] >= lengths[k]):
@@ -192,6 +220,8 @@ def range_product(lengths):
             if(k < 0): done = True; break;
             inds[k] += 1
         k = max_k
+        c += 1
+    return out
 
 
 @njit(cache=True)
@@ -242,7 +272,10 @@ def update_fact_vecs(self):
             new_f_ids.add(f_id)
             new_fact_ptrs.add(in_memset_facts[f_id])
 
-            
+
+i8_arr = i8[::1]
+# NOTE: Generator based implementation is probably way more efficient 
+#  but causes memleak see numba issue 6993
 @njit(cache=True)
 def iter_arg_gval_ptrs(self, arg_gval_t_ids):
     n_args = len(arg_gval_t_ids)
@@ -259,7 +292,7 @@ def iter_arg_gval_ptrs(self, arg_gval_t_ids):
         olds_facts_list.append(old_fact_ptrs)
         facts_lists.append(old_fact_ptrs)
 
-
+    gval_ptrs_seq = List.empty_list(i8_arr)
     for is_new in range_product(2*np.ones(n_args)):
         if(not np.any(is_new)): continue
         for i in range(n_args):
@@ -275,7 +308,9 @@ def iter_arg_gval_ptrs(self, arg_gval_t_ids):
 
             # print(is_new, inds, lengths, gval_ptrs, okay, arr_is_unique(gval_ptrs))
             if(okay and arr_is_unique(gval_ptrs)):
-                yield gval_ptrs
+                gval_ptrs_seq.append(gval_ptrs)
+                # yield gval_ptrs
+    return gval_ptrs_seq
 
 
 @generated_jit(nopython=True)
@@ -347,6 +382,10 @@ def set_in_memset(self, in_memset):
 @njit(MemSetType(GenericFeatureApplierType),cache=True)
 def get_in_memset(self):
     return self.in_memset
+
+@njit(MemSetType(GenericFeatureApplierType),cache=True)
+def get_out_memset(self):
+    return self.out_memset
 
 @njit(types.void(GenericFeatureApplierType,MemSetType),cache=True)
 def set_out_memset(self, out_memset):

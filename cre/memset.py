@@ -35,7 +35,7 @@ from cre.fact import Fact, BaseFact, cast_fact, get_inheritance_t_ids
 from cre.tuple_fact import TF, TupleFact
 from cre.fact_intrinsics import fact_lower_setattr
 from cre.utils import CastFriendlyMixin, lower_setattr, _cast_structref, _meminfo_from_struct, decode_idrec, encode_idrec, \
- _raw_ptr_from_struct, _ptr_from_struct_incref,  _struct_from_ptr, _decref_ptr, _decref_structref, _raw_ptr_from_struct_incref, _obj_cast_codegen, _incref_structref
+ _raw_ptr_from_struct, _ptr_from_struct_incref,  _struct_from_ptr, _decref_ptr, _decref_structref, _raw_ptr_from_struct_incref, _raw_ptr_from_struct, _obj_cast_codegen, _incref_structref
 from cre.vector import new_vector, VectorType
 from cre.caching import import_from_cached, source_in_cache, source_to_cache
 
@@ -59,7 +59,12 @@ memset_fields = {
     "names_to_idrecs" : DictType(unicode_type,u8),
 
     # Vector of change idrecs 
-    "change_queue" : VectorType
+    "change_queue" : VectorType,
+
+    # Placeholder types to ensure that facts and fact vecs are refcounted
+    "all_facts" : ListType(BaseFact),
+
+    "all_vecs" : ListType(VectorType),
 }
 
 @structref.register
@@ -77,6 +82,8 @@ def memset_ctor(context_data):
     st.retracted_f_ids = new_vector(BASE_T_ID_STACK_SIZE)
     st.names_to_idrecs = Dict.empty(unicode_type,u8)
     st.change_queue = new_vector(BASE_CHANGE_QUEUE_SIZE)
+    st.all_facts = List.empty_list(BaseFact)
+    st.all_vecs = List.empty_list(VectorType)
     L = max(len(context_data.parent_t_ids)+1,1)
     expand_mem_set_types(st,L)
     return st
@@ -86,12 +93,19 @@ def expand_mem_set_types(ms, n):
     ''' Expands facts and retracted_f_ids by n.'''
     for i in range(n):
         v = new_vector(BASE_F_ID_STACK_SIZE)    
-        v_ptr = _raw_ptr_from_struct_incref(v)
+        ms.all_vecs.append(v)
+
+        # v_ptr = _raw_ptr_from_struct_incref(v)
+        v_ptr = _raw_ptr_from_struct(v)
         ms.retracted_f_ids.add(v_ptr)
 
         v = new_vector(BASE_FACT_SET_SIZE)    
-        v_ptr = _raw_ptr_from_struct_incref(v)
+        ms.all_vecs.append(v)
+        
+        # v_ptr = _raw_ptr_from_struct_incref(v)
+        v_ptr = _raw_ptr_from_struct(v)
         ms.facts.add(v_ptr)
+
         
 
 @njit(cache=True)
@@ -209,8 +223,8 @@ class MemSet(structref.StructRefProxy):
     def __del__(self):        
         # NOTE: This definitely has bugs
         try:
-            # pass
-            memset_dtor(self)
+            pass
+            # memset_dtor(self)
         except Exception as e:
             # If the process is ending then global variables can be sporatically None
             #   thus skip any TypeError of this sort.
@@ -278,7 +292,7 @@ def make_f_id_empty(ms, t_id, f_id):
     fact_ptr = facts[f_id]
     if(fact_ptr != 0):
         retracted_f_ids_for_t_id(ms,t_id).add(f_id)
-        _decref_ptr(fact_ptr)
+        # _decref_ptr(fact_ptr)
     
     facts[f_id] = 0
 
@@ -337,7 +351,9 @@ def declare_fact(ms, fact):
     '''Declares a fact to a MemSet'''
     
     # Acquire a reference to the fact and get it's t_id
-    fact_ptr = i8(_raw_ptr_from_struct_incref(fact)) #.4ms / 10000
+    # fact_ptr = i8(_raw_ptr_from_struct_incref(fact)) #.4ms / 10000
+    ms.all_facts.append(fact)
+    fact_ptr = i8(_raw_ptr_from_struct(fact)) #.4ms / 10000
     t_id = resolve_t_id(ms, fact)  #.1ms / 10000
     
     # Get the facts Vector for facts with t_id  
@@ -355,7 +371,7 @@ def declare_fact(ms, fact):
         facts.expand()
 
     # Put the fact into facts at f_id. Release any old facts.
-    if(facts.data[f_id] != 0): _decref_ptr(facts.data[f_id])
+    # if(facts.data[f_id] != 0): _decref_ptr(facts.data[f_id])
     facts.set_item_safe(f_id, fact_ptr)
     
     ms.change_queue.add(idrec)

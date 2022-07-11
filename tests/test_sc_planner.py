@@ -353,6 +353,40 @@ def test_mem_leaks(n=5):
                 assert used_bytes() == init_used
 
 
+        BOOP = define_fact("BOOP", {
+            "A" : "string",
+            "B" : {"type": "number", "visible":  True, "semantic" : True}
+        })
+        
+        def declare_em(planner,s="A"):
+            for i in range(n):
+                b = BOOP(s,i)
+                planner.declare(b)
+
+        print("-----")
+        # raise ValueError()
+        for i in range(5):
+
+            planner = SetChainingPlanner([BOOP])
+            declare_em(planner,"A")
+            expl_tree = search_for_explanations(planner, 36.0,
+                ops=ops, search_depth=2, context=context)
+            expl_tree_iter = iter(expl_tree)
+            for op_comp,binding in expl_tree_iter:
+                pass
+
+            planner = None
+            expl_tree = None
+            expl_tree_iter = None
+            if(i == 0): 
+                init_used = used_bytes()
+            else:
+                # print(used_bytes() - init_used)
+                assert used_bytes() == init_used
+
+
+
+
 def test_declare_fact():
     with cre_context("test_declare_fact"):
         # print("vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv")
@@ -707,8 +741,8 @@ if __name__ == "__main__":
     # test_forward_chain_one()
     # test_build_explanation_tree()
     # test_search_for_explanations()
-    test_declare_fact()
-    # test_mem_leaks(n=10)
+    # test_declare_fact()
+    test_mem_leaks(n=10)
     # benchmark_apply_multi()
     # benchmark_retrace_back_one()
         # test_apply_multi()
@@ -717,8 +751,8 @@ if __name__ == "__main__":
     #     print(i)
     # test_declare_fact()
     # test_declare_fact()
-    test_declare_fact_w_conversions()
-    test_min_stop_depth()
+    # test_declare_fact_w_conversions()
+    # test_min_stop_depth()
 # from numba import njit, i8
 # from numba.typed import Dict
 # from numba.types import ListType

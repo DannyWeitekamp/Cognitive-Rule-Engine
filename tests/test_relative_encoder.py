@@ -13,6 +13,8 @@ from cre.fact import define_fact
 from cre.default_ops import Equals
 from cre.context import cre_context
 import cre
+from numba.core.runtime.nrt import rtsys
+import gc
 # v1 = Var(Container).children[0]
 # v2 = Var(Container).children[1]
 # print(v1, v1.deref_infos, v1.deref_infos)
@@ -119,6 +121,9 @@ def setup_update():
         ms = MemSet()
         end = TestLL(id="q",value="1")
         ms.declare(end)
+
+        init_bytes = used_bytes()  
+        
         fl = Flattener((TestLL,), in_memset=ms, id_attr="id",)
         flat_ms = fl()
         fa = FeatureApplier([eq_f8,eq_str], flat_ms)
@@ -126,6 +131,7 @@ def setup_update():
         re = RelativeEncoder((TestLL,), ms, id_attr="id")
         re.update()
 
+        init_bytes = used_bytes()
         for i in range(100):
             new_end = TestLL(str(i),str(i),end)
             ms.modify(end, "prev",new_end)
@@ -134,7 +140,7 @@ def setup_update():
 
         flat_ms = fl()
         feat_ms = fa()
-        # print(l)
+        feat_ms, fa = None, None
         
     return (re,ms,end), {}
 
@@ -157,6 +163,36 @@ def do_encode_rel(ms,feat_ms,fl,fa,re,ps,vs):
     rel_ms = re.encode_relative_to(feat_ms, ps,vs)
 
 
+
+def used_bytes(garbage_collect=True):
+    if(garbage_collect): gc.collect()
+    stats = rtsys.get_allocation_stats()
+    # print(stats)
+    return stats.alloc-stats.free
+
+
+def test_re_mem_leaks():
+    with cre_context("test_re_mem_leaks"):
+        for i in range(5):
+            args, kwargs = setup_update()
+            (re,ms,end) = args
+            first = ms.get_facts()[0]
+
+            print(re._meminfo.refcount)
+            print(ms._meminfo.refcount)
+            print(ms._meminfo.refcount)
+            print(first._meminfo.refcount)
+            print(end._meminfo.refcount)
+
+            if(i == 0):
+                init_bytes = used_bytes()
+            else:
+                print("<<", used_bytes()-init_bytes)
+
+        assert used_bytes()-init_bytes == 0
+        
+
+
 def test_b_rel_enc_update_100x100(benchmark):
     with cre_context("test_relative_encoder"):
         benchmark.pedantic(do_update,setup=setup_update, warmup_rounds=1, rounds=10)
@@ -172,14 +208,16 @@ def test_b_rel_enc_100x100_encode(benchmark):
 
 
 if __name__ == "__main__":
-    np.set_printoptions(linewidth=1000)
-    test_relative_encoder()
-    (re,ms,_), _ = setup_update()
-    with PrintElapse("Elapse"):
-        re.update()
-    with PrintElapse("Elapse 2"):
-        re.update()
+    test_re_mem_leaks()
 
-    (re,ms,_), _ = setup_update_plus_1()
-    with PrintElapse("Elapse_plus 1"):
-        re.update()
+    # np.set_printoptions(linewidth=1000)
+    # test_relative_encoder()
+    # (re,ms,_), _ = setup_update()
+    # with PrintElapse("Elapse"):
+    #     re.update()
+    # with PrintElapse("Elapse 2"):
+    #     re.update()
+
+    # (re,ms,_), _ = setup_update_plus_1()
+    # with PrintElapse("Elapse_plus 1"):
+    #     re.update()

@@ -5,6 +5,8 @@ from cre.memset import MemSet, MemSetType
 from cre.transform.flattener import Flattener, flattener_update
 from cre.fact import define_fact
 import pytest_benchmark
+from numba.core.runtime.nrt import rtsys
+import gc
 
 def flat_ms_vals(flat_ms):
     from cre.gval import gval
@@ -67,6 +69,48 @@ def test_flatten():
         assert values == {"A", "B", "E" ,"Z", 15., 16., 777., 106.}
 
 
+def used_bytes(garbage_collect=True):
+    if(garbage_collect): gc.collect()
+    stats = rtsys.get_allocation_stats()
+    # print(stats)
+    return stats.alloc-stats.free
+
+
+def test_fl_mem_leaks():
+    with cre_context("test_fl_mem_leaks"):
+        spec ={ "A" : {"type" : "string", "visible" : True},
+                "B" : {"type" : "number", "visible" : True}
+          }
+        BOOP = define_fact("BOOP", spec)
+
+        for k in range(5):
+            ms = MemSet()
+            for i in range(10):
+                ms.declare(BOOP(str(i),i))
+
+            fl = Flattener([BOOP],in_memset=ms,id_attr="A")
+            flat_ms = fl(ms)
+            if(k <= 1):
+                init_bytes = used_bytes()
+
+        assert used_bytes()-init_bytes == 0
+
+
+        
+        # print(fl._meminfo.refcount)
+        # fl = None
+        # print("<<", used_bytes()-init_bytes)
+        # print(flat_ms._meminfo.refcount)
+        # flat_ms = None
+        # print("<<", used_bytes()-init_bytes)
+        # print(ms._meminfo.refcount)
+        # ms = None
+        # print("<<", used_bytes()-init_bytes)
+
+
+        # do_update(*args, **kwargs)
+
+        
 
 # with cre_context("flat") as context:
 
@@ -85,24 +129,23 @@ def test_flatten():
 #             ms.declare(b)
 
 def setup_flatten():
-    with cre_context("flatten_10000") as context:
-        spec ={ "A" : {"type" : "string", "visible" : True},
-                "B" : {"type" : "number", "visible" : True}
-          }
-        BOOP = define_fact("BOOP", spec)
+    spec ={ "A" : {"type" : "string", "visible" : True},
+            "B" : {"type" : "number", "visible" : True}
+      }
+    BOOP = define_fact("BOOP", spec)
 
-        @njit(types.void(MemSetType), cache=True)
-        def _b_dec_10000(ms):
-            for i in range(10000):
-                b = BOOP("HI",i)
-                ms.declare(b)
+    @njit(types.void(MemSetType), cache=True)
+    def _b_dec_10000(ms):
+        for i in range(10000):
+            b = BOOP("HI",i)
+            ms.declare(b)
 
-        print("SPEC:", BOOP.spec)
-        ms = MemSet()
-        ms.declare(BOOP("HI",-1))
-        fl = Flattener((BOOP,),in_memset=ms,id_attr="A",)
-        fl.update()
-        _b_dec_10000(ms)
+    print("SPEC:", BOOP.spec)
+    ms = MemSet()
+    ms.declare(BOOP("HI",-1))
+    fl = Flattener((BOOP,),in_memset=ms,id_attr="A",)
+    fl.update()
+    _b_dec_10000(ms)
         
     return (fl,ms), {}
 
@@ -111,11 +154,13 @@ def do_flatten(fl,ms):
     return fl.out_memset
 
 def test_b_flatten_10000(benchmark):
-    benchmark.pedantic(do_flatten,setup=setup_flatten, warmup_rounds=1, rounds=10)
+    with cre_context("flatten_10000") as context:
+        benchmark.pedantic(do_flatten,setup=setup_flatten, warmup_rounds=1, rounds=10)
 
 if(__name__ == "__main__"):
     import faulthandler; faulthandler.enable()
-    test_flatten()
+    test_fl_mem_leaks()
+    # test_flatten()
     # from cre.utils import PrintElapse
     # fl = setup_flatten()[0][0]
     # with PrintElapse("ABC"):

@@ -7,7 +7,8 @@ from cre.utils import (_memcpy_structref, _obj_cast_codegen, ptr_t,
     _raw_ptr_from_struct, _raw_ptr_from_struct_incref, _incref_ptr,
     CastFriendlyMixin, decode_idrec, _func_from_address, _incref_structref,
     _cast_structref, _get_member_offset, _struct_get_data_ptr, _store,
-    _sizeof_type, _load_ptr, _struct_from_ptr, encode_idrec, _decref_ptr, _incref_ptr)
+    _sizeof_type, _load_ptr, _struct_from_ptr, encode_idrec, _decref_ptr, _incref_ptr,
+    _decref_structref, check_issue_6993)
 from cre.structref import define_structref
 from numba.core.datamodel import default_manager, models
 from numba.core import cgutils
@@ -487,6 +488,10 @@ def cre_obj_set_item(obj, index, val):
     return impl
 
 
+# np_t_id_item_ptrs_type = np.dtype([('t_id', np.uint16),  ('m_id', np.uint16), ('ptr', np.int64)])
+# t_id_item_ptrs = numba.from_dtype(np_t_id_item_ptrs_type)
+
+has_not_fixed_6993 = check_issue_6993()
 
 @njit(cache=True)
 def cre_obj_iter_t_id_item_ptrs(x):
@@ -494,10 +499,19 @@ def cre_obj_iter_t_id_item_ptrs(x):
     data_ptr = _struct_get_data_ptr(x)
     member_info_ptr = data_ptr + x.chr_mbrs_infos_offset
 
+    # NOTE: Using as generator causes memory leak
     for i in range(x.num_chr_mbrs):
         t_id, m_id, member_offset = _load_ptr(member_info_type, member_info_ptr)
         yield t_id, m_id, data_ptr + member_offset
         member_info_ptr += _sizeof_type(member_info_type)
+
+    if(has_not_fixed_6993):
+        _decref_structref(x)
+
+
+
+
+
 
 @njit(cache=True)
 def cre_obj_get_member_t_ids(x):
@@ -517,7 +531,6 @@ def asa(self, typ):
     return impl
 
 
-# from cre.utils import _raw_ptr_from_struct, _struct_from_ptr, _store, _cast_structref, decode_idrec, encode_idrec, _incref_ptr, _load_ptr
 @generated_jit(cache=True,nopython=True)
 def copy_cre_obj(fact):
     fact_type = fact
@@ -527,17 +540,24 @@ def copy_cre_obj(fact):
 
         t_id, _, _ = decode_idrec(a.idrec)
         b.idrec = encode_idrec(t_id,0,u1(-1))
-        for info_a, info_b in zip(cre_obj_iter_t_id_item_ptrs(a),cre_obj_iter_t_id_item_ptrs(b)):
+        for info_a in cre_obj_iter_t_id_item_ptrs(a):
             t_id_a, m_id_a, data_ptr_a = info_a
-            t_id_b, m_id_b, data_ptr_b = info_b
+            # t_id_b, m_id_b, data_ptr_b = info_b
 
-            if(m_id_b != PRIMITIVE_MBR_ID):
+            if(m_id_a != PRIMITIVE_MBR_ID):
                 obj_ptr = _load_ptr(i8, data_ptr_a)
                 _incref_ptr(obj_ptr)
             elif(t_id_a == T_ID_STR):
                 s = _load_ptr(unicode_type, data_ptr_a)
                 _incref_structref(s)
                 #_store(unicode_type, data_ptr_b, s)
+
+        # Weird extra refcounts... as much as 4 extra if call cre_obj_iter_t_id_item_ptrs
+        #  on the new_fact
+        _decref_structref(new_fact)
+        # _decref_structref(new_fact)
+        # _decref_structref(new_fact)
+        # _decref_structref(new_fact)
 
         return new_fact
     return impl

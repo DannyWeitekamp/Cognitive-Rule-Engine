@@ -8,6 +8,9 @@ import pytest_benchmark
 from cre.default_ops import Equals
 from cre.transform.flattener import Flattener, flattener_update
 from cre.transform.feature_applier import FeatureApplier
+from numba.core.runtime.nrt import rtsys
+import gc
+from cre.cre_object import copy_cre_obj
 
 
 eq_f8 = Equals(f8, f8)
@@ -130,6 +133,37 @@ def do_feat_apply(fa,ms):
     fa.update()
     return fa.out_memset
 
+
+def used_bytes(garbage_collect=True):
+    if(garbage_collect): gc.collect()
+    stats = rtsys.get_allocation_stats()
+    # print(stats)
+    return stats.alloc-stats.free
+
+def test_fa_mem_leaks():
+    with cre_context("test_fa_mem_leaks"):
+        spec ={ "A" : {"type" : "string", "visible" : True},
+            "B" : {"type" : "number", "visible" : True}
+              }
+        BOOP = define_fact("BOOP", spec)
+
+        for k in range(5):
+            ms = MemSet()
+            for i in range(20):
+                ms.declare(BOOP(str(i),i))
+
+            fl = Flattener((BOOP,),ms,id_attr="A")
+            flat_ms = fl()
+            fa = FeatureApplier([eq_f8,eq_str],flat_ms)
+            feat_ms = fa()
+
+            if(k <= 1):
+                init_bytes = used_bytes()
+            else:
+                print("<<", used_bytes()-init_bytes)
+
+        assert used_bytes()-init_bytes == 0
+
 def test_b_feat_apply_100x100(benchmark):
     with cre_context("feat_apply_100x100"):
         benchmark.pedantic(do_feat_apply,setup=setup_feat_apply_100x100, warmup_rounds=1, rounds=10)
@@ -138,8 +172,9 @@ def test_b_feat_apply_100x100(benchmark):
 
 if(__name__ == "__main__"):
     import faulthandler; faulthandler.enable()
+    test_fa_mem_leaks()
     # test_product_iter_w_const()
-    test_feature_apply()
+    # test_feature_apply()
     # with PrintElapse("elapse"):
     #     do_feat_apply(*setup_feat_apply_100x100()[0])
     # with PrintElapse("elapse"):

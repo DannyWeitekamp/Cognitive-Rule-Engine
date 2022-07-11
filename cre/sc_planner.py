@@ -399,7 +399,9 @@ def planner_declare_val(planner, val, op_or_var):
 
         # And associate the var_ptr with val in inv_val_map
         inv_val_map[var_ptr] = val
-        return len(flat_vals)-1
+
+        # TODO: Find something faster than this
+        return flat_vals.index(val)#len(flat_vals)-1
     return impl 
 
 @generated_jit(cache=True,nopython=True)
@@ -1009,6 +1011,7 @@ def _fill_arg_inds_from_rec_entries(re_ptr, new_arg_inds, expl_tree, retrace_dep
 
     while(re_ptr != 0):
         re_rec, re_next_re_ptr, re_args = extract_rec_entry(re_ptr)
+        # print("REARGS", re_args, re_next_re_ptr)
 
         # Skip any records that 
         if(re_rec.depth > retrace_depth and re_rec.depth != 0):
@@ -1065,16 +1068,17 @@ def retrace_arg_inds(planner, typ,  goal_expltree_maps, retrace_depth, new_arg_i
         # print("B")
         _goal_map = _dict_from_ptr(_goal_map_d_typ, goal_expltree_maps[typ_name])
 
-        # print("C", typ_name, _goal_map)
+        # print("Retrace", retrace_depth, typ_name, ":", _goal_map)
         for goal, expl_tree in _goal_map.items():
             # 're' is the head of a linked list of rec_entries
             # if(goal not in val_map): continue
             depth, entry_ptr = val_map[goal]
+            # print(goal, entry_ptr)
             # re = rec_entry_from_ptr(entry_ptr)
             # print("Z", goal, entry_ptr)
             _fill_arg_inds_from_rec_entries(entry_ptr,
                 new_arg_inds, expl_tree, retrace_depth)
-        # print("D")
+        # print("Arg Inds:", new_arg_inds)
         return new_arg_inds
     return impl    
 

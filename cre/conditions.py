@@ -1211,8 +1211,6 @@ def get_possible_remap_inds(a_ind_set, b_ind_set, n_a, n_b):
     num_remaps_per_a = poss_remap_matrix.sum(axis=1)
     num_remaps_per_b = poss_remap_matrix.sum(axis=0)
 
-    print("<<", num_remaps_per_a, num_remaps_per_b)
-
     n_possibilities = 1
     for n_remaps in num_remaps_per_a:
         if(n_remaps != 0): n_possibilities *= n_remaps
@@ -1263,8 +1261,6 @@ def get_possible_remap_inds(a_ind_set, b_ind_set, n_a, n_b):
         remaps[c, :] = remap_inds
         c += 1
     
-    print("len(remaps)", len(remaps))
-
     return remaps
 
 

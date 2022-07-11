@@ -609,6 +609,31 @@ def test_min_stop_depth():
 
 
 
+def test_non_numerical_vals():
+    with cre_context("test_min_stop_depth"):
+        BOOP = define_fact("BOOP", {
+            "A" : str,
+            "B" : {"type": str, "visible":  True,
+                 "semantic" : True, 'conversions' : {float : CastFloat}}
+        })
+        from cre.default_ops import Add, Multiply
+        Add_f8 = Add(f8, f8)
+
+        planner = SetChainingPlanner([BOOP])
+        planner.declare(BOOP("A",'1'))
+        planner.declare(BOOP("B",'+'))
+        planner.declare(BOOP("C",'1'))
+
+        print(summarize_depth_vals(planner,BOOP, 0))
+        print(summarize_depth_vals(planner,unicode_type, 0))
+        print(summarize_depth_vals(planner,f8, 0))
+
+        expls = planner.search_for_explanations(2.0, ops=[Add_f8], 
+            search_depth=1)
+
+        for i, (op_comp, binding) in enumerate(expls):
+            print(op_comp, binding)
+
 
 
 
@@ -723,7 +748,7 @@ def product_of_generators(generators):
 if __name__ == "__main__":
     # Makes it easier to track down segfaults
     import faulthandler; faulthandler.enable()
-
+    test_non_numerical_vals()
     # with PrintElapse("test_build_explanation_tree"):
     #     test_build_explanation_tree()
     # with PrintElapse("test_build_explanation_tree"):
@@ -742,7 +767,7 @@ if __name__ == "__main__":
     # test_build_explanation_tree()
     # test_search_for_explanations()
     # test_declare_fact()
-    test_mem_leaks(n=10)
+    # test_mem_leaks(n=10)
     # benchmark_apply_multi()
     # benchmark_retrace_back_one()
         # test_apply_multi()

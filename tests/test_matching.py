@@ -186,7 +186,7 @@ def test_check_and_score_match():
 
         match =[bps[9], bps[7]]
         assert conds.check_match(match, ms) == False
-        assert conds.score_match(match, ms) == 0.0
+        assert conds.score_match(match, ms) == 2./3
 
         conds = a & b & c & (a.name != "7") & (a.val < b.val) & (b.val < c.val)
 
@@ -196,15 +196,15 @@ def test_check_and_score_match():
 
         match =[bps[7], bps[8],bps[9]]
         assert conds.check_match(match, ms) == False
-        assert conds.score_match(match, ms) == 2./3
+        assert conds.score_match(match, ms) == 5./6
 
         match =[bps[8], bps[0],bps[9]]
         assert conds.check_match(match, ms) == False
-        assert conds.score_match(match, ms) == 2./3
+        assert conds.score_match(match, ms) == 5./6
 
         match =[bps[9], bps[4],bps[0]]
         assert conds.check_match(match, ms) == False
-        assert conds.score_match(match, ms) == 1./3
+        assert conds.score_match(match, ms) == 4./6
 
 
 def test_multiple_deref():

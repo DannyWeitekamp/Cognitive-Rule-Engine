@@ -534,9 +534,9 @@ def build_rete_graph(ms, c):
             # Short circut the input to the output for identity nodes
             if(node.lit is None):
                 node.outputs = node.inputs
-            # Only proper nodes contribute to total node count
-            else:
-                n_nodes += 1
+            
+
+            n_nodes += 1
 
             # Make this node the new end node for the vars it takes as inputs
             for var_ind in node.var_inds:
@@ -1492,10 +1492,11 @@ def new_match_iter(graph):
 def repr_match_iter_dependencies(m_iter):
     rep = ""
     for i, m_node in enumerate(m_iter.iter_nodes):
-        s = f'({str(m_node.var_ind)}'
+        s = f'({str(m_node.node.lit.op.base_vars[m_node.associated_arg_ind].alias)}'
         for j, dep_m_node_ind in enumerate(m_node.dep_m_node_inds):
             dep_m_node = m_iter.iter_nodes[dep_m_node_ind]
-            s += f",dep={str(dep_m_node.var_ind)}"
+            # s += f",dep={str(dep_m_node.var_ind)}"
+            s += f",dep={str(dep_m_node.node.lit.op.base_vars[dep_m_node.associated_arg_ind].alias)}"
         s += f")"
 
         rep += s
@@ -1529,22 +1530,38 @@ def update_from_upstream_match(m_iter, m_node):
         
         # Determine the index of the fixed downstream match within this node
         if(_raw_ptr_from_struct(m_node.node) == _raw_ptr_from_struct(dep_node)):
+
             # If they happen to represent the same graph node then get from match_inp_inds
             other_output = m_node.node.outputs[dep_m_node.associated_arg_ind]
+            # print("Z",other_output.match_inp_inds, dep_m_node.curr_ind)
+            if(dep_m_node.curr_ind >= len(other_output.match_inp_inds)):
+                m_node.idrecs = np.empty((0,), dtype=np.uint64)
+                return
+
             fixed_intern_ind = other_output.match_inp_inds[dep_m_node.curr_ind]
 
         # Otherwise we need to use the 'idrecs_to_inds' map
         else:
             # Extract the idrec for the current fixed dependency value in dep_m_node
+            # print("&&", dep_m_node.var_ind, dep_m_node.m_node_ind, dep_m_node.node.lit, np.array([decode_idrec(x)[1] for x in dep_m_node.idrecs]))
             dep_idrec = dep_m_node.idrecs[dep_m_node.curr_ind]
 
-            # Use idrecs_to_inds to find the index of the fixed value in dep_node. 
-            fixed_intern_ind = dep_node.inputs[dep_arg_ind].idrecs_to_inds[dep_idrec]
+            # Use idrecs_to_inds to find the index of the fixed value in dep_node.
+            dn_idrecs_to_inds = dep_node.inputs[dep_arg_ind].idrecs_to_inds
+
+            # If failed to retrieve then idrecs for this node should be empty
+            if(dep_idrec not in dn_idrecs_to_inds):
+                m_node.idrecs = np.empty((0,), dtype=np.uint64)
+                return
+            
+            # print("BEF", decode_idrec(dep_idrec)[1], dep_arg_ind)
+            # for sdifojsdf in dep_node.inputs[dep_arg_ind].idrecs_to_inds:
+            #     print("-", decode_idrec(sdifojsdf)[1])
+            fixed_intern_ind = dn_idrecs_to_inds[dep_idrec]
 
         fixed_var = _struct_from_ptr(GenericVarType, dep_node.lit.var_base_ptrs[dep_arg_ind])
         fixed_idrec = dep_node.input_state_buffers[dep_arg_ind][fixed_intern_ind].idrec
-
-        # print("\tFixed:",  fixed_var.alias, "==", decode_idrec(fixed_idrec)[1])#m_iter.graph.memset.get_fact(fixed_idrec))
+        # print("\tFixed:",  fixed_var.alias, dep_m_node.curr_ind, "==", decode_idrec(fixed_idrec)[1])#m_iter.graph.memset.get_fact(fixed_idrec))
         
         # Consult the dep_node's truth_table to fill 'idrecs'.
         inp_states = dep_node.input_state_buffers[assoc_arg_ind]        
@@ -1583,6 +1600,8 @@ def update_from_upstream_match(m_iter, m_node):
         else:
             m_node.idrecs = idrecs
 
+
+
     
     # If multiple dependencies copy remaining contents of idrecs_set into an array.
     if(multiple_deps):
@@ -1590,6 +1609,8 @@ def update_from_upstream_match(m_iter, m_node):
         for i, idrec in enumerate(idrecs_set):
             idrecs[i] = idrec
         m_node.idrecs = idrecs
+
+    # print("!!", m_node.var_ind, m_node.m_node_ind, m_node.node.lit, ".idrecs ->", np.array([decode_idrec(x)[1] for x in m_node.idrecs]))
     # return idrecs
 
         # print("Update", m_node.node.lit, m_node.node.var_inds[assoc_arg_ind],
@@ -1655,6 +1676,10 @@ def match_iter_next_idrecs(m_iter):
             if(most_upstream_overflow == 0):
                 m_iter.is_empty = True
 
+        # Note: Keep these prints for debugging
+        # print("<< it: ", np.array([y.curr_ind for y in m_iter.iter_nodes]))        
+        # print("<< lens", np.array([len(m_iter.iter_nodes[i].idrecs) for i in range(n_vars)]))    
+
         # Starting with the most upstream overflow and moving downstream set m_node.idrecs
         #  to be the set of idrecs consistent with its upstream dependencies.
         idrec_sets_are_nonzero = True
@@ -1665,12 +1690,7 @@ def match_iter_next_idrecs(m_iter):
             if(len(m_node.dep_m_node_inds)):
                 update_from_upstream_match(m_iter, m_node)
 
-            if(len(m_node.idrecs) == 0): idrec_sets_are_nonzero = False;
-
-        # Note: Keep these prints for debugging
-        # print("<< it: ", np.array([y.curr_ind for y in m_iter.iter_nodes]))        
-        # print("<< lens", np.array([len(m_iter.iter_nodes[i].idrecs) for i in range(n_vars)]))    
-
+            if(len(m_node.idrecs) == 0): idrec_sets_are_nonzero = False;        
         # If each m_node has a non-zero idrec set we can yield a match
         #  otherwise we need to keep iterating
         if(idrec_sets_are_nonzero): break
@@ -1719,20 +1739,42 @@ def fact_ptrs_as_tuple(typs, ptr_arr):
 
 @njit(cache=True)
 def get_graph(ms, conds):
+    needs_new_graph = False
+
     if(i8(conds.matcher_inst_ptr) == 0):
-        rete_graph = build_rete_graph(ms, conds)
-        conds.matcher_inst_ptr = _ptr_from_struct_incref(rete_graph)
-    rete_graph = _struct_from_ptr(ReteGraphType, conds.matcher_inst_ptr)
-    return rete_graph
+        needs_new_graph = True
+    else:
+        graph = _struct_from_ptr(ReteGraphType, conds.matcher_inst_ptr)
+        if(_raw_ptr_from_struct(ms) != _raw_ptr_from_struct(graph.memset)):
+            needs_new_graph = True
+
+    # if(needs_new_graph):
+    graph = build_rete_graph(ms, conds)
+    conds.matcher_inst_ptr = _ptr_from_struct_incref(graph)
+    # else:
+        # raise ValueError("THIS SHOULDN't HAPPEN")
+    # graph = _struct_from_ptr(ReteGraphType, conds.matcher_inst_ptr)
+
+    # if(_raw_ptr_from_struct(ms) != _raw_ptr_from_struct(graph.memset)):
+    #     graph.memset = ms
+    #     for lst in graph.nodes_by_nargs:
+    #         for node in lst:
+    #             node.memset = ms
+    return graph
 
 
 @njit(GenericMatchIteratorType(MemSetType, ConditionsType), cache=True)
 def get_match_iter(ms, conds):
+
+
     # print("START", conds.matcher_inst_ptr)
     rete_graph = get_graph(ms, conds)
+
     update_graph(rete_graph)
     # print("UPDATED")
     m_iter = new_match_iter(rete_graph)
+
+    # print("DEPS:", repr_match_iter_dependencies(m_iter))
     # print("NEW MATCH ITER")
     for i in range(len(m_iter.iter_nodes)):
         m_node = m_iter.iter_nodes[i]
@@ -1767,7 +1809,9 @@ def count_matching_nodes(ms, conds, match_idrecs, zero_on_fail=False):
     n_matches = 0
     for lst in rete_graph.nodes_by_nargs:
         for node in lst:
-            if(node.op is None): continue
+            if(node.op is None):
+                n_matches += 1
+                continue
             match_inp_ptrs = np.zeros(len(node.op.head_var_ptrs),dtype=np.int64)
             
             is_match, all_valid, skip = False, True, False
@@ -1796,7 +1840,6 @@ def count_matching_nodes(ms, conds, match_idrecs, zero_on_fail=False):
 
                 if(not is_valid):
                     all_valid = False
-                    continue
 
                 i_strt, i_len = head_ranges_i[0], head_ranges_i[1]
                 match_inp_ptrs[i_strt:i_strt+i_len] = head_ptrs
@@ -1835,6 +1878,9 @@ def score_match(conds, match_idrecs, ms=None):
 @njit(cache=True)
 def check_match(conds, match_idrecs, ms=None):
     ms = _ensure_ms(conds, ms)
+    rete_graph = get_graph(ms, conds)
+    #TODO to make sure checking types
+
     return count_matching_nodes(ms, conds, match_idrecs, True) != 0
 
 

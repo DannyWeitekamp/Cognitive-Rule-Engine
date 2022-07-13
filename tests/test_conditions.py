@@ -346,6 +346,24 @@ def test_anti_unify():
 
     assert str(c12) == str(c12_ref)
     assert score == 8./9.
+
+    c1 = (x < y) & (y < z) & (y < z) & (z != x) & (y != 0) 
+    c2 = (x < y) & (z < y) & (z < y) & (x != z) & (z != 0) 
+    c12_ref = (x < y)
+
+    c12, score = c1.antiunify(c2, return_score=True, fix_same_var=True) #conds_antiunify(c1,c2)
+    assert str(c12) == str(c12_ref)
+    assert score == 1./5.
+
+    X, Y, Z = Var(f8,'x'), Var(f8,'y'), Var(f8,'z')
+
+    c1 = (x < y) & (y < z) & (y < z) & (z != x) & (y != 0) 
+    c2 = (X < Y) & (Z < Y) & (Z < Y) & (X != Z) & (Z != 0) 
+    c12_ref = (x < y)
+
+    c12, score = c1.antiunify(c2, return_score=True, fix_same_alias=True) #conds_antiunify(c1,c2)
+    assert str(c12) == str(c12_ref)
+    assert score == 1./5.
     
 
 if(__name__ == "__main__"):

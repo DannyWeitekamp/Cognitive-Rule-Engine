@@ -42,8 +42,14 @@ import numpy as np
 SPECIAL_SPEC_ATTRIBUTES = ["inherit_from"]
 
 class Fact(CREObjTypeClass):
-    def __init__(self, fields):
+    def __init__(self, name, fields, hash_code=None):
+        if(hash_code is None):
+            hash_code = unique_hash([name,fields])
         super(Fact, self).__init__(fields)
+    
+        # Sets the numba type name. Using hash_code is much shorter
+        #  and thus more readable than using the fields dict.        
+        self.name = f'{name}_{hash_code}'
 
     def __str__(self):
         if(hasattr(self, '_fact_name')):
@@ -188,8 +194,8 @@ def call_untyped_fact(self, **kwargs):
 from numba.core.typing.typeof import typeof
 class UntypedFact(Fact):
     specializations = {}
-    def __init__(self, fields):
-        super(UntypedFact, self).__init__(fields)
+    def __init__(self, name, fields, hash_code=None):
+        super(UntypedFact, self).__init__(name, fields, hash_code)
     def __call__(self, *args, **kwargs):
         if(len(kwargs) == 0):
             return signature(self,*args)
@@ -548,10 +554,22 @@ class FactProxy(CREObjProxy):
         return isa(self,typ)
 
     def asa(self, typ):
+    #     instance = typ.__new__(CREObjProxy)
+    #     instance._type = typ
+    #     instance._meminfo = self._meminfo
+    #     return instance
         return asa(self,typ)
 
     def __repr__(self):
         return str(self)
+
+    # def __eq__(self, other):
+    #     from cre.dynamic_exec import fact_eq
+    #     return fact_eq(self.asa(CREObjType), other.asa(CREObjType))
+
+    # def __hash__(self):
+    #     from cre.dynamic_exec import fact_hash
+    #     return fact_hash(self.asa(CREObjType))
 
 
 def gen_fact_import_str(t):
@@ -786,11 +804,12 @@ from cre.cre_object import member_info_type, set_chr_mbrs
 attr_offsets = np.array({attr_offsets!r},dtype=np.int16)
 inheritance_bytes = tuple({"list(parent_inh_bytes) + [u1(0)] + " if inherit_from else ""}list(uint_to_inheritance_bytes({t_id}))) 
 num_inh_bytes = len(inheritance_bytes)
+hash_code = '{hash_code}'
 
 @_register_fact_structref
 class {typ}Class({"UntypedFact" if is_untyped else "Fact"}):
-    def __init__(self,*args,**kwargs):
-        super().__init__(*args,**kwargs)
+    def __init__(self, fields, hash_code=None):
+        super().__init__('{typ}', fields, hash_code)
         self._fact_name = '{typ}'
         self.t_id = {t_id}
         self._attr_offsets = attr_offsets
@@ -800,7 +819,7 @@ class {typ}Class({"UntypedFact" if is_untyped else "Fact"}):
     
 
 field_list = cloudpickle.loads({cloudpickle.dumps(all_fields)})
-{typ} = fact_type = {typ}Class(field_list)
+{typ} = fact_type = {typ}Class(field_list, hash_code)
 {typ}_w_mbr_infos = {typ}Class(field_list+
 [("chr_mbrs_infos", UniTuple(member_info_type,{len(fields)})),
  ("num_inh_bytes", u1),

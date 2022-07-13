@@ -12,6 +12,7 @@ import shutil
 
 #Snatch AppDirs from numba numba and find the cache dir
 from numba.misc.appdirs import AppDirs
+from base64 import b64encode
 
 #Resolve the location of the cache_dir
 appdirs = AppDirs(appname="cre", appauthor=False)
@@ -80,7 +81,13 @@ def update_unique_hash(m,obj):
 def unique_hash(stuff,hash_func='sha256'):
 	m = hashlib.new(hash_func)
 	update_unique_hash(m,stuff)	
-	return m.hexdigest()
+	# return m.hexdigest()
+
+	# Encode in base64 map the usual altchars '/' and "+' to 'A' and 'B".
+	s = b64encode(m.digest(),altchars=b'AB').decode('utf-8')
+	# Strip the trailing '='.
+	s = s[:-1]
+	return s
 
 def get_cache_path(name,hsh=None,suffix=".py"):
 	if(hsh is None):

@@ -193,7 +193,7 @@ class TupleFactClass(Fact):
         if(len(args)==1 and isinstance(args[0],(list,tuple))):
             fields = args[0]
             self = super().__new__(cls)
-            super().__init__(self,fields)
+            super().__init__(self,'TupleFact',fields)
             return self
 
         else:

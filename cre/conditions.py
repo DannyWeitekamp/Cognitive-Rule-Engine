@@ -2,7 +2,7 @@ import operator
 import numpy as np
 from numba import types, njit, f8, i8, u8, i4, u1, i8, i2, u2, literally, generated_jit
 from numba.typed import List, Dict
-from numba.types import ListType, DictType, unicode_type, void, Tuple, UniTuple, optional
+from numba.types import ListType, DictType, unicode_type, void, Tuple, UniTuple, optional, boolean
 from numba.experimental import structref
 from numba.experimental.structref import new, define_boxing, define_attributes, _Utils
 from numba.extending import lower_cast, overload_method, intrinsic, overload_attribute, intrinsic, lower_getattr_generic, overload, infer_getattr, lower_setattr_generic, SentryLiteralArgs
@@ -306,8 +306,10 @@ class Conditions(structref.StructRefProxy):
         idrecs = np.array([x.idrec for x in match],dtype=np.uint64)
         return score_match(self, idrecs, ms)
 
-    def antiunify(self, other, return_score=False, normalize='left'):
-        return conds_antiunify(self, other, return_score, normalize) 
+    def antiunify(self, other, return_score=False, normalize='left',
+         fix_same_var=False, fix_same_alias=False):
+        return conds_antiunify(self, other, return_score, normalize,
+                    fix_same_var, fix_same_alias) 
     
     @property
     def var_base_types(self):
@@ -1190,13 +1192,17 @@ def remap_is_valid(remap, poss_remaps):
         poss_remaps[i, j]
 
 @njit(cache=True, locals={"remaps":i2[:,::1]})
-def get_possible_remap_inds(a_ind_set, b_ind_set, n_a, n_b):
+def get_possible_remap_inds(a_ind_set, b_ind_set, n_a, n_b, a_fixed_inds):
     ''' Given arrays of var indicies corresponding to a common type of literal (e.g. (x<y) & (a<b))
         between Conditions A and B. Generate all possible remappings of variables in 
         A to variables in B. Each remapping is represented by an array of indices 
         of variables in B. For example if A has vars {a,b,c} and B has vars {x,y,z}
         then the remapping [a,b,c] -> [y,z,x] is represented as [1,2,0]. Unresolved
         vars are represented as -1. For example [a,b,-] -> [y,x,-] is represented as [1,0,-1]
+
+        a_ind_set/b_ind_set : arrays of single or paired indicies associated with each literal
+        n_a/n_b: the number of variables in A and B respectively
+        a_fixed_inds : for each var in A var indicies in B that they are certain to map to.
     '''
 
     # Produce a boolean matrix identifying feasible remapping pairs
@@ -1205,14 +1211,19 @@ def get_possible_remap_inds(a_ind_set, b_ind_set, n_a, n_b):
         for b_base_inds in b_ind_set:
             if(len(a_base_inds) == len(b_base_inds)):
                 for ind_a, ind_b in zip(a_base_inds, b_base_inds):
+                    # print(a_fixed_inds, ind_a)
+                    # if(a_fixed_inds[ind_a] == -1 or a_fixed_inds[ind_a] == ind_b):
                     poss_remap_matrix[ind_a, ind_b] = True
 
     # The marginal sums, i.e. number of remappings of each varibles in A and B, respectively
     num_remaps_per_a = poss_remap_matrix.sum(axis=1)
-    num_remaps_per_b = poss_remap_matrix.sum(axis=0)
+    # num_remaps_per_b = poss_remap_matrix.sum(axis=0)
 
     n_possibilities = 1
-    for n_remaps in num_remaps_per_a:
+    for i in range(len(num_remaps_per_a)):
+        if(a_fixed_inds[i] != -1): 
+            num_remaps_per_a[i] = 1
+        n_remaps = num_remaps_per_a[i]
         if(n_remaps != 0): n_possibilities *= n_remaps
 
     
@@ -1225,18 +1236,23 @@ def get_possible_remap_inds(a_ind_set, b_ind_set, n_a, n_b):
     # Use the poss_remap_matrix to fill in a 2d-array of remap options (-1 padded) 
     remap_options = -np.ones((n_a,n_b), dtype=np.int16)
     for i in range(n_a):
-        k = 0
-        for j in range(n_b):
-            if(poss_remap_matrix[i,j]):
-                remap_options[i,k] = j
-                k += 1
+        if(a_fixed_inds[i] != -1):
+            remap_options[i,0] = a_fixed_inds[i]
+        else:
+            k = 0
+            for j in range(n_b):
+                if(poss_remap_matrix[i,j]):
+                    remap_options[i,k] = j
+                    k += 1
 
     # Build the set of possible remaps by taking the cartsian product of remap_options
     remaps = np.empty((n_possibilities, n_a), dtype=np.int16)
-    c = 0
+    
     remap_inds = remap_options[:,0].copy()
+
     j_iters = np.zeros(n_a, dtype=np.int16)
     iter_i = first_i; iter_j = j_iters[first_i] = -1; done = False;
+    c = 0
     while(not done):  
         # Increment to the next possibility for the first variable 
         iter_j = j_iters[iter_i] = j_iters[iter_i] + 1      
@@ -1260,7 +1276,6 @@ def get_possible_remap_inds(a_ind_set, b_ind_set, n_a, n_b):
 
         remaps[c, :] = remap_inds
         c += 1
-    
     return remaps
 
 
@@ -1302,8 +1317,8 @@ i2_arr = i2[::1]
 f8_i2_arr_tup = Tuple((f8,i2[::1]))
 
 @njit(cache=True)
-def score_remaps(lit_set_a, lit_set_b, bpti_a, bpti_b,
-     remap_inds=None, op_key_intersection=None, max_remaps=15):
+def score_remaps(lit_set_a, lit_set_b, bpti_a, bpti_b, a_fixed_inds, 
+     op_key_intersection=None, max_remaps=15):
     # print(lit_set_a, lit_set_b)
     if(op_key_intersection is None):
         op_key_intersection = intersect_keys(lit_set_a, lit_set_b)
@@ -1321,7 +1336,7 @@ def score_remaps(lit_set_a, lit_set_b, bpti_a, bpti_b,
         b_ind_set = lit_set_to_ind_sets(lit_set_b[k], bpti_b)
 
         # print(a_ind_set)
-        remaps = get_possible_remap_inds(a_ind_set, b_ind_set, len(bpti_a), len(bpti_b))
+        remaps = get_possible_remap_inds(a_ind_set, b_ind_set, len(bpti_a), len(bpti_b), a_fixed_inds)
         scores = np.empty(len(remaps),dtype=np.float64)
         for c, remap in enumerate(remaps):
             # print("remap: ", remap)
@@ -1435,14 +1450,14 @@ f8_2darr_type = f8[:,::1]
 i8_arr = i8[::1]
 
 @njit(cache=True)
-def _buid_score_aligment_matrices(ls_as, ls_bs, bpti_a, bpti_b):
+def _buid_score_aligment_matrices(ls_as, ls_bs, bpti_a, bpti_b, a_fixed_inds):
     '''For each unique remap make a matrix that holds the remap score between 
        conjunct_i and conjunct_j for all possible alignments of the conjuncts 
        in A and conjuncts in B. Return a list of remap matrix pairs.'''
     score_aligment_matrices = Dict.empty(FrozenArrTypei2, f8_2darr_type)
     for i, ls_a in enumerate(ls_as): 
         for j, ls_b in enumerate(ls_bs): 
-            scored_remaps = score_remaps(ls_a, ls_b, bpti_a, bpti_b)
+            scored_remaps = score_remaps(ls_a, ls_b, bpti_a, bpti_b, a_fixed_inds)
             for score, remap in scored_remaps:
                 f_remap = FrozenArr(remap)
                 if(f_remap not in score_aligment_matrices):
@@ -1507,11 +1522,30 @@ def make_base_ptrs_to_inds(self):
     i = u2(0)
     for v in self.vars:
         base_ptrs_to_inds[v.base_ptr] = i; i += 1;
-
     return base_ptrs_to_inds
-@njit(Tuple((ConditionsType,f8))(ConditionsType,ConditionsType), cache=True)
+
+
+@njit(cache=True)
+def get_fixed_inds(c_a, c_b, map_same_var, map_same_alias):
+    a_fixed_inds = -np.ones(len(c_a.vars), dtype=np.int16)
+
+    if(map_same_var):
+        for k, v_b in enumerate(c_b.vars):
+            if(v_b.base_ptr in c_a.base_var_map):
+                a_fixed_inds[c_a.base_var_map[v_b.base_ptr]] = k
+    elif(map_same_alias):
+        for i, v_a in enumerate(c_a.vars):
+            for j, v_b in enumerate(c_b.vars):
+                if(v_a.alias == v_b.alias):
+                    a_fixed_inds[i] = j
+    
+    return a_fixed_inds
+
+
+
+@njit(Tuple((ConditionsType, f8))(ConditionsType, ConditionsType, boolean, boolean), cache=True)
 # @njit(cache=True)
-def _conds_antiunify(c_a, c_b):
+def _conds_antiunify(c_a, c_b, fix_same_var, fix_same_alias):
     ls_as = conds_to_lit_sets(c_a)
     ls_bs = conds_to_lit_sets(c_b)
 
@@ -1522,12 +1556,18 @@ def _conds_antiunify(c_a, c_b):
     num_conj = len(ls_as)
     best_score = -np.inf
     best_remap = np.arange(remap_size, dtype=np.int16)
+
+
+    a_fixed_inds = get_fixed_inds(c_a, c_b, fix_same_var, fix_same_alias)
+    # a_fixed_inds = np.arange(len(c_a.base_var_map),dtype=np.int16)
+    # a_fixed_inds[-2] = -1
+    # a_fixed_inds = -np.ones(len(c_a.base_var_map), dtype=np.int16)
     
     # Case 1: c_a and c_b are both single conjunctions like (lit1 & lit2 & lit3)
     if(len(ls_as) == 1 and len(ls_bs) == 1):
         op_key_intersection = intersect_keys(ls_as[0], ls_bs[0])
         # print(op_key_intersection)
-        scored_remaps = score_remaps(ls_as[0], ls_bs[0], bpti_a, bpti_b,
+        scored_remaps = score_remaps(ls_as[0], ls_bs[0], bpti_a, bpti_b, a_fixed_inds,
                                     op_key_intersection=op_key_intersection)
         best_score, best_remap = scored_remaps[0]
 
@@ -1540,7 +1580,7 @@ def _conds_antiunify(c_a, c_b):
 
     # Case 2: c_a or c_b have disjunction like ((lit1 & lit2 & lit3) | (lit4 & lit5))
     else:
-        score_aligment_matrices = _buid_score_aligment_matrices(ls_as, ls_bs, bpti_a, bpti_b)
+        score_aligment_matrices = _buid_score_aligment_matrices(ls_as, ls_bs, bpti_a, bpti_b, a_fixed_inds)
         
         # Find the upperbounds on each remap
         score_upperbounds = np.zeros(len(score_aligment_matrices),dtype=np.float64)
@@ -1595,12 +1635,15 @@ def _conds_antiunify(c_a, c_b):
 
 @generated_jit(cache=True)
 @overload_method(ConditionsTypeClass, 'antiunify')
-def conds_antiunify(c_a, c_b, return_score=False, normalize='left'):
-    SentryLiteralArgs(['return_score','normalize']).for_function(conds_antiunify).bind(c_a, c_b, return_score, normalize)
+def conds_antiunify(c_a, c_b, return_score=False,
+            normalize='left', fix_same_var=False, fix_same_alias=False):
+    SentryLiteralArgs(['return_score','normalize']).for_function(
+                    conds_antiunify).bind(c_a, c_b, return_score, normalize)
     normalize = normalize.literal_value
     if(return_score.literal_value):
-        def impl(c_a, c_b, return_score=False, normalize='left'):
-            c, score = _conds_antiunify(c_a, c_b)
+        def impl(c_a, c_b, return_score=False,
+                normalize='left', fix_same_var=False, fix_same_alias=False):
+            c, score = _conds_antiunify(c_a, c_b, fix_same_var, fix_same_alias)
             if(normalize == 'left'):
                 n_literals_a = count_literals(c_a)
                 return c, score / n_literals_a
@@ -1614,8 +1657,9 @@ def conds_antiunify(c_a, c_b, return_score=False, normalize='left'):
             else:
                 return c, score
     else:
-        def impl(c_a, c_b, return_score=False, normalize='left'):
-            c, score = _conds_antiunify(c_a,c_b)
+        def impl(c_a, c_b, return_score=False,
+                normalize='left', fix_same_var=False, fix_same_alias=False):
+            c, score = _conds_antiunify(c_a, c_b, fix_same_var, fix_same_alias)
             return c
     return impl
 

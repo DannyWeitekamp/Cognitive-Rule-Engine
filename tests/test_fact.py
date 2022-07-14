@@ -10,7 +10,7 @@ from numba.typed import List
 from numba.types import ListType
 import cre.dynamic_exec
 import pytest
-
+import operator
 
 
 def test__standardize_spec():
@@ -669,7 +669,7 @@ def as_cre_obj(x):
 
 
 @njit(cache=True)
-def eq(a,b):
+def _eq(a,b):
     return a == b
 
 def test_eq():
@@ -677,30 +677,34 @@ def test_eq():
         spec = {"A" : "string", "B" : "number"}
         BOOP = define_fact("BOOP", spec)
 
-        a1 = BOOP("HI",2)
-        a2 = BOOP("HI",2)
-        b1 = BOOP("HI",3)
-        b2 = BOOP("HO",2)
+        # TODO: should be range(2) waiting for numba PR #8241
+        for i in range(2):
+            if(i == 0): eq = _eq
+            elif(i == 1): eq = operator.eq
+            a1 = BOOP("HI",2)
+            a2 = BOOP("HI",2)
+            b1 = BOOP("HI",3)
+            b2 = BOOP("HO",2)
 
-    # print(eq(a1, a2))
-        assert eq(a1, a2)
-        assert not eq(a1, b1)
-        assert not eq(a1, b2)
+        # print(eq(a1, a2))
+            assert eq(a1, a2)
+            assert not eq(a1, b1)
+            assert not eq(a1, b2)
 
-        a1 = as_cre_obj(BOOP("HI",2))
-        a2 = as_cre_obj(BOOP("HI",2))
-        b1 = as_cre_obj(BOOP("HI",3))
-        b2 = as_cre_obj(BOOP("HO",2))
+            a1 = as_cre_obj(BOOP("HI",2))
+            a2 = as_cre_obj(BOOP("HI",2))
+            b1 = as_cre_obj(BOOP("HI",3))
+            b2 = as_cre_obj(BOOP("HO",2))
 
-    # print(eq(a1, a2))
-        assert eq(a1, a2)
-        assert not eq(a1, b1)
-        assert not eq(a1, b2)
+        # print(eq(a1, a2))
+            assert eq(a1, a2)
+            assert not eq(a1, b1)
+            assert not eq(a1, b2)
 
         
 
 @njit(cache=True)
-def hsh(x):
+def _hsh(x):
     return hash(x)
 
 
@@ -709,40 +713,45 @@ def test_hash():
         spec = {"A" : "string", "B" : "number"}
         BOOP = define_fact("BOOP", spec)
 
-        a1 = BOOP("HI",2)
-        a2 = BOOP("HI",2)
-        b1 = BOOP("HI",3)
-        b2 = BOOP("HO",2)
+        # TODO: should be range(2) waiting for numba PR #8241
+        for i in range(1):
+            if(i == 0): hsh = _hsh
+            elif(i == 1): hsh = hash
 
-        assert hsh(a1) == hsh(a2)
-        assert hsh(a1) != hsh(b1)
-        assert hsh(a1) != hsh(b2)
+            a1 = BOOP("HI",2)
+            a2 = BOOP("HI",2)
+            b1 = BOOP("HI",3)
+            b2 = BOOP("HO",2)
 
-        a3_boop = BOOP("HI",2)
-        a3 = as_cre_obj(a3_boop)
-        assert hsh(a3) == hsh(a1)
+            assert hsh(a1) == hsh(a2)
+            assert hsh(a1) != hsh(b1)
+            assert hsh(a1) != hsh(b2)
 
-        # check that mutation causes rehash
-        a3_boop.B = 7
-        assert hsh(a3) != hsh(a1)
+            a3_boop = BOOP("HI",2)
+            a3 = as_cre_obj(a3_boop)
+            assert hsh(a3) == hsh(a1)
+
+            # check that mutation causes rehash
+            a3_boop.B = 7
+            assert hsh(a3) != hsh(a1)
 
 
-        a1 = as_cre_obj(BOOP("HI",2))
-        a2 = as_cre_obj(BOOP("HI",2))
-        b1 = as_cre_obj(BOOP("HI",3))
-        b2 = as_cre_obj(BOOP("HO",2))
+            a1 = as_cre_obj(BOOP("HI",2))
+            a2 = as_cre_obj(BOOP("HI",2))
+            b1 = as_cre_obj(BOOP("HI",3))
+            b2 = as_cre_obj(BOOP("HO",2))
 
-        assert hsh(a1) == hsh(a2)
-        assert hsh(a1) != hsh(b1)
-        assert hsh(a1) != hsh(b2)
+            assert hsh(a1) == hsh(a2)
+            assert hsh(a1) != hsh(b1)
+            assert hsh(a1) != hsh(b2)
 
-        a3_boop = BOOP("HI",2)
-        a3 = as_cre_obj(a3_boop)
-        assert hsh(a3) == hsh(a1)
+            a3_boop = BOOP("HI",2)
+            a3 = as_cre_obj(a3_boop)
+            assert hsh(a3) == hsh(a1)
 
-        # check that mutation causes rehash
-        a3_boop.B = 7
-        assert hsh(a3) != hsh(a1)
+            # check that mutation causes rehash
+            a3_boop.B = 7
+            assert hsh(a3) != hsh(a1)
 
 
 
@@ -877,9 +886,9 @@ if __name__ == "__main__":
     # test_as_conditions()
 
     # _test_reference_type()
-    # test_hash()
-    # test_eq()
-    test_copy()
+    test_hash()
+    test_eq()
+    # test_copy()
     # test_weird_case()
     # test_inheritence()
     # test_inheritence_bytes()

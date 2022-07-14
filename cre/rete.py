@@ -1532,9 +1532,10 @@ def update_from_upstream_match(m_iter, m_node):
         if(_raw_ptr_from_struct(m_node.node) == _raw_ptr_from_struct(dep_node)):
 
             # If they happen to represent the same graph node then get from match_inp_inds
-            other_output = m_node.node.outputs[dep_m_node.associated_arg_ind]
+            other_output = m_node.node.outputs[dep_arg_ind]
             # print("Z",other_output.match_inp_inds, dep_m_node.curr_ind)
             if(dep_m_node.curr_ind >= len(other_output.match_inp_inds)):
+                # print("BAIL L")
                 m_node.idrecs = np.empty((0,), dtype=np.uint64)
                 return
 
@@ -1552,6 +1553,7 @@ def update_from_upstream_match(m_iter, m_node):
             # If failed to retrieve then idrecs for this node should be empty
             if(dep_idrec not in dn_idrecs_to_inds):
                 m_node.idrecs = np.empty((0,), dtype=np.uint64)
+                # print("BAIL D")
                 return
             
             # print("BEF", decode_idrec(dep_idrec)[1], dep_arg_ind)
@@ -1765,17 +1767,13 @@ def get_graph(ms, conds):
 
 @njit(GenericMatchIteratorType(MemSetType, ConditionsType), cache=True)
 def get_match_iter(ms, conds):
-
-
-    # print("START", conds.matcher_inst_ptr)
     rete_graph = get_graph(ms, conds)
 
     update_graph(rete_graph)
-    # print("UPDATED")
     m_iter = new_match_iter(rete_graph)
 
     # print("DEPS:", repr_match_iter_dependencies(m_iter))
-    # print("NEW MATCH ITER")
+
     for i in range(len(m_iter.iter_nodes)):
         m_node = m_iter.iter_nodes[i]
         m_node.curr_ind = 0
@@ -1784,17 +1782,7 @@ def get_match_iter(ms, conds):
             if(not ok):
                 m_iter.is_empty = True
                 break
-            # print("<<", m_node.var_ind, m_node.idrecs)
-            # print(m_node.idrecs, m_node.node.lit)
-        # else:
-        #     update_from_upstream_match(m_iter,  m_node)
-        
-    # print("FINISH UPDATE")
-    # print("<< lens BEG:", np.array([len(m_node.idrecs) for m_node in m_iter.iter_nodes]))
-    # for i, m_node in enumerate(m_iter.iter_nodes):
-    #     print("<<", m_node.curr_ind)
-    # print("initial restich")
-    # restitch_match_iter(m_iter, -1)
+
     return m_iter
 
 

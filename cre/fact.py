@@ -119,6 +119,11 @@ class Fact(CREObjTypeClass):
         return self._ctor[0](*args, **kwargs)
 
     def filter_spec(self, *flags, and_or="and"):
+        # if(isinstance(flags[0],(tuple,list))):
+        #     print("TRUE")
+        #     print(flags)
+        #     flags = flags[0]
+        #     print(flags)
         if(len(flags) == 0): return self.clean_spec
         flags = list(flags)
 
@@ -437,11 +442,11 @@ class FactProxy(CREObjProxy):
         """
         return self._fact_type
 
-    def __eq__(self, other):
-        from cre.dynamic_exec import fact_eq
-        if(isinstance(other, FactProxy)):
-            return fact_eq(self,other)
-        return False
+    # def __eq__(self, other):
+    #     from cre.dynamic_exec import fact_eq
+    #     if(isinstance(other, FactProxy)):
+    #         return fact_eq(self,other)
+    #     return False
 
     def restore(self,context=None):
         context = cre_context(context)
@@ -504,7 +509,8 @@ class FactProxy(CREObjProxy):
                 attr_val_fact_ptr = attr_val.get_ptr()
                 if(attr_val_fact_ptr not in fact_ptr_to_var_map):
                     if(add_implicit_neighbor_self_refs):
-                        fact_ptr_to_var_map[attr_val_fact_ptr] = Var(attr_val._fact_type, f"Nbr{neigh_count}")
+                        nbr_var = Var(attr_val._fact_type, f"Nbr{neigh_count}")
+                        fact_ptr_to_var_map[attr_val_fact_ptr] = nbr_var
                         neigh_count += 1
                     else:
                         continue

@@ -1,5 +1,5 @@
 import numpy as np
-from numba import f8, u1, u2, i8, u8, types, njit
+from numba import f8, u1, u2, i8, u8, types, njit, generated_jit
 from numba.types import FunctionType, unicode_type, ListType, boolean
 from numba.typed import List
 from numba.extending import  overload, overload_method
@@ -236,6 +236,10 @@ def _cre_obj_eq(a,b):
             
         return impl
 
+@njit(boolean(CREObjType,CREObjType), cache=True)
+def cre_obj_eq(a,b):
+    return a == b
+
 
 ### __hash___ ###
 
@@ -434,6 +438,7 @@ def tuple_fact_hash(x):
 
 #     return process_return(hsh)
 
+
 @overload(hash)
 @overload_method(CREObjTypeClass, '__hash__')
 def _cre_obj_hash(x):
@@ -454,7 +459,9 @@ def _cre_obj_hash(x):
                 return fact_hash(x)            
         return impl
 
-
+@njit(_Py_hash_t(CREObjType), cache=True)
+def cre_obj_hash(x):
+    return hash(x)
 
 
 #### __str__ ### 

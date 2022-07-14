@@ -34,7 +34,15 @@ def should_be_spatial(attr, config):
         (attr_t == "height" and isinstance(config['type'], types.number_domain))
     )
 
+def should_be_few_valued(attr, config):
+    return isinstance(config['type'], types.Boolean)
+
+def should_be_parent(attr, config):
+    return "parent" in attr 
+
 visible = AttrFilter("visible")
 relational = AttrFilter("relational", should_be_relational)
 semantic = AttrFilter("semantic")
 spatial = AttrFilter("spatial", should_be_spatial)
+few_valued = AttrFilter("few_valued", should_be_few_valued)
+parent = AttrFilter("parent", should_be_few_valued)

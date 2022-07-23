@@ -85,6 +85,7 @@ def vectorizer_apply(self, mem):
     def impl(self, mem):
         # Ensure all heads are in head_to_slot_ind
         for i, fact in enumerate(mem.get_facts(gval_type)):
+            # print("<<", fact)
             if(not(fact.head in self.head_to_slot_ind)):
                 self.head_to_slot_ind[fact.head] = len(self.head_to_slot_ind)
 

@@ -111,7 +111,6 @@ class CREContext(object):
             self = cls(name)
             self.enter_count = 0
             cls._contexts[name] = self
-
         else:
             raise ValueError(f"Context redefinition attempted for name {name}.")
 
@@ -127,7 +126,7 @@ class CREContext(object):
 
     @classmethod
     def set_default_context(cls, name):
-        os.environ["cre_DEFAULT_CONTEXT"] = cls.get_context(name)
+        os.environ["cre_DEFAULT_CONTEXT"] = name
 
     def __init__(self,name):
         self.name = name

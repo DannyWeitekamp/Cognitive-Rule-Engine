@@ -105,6 +105,7 @@ class Fact(CREObjTypeClass):
         return u1(self.field_dict_keys.index(attr))
 
     def get_attr_from_a_id(self, a_id):
+        print(self.name,a_id, self.field_dict_keys)
         return self.field_dict_keys[a_id]
 
     def __call__(self, *args, **kwargs):

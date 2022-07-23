@@ -232,121 +232,7 @@ def test_pipeline():
         assert len(np.unique(new_nom)) > len(np.unique(nom))
         nom = new_nom
 
-def _add_adjacent(src_fact, _, fact, src_attr_var, conds,
-         fact_ptr_map, attr_flags, add_back_relation=False, var_prefix=None):
-    src_ptr = src_fact.get_ptr()
-    fact_ptr = fact.get_ptr()
 
-    
-    # Make sure that the adjacent fact is in 'fact_ptr_map'
-    if(fact_ptr not in fact_ptr_map):
-        fact_var = Var(fact._fact_type, f"{var_prefix}{len(conds)}")
-        fact_ptr_map[fact_ptr] = fact_var
-
-    fact_var = fact_ptr_map[fact_ptr]
-    src_fact_var = fact_ptr_map[src_ptr]
-    _conds = conds.get(fact_ptr, [])
-    
-    if(add_back_relation):
-        for attr, config in fact._fact_type.filter_spec(*attr_flags).items():
-            attr_val = getattr(fact, attr)
-            if(not isinstance(attr_val, FactProxy) or
-                attr_val.get_ptr() != src_ptr):
-                continue
-            attr_var = getattr(fact_var, attr)
-            _conds.append(attr_var==src_fact_var)
-
-    # Add a condition from val to 
-    _conds.append(src_attr_var==fact_var)            
-    conds[fact_ptr] = _conds
-
-
-from itertools import chain
-
-def conditions_from_facts(facts, _vars=None, add_neighbors=True,
-     add_neighbor_holes=False, neighbor_back_relation=False, neighbor_req_n_adj=1, 
-     alpha_flags=('visible',), parent_flags=('parent',), beta_flags=('relational',)):
-    
-    if(_vars is None):
-        _vars = [Var(x._fact_type, f'A{i}') for i, x in enumerate(facts)]
-
-    fact_ptr_map = {fact.get_ptr() : var for fact, var in zip(facts, _vars)}
-    inp_fact_ptrs = set(fact_ptr_map.keys())
-    
-    # Make flag sets based on 
-    beta_not_parent_flags = [*beta_flags,*[f"~{f}" for f in parent_flags]]
-    alpha_candidate_flags = alpha_flags
-    if(add_neighbor_holes):
-        alpha_candidate_flags = [*alpha_flags, *parent_flags, *beta_flags]
-    
-    # Make Alphas (i.e. nvar = 1)
-    cond_set = []
-    nbr_conds = {}
-    parent_conds = {}
-    beta_conds = {}
-    for fact, var in zip(facts,_vars):
-        for attr, config in fact._fact_type.filter_spec(*alpha_candidate_flags).items():
-            val = getattr(fact, attr)
-            if(isinstance(val, FactProxy)): continue
-            attr_var = getattr(var, attr)
-            cond_set.append(attr_var==val)
-
-        # TODO: Make parents 
-        
-        nxt_parents = [fact]
-        while(len(nxt_parents) > 0):
-            for nxt_parent in nxt_parents:
-                spec = nxt_parent._fact_type.filter_spec(*parent_flags)
-                for attr, config in spec.items():
-                    pass
-            nxt_parents = []
-
-        # Make Betas (i.e. n_var=2) + Neighbors
-        
-        for attr, config in fact._fact_type.filter_spec(*beta_not_parent_flags).items():
-            attr_val =  getattr(fact, attr)
-            if(not isinstance(attr_val, FactProxy)): continue
-            attr_var = getattr(var, attr)
-
-            # Add a beta between the input facts.
-            if(attr_val.get_ptr() in inp_fact_ptrs):
-                _add_adjacent(fact, var, attr_val, attr_var, beta_conds,
-                        fact_ptr_map, beta_not_parent_flags, var_prefix=None)
-
-            # Add a beta between an input fact and a non-input neighbor.
-            elif(add_neighbors):
-                _add_adjacent(fact, var, attr_val, attr_var, nbr_conds,
-                 fact_ptr_map, beta_not_parent_flags, add_back_relation=neighbor_back_relation,
-                var_prefix="Nbr")
-
-    if(neighbor_req_n_adj > 1):
-        for ptr, lst in list(nbr_conds.items()): 
-            if len(lst) < neighbor_req_n_adj:
-                del nbr_conds[ptr]
-                del fact_ptr_map[ptr]
-        # TODO: Rename aliases of remaining vars to 0,1,2...
-        # for i, ptr in enumerate(nbr_conds): 
-        #     v = fact_ptr_map[ptr]
-        #     v.alias = f"Nbr{i}"
-        #     print(v.alias)
-
-    cond_set = [*cond_set, 
-                *chain(*parent_conds.values()),
-                *chain(*beta_conds.values()),    
-                *chain(*nbr_conds.values())
-                ]
-
-    _vars = list({v.get_ptr():v for v in fact_ptr_map.values()}.values())
-    # print(_vars)   
-    conds = _vars[0]
-    for i in range(1, len(_vars)):
-        conds = conds & _vars[i]
-
-    for c in cond_set:
-        conds = conds & c
-
-    # print(conds)
-    return conds
 
 from operator import itemgetter
 def test_condition_generalizing():
@@ -370,8 +256,8 @@ def test_condition_generalizing():
         sel_b, arg_b0, arg_b1 = itemgetter("1_answer", "1_upper","1_lower")(fact_map)
 
         print("-------------------------")
-        # c_a = Conditions.from_facts([sel_a, arg_a0, arg_a1], varz)
-        c_a = conditions_from_facts([sel_a, arg_a0, arg_a1], varz)
+        c_a = Conditions.from_facts([sel_a, arg_a0, arg_a1], varz)
+        # c_a = conditions_from_facts([sel_a, arg_a0, arg_a1], varz)
         print(repr(c_a))
         print(repr_match_iter_dependencies(c_a.get_matches(wm)))
         match_names = [[x.id for x in match][:3] for match in c_a.get_matches(wm)]
@@ -379,8 +265,8 @@ def test_condition_generalizing():
         assert match_names == [['0_answer', '0_upper', '0_lower']]
 
         print("-------------------------")
-        # c_b = Conditions.from_facts([sel_b, arg_b0, arg_b1], varz)
-        c_b = conditions_from_facts([sel_b, arg_b0, arg_b1], varz)
+        c_b = Conditions.from_facts([sel_b, arg_b0, arg_b1], varz)
+        # c_b = conditions_from_facts([sel_b, arg_b0, arg_b1], varz)
         match_names = [[x.id for x in match][:3] for match in c_b.get_matches(wm)]
         print(repr(c_b))
         print(match_names)
@@ -414,9 +300,9 @@ def test_condition_generalizing():
         sel_a, arg_a0, arg_a1 = itemgetter("1_carry", "0_upper","0_lower")(fact_map)
         sel_b, arg_b0, arg_b1 = itemgetter("2_carry", "1_upper","1_lower")(fact_map)
 
-        # c_a = Conditions.from_facts([sel_a, arg_a0, arg_a1], varz)
-        print("--------CARRRY------------")
-        c_a = conditions_from_facts([sel_a, arg_a0, arg_a1], varz)
+        
+        c_a = Conditions.from_facts([sel_a, arg_a0, arg_a1], varz)
+        # c_a = conditions_from_facts([sel_a, arg_a0, arg_a1], varz)
         match_names = [[x.id for x in match][:3] for match in c_a.get_matches(wm)]
         print("--c_a--")
         print(repr(c_a))
@@ -424,8 +310,8 @@ def test_condition_generalizing():
         print(match_names)
         assert match_names == [['1_carry', '0_upper', '0_lower']]
 
-        # c_b = Conditions.from_facts([sel_b, arg_b0, arg_b1], varz)
-        c_b = conditions_from_facts([sel_b, arg_b0, arg_b1], varz)
+        c_b = Conditions.from_facts([sel_b, arg_b0, arg_b1], varz)
+        # c_b = conditions_from_facts([sel_b, arg_b0, arg_b1], varz)
         match_names = [[x.id for x in match][:3] for match in c_b.get_matches(wm)]
         print("--c_b--")
         print(repr(c_b))
@@ -444,8 +330,8 @@ def test_condition_generalizing():
         # NOTE : ['3_carry', '2_lower', '2_upper'] might not be available at this point
 
         sel_c, arg_c0, arg_c1 = itemgetter("3_carry", "2_upper","2_lower")(fact_map)
-        # c_c = Conditions.from_facts([sel_c, arg_c0, arg_c1], varz)
-        c_c = conditions_from_facts([sel_c, arg_c0, arg_c1], varz)
+        c_c = Conditions.from_facts([sel_c, arg_c0, arg_c1], varz)
+        # c_c = conditions_from_facts([sel_c, arg_c0, arg_c1], varz)
         c_abc = c_ab.antiunify(c_c)
 
         print(repr(c_abc))
@@ -487,9 +373,9 @@ def test_condition_generalizing():
         print(match_names)
         print({decode_idrec(f.idrec)[1] : f.id for f in  fact_map.values()})
         assert match_names == [['1_carry', '0_upper', '0_lower']] #??
-        
-        # c = Conditions.from_facts([sel_c, arg_c0, arg_c1], varz,
-        c = conditions_from_facts([sel_c, arg_c0, arg_c1], varz,
+
+        c = Conditions.from_facts([sel_c, arg_c0, arg_c1], varz,
+        # c = conditions_from_facts([sel_c, arg_c0, arg_c1], varz,
              neighbor_req_n_adj=2, alpha_flags=("visible", "few_valued"))
         print(c)
         match_names = [[x.id for x in match][:3] for match in c_abc.get_matches(wm)]

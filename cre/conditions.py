@@ -10,7 +10,7 @@ from numba.core.typing.templates import AttributeTemplate
 from cre.caching import gen_import_str, unique_hash,import_from_cached, source_to_cache, source_in_cache
 from cre.context import cre_context
 from cre.structref import define_structref, define_structref_template
-from cre.fact import define_fact, BaseFact, cast_fact
+from cre.fact import define_fact, BaseFact, cast_fact, FactProxy
 from cre.utils import _struct_from_meminfo, _meminfo_from_struct, _cast_structref, cast_structref, decode_idrec, lower_getattr, _struct_from_ptr,  lower_setattr, lower_getattr, _raw_ptr_from_struct, _ptr_from_struct_incref, _decref_ptr
 from cre.utils import assign_to_alias_in_parent_frame, meminfo_type
 from cre.subscriber import base_subscriber_fields, BaseSubscriber, BaseSubscriberType, init_base_subscriber, link_downstream
@@ -369,22 +369,8 @@ class Conditions(structref.StructRefProxy):
         return conditions_repr(self)
 
 
-    def from_facts(facts,_vars=None):
-        assert len(facts), "Must provide one or more facts."
-        if(_vars is None):
-            _vars = [Var(x._fact_type, f'a{i}') for i, x in enumerate(facts)]
-
-        fact_ptr_map = {fact.get_ptr() : var for fact, var in zip(facts, _vars)}
-        
-        # Include each Var ahead of time to ensure order. 
-        conds = _vars[0]
-        for i in range(1,len(_vars)):
-            conds = conds & _vars[i]
-
-        for i in range(0,len(facts)):
-            conds = conds & facts[i].as_conditions(fact_ptr_map,neigh_count=len(fact_ptr_map)-len(facts))
-        return conds
-
+    def from_facts(facts,_vars=None, *args, **kwargs):
+        return conditions_from_facts(facts, _vars, *args, **kwargs)
 
 
 define_boxing(ConditionsTypeClass,Conditions)
@@ -1665,8 +1651,125 @@ def conds_antiunify(c_a, c_b, return_score=False,
 
         
 
+# -----------------------------------------------------------------------
+# : Conditions.from_facts
+
+def _add_adjacent(src_fact, _, fact, src_attr_var, conds,
+         fact_ptr_map, attr_flags, add_back_relation=False, var_prefix=None):
+    src_ptr = src_fact.get_ptr()
+    fact_ptr = fact.get_ptr()
+
+    
+    # Make sure that the adjacent fact is in 'fact_ptr_map'
+    if(fact_ptr not in fact_ptr_map):
+        fact_var = Var(fact._fact_type, f"{var_prefix}{len(conds)}")
+        fact_ptr_map[fact_ptr] = fact_var
+
+    fact_var = fact_ptr_map[fact_ptr]
+    src_fact_var = fact_ptr_map[src_ptr]
+    _conds = conds.get(fact_ptr, [])
+    
+    if(add_back_relation):
+        for attr, config in fact._fact_type.filter_spec(*attr_flags).items():
+            attr_val = getattr(fact, attr)
+            if(not isinstance(attr_val, FactProxy) or
+                attr_val.get_ptr() != src_ptr):
+                continue
+            attr_var = getattr(fact_var, attr)
+            _conds.append(attr_var==src_fact_var)
+
+    # Add a condition from val to 
+    _conds.append(src_attr_var==fact_var)            
+    conds[fact_ptr] = _conds
 
 
+from itertools import chain
+
+def conditions_from_facts(facts, _vars=None, add_neighbors=True,
+     add_neighbor_holes=False, neighbor_back_relation=False, neighbor_req_n_adj=1, 
+     alpha_flags=('visible',), parent_flags=('parent',), beta_flags=('relational',)):
+    
+    
+    if(_vars is None):
+        _vars = [Var(x._fact_type, f'A{i}') for i, x in enumerate(facts)]
+
+    fact_ptr_map = {fact.get_ptr() : var for fact, var in zip(facts, _vars)}
+    inp_fact_ptrs = set(fact_ptr_map.keys())
+    
+    # Make flag sets based on 
+    beta_not_parent_flags = [*beta_flags,*[f"~{f}" for f in parent_flags]]
+    alpha_candidate_flags = alpha_flags
+    if(add_neighbor_holes):
+        alpha_candidate_flags = [*alpha_flags, *parent_flags, *beta_flags]
+    
+    # Make Alphas (i.e. nvar = 1)
+    cond_set = []
+    nbr_conds = {}
+    parent_conds = {}
+    beta_conds = {}
+    for fact, var in zip(facts,_vars):
+        for attr, config in fact._fact_type.filter_spec(*alpha_candidate_flags).items():
+            val = getattr(fact, attr)
+            if(isinstance(val, FactProxy)): continue
+            attr_var = getattr(var, attr)
+            cond_set.append(attr_var==val)
+
+        # TODO: Make parents 
+        
+        nxt_parents = [fact]
+        while(len(nxt_parents) > 0):
+            for nxt_parent in nxt_parents:
+                spec = nxt_parent._fact_type.filter_spec(*parent_flags)
+                for attr, config in spec.items():
+                    pass
+            nxt_parents = []
+
+        # Make Betas (i.e. n_var=2) + Neighbors
+        
+        for attr, config in fact._fact_type.filter_spec(*beta_not_parent_flags).items():
+            attr_val =  getattr(fact, attr)
+            if(not isinstance(attr_val, FactProxy)): continue
+            attr_var = getattr(var, attr)
+
+            # Add a beta between the input facts.
+            if(attr_val.get_ptr() in inp_fact_ptrs):
+                _add_adjacent(fact, var, attr_val, attr_var, beta_conds,
+                        fact_ptr_map, beta_not_parent_flags, var_prefix=None)
+
+            # Add a beta between an input fact and a non-input neighbor.
+            elif(add_neighbors):
+                _add_adjacent(fact, var, attr_val, attr_var, nbr_conds,
+                 fact_ptr_map, beta_not_parent_flags, add_back_relation=neighbor_back_relation,
+                var_prefix="Nbr")
+
+    if(neighbor_req_n_adj > 1):
+        for ptr, lst in list(nbr_conds.items()): 
+            if len(lst) < neighbor_req_n_adj:
+                del nbr_conds[ptr]
+                del fact_ptr_map[ptr]
+        # TODO: Rename aliases of remaining vars to 0,1,2...
+        # for i, ptr in enumerate(nbr_conds): 
+        #     v = fact_ptr_map[ptr]
+        #     v.alias = f"Nbr{i}"
+        #     print(v.alias)
+
+    cond_set = [*cond_set, 
+                *chain(*parent_conds.values()),
+                *chain(*beta_conds.values()),    
+                *chain(*nbr_conds.values())
+                ]
+
+    _vars = list({v.get_ptr():v for v in fact_ptr_map.values()}.values())
+    # print(_vars)   
+    conds = _vars[0]
+    for i in range(1, len(_vars)):
+        conds = conds & _vars[i]
+
+    for c in cond_set:
+        conds = conds & c
+
+    # print(conds)
+    return conds
 
 
 

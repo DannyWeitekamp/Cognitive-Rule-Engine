@@ -27,6 +27,8 @@ with cre_context("test_relative_encoder"):
     eq_f8 = Equals(f8, f8)
     eq_str = Equals(unicode_type, unicode_type)
 
+
+def def_fact_types():
     Component = define_fact("Component", {
         "id" : unicode_type,
         "value" : {"type" : unicode_type, "visible" : True},
@@ -46,11 +48,13 @@ with cre_context("test_relative_encoder"):
         "nxt" : "TestLL",
         "prev" : "TestLL",
     })
+    return Component, Container, TestLL
 
 
 
 def setup_encoder_w_heir_state():
     with cre_context("test_relative_encoder"):
+        Component, Container, TestLL = def_fact_types()
         ### Make Structure ### 
         #     p3
         #     p2
@@ -103,7 +107,7 @@ def test_relative_encoder():
         p1, p2, p3  = ps[0],ps[1],ps[2]
         vp1,vp2,vp2 = vs[0],vs[1],vs[2]
 
-        print(ms)
+        print(feat_ms)
         re.update()
 
         with PrintElapse("encode_relative"):
@@ -118,6 +122,8 @@ def test_relative_encoder():
 
 def setup_update():
     with cre_context("test_relative_encoder"):
+        Component, Container, TestLL = def_fact_types()
+
         ms = MemSet()
         end = TestLL(id="q",value="1")
         ms.declare(end)
@@ -190,6 +196,95 @@ def test_re_mem_leaks():
                 print("<<", used_bytes()-init_bytes)
 
         assert used_bytes()-init_bytes == 0
+
+
+def test_downcasted_heads():
+    with cre_context("test_downcasted_heads"):
+        Component = define_fact("Component", {
+            "id" : str,
+            "x" : {"type" : float, "visible" : False},
+            "y" : {"type" : float, "visible" : False},
+            "width" : {"type" : float, "visible" : False},
+            "height" : {"type" : float, "visible" : False},
+            "above" : "Component", 
+            "below" : "Component",
+            "left": "Component", 
+            "right" : "Component",
+            "parents" : "List(Component)"
+        })
+
+        TextField = define_fact("TextField", {
+            "inherit_from" : "Component",
+            "value" : {"type" : str, "visible" : True, "semantic" : True},
+            "locked" : {"type" : bool, "visible" : True},
+        })
+
+        Button = define_fact("Button", {
+            "inherit_from" : "Component",
+        })
+
+        Container = define_fact("Container", {
+            "inherit_from" : "Component",
+            "children" : "List(Component)"
+        })
+
+        a = TextField(id="A",value="a")
+        b = TextField(id="B",value="b")
+        c = TextField(id="C",value="c")
+        a.right = b
+        b.right = c
+        b.left = a
+        c.left = b
+
+        p1 = Container(id="P1", children=List([a,b,c]))
+        a.parents = List([p1])
+        b.parents = List([p1])
+        c.parents = List([p1])
+
+        p2 = Container(id="P2", children=List([p1]))
+        p1.parents = List([p2])
+
+        p3 = Container(id="P3", children=List([p2]))
+        p2.parents = List([p3])
+
+        ms = MemSet()
+        ms.declare(a)
+        ms.declare(b)
+        ms.declare(c)
+        ms.declare(p1)
+        ms.declare(p2)
+        ms.declare(p3)
+
+        fl = Flattener((TextField,Container,), ms, id_attr="id")
+        flat_ms = fl()
+        fa = FeatureApplier([eq_f8,eq_str], flat_ms)
+        feat_ms = fa()
+
+        print(feat_ms)
+
+        re = RelativeEncoder((TextField,Container),ms)
+        vs = [Var(Container,'p1'),Var(Container,'p2'),Var(Container,'p3')]
+
+        vp1,vp2,vp2 = vs[0],vs[1],vs[2]
+
+
+        print(ms)
+        re.update()
+
+        with PrintElapse("encode_relative"):
+            rel_ms = re.encode_relative_to(feat_ms,[p1], [vp1])
+        print(rel_ms)
+
+        with PrintElapse("encode_relative"):
+            rel_ms = re.encode_relative_to(feat_ms,[p1,p2,p3], [vp1,vp2,vp2])
+        print(rel_ms)
+
+        with PrintElapse("encode_relative"):
+            rel_ms = re.encode_relative_to(feat_ms,[a,c], [Var(TextField,'a'),Var(TextField,'c')])
+        print(rel_ms)
+
+    
+    
         
 
 
@@ -208,7 +303,10 @@ def test_b_rel_enc_100x100_encode(benchmark):
 
 
 if __name__ == "__main__":
-    test_re_mem_leaks()
+    # test_re_mem_leaks()
+
+    test_downcasted_heads()
+    # test_relative_encoder()
 
     # np.set_printoptions(linewidth=1000)
     # test_relative_encoder()

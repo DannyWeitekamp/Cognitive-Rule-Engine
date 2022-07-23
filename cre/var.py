@@ -145,7 +145,7 @@ class Var(CREObjProxy):
             attr = attr_or_ind
             # fd = curr_head_type.field_dict
             # print("<<", attr_or_ind)
-            head_type = curr_head_type.spec[attr]['type']
+            head_type = curr_head_type.clean_spec[attr]['type']
             if(isinstance(head_type, DeferredFactRefType)):
                 head_type = cre_context().name_to_type[head_type._fact_name]
             a_id = curr_head_type.get_attr_a_id(attr) #list(fd.keys()).index(attr)
@@ -161,6 +161,7 @@ class Var(CREObjProxy):
 
             attr = str(attr_or_ind)
             a_id = u4(attr_or_ind)
+            print(self.head_type)
             item_size = listtype_sizeof_item(self.head_type)
             offset = int(attr_or_ind)*item_size
             # print(int(attr_or_ind), item_size)
@@ -478,7 +479,7 @@ def var_getattr_impl(context, builder, typ, val, attr):
     else:
         # print("APPEND")
         base_type = typ.field_dict['base_type'].instance_type 
-        head_type = typ.field_dict['head_type'].instance_type.spec[attr]['type']
+        head_type = typ.field_dict['head_type'].instance_type.clean_spec[attr]['type']
         # head_type = typ.field_dict['head_type'].instance_type 
         head_type_name = str(head_type)
         # print(">>", head_type_name)
@@ -496,7 +497,7 @@ def var_getattr_impl(context, builder, typ, val, attr):
             # st = new(typ)
             # var_memcopy(self,st)
             # var_append_deref(st,attr,offset)
-            # return st
+        # return st
 
         ret = context.compile_internal(builder, new_var_and_append, new_var_type(typ,), (st,))
         context.nrt.incref(builder, typ, ret)
@@ -514,15 +515,24 @@ def resolve_deref_attrs(self):
     # print(deref_infos)
     deref_attrs = []
     typ = self.base_type
-    # print("base", typ)
-    # print("deref_infos", deref_infos)
+    print("\nbase", typ)
+    print("deref_infos", deref_infos)
     for i, x in enumerate(deref_infos):
         # print(i, "X")
-        # print(typ)
+        print(i, typ)
         if(isinstance(typ, ListType)):
             deref_attrs.append(str(x['a_id']))
         else:
-            deref_attrs.append(typ.get_attr_from_a_id(x['a_id']))
+            try:
+                deref_attrs.append(typ.get_attr_from_a_id(x['a_id']))
+            except IndexError:
+                print(self.base_t_id)
+                chain_so_far = ''.join([f'[{a}]' if a.isdigit() else f'.{a}' for a in deref_attrs])
+                raise ValueError(
+                "Could resolve next attribute in chain after Var(" +\
+                f"{typ},{self.alias!r}){chain_so_far}. No a_id {x['a_id']}."
+                )
+
         # print(i, "U")
         typ = context.get_type(t_id=x['t_id'])
         # print(i, typ, x['t_id'])

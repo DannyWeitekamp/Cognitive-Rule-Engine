@@ -216,6 +216,12 @@ class MemSet(structref.StructRefProxy):
         # with PrintElapse("__REPR__"):
         return self._repr_helper(repr,**kwargs)
 
+    def copy(self):
+        return memset_copy(self)
+
+    def __copy__(self):
+        return memset_copy(self)
+
     def free(self):
         memset_dtor(self)
     
@@ -885,6 +891,27 @@ def indexer_get_fact(self, memset, val):
     if(len(facts) == 0):
         raise KeyError("No fact found.")
     return facts[0]
+
+
+# ----------------------------------------------------------------------
+# : memset_copy - Allows for .get_facts(attr=val)
+
+from cre.cre_object import copy_cre_obj
+@njit(cache=True)
+def memset_copy(self):
+    new = memset_ctor(self.context_data)    
+
+    #Decref all declared facts and their container vectors 
+    for i in range(self.facts.head):
+        facts_ptr = self.facts.data[i]
+        if(facts_ptr != 0):
+            facts = _struct_from_ptr(VectorType, facts_ptr)
+            for j in range(facts.head):
+                fact_ptr = facts.data[j]
+                fact = _struct_from_ptr(BaseFact, fact_ptr)
+                new.declare(copy_cre_obj(fact))
+    
+    return new
 
 
 

@@ -1,11 +1,11 @@
 import numpy as np
-from numba import types, f8, i8, u8, boolean, generated_jit
+from numba import types, f8, i8, u8, boolean, generated_jit, objmode
 from numba.extending import overload
 from numba.typed import List
 from numba.types import ListType, unicode_type
-from cre.cre_object import CREObjType, cre_obj_get_item
+from cre.cre_object import CREObjType, cre_obj_get_item, cre_obj_get_member_t_ids
 from cre.fact import define_fact
-from cre.core import short_name, T_ID_TUPLE_FACT
+from cre.core import short_name, T_ID_TUPLE_FACT, T_ID_OP, T_ID_VAR
 from cre.context import cre_context
 from cre.utils import decode_idrec, _cast_structref
 from cre.var import get_deref_attrs_str, GenericVarType
@@ -36,6 +36,7 @@ def get_gval_type(val_type, context=None):
 
 # Just prebuild these to avoid weird print ordering
 get_gval_type(boolean)
+get_gval_type(i8)
 get_gval_type(f8)
 get_gval_type(types.unicode_type)
 
@@ -60,6 +61,11 @@ def _val_to_str(val):
             return str(val)
     return impl
 
+# @njit(u2(CREObjType),cache=True)
+# def cre_obj_get_t_id(obj):
+#     t_id, _, _ = decode_idrec(obj.idrec)
+#     return t_id
+
 
 @generated_jit(cache=True,nopython=True)
 @overload(str)
@@ -69,13 +75,21 @@ def gval_str(gval):
         head = gval.head
         head_t_id,_,_ = decode_idrec(head.idrec)
         if(head_t_id == T_ID_TUPLE_FACT):
-            op = cre_obj_get_item(head, GenericOpType, 0)
-            v_strs = List.empty_list(unicode_type)
-            for i in range(1,head.num_chr_mbrs):
-                v = cre_obj_get_item(head, GenericVarType, i)
-                s = get_deref_attrs_str(v)
-                v_strs.append(v.alias + get_deref_attrs_str(v))
-            head_str = op.expr_template.format(v_strs)
+            t_ids = cre_obj_get_member_t_ids(head)
+            if(t_ids[0] == T_ID_OP and np.all(t_ids[:1]==T_ID_VAR)):
+                op = cre_obj_get_item(head, GenericOpType, 0)
+                v_strs = List.empty_list(unicode_type)
+                for i in range(1,head.num_chr_mbrs):
+                    v = cre_obj_get_item(head, GenericVarType, i)
+                    s = get_deref_attrs_str(v)
+                    v_strs.append(v.alias + get_deref_attrs_str(v))
+                head_str = op.expr_template.format(v_strs)
+            else:
+                with objmode(head_str=unicode_type):
+                    head_str = str(head)
+
+                # Get rid of the TF
+                head_str = head_str[2:]
         else:
             v = _cast_structref(GenericVarType,head)
             head_str = v.alias + get_deref_attrs_str(v)

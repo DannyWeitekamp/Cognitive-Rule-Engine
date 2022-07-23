@@ -279,8 +279,9 @@ def _build_deref_info_matrix(self):
     def impl(self):
         # Fill in the deref_info_matrix which we use to build Var instances 
         deref_info_matrix = np.zeros((n_attrs,2),dtype=deref_info_type)
-        _fill_rel_derefs(deref_info_matrix, rel_derefs)
-        _fill_list_derefs(deref_info_matrix, list_derefs,start=len(rel_derefs))
+        
+        _fill_list_derefs(deref_info_matrix, list_derefs)
+        _fill_rel_derefs(deref_info_matrix, rel_derefs,start=len(list_derefs))
         return deref_info_matrix
 
     return impl
@@ -314,16 +315,16 @@ def RelativeEncoder_ctor(context_data, re_type, in_memset):
     return k+1
 from cre.fact_intrinsics import fact_lower_getattr
 
-@njit(cache=True)
-def fill_adj_inds(self, fact, k, adj_inds, attr_id, item_ind):
-    ind = self.idrec_to_ind[fact.idrec]
+# @njit(cache=True)
+# def fill_adj_inds(self, fact, k, adj_inds, attr_id, item_ind):
+#     ind = self.idrec_to_ind[fact.idrec]
 
-    adj_inds[k].ind = i4(ind)
-    adj_inds[k].dist = f4(self.lateral_w)
-    adj_inds[k].attr_id = u4(attr_id)
-    adj_inds[k].item_ind = i4(item_ind)
+#     adj_inds[k].ind = i4(ind)
+#     adj_inds[k].dist = f4(self.lateral_w)
+#     adj_inds[k].attr_id = u4(attr_id)
+#     adj_inds[k].item_ind = i4(item_ind)
 
-    return k+1
+#     return k+1
 
 @njit(cache=True,inline='always')
 def fill_adj_inds(self, fact, k, adj_inds, attr_id, item_ind):
@@ -383,6 +384,7 @@ def _next_rel_adj(self, fact, adj_inds, attr_id, k):
         if(not isinstance(attr_t,types.ListType)):
             rel_attrs.append((attr, base_t))
     rel_attrs = tuple(rel_attrs)
+    print("<<<<", rel_attrs)
 
     if(len(rel_attrs) == 0): 
         return lambda self, fact, adj_inds, attr_id, k : (adj_inds, attr_id, k)
@@ -565,6 +567,7 @@ def _closest_source(self, ind, s_inds):
     min_dist = np.inf
     for i, s_ind in enumerate(s_inds):
         dist = self.dist_matrix[i8(s_ind)][i8(ind)].dist
+        print(self.facts[ind], dist)
         if(dist < min_dist): 
             min_dist = dist
             min_s_ind = s_ind
@@ -602,6 +605,7 @@ def _make_rel_var(self, f_ind, s_ind, s_var, extra_derefs=None):
     while(True):
         dm_entry = self.dist_matrix[i8(ind)][i8(f_ind)]
         ind = dm_entry.ind
+
         if(ind == i4(-1)): break
 
         deref_infos = self.deref_info_matrix[dm_entry.attr_id]
@@ -610,7 +614,7 @@ def _make_rel_var(self, f_ind, s_ind, s_var, extra_derefs=None):
         if(deref_infos[1].type == DEREF_TYPE_LIST):
             deref_info_buffer[k].type = DEREF_TYPE_LIST
             deref_info_buffer[k].a_id = dm_entry.item_ind
-            deref_info_buffer[k].t_id = deref_infos[1].t_id
+            deref_info_buffer[k].t_id = decode_idrec(self.facts[ind].idrec)[0]#deref_infos[1].t_id
             deref_info_buffer[k].offset = dm_entry.item_ind*deref_infos[1].offset
             k += 1
 
@@ -620,9 +624,20 @@ def _make_rel_var(self, f_ind, s_ind, s_var, extra_derefs=None):
             deref_info_buffer[k:k+1] = extra_derefs[i:i+1]
             k += 1
 
+    # Make sure that the last t_id is the actual t_id of the fact
+    #  so that we are certain we can dereference the final value.
+    if(k >= 2):
+        print("&&", deref_info_buffer[k-2])
+        # p = k-2 if deref_info_buffer[k-2].type == DEREF_TYPE_ATTR else k-3
+        deref_info_buffer[k-2].t_id = decode_idrec(self.facts[f_ind].idrec)[0]
+        print("&&", deref_info_buffer[k-2].t_id)
+    
     # Make the Var
     head_t_id = deref_info_buffer[k-1].t_id if(k > 0) else s_var.base_t_id
-    return  _new_rel_var(s_var, head_t_id, deref_info_buffer[:k].copy())
+    print(deref_info_buffer[:k].copy(), s_var, s_var.base_t_id, head_t_id)
+    r_var =  _new_rel_var(s_var, head_t_id, deref_info_buffer[:k].copy())
+    print(r_var.base_t_id)
+    return  r_var
 
 @njit(cache=True,locals={"tup": var_cache_key_type})
 def rel_var_for_id(self, id_str, source_idrecs, source_vars, s_inds=None, extra_derefs=None):
@@ -636,7 +651,6 @@ def rel_var_for_id(self, id_str, source_idrecs, source_vars, s_inds=None, extra_
     if(id_str not in self.id_to_ind): 
         print(f"No fact with {self.id_attr}={id_str}")
         raise ValueError(f"Tried to re-encode fact with an id unknown to the RelativeEncoder.")
-
     f_ind = self.id_to_ind[id_str]
     s_ind, s_i = _closest_source(self, f_ind, s_inds)
     s_var = source_vars[s_i]

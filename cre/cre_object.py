@@ -399,7 +399,7 @@ def _get_chr_mbrs_infos_from_attrs(typingctx, st_type, attrs_lit):
     context = CREContext.get_default_context()
 
     # st_type = st_type_ref.instance_type
-    # print(attrs_lit)
+    print("attrs_lit", attrs_lit)
     if(len(attrs_lit.types) >= 0 and
      not isinstance(attrs_lit.types[0],types.Literal)): return
     

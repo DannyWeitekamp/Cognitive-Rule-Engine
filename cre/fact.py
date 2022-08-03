@@ -105,7 +105,7 @@ class Fact(CREObjTypeClass):
         return u1(self.field_dict_keys.index(attr))
 
     def get_attr_from_a_id(self, a_id):
-        print(self.name,a_id, self.field_dict_keys)
+        # print(self.name,a_id, self.field_dict_keys)
         return self.field_dict_keys[a_id]
 
     def __call__(self, *args, **kwargs):
@@ -435,6 +435,15 @@ class FactProxy(CREObjProxy):
         inst = super(FactProxy,cls)._numba_box_(BaseFact,mi)
         return inst
 
+    @classmethod
+    def _numba_box_no_recover_(cls, ty, mi):
+        '''Same as StructRefProxy'''
+        instance = ty.__new__(cls)
+        instance._type = ty
+        instance._meminfo = mi
+        return instance
+
+
     @property
     def _numba_type_(self):
         """Returns the Numba type instance for this structref instance.
@@ -560,12 +569,12 @@ class FactProxy(CREObjProxy):
     def isa(self, typ):
         return isa(self,typ)
 
-    def asa(self, typ):
-    #     instance = typ.__new__(CREObjProxy)
-    #     instance._type = typ
-    #     instance._meminfo = self._meminfo
-    #     return instance
-        return asa(self,typ)
+    # def asa(self, typ):
+    # #     instance = typ.__new__(CREObjProxy)
+    # #     instance._type = typ
+    # #     instance._meminfo = self._meminfo
+    # #     return instance
+    #     return asa(self,typ)
 
     def __repr__(self):
         return str(self)
@@ -933,9 +942,11 @@ def overload_{typ}(self, {param_defaults_seq}):
 
 {typ}Class._fact_type = {typ}
 {typ}Class._fact_proxy = {typ}Proxy
+{typ}Class._proxy_class = {typ}Proxy
 
 {typ}._fact_type_class = {typ}Class
 {typ}._fact_proxy = {typ}Proxy
+{typ}._proxy_class = {typ}Proxy
 
 
 define_boxing({typ}Class,{typ}Proxy)

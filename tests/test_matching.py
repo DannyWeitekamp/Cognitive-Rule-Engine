@@ -662,7 +662,7 @@ if(__name__ == "__main__"):
     # print(alloc_stats1.alloc-alloc_stats1.free, alloc_stats2.alloc-alloc_stats2.free)
 
 
-    # test_ref_matching()
+    test_ref_matching()
     # test_check_and_score_match()
     # test_multiple_deref()
     # test_matching_unconditioned()

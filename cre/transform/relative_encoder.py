@@ -99,6 +99,7 @@ relative_encoder_fields = {
     "id_to_ind" : DictType(unicode_type, i4),
     "var_cache" : DictType(Tuple((i4,i4,i4)),GenericVarType),
     "valid_t_ids" : VectorType,
+    "keep_floating_facts" : types.boolean,
     "needs_rebuild" : types.boolean,
     "fact_types" : types.Any,
     "relational_attrs" : types.Any,
@@ -133,13 +134,13 @@ def get_relative_encoder_type(fact_types, id_attr):
     return re_type
 
 class RelativeEncoder(structref.StructRefProxy):
-    def __new__(cls, fact_types, in_memset=None, id_attr='id', context=None):
+    def __new__(cls, fact_types, in_memset=None, id_attr='id', context=None, keep_floating_facts=True):
         # Make new in_ms and out_ms if they are not provided.
         context = cre_context(context)
         fact_types=tuple(fact_types)
         if(in_memset is None): in_memset = MemSet(context);
         re_type = get_relative_encoder_type(fact_types,id_attr)
-        self = RelativeEncoder_ctor(context.context_data, re_type, in_memset)
+        self = RelativeEncoder_ctor(context.context_data, re_type, in_memset, keep_floating_facts)
         return self
 
     def encode_relative_to(self, ms, sources, source_vars):
@@ -299,7 +300,7 @@ def RelativeEncoder_reinit(self,size=32):
 
 # print("A")
 @njit(cache=True)
-def RelativeEncoder_ctor(context_data, re_type, in_memset):
+def RelativeEncoder_ctor(context_data, re_type, in_memset, keep_floating_facts):
     # def impl(re_type, in_ms):
     st = new(re_type)
     init_incr_processor(st, in_memset)
@@ -309,6 +310,7 @@ def RelativeEncoder_ctor(context_data, re_type, in_memset):
     st.deref_info_matrix = _build_deref_info_matrix(st)
     st.valid_t_ids = _build_valid_t_ids(st)
     st.needs_rebuild = False
+    st.keep_floating_facts = keep_floating_facts
     return st
 
     
@@ -330,7 +332,7 @@ from cre.fact_intrinsics import fact_lower_getattr
 def fill_adj_inds(self, fact, k, adj_inds, attr_id, item_ind):
     ind = self.idrec_to_ind[fact.idrec]
     adj_inds[k].ind = i4(ind)
-    adj_inds[k].dist = f4(self.lateral_w)
+    adj_inds[k].dist = f4(self.lateral_w - (1.0/(2<<(attr_id+1)*3) if attr_id < 7 else 0.0))
     adj_inds[k].attr_id = u4(attr_id)
     adj_inds[k].item_ind = i4(item_ind)
     return k+1
@@ -384,7 +386,7 @@ def _next_rel_adj(self, fact, adj_inds, attr_id, k):
         if(not isinstance(attr_t,types.ListType)):
             rel_attrs.append((attr, base_t))
     rel_attrs = tuple(rel_attrs)
-    print("<<<<", rel_attrs)
+    # print("<<<<", rel_attrs)
 
     if(len(rel_attrs) == 0): 
         return lambda self, fact, adj_inds, attr_id, k : (adj_inds, attr_id, k)
@@ -441,7 +443,7 @@ def update_relative_to(self , sources):
 
                     next_frontier_inds[c_ind] = u1(1)
 
-                    # print("CONNECT:", f'{b_ind}', "->", f'{c_ind}', c_ind_dist_pair.dist)
+                    # print("CONNECT:", f'{b_ind}', "->", f'{c_ind}', c_ind_dist.dist)
                     # print("CONNECT:", f'{b.id}', "->", f'{c.id}', c_ind_w_pair.dist)
 
                 for a_ind in self.visited_inds:
@@ -567,7 +569,6 @@ def _closest_source(self, ind, s_inds):
     min_dist = np.inf
     for i, s_ind in enumerate(s_inds):
         dist = self.dist_matrix[i8(s_ind)][i8(ind)].dist
-        print(self.facts[ind], dist)
         if(dist < min_dist): 
             min_dist = dist
             min_s_ind = s_ind
@@ -617,6 +618,8 @@ def _make_rel_var(self, f_ind, s_ind, s_var, extra_derefs=None):
             deref_info_buffer[k].t_id = decode_idrec(self.facts[ind].idrec)[0]#deref_infos[1].t_id
             deref_info_buffer[k].offset = dm_entry.item_ind*deref_infos[1].offset
             k += 1
+        else:
+            deref_info_buffer[k-1].t_id = decode_idrec(self.facts[ind].idrec)[0]
 
     # Add any extra deref_infos. e.g.'.value' at the end of a deref chain.
     if(extra_derefs is not None):
@@ -627,32 +630,36 @@ def _make_rel_var(self, f_ind, s_ind, s_var, extra_derefs=None):
     # Make sure that the last t_id is the actual t_id of the fact
     #  so that we are certain we can dereference the final value.
     if(k >= 2):
-        print("&&", deref_info_buffer[k-2])
+        # print("&&", deref_info_buffer[k-2])
         # p = k-2 if deref_info_buffer[k-2].type == DEREF_TYPE_ATTR else k-3
         deref_info_buffer[k-2].t_id = decode_idrec(self.facts[f_ind].idrec)[0]
-        print("&&", deref_info_buffer[k-2].t_id)
+        # print("&&", deref_info_buffer[k-2].t_id)
     
     # Make the Var
     head_t_id = deref_info_buffer[k-1].t_id if(k > 0) else s_var.base_t_id
-    print(deref_info_buffer[:k].copy(), s_var, s_var.base_t_id, head_t_id)
+    # print(deref_info_buffer[:k].copy(), s_var, s_var.base_t_id, head_t_id)
     r_var =  _new_rel_var(s_var, head_t_id, deref_info_buffer[:k].copy())
-    print(r_var.base_t_id)
+    # print(r_var.base_t_id)
     return  r_var
 
-@njit(cache=True,locals={"tup": var_cache_key_type})
-def rel_var_for_id(self, id_str, source_idrecs, source_vars, s_inds=None, extra_derefs=None):
-    '''Builds a Var using the relative encoder for the fact instance with
-         id==id_str. Var has dereference chain that starts at the closest source. '''
-    if(s_inds is None):
-        s_inds = np.empty((len(source_idrecs,)),dtype=np.int32)
-        for i, s_idrec in enumerate(source_idrecs):
-            s_inds[i] = self.idrec_to_ind[s_idrec]
 
+@njit(cache=True)
+def f_ind_from_id(self, id_str):
     if(id_str not in self.id_to_ind): 
         print(f"No fact with {self.id_attr}={id_str}")
         raise ValueError(f"Tried to re-encode fact with an id unknown to the RelativeEncoder.")
     f_ind = self.id_to_ind[id_str]
+    return f_ind
+
+@njit(cache=True,locals={"tup": var_cache_key_type})
+def get_rel_var(self, f_ind, source_vars, s_inds, extra_derefs=None):
+    '''Builds a Var using the relative encoder for the fact instance with
+         id==id_str. Var has dereference chain that starts at the closest source. '''
     s_ind, s_i = _closest_source(self, f_ind, s_inds)
+
+    if(s_ind == -1):
+        return None
+
     s_var = source_vars[s_i]
 
     offset, cachable = i4(-1), True
@@ -675,9 +682,43 @@ def rel_var_for_id(self, id_str, source_idrecs, source_vars, s_inds=None, extra_
 
     # return _make_rel_var(self, f_ind, s_ind, source_vars[s_i])
 from cre.core import T_ID_TUPLE_FACT, T_ID_VAR
-from cre.cre_object import copy_cre_obj, cre_obj_iter_t_id_item_ptrs, cre_obj_set_item, CREObjType
+from cre.cre_object import copy_cre_obj, cre_obj_iter_t_id_item_ptrs, cre_obj_set_item, CREObjType, PRIMITIVE_MBR_ID, OBJECT_MBR_ID
 from cre.tuple_fact import TupleFact
 from cre.utils import _load_ptr, _struct_from_ptr
+
+@njit(cache=True, locals={'rel_var' : GenericVarType})
+def rel_encode_tf(self, tf, source_vars, s_inds):
+    tf_copy = copy_cre_obj(tf)
+    tf_cre_obj = _cast_structref(CREObjType, tf)
+    for i, (t_id, m_id, data_ptr) in enumerate(cre_obj_iter_t_id_item_ptrs(tf_cre_obj)):
+        if(t_id == T_ID_VAR):
+            v = _struct_from_ptr(GenericVarType, _load_ptr(i8,data_ptr))
+            f_ind = f_ind_from_id(self, v.alias)
+            _rel_var = get_rel_var(self, f_ind, source_vars, s_inds, v.deref_infos)
+            if(_rel_var is None): 
+                _rel_var = v
+                is_floating = True
+            rel_var = _rel_var
+            cre_obj_set_item(tf_copy, i, rel_var)
+            # cre_obj_set_member_info(tf_copy, i, (T_ID_VAR, OBJECT_MBR_ID))
+
+        elif(m_id != PRIMITIVE_MBR_ID):
+
+            # Fact case 
+            fact = _struct_from_ptr(CREObjType, _load_ptr(i8,data_ptr))
+            if(fact.idrec in self.idrec_to_ind):
+                f_ind = self.idrec_to_ind[fact.idrec]
+                _rel_var = get_rel_var(self, f_ind, source_vars, s_inds)
+                if(_rel_var is not None):
+                    rel_var = _rel_var
+                    cre_obj_set_item(tf_copy, i, rel_var)
+                    # cre_obj_set_member_info(tf_copy, i, (T_ID_VAR, OBJECT_MBR_ID))
+
+
+
+
+    return tf_copy
+
 
 @njit(cache=True, locals={"source_idrecs" : u8[::1]})
 def encode_relative_to(self, gval_ms, source_idrecs, source_var_ptrs):
@@ -701,23 +742,27 @@ def encode_relative_to(self, gval_ms, source_idrecs, source_var_ptrs):
 
         head = fact.head
         head_t_id, _, _ = decode_idrec(head.idrec)
+        is_floating = False
         # For TupleFacts replace each Var member with a relatively encoded one.
         if(head_t_id == T_ID_TUPLE_FACT):
             tf = _cast_structref(TupleFact, head)
-            tf_copy = copy_cre_obj(tf)
-            for i, (t_id, m_id, data_ptr) in enumerate(cre_obj_iter_t_id_item_ptrs(tf)):
-                if(t_id == T_ID_VAR):
-                    v = _struct_from_ptr(GenericVarType, _load_ptr(i8,data_ptr))
-                    rel_var = rel_var_for_id(self, v.alias, source_idrecs, source_vars, s_inds, v.deref_infos)
-                    cre_obj_set_item(tf_copy, i, rel_var)
-            fact_copy.head = _cast_structref(CREObjType, tf_copy)
+            new_tf = rel_encode_tf(self, tf, source_vars, s_inds)
+            # print(tf, "->", new_tf)
+            fact_copy.head = _cast_structref(CREObjType, new_tf)
 
         elif(head_t_id == T_ID_VAR):
             v = _cast_structref(GenericVarType, head)
-            rel_var = rel_var_for_id(self, v.alias, source_idrecs, source_vars, s_inds, v.deref_infos)
+            f_ind = f_ind_from_id(self, v.alias)
+            rel_var = get_rel_var(self, f_ind, source_vars, s_inds, v.deref_infos)
+            if(rel_var is None): 
+                rel_var = v
+                is_floating = True
             fact_copy.head = _cast_structref(CREObjType, rel_var)
+        
 
-        rel_ms.declare(fact_copy)
+
+        if(self.keep_floating_facts or not is_floating):
+            rel_ms.declare(fact_copy)
     return rel_ms
             
 

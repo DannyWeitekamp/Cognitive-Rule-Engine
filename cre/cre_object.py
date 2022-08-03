@@ -8,7 +8,7 @@ from cre.utils import (_memcpy_structref, _obj_cast_codegen, ptr_t,
     CastFriendlyMixin, decode_idrec, _func_from_address, _incref_structref,
     _cast_structref, _get_member_offset, _struct_get_data_ptr, _store,
     _sizeof_type, _load_ptr, _struct_from_ptr, encode_idrec, _decref_ptr, _incref_ptr,
-    _decref_structref, check_issue_6993)
+    _decref_structref, check_issue_6993, incref_meminfo)
 from cre.structref import define_structref
 from numba.core.datamodel import default_manager, models
 from numba.core import cgutils
@@ -157,6 +157,7 @@ from cre.utils import PrintElapse
 class CREObjProxy(StructRefProxy):
     @classmethod
     def _numba_box_(cls, ty, mi):
+
         instance = ty.__new__(cls)
         instance._type = ty
         instance._meminfo = mi
@@ -171,8 +172,8 @@ class CREObjProxy(StructRefProxy):
     def __str__(self):
         return f"<cre.CREObj at {self.get_ptr()}>"
 
-    def get_ptr(self):
-        return get_var_ptr(self)
+    # def get_ptr(self):
+    #     return get_var_ptr(self)
 
     def get_ptr(self):
         return get_cre_obj_ptr(self)
@@ -181,23 +182,31 @@ class CREObjProxy(StructRefProxy):
         return get_cre_obj_ptr_incref(self)
 
     def asa(self, typ):
-        return asa(self,typ)
+        if(typ._proxy_class is self._type): return self
+        incref_meminfo(self._meminfo)
+        proxy_typ = typ._proxy_class
+        instance = super(StructRefProxy, proxy_typ).__new__(proxy_typ)
+        instance._type = typ
+        instance._meminfo = self._meminfo
+        return instance
+        # return asa(self,typ)
 
     def recover_type(self,context=None):
         ''' Try to recover the true type that the object was instantiated as'''            
         from cre.context import cre_context
-        context = cre_context(context)
+        context = cre_context(context)# 2us
 
-        t_id = get_t_id(self._meminfo)
+        t_id = get_t_id(self._meminfo)# .5us
 
         # print("<<", t_id, getattr(self._type,'t_id',0))
         # print(type(self),self._type,)
-        if(getattr(self._type,'t_id',0) == t_id):
+        if(getattr(self._type,'t_id',0) == t_id):# .5us
             return self
+
+        # print("RECOVER",getattr(self._type,'t_id',0), t_id)
         if(t_id != T_ID_TUPLE_FACT):
             # The type associated with the object's t_id in 'context'
-
-            t_id_type = context.get_type(t_id=t_id)
+            t_id_type = context.get_type(t_id=t_id) # 3.9us
             if(self.__class__ is not t_id_type and hasattr(t_id_type,"_proxy_class")):
                 self._type = t_id_type
                 self.__class__ = t_id_type._proxy_class
@@ -226,6 +235,7 @@ class CREObjProxy(StructRefProxy):
         return cre_obj_eq(self, other)
 
 
+CREObjType._proxy_class = CREObjProxy
 define_boxing(CREObjTypeClass, CREObjProxy)
 
 
@@ -399,7 +409,7 @@ def _get_chr_mbrs_infos_from_attrs(typingctx, st_type, attrs_lit):
     context = CREContext.get_default_context()
 
     # st_type = st_type_ref.instance_type
-    print("attrs_lit", attrs_lit)
+    # print("attrs_lit", attrs_lit)
     if(len(attrs_lit.types) >= 0 and
      not isinstance(attrs_lit.types[0],types.Literal)): return
     
@@ -468,6 +478,8 @@ def cre_obj_get_item_t_id_ptr(x, index):
 @generated_jit(cache=True,nopython=True)
 @overload_method(CREObjTypeClass,'get_item')
 def cre_obj_get_item(obj, item_type, index):
+    print("obj", obj)
+    if(obj is not CREObjType): return
     def impl(obj, item_type, index):
         _, _, item_ptr = cre_obj_get_item_t_id_ptr(obj, index)
         out = _load_ptr(item_type, item_ptr)
@@ -477,6 +489,12 @@ def cre_obj_get_item(obj, item_type, index):
 @generated_jit(cache=True,nopython=True)
 def cre_obj_set_item(obj, index, val):
     item_type = val
+
+    from cre.context import cre_context
+    context = cre_context()
+
+    m_id = resolve_member_id(item_type)
+    t_id = context.get_t_id(_type=item_type)
 
     from numba.core.datamodel import default_manager, StructModel
     if isinstance(default_manager[item_type], StructModel):
@@ -488,12 +506,15 @@ def cre_obj_set_item(obj, index, val):
             _store(item_type, item_ptr, val)
             _incref_structref(val)
 
+            cre_obj_set_member_t_id_m_id(obj, index, (u2(t_id), u2(m_id)))
+
             if(old_ptr != 0):
                 _decref_ptr(old_ptr)
     else:
         def impl(obj, index, val):
             _, m_id, item_ptr = cre_obj_get_item_t_id_ptr(obj, index)
             _store(item_type, item_ptr, val)        
+            cre_obj_set_member_t_id_m_id(obj, index, (u2(t_id), u2(m_id)))
     return impl
 
 
@@ -502,23 +523,31 @@ def cre_obj_set_item(obj, index, val):
 
 has_not_fixed_6993 = check_issue_6993()
 
-@njit(cache=True)
+@generated_jit(cache=False)
 def cre_obj_iter_t_id_item_ptrs(x):
-    # x = _cast_structref(TupleFact,_x)
+    def impl(x):
+        # x = _cast_structref(TupleFact,_x)
+        data_ptr = _struct_get_data_ptr(x)
+        member_info_ptr = data_ptr + x.chr_mbrs_infos_offset
+
+        # NOTE: Using as generator causes memory leak
+        for i in range(x.num_chr_mbrs):
+            t_id, m_id, member_offset = _load_ptr(member_info_type, member_info_ptr)
+            yield t_id, m_id, data_ptr + member_offset
+            member_info_ptr += _sizeof_type(member_info_type)
+
+        if(has_not_fixed_6993):
+            _decref_structref(x)
+
+    return impl
+
+t_id_m_id_type = types.Tuple((u2,u2))
+
+@njit(cache=True)
+def cre_obj_set_member_t_id_m_id(x, i, t_id_m_id):
     data_ptr = _struct_get_data_ptr(x)
-    member_info_ptr = data_ptr + x.chr_mbrs_infos_offset
-
-    # NOTE: Using as generator causes memory leak
-    for i in range(x.num_chr_mbrs):
-        t_id, m_id, member_offset = _load_ptr(member_info_type, member_info_ptr)
-        yield t_id, m_id, data_ptr + member_offset
-        member_info_ptr += _sizeof_type(member_info_type)
-
-    if(has_not_fixed_6993):
-        _decref_structref(x)
-
-
-
+    member_info_ptr = data_ptr + x.chr_mbrs_infos_offset + i * _sizeof_type(member_info_type)
+    _store(t_id_m_id_type, member_info_ptr, t_id_m_id)
 
 
 
@@ -545,10 +574,12 @@ def copy_cre_obj(fact):
     fact_type = fact
     def impl(fact):
         new_fact = _memcpy_structref(fact)
+
         a,b = _cast_structref(CREObjType, fact), _cast_structref(CREObjType, new_fact)
 
         t_id, _, _ = decode_idrec(a.idrec)
         b.idrec = encode_idrec(t_id,0,u1(-1))
+        b.hash_val = 0 
         for info_a in cre_obj_iter_t_id_item_ptrs(a):
             t_id_a, m_id_a, data_ptr_a = info_a
             # t_id_b, m_id_b, data_ptr_b = info_b

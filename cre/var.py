@@ -515,22 +515,23 @@ def resolve_deref_attrs(self):
     # print(deref_infos)
     deref_attrs = []
     typ = self.base_type
-    print("\nbase", typ)
-    print("deref_infos", deref_infos)
+    # print("\nbase", typ)
+    # print("deref_infos", deref_infos)
     for i, x in enumerate(deref_infos):
         # print(i, "X")
-        print(i, typ)
+        # print(i, typ)
         if(isinstance(typ, ListType)):
             deref_attrs.append(str(x['a_id']))
         else:
             try:
                 deref_attrs.append(typ.get_attr_from_a_id(x['a_id']))
-            except IndexError:
-                print(self.base_t_id)
+            except IndexError as e:
+                # print(self.base_t_id)
                 chain_so_far = ''.join([f'[{a}]' if a.isdigit() else f'.{a}' for a in deref_attrs])
                 raise ValueError(
                 "Could resolve next attribute in chain after Var(" +\
-                f"{typ},{self.alias!r}){chain_so_far}. No a_id {x['a_id']}."
+                f"{typ},{self.alias!r}){chain_so_far}. No a_id {x['a_id']}." +\
+                f"Chain: {deref_infos}"
                 )
 
         # print(i, "U")

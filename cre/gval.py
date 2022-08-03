@@ -23,6 +23,8 @@ gval = define_fact("gval", gval_spec)
 
 _gval_types = {}
 def get_gval_type(val_type, context=None):
+    if(isinstance(val_type, types.Literal)):
+        val_type = val_type.literal_type
     context = cre_context(context)
     tup = (context.name,val_type)
     if(tup not in _gval_types):

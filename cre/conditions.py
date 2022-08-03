@@ -1,6 +1,6 @@
 import operator
 import numpy as np
-from numba import types, njit, f8, i8, u8, i4, u1, i8, i2, u2, literally, generated_jit
+from numba import types, njit, f8, f4, i8, u8, i4, u1, i8, i2, u2, literally, generated_jit
 from numba.typed import List, Dict
 from numba.types import ListType, DictType, unicode_type, void, Tuple, UniTuple, optional, boolean
 from numba.experimental import structref
@@ -89,10 +89,12 @@ literal_fields_dict = {
     **cre_obj_field_dict,
     "op" : GenericOpType,
     "var_base_ptrs" : i8[:],#UniTuple(i8,2),
+    "cre_ms_ptr" : i8,
+    # A weight used for scoring matches and structure remapping  
+    "weight" : f4,
     "negated" : u1,
     "is_alpha" : u1,
-    "cre_ms_ptr" : i8,
-    "link_data" : LiteralLinkDataType   
+    "link_data" : LiteralLinkDataType,
 }
 
 literal_fields =  [(k,v) for k,v, in literal_fields_dict.items()]
@@ -118,6 +120,13 @@ class Literal(structref.StructRefProxy):
         return literal_str(self)
 
     @property
+    def weight(self):
+        return literal_get_weight(self)
+
+    def set_weight(self, weight):
+        literal_set_weight(self, weight)
+
+    @property
     def op(self):
         return literal_get_pred_node(self)
 
@@ -128,6 +137,14 @@ def literal_str(self):
 @njit(cache=True)
 def literal_get_op(self):
     return self.op
+
+@njit(cache=True)
+def literal_get_weight(self):
+    return self.weight
+
+@njit(cache=True)
+def literal_set_weight(self,weight):
+    self.weight = weight
 
 define_boxing(LiteralTypeClass, Literal)
 LiteralType = LiteralTypeClass(literal_fields)
@@ -142,9 +159,10 @@ def literal_ctor(op):
     st.var_base_ptrs = np.empty(len(op.base_var_map),dtype=np.int64)
     for i, ptr in enumerate(op.base_var_map):
         st.var_base_ptrs[i] = ptr
+    st.cre_ms_ptr = 0
+    st.weight = 1.0
     st.negated = 0
     st.is_alpha = u1(len(st.var_base_ptrs) == 1)
-    st.cre_ms_ptr = 0
     return st
 
 
@@ -163,6 +181,7 @@ def literal_copy(self):
     st.idrec = self.idrec
     st.op = self.op
     st.var_base_ptrs = self.var_base_ptrs
+    st.weight = self.weight
     st.negated = self.negated
     st.is_alpha = self.is_alpha
     st.cre_ms_ptr = self.cre_ms_ptr
@@ -273,8 +292,10 @@ register_global_default("Conditions", ConditionsType)
 # default_manager.register(VarTypeClass, models.StructRefModel)
 class Conditions(structref.StructRefProxy):
     def __new__(cls, _vars, dnf=None):
-        # return structref.StructRefProxy.__new__(cls, *args)
-        return conditions_ctor(_vars, dnf)
+        if(isinstance(_vars,Op)):
+            return op_to_cond(_vars)
+        else:
+            return conditions_ctor(_vars, dnf)
     def __str__(self):
         return conditions_str(self)
     def __and__(self, other):
@@ -300,6 +321,9 @@ class Conditions(structref.StructRefProxy):
         from cre.rete import check_match
         idrecs = np.array([x.idrec for x in match],dtype=np.uint64)
         return check_match(self, idrecs, ms)
+
+    def set_weight(self, weight):
+        conds_set_weight(self, weight)
 
     def score_match(self, match, ms=None):
         from cre.rete import score_match
@@ -383,6 +407,11 @@ def conds_get_var_t_ids(self):
         t_ids[i] = v.base_t_id
     return t_ids
 
+@njit(types.void(ConditionsType, f4))
+def conds_set_weight(self, weight):
+    for conj in self.dnf: 
+        for lit in conj:
+            lit.weight = weight
 
 # @njit(unicode_type(ConditionsType,unicode_type,types.boolean), cache=True)
 # def conds_get_delimited_type_names(self,delim,ignore_ext_nots):
@@ -1655,7 +1684,7 @@ def conds_antiunify(c_a, c_b, return_score=False,
 # : Conditions.from_facts
 
 def _add_adjacent(src_fact, _, fact, src_attr_var, conds,
-         fact_ptr_map, attr_flags, add_back_relation=False, var_prefix=None):
+         fact_ptr_map, attr_flags, weight=1.0, add_back_relation=False, var_prefix=None):
     src_ptr = src_fact.get_ptr()
     fact_ptr = fact.get_ptr()
 
@@ -1676,10 +1705,15 @@ def _add_adjacent(src_fact, _, fact, src_attr_var, conds,
                 attr_val.get_ptr() != src_ptr):
                 continue
             attr_var = getattr(fact_var, attr)
-            _conds.append(attr_var==src_fact_var)
+
+            lit = attr_var==src_fact_var
+            lit.set_weight(weight)
+            _conds.append(lit)
 
     # Add a condition from val to 
-    _conds.append(src_attr_var==fact_var)            
+    lit = src_attr_var==fact_var
+    lit.set_weight(weight)
+    _conds.append(lit)
     conds[fact_ptr] = _conds
 
 
@@ -1687,6 +1721,7 @@ from itertools import chain
 
 def conditions_from_facts(facts, _vars=None, add_neighbors=True,
      add_neighbor_holes=False, neighbor_back_relation=False, neighbor_req_n_adj=1, 
+     alpha_weight=1.0, beta_weight = 1.0, neighbor_alpha_weight = 1.0, neighbor_beta_weight = 1.0, 
      alpha_flags=('visible',), parent_flags=('parent',), beta_flags=('relational',)):
     
     
@@ -1702,20 +1737,23 @@ def conditions_from_facts(facts, _vars=None, add_neighbors=True,
     if(add_neighbor_holes):
         alpha_candidate_flags = [*alpha_flags, *parent_flags, *beta_flags]
     
-    # Make Alphas (i.e. nvar = 1)
+    
     cond_set = []
     nbr_conds = {}
     parent_conds = {}
     beta_conds = {}
     for fact, var in zip(facts,_vars):
+        # Make Alphas (i.e. nvar = 1)
         for attr, config in fact._fact_type.filter_spec(*alpha_candidate_flags).items():
             val = getattr(fact, attr)
             if(isinstance(val, FactProxy)): continue
             attr_var = getattr(var, attr)
-            cond_set.append(attr_var==val)
+
+            lit = Conditions(attr_var==val)
+            lit.set_weight(alpha_weight)
+            cond_set.append(lit)
 
         # TODO: Make parents 
-        
         nxt_parents = [fact]
         while(len(nxt_parents) > 0):
             for nxt_parent in nxt_parents:
@@ -1725,7 +1763,6 @@ def conditions_from_facts(facts, _vars=None, add_neighbors=True,
             nxt_parents = []
 
         # Make Betas (i.e. n_var=2) + Neighbors
-        
         for attr, config in fact._fact_type.filter_spec(*beta_not_parent_flags).items():
             attr_val =  getattr(fact, attr)
             if(not isinstance(attr_val, FactProxy)): continue
@@ -1734,13 +1771,14 @@ def conditions_from_facts(facts, _vars=None, add_neighbors=True,
             # Add a beta between the input facts.
             if(attr_val.get_ptr() in inp_fact_ptrs):
                 _add_adjacent(fact, var, attr_val, attr_var, beta_conds,
-                        fact_ptr_map, beta_not_parent_flags, var_prefix=None)
+                        fact_ptr_map, beta_not_parent_flags, weight=beta_weight,
+                        var_prefix=None)
 
             # Add a beta between an input fact and a non-input neighbor.
             elif(add_neighbors):
                 _add_adjacent(fact, var, attr_val, attr_var, nbr_conds,
-                 fact_ptr_map, beta_not_parent_flags, add_back_relation=neighbor_back_relation,
-                var_prefix="Nbr")
+                 fact_ptr_map, beta_not_parent_flags, weight=neighbor_beta_weight,
+                 add_back_relation=neighbor_back_relation, var_prefix="Nbr")
 
     if(neighbor_req_n_adj > 1):
         for ptr, lst in list(nbr_conds.items()): 

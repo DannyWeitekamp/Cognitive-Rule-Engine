@@ -41,7 +41,7 @@ def get_visibile_fact_attrs(fact_types):
     for ft in fact_types:
         ft = ft.instance_type if (isinstance(ft, (types.TypeRef,))) else ft
         parents = context.parents_of.get(ft._fact_name,[])
-        for attr in ft.filter_spec("visible"):
+        for attr in ft.filter_spec("visible", "few_valued"):
             is_new = True
             for p in parents:
                 if((p,attr) in vis_fact_attrs):
@@ -279,7 +279,7 @@ def flattener_update(self):
     impl_args = tuple(impl_args)
 
     id_attr = self._id_attr
-    print([tuple(str(x) for x in y) for y in impl_args])
+    # print([tuple(str(x) for x in y) for y in impl_args])
     def impl(self):
         # For each change event that occured since the last call to update() 
         for change_event in self.get_changes():

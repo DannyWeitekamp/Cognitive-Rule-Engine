@@ -29,6 +29,7 @@ vectorizer_fields = {
     "head_to_slot_ind" : DictType(CREObjType, i8),
     "one_hot_map" : DictType(Tuple((i8,u8)), i8),
     "one_hot_nominals" : types.boolean,
+    "encode_missing" : types.boolean,
     "val_types" : types.Any
 }
 
@@ -48,10 +49,10 @@ def get_vectorizer_type(val_types):
     return struct_type
 
 class Vectorizer(structref.StructRefProxy):
-    def __new__(cls, val_types, one_hot_nominals=False):
+    def __new__(cls, val_types, one_hot_nominals=False, encode_missing=False):
         val_types = tuple(val_types)
         vectorizer_type = get_vectorizer_type(val_types)
-        self = vectorizer_ctor(vectorizer_type, one_hot_nominals)
+        self = vectorizer_ctor(vectorizer_type, one_hot_nominals, encode_missing)
         self._val_types = val_types
         return self
 
@@ -67,12 +68,13 @@ class Vectorizer(structref.StructRefProxy):
 define_boxing(VectorizerTypeClass, Vectorizer)
 
 @generated_jit(cache=True, nopython=True)    
-def vectorizer_ctor(struct_type, one_hot_nominals):
-    def impl(struct_type, one_hot_nominals):    
+def vectorizer_ctor(struct_type, one_hot_nominals, encode_missing):
+    def impl(struct_type, one_hot_nominals, encode_missing):    
         st = new(struct_type)
         st.head_to_slot_ind = Dict.empty(CREObjType,i8)
         st.one_hot_map = Dict.empty(i8_u8_pair,i8)
         st.one_hot_nominals = one_hot_nominals
+        st.encode_missing = encode_missing
         return st
     return impl
 
@@ -86,8 +88,13 @@ def vectorizer_apply(self, mem):
         # Ensure all heads are in head_to_slot_ind
         for i, fact in enumerate(mem.get_facts(gval_type)):
             # print("<<", fact)
-            if(not(fact.head in self.head_to_slot_ind)):
-                self.head_to_slot_ind[fact.head] = len(self.head_to_slot_ind)
+            if(fact.head not in self.head_to_slot_ind):
+                slot = len(self.head_to_slot_ind)
+                self.head_to_slot_ind[fact.head] = slot
+                if(self.encode_missing and self.one_hot_nominals):
+                    self.one_hot_map[(slot, 0)] = len(self.one_hot_map)
+
+
 
         if(not self.one_hot_nominals):
             # Build the numpy arrays 
@@ -102,6 +109,7 @@ def vectorizer_apply(self, mem):
         else:
             # Make sure one_hot_map is up to date.
             for i, fact in enumerate(mem.get_facts(gval_type)):
+
                 tup = (self.head_to_slot_ind[fact.head], fact.nom)
                 if(tup not in self.one_hot_map):
                     self.one_hot_map[tup] = len(self.one_hot_map)
@@ -109,12 +117,25 @@ def vectorizer_apply(self, mem):
             # Build the numpy arrays w/ nom_vals as one_hot encoded
             flt_vals = np.empty((len(self.head_to_slot_ind),),dtype=np.float64)
             nom_vals = np.zeros((len(self.one_hot_map),),dtype=np.uint64)
+
+            if(self.encode_missing):
+                for head in self.head_to_slot_ind:
+                    slot = self.head_to_slot_ind[head]
+                    one_hot_slot = self.one_hot_map[(slot, 0)]
+                    nom_vals[one_hot_slot] = 1
+
+
             for i, fact in enumerate(mem.get_facts(gval_type)):
                 slot = self.head_to_slot_ind[fact.head]
-                # print(fact.head,'->', slot)
+                # print(slot, "<-", fact.head, fact.head.hash_val)
                 flt_vals[slot] = fact.flt
                 one_hot_slot = self.one_hot_map[(slot, fact.nom)]
+                # print(one_hot_slot, fact)#fact.head, "==", fact.nom)
                 nom_vals[one_hot_slot] = 1
+                if(self.encode_missing):
+                    one_hot_slot = self.one_hot_map[(slot, 0)]
+                    nom_vals[one_hot_slot] = 0
+
             return flt_vals, nom_vals
 
     return impl
@@ -122,7 +143,18 @@ def vectorizer_apply(self, mem):
 
 @njit(cache=True)
 def get_inv_map(self):
+    # print("...............")
+    # print(self.head_to_slot_ind)
+    # print("...............")
     d = Dict.empty(i8,CREObjType)
-    for head, ind, in self.head_to_slot_ind.items():
-        d[ind] = head
+    if(self.one_hot_nominals):
+        heads = List.empty_list(CREObjType)
+        for i, head in enumerate(self.head_to_slot_ind):
+            heads.append(head)
+
+        for (head_ind, nom), ind, in self.one_hot_map.items():
+            d[ind] = TF(heads[head_ind], nom)
+    else:
+        for head, ind, in self.head_to_slot_ind.items():
+            d[ind] = head
     return d

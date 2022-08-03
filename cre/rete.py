@@ -1,17 +1,17 @@
 import numpy as np
 import numba
-from numba import types, njit, i8, u8, i4, u1, u2, i8, f8, literally, generated_jit
+from numba import types, njit, i8, u8, i4, u1, u2, i8, f8, f4, literally, generated_jit
 from numba.extending import SentryLiteralArgs
 from numba.typed import List, Dict
 from numba.types import ListType, DictType, unicode_type, void, Tuple
-from numba.experimental.structref import new, define_boxing
+from numba.experimental.structref import new, define_boxing, StructRefProxy
 import numba.experimental.structref as structref
 from cre.utils import (wptr_t, ptr_t, _dict_from_ptr, _raw_ptr_from_struct, _get_array_raw_data_ptr,
          _ptr_from_struct_incref, _struct_from_ptr, decode_idrec, CastFriendlyMixin,
         encode_idrec, deref_info_type, DEREF_TYPE_ATTR, DEREF_TYPE_LIST, _obj_cast_codegen,
          _ptr_to_data_ptr, _list_base_from_ptr, _load_ptr, PrintElapse, meminfo_type,
          _decref_structref, _decref_ptr, cast_structref, _struct_tuple_from_pointer_arr, _meminfo_from_struct,
-         lower_getattr, lower_setattr)
+         lower_getattr, lower_setattr, ptr_to_meminfo)
 from cre.structref import define_structref
 from cre.caching import gen_import_str, unique_hash,import_from_cached, source_to_cache, source_in_cache, cache_safe_exec, get_cache_path
 from cre.memset import MemSetType
@@ -328,6 +328,9 @@ rete_graph_field_dict = {
     # A strong pointer the prototype instance for match iterators on this graph.
     "match_iter_prototype_ptr" : ptr_t, #NOTE: Should really use deferred type
 
+    # The sum of weights of all literals in the graph
+    "total_weight" : f4,
+
 
 }
 
@@ -338,7 +341,7 @@ ReteGraph, ReteGraphType = define_structref("ReteGraph", rete_graph_field_dict, 
 
 @njit(cache=True)
 def rete_graph_ctor(ms, conds, nodes_by_nargs, n_nodes, var_root_nodes, var_end_nodes,
-                var_end_join_ptrs, global_modify_map, global_t_id_root_map):
+                var_end_join_ptrs, global_modify_map, global_t_id_root_map, total_weight):
     st = new(ReteGraphType)
     st.change_head = 0
     st.memset = ms
@@ -350,6 +353,7 @@ def rete_graph_ctor(ms, conds, nodes_by_nargs, n_nodes, var_root_nodes, var_end_
     st.global_modify_map = global_modify_map
     st.global_t_id_root_map = global_t_id_root_map
     st.match_iter_prototype_ptr = 0
+    st.total_weight = total_weight
     
     return st
 
@@ -483,6 +487,7 @@ def build_rete_graph(ms, c):
     var_end_nodes = Dict.empty(i8,ReteNodeType)
     var_root_nodes = Dict.empty(i8,ReteNodeType)
     n_nodes = 0
+    total_weight = 0
 
     # Link nodes together. 'nodes_by_nargs' should already be ordered
     # so that alphas are before 2-way, 3-way, etc. betas. 
@@ -534,18 +539,21 @@ def build_rete_graph(ms, c):
             # Short circut the input to the output for identity nodes
             if(node.lit is None):
                 node.outputs = node.inputs
+                total_weight += 1.0 
+            else:
+                total_weight += node.lit.weight 
             
 
             n_nodes += 1
+            
 
             # Make this node the new end node for the vars it takes as inputs
             for var_ind in node.var_inds:
                 var_end_nodes[var_ind] = node
-
             
             
     return rete_graph_ctor(ms, c, nodes_by_nargs, n_nodes, var_root_nodes, var_end_nodes,
-              var_end_join_ptrs, global_modify_map, global_t_id_root_map)
+              var_end_join_ptrs, global_modify_map, global_t_id_root_map, total_weight)
 
 
 # -----------------------------------------------------------------------
@@ -1327,34 +1335,79 @@ def specialize_m_iter(self):
     return _cast_structref(m_iter_type,self)
     '''
 
+MATCH_ITER_FACT_KIND = 0
+MATCH_ITER_PTR_KIND = 1
+MATCH_ITER_IDREC_KIND = 2
+match_iter_kinds = {
+    "fact" : MATCH_ITER_FACT_KIND,
+    "ptr" : MATCH_ITER_PTR_KIND,
+    "idrec" : MATCH_ITER_IDREC_KIND,
+}
+
+
 class MatchIterator(structref.StructRefProxy):
     ''' '''
+    __slots__ = ('kind', 'recover_types' , 'output_types', 'proxy_types')
     m_iter_type_cache = {}
-    def __new__(cls, ms, conds):
+    def __new__(cls, ms, conds, kind="fact", recover_types=False):
         # Make a generic MatchIterator (reuses graph if conds already has one)
         generic_m_iter = get_match_iter(ms, conds)
-        #Cache 'output_types' and 'specialized_m_iter_type'
+        kind = match_iter_kinds[kind]
         var_base_types = conds.var_base_types
 
-        if(var_base_types not in cls.m_iter_type_cache):
-            hash_code = unique_hash([var_base_types])
-            if(not source_in_cache('MatchIterator', hash_code)):
-                output_types = types.TypeRef(types.Tuple([types.TypeRef(x) for x in conds.var_base_types]))
-                source = gen_match_iter_source(output_types)
-                source_to_cache('MatchIterator', hash_code, source)
-            l = import_from_cached('MatchIterator', hash_code, ['specialize_m_iter', 'output_types'])
-            output_types, specialize_m_iter = cls.m_iter_type_cache[var_base_types] = l['output_types'], l['specialize_m_iter']
-        else:
-            output_types, specialize_m_iter  = cls.m_iter_type_cache[var_base_types]
+        if(kind == MATCH_ITER_FACT_KIND and recover_types):
+            #Cache 'output_types' and 'specialized_m_iter_type'
+            
+            if(var_base_types not in cls.m_iter_type_cache):
+                hash_code = unique_hash([var_base_types])
+                if(not source_in_cache('MatchIterator', hash_code)):
+                    output_types = types.TypeRef(types.Tuple([types.TypeRef(x) for x in conds.var_base_types]))
+                    source = gen_match_iter_source(output_types)
+                    source_to_cache('MatchIterator', hash_code, source)
+                l = import_from_cached('MatchIterator', hash_code, ['specialize_m_iter', 'output_types'])
+                output_types, specialize_m_iter = cls.m_iter_type_cache[var_base_types] = l['output_types'], l['specialize_m_iter']
+            else:
+                output_types, specialize_m_iter  = cls.m_iter_type_cache[var_base_types]
 
-        # Specialize the match iter so that it outputs conds.var_base_types 
-        self = specialize_m_iter(generic_m_iter)
-        self.output_types = output_types#tuple([types.TypeRef(x) for x in conds.var_base_types])
+            # Specialize the match iter so that it outputs conds.var_base_types 
+            self = specialize_m_iter(generic_m_iter)
+            self.output_types = output_types#tuple([types.TypeRef(x) for x in conds.var_base_types])
+        else:
+            self = generic_m_iter
+            if(kind == MATCH_ITER_FACT_KIND):
+                self.proxy_types = [x._fact_proxy for x in var_base_types]                
+
+        self.kind = kind
+        self.recover_types = recover_types
         return self
+            
         
     def __next__(self):
-        # with PrintElapse("match_iter_next"):
-        return match_iter_next(self)
+        # Note: only necessary for C-profiling
+        try:
+            if(self.kind == MATCH_ITER_FACT_KIND):
+                if(self.recover_types):
+                    return match_iter_next(self)
+                else:
+                    ptrs = match_iter_next_ptrs(self)
+                    arr = []
+                    for ptr, proxy_typ in zip(ptrs, self.proxy_types):
+                        mi = ptr_to_meminfo(ptr)
+                        instance = super(StructRefProxy,proxy_typ).__new__(proxy_typ)
+                        instance._type = proxy_typ
+                        instance._meminfo = mi
+                        arr.append(instance)
+                    return arr
+            elif(self.kind == MATCH_ITER_PTR_KIND):
+                return match_iter_next_ptrs(self)
+            else:
+                return match_iter_next_idrecs(self)
+
+        # Catch system errors. Needed for Cprofiling to work
+        except SystemError:
+            raise StopIteration()
+
+
 
     def __iter__(self):
         return self
@@ -1771,9 +1824,7 @@ def get_match_iter(ms, conds):
 
     update_graph(rete_graph)
     m_iter = new_match_iter(rete_graph)
-
     # print("DEPS:", repr_match_iter_dependencies(m_iter))
-
     for i in range(len(m_iter.iter_nodes)):
         m_node = m_iter.iter_nodes[i]
         m_node.curr_ind = 0
@@ -1790,15 +1841,17 @@ def get_match_iter(ms, conds):
 # : score_match, check_match
 
 @njit(cache=True)
-def count_matching_nodes(ms, conds, match_idrecs, zero_on_fail=False):
+def cum_weight_of_matching_nodes(ms, conds, match_idrecs, zero_on_fail=False):
 
     rete_graph = get_graph(ms, conds)
 
-    n_matches = 0
+    # n_matches = 0
+    cum_weight = 0.0
     for lst in rete_graph.nodes_by_nargs:
         for node in lst:
             if(node.op is None):
-                n_matches += 1
+                cum_weight += 1.0
+                # n_matches += 1
                 continue
             match_inp_ptrs = np.zeros(len(node.op.head_var_ptrs),dtype=np.int64)
             
@@ -1841,10 +1894,14 @@ def count_matching_nodes(ms, conds, match_idrecs, zero_on_fail=False):
                 is_match = match_head_ptrs_func(match_inp_ptrs) ^ node.lit.negated
 
             if(is_match):
-                n_matches += 1
+                # print("++", node.lit, node.lit.weight)
+                cum_weight += node.lit.weight
             elif(zero_on_fail):
-                return 0
-    return n_matches
+
+                return 0.0
+            # else:
+            #     print("--", node.lit, node.lit.weight)
+    return cum_weight
 
 @njit(MemSetType(ConditionsType, types.optional(MemSetType)), cache=True)
 def _ensure_ms(conds, ms):
@@ -1860,16 +1917,15 @@ def _ensure_ms(conds, ms):
 def score_match(conds, match_idrecs, ms=None):
     ms = _ensure_ms(conds, ms)
     rete_graph = get_graph(ms, conds)
-    n_matches = count_matching_nodes(ms, conds, match_idrecs, False)
-    return n_matches / rete_graph.n_nodes
+    cum_weight = cum_weight_of_matching_nodes(ms, conds, match_idrecs, False)
+    return cum_weight / rete_graph.total_weight
 
 @njit(cache=True)
 def check_match(conds, match_idrecs, ms=None):
     ms = _ensure_ms(conds, ms)
     rete_graph = get_graph(ms, conds)
     #TODO to make sure checking types
-
-    return count_matching_nodes(ms, conds, match_idrecs, True) != 0
+    return cum_weight_of_matching_nodes(ms, conds, match_idrecs, True) != 0.0
 
 
 

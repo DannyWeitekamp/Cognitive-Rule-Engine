@@ -1610,12 +1610,14 @@ class OpComp():
         args = []
         arg_types = []
         n_terms = 0
+        n_ops = 1
         depth = 1
         
         for i, x in enumerate(py_args):
             if(isinstance(x, Op)): x = x.as_op_comp()
             if(isinstance(x, OpComp)):
                 n_terms += x.n_terms
+                n_ops += x.n_ops
                 depth = max(x.depth+1, depth)
                 for v_ptr,(v,_,t) in x.base_vars.items():
                     if(v_ptr not in base_vars):
@@ -1664,6 +1666,7 @@ class OpComp():
 
         # print("<<",_vars)
         self.n_terms = n_terms
+        self.n_ops = n_ops
         self.depth = depth
         self.op = op
         self.base_vars = base_vars
@@ -2035,8 +2038,6 @@ method_addrs[3] = _get_wrapper_address(match_heads, boolean(*head_types))
 method_addrs[4] = _get_wrapper_address(match_head_ptrs, boolean(i8[::1],))
 method_addrs[5] = _get_wrapper_address(match, boolean(*call_sig.args))
     
-
-
 '''
         if(has_check): source +=f'''
 @njit(boolean(*call_sig.args),cache=True)

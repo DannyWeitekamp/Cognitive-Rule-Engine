@@ -140,6 +140,7 @@ def overload_tup_fact_ctor(*args):
     return impl
 
 SpecializedTF._fact_proxy = SpecializedTFProxy
+SpecializedTF._proxy_class = SpecializedTFProxy
 
 define_boxing(SpecializedTFClass,SpecializedTFProxy)
 

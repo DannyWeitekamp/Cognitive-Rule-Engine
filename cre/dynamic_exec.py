@@ -183,10 +183,9 @@ def tuple_fact_eq(a, b):
                 stack_buffer[stack_head,1] = _load_ptr(i8, data_ptr_b)
 
             elif(t_id_a <= T_ID_STR):
-                    if(not eq_from_t_id_ptr(t_id_a, data_ptr_a, data_ptr_b)): return False
-                    
+                if(not eq_from_t_id_ptr(t_id_a, data_ptr_a, data_ptr_b)):
+                    return False
             else:
-
                 # Kind of a heavy handed way to do this... but lack
                 #  of recrusion makes it the best option                    
                 mbr_a = _struct_from_ptr(CREObjType,_load_ptr(i8,data_ptr_a))

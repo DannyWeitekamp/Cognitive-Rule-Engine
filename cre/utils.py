@@ -138,6 +138,24 @@ meminfo_type = types.MemInfoPointer(types.voidptr)
 def cast_meminfo_to_ptr(context, builder, fromty, toty, val):
     return builder.ptrtoint(val, cgutils.intp_t)
 
+@intrinsic
+def _ptr_to_meminfo(typingctx, ptr_type):    
+
+    mip_type = types.MemInfoPointer(types.voidptr)
+    def codegen(context, builder, signature, args):
+        raw_ptr = args[0]
+        meminfo = builder.inttoptr(raw_ptr, cgutils.voidptr_t)
+        context.nrt.incref(builder, mip_type, meminfo)
+
+        return meminfo
+    sig = mip_type(ptr_type)
+    return sig, codegen
+
+
+
+@njit(types.MemInfoPointer(types.voidptr)(i8),cache=True)
+def ptr_to_meminfo(ptr):
+    return _ptr_to_meminfo(ptr)
 
 
 @intrinsic
@@ -476,6 +494,10 @@ def _incref_structref(typingctx,inst_type):
     sig = void(inst_type)
     return sig, codegen
 
+# @njit(cache=True)
+# def incref(x):
+#     _incref_structref(x)
+
 
 @intrinsic
 def _decref_structref(typingctx,inst_type):
@@ -512,6 +534,36 @@ def _incref_ptr(typingctx, raw_ptr):
 
     sig = void(raw_ptr)
     return sig, codegen
+
+@intrinsic
+def _decref_meminfo(typingctx, meminfo_type):
+    def codegen(context, builder, sig, args):
+        meminfo, = args
+        # meminfo = builder.inttoptr(raw_ptr, cgutils.voidptr_t)
+        context.nrt.decref(builder, types.MemInfoPointer(types.voidptr), meminfo)
+
+
+    sig = void(meminfo_type)
+    return sig, codegen
+
+@intrinsic
+def _incref_meminfo(typingctx, raw_ptr):
+    def codegen(context, builder, sig, args):
+        meminfo, = args
+        # meminfo = builder.inttoptr(raw_ptr, cgutils.voidptr_t)
+        context.nrt.incref(builder, types.MemInfoPointer(types.voidptr), meminfo)
+
+
+    sig = void(meminfo_type)
+    return sig, codegen
+
+@njit(cache=True)
+def decref_meminfo(mi):
+    _decref_meminfo(mi)
+
+@njit(cache=True)
+def incref_meminfo(mi):
+    _incref_meminfo(mi)
 
 
 

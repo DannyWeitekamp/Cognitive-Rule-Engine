@@ -27,6 +27,8 @@ if(not skip.get()):
     from cre.memset import MemSet
     from cre.ptrop import PtrOp
 
+    import cre.dynamic_exec
+
     # Import this to monkey-patch numba 
     import cre.type_conv
 

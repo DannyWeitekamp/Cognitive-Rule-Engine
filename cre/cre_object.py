@@ -225,9 +225,9 @@ class CREObjProxy(StructRefProxy):
             print("RECOVER FAILED", e)
             return self
 
-    def __hash__(self):
-        from cre.dynamic_exec import cre_obj_hash        
-        return cre_obj_hash(self)
+    # def __hash__(self):
+    #     from cre.dynamic_exec import cre_obj_hash        
+    #     return cre_obj_hash(self)
 
     def __eq__(self, other):
         from cre.dynamic_exec import cre_obj_eq

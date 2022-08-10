@@ -281,9 +281,10 @@ class SetChainingPlanner(structref.StructRefProxy):
     def declare(self, val, var=None):
         return planner_declare(self, val, var)
 
-    def search_for_explanations(self, goal, ops=None,
+    def search_for_explanations(self, goal, ops=None, policy=None,
              search_depth=1, min_stop_depth=-1,context=None):
-        return search_for_explanations(self, goal, ops, search_depth, min_stop_depth, context)
+        return search_for_explanations(self, goal, ops, policy,
+                        search_depth, min_stop_depth, context)
 
     @property
     def conversion_ops(self):
@@ -570,7 +571,7 @@ def planner_declare(planner, val, var=None):
 
 from numba.core.runtime.nrt import rtsys
 from cre.core import standardize_type
-def search_for_explanations(self, goal, ops=None,
+def search_for_explanations(self, goal, ops=None, policy=None,
              search_depth=1, min_stop_depth=-1,context=None):
     '''For SetChainingPlanner 'self' produce an explanation tree
         holding all cre.Op compositions of 'ops' up to depth 'search_depth'
@@ -588,16 +589,19 @@ def search_for_explanations(self, goal, ops=None,
 
         depth += 1
         if(depth <= self.curr_infer_depth): continue
+                
+        # Apply the input ops in the forward direction once.
+        if(policy is None):
+            if(ops is None): raise ValueError("Must provide ops or policy.")
+            forward_chain_one(self, ops, min_stop_depth)
+        else:
+            depth_policy = policy[depth-1]
+            # TODO : write so that forward can take whole depth_policy
+            depth_ops = [t[0] if isinstance(t, tuple) else t for t in depth_policy]
+            forward_chain_one(self, depth_ops, min_stop_depth)
             
-        
-        forward_chain_one(self, ops, min_stop_depth)
-
         if(depth >= min_stop_depth):
             found_at_depth = query_goal(self, g_typ, goal, min_stop_depth)
-        # print("<< found_at_depth", goal, depth, found_at_depth)
-            # print("found_at_depth", found_at_depth)
-        # else:
-            # break
         
         # if(depth >= search_depth): break
     # print(found_at_depth)

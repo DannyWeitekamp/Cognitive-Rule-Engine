@@ -41,7 +41,7 @@ def get_visibile_fact_attrs(fact_types):
     for ft in fact_types:
         ft = ft.instance_type if (isinstance(ft, (types.TypeRef,))) else ft
         parents = context.parents_of.get(ft._fact_name,[])
-        for attr in ft.filter_spec("visible", "few_valued"):
+        for attr in ft.filter_spec("visible"):
             is_new = True
             for p in parents:
                 if((p,attr) in vis_fact_attrs):

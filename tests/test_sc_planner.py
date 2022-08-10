@@ -634,7 +634,32 @@ def test_non_numerical_vals():
         for i, (op_comp, binding) in enumerate(expls):
             print(op_comp, binding)
 
+def test_policy_search(n=5):
+    [Add_f8, Multiply_f8, Concatenate] = ops = get_base_ops()
+        
+    # No Policy
+    planner = setup_float(n=n)
+    expl_tree = search_for_explanations(planner, 36.0, ops=ops, search_depth=2)
+    no_policy_expls = list(expl_tree)    
 
+    # Policy
+    policy = [[Add_f8],[Multiply_f8]]
+    planner = setup_float(n=n)
+    expl_tree = search_for_explanations(planner, 36.0, policy=policy, search_depth=2)
+    policy_expls = list(expl_tree)    
+
+    for expl in no_policy_expls:
+        print(expl)
+    print("----------------")
+    for expl in policy_expls:
+        print(expl)
+    
+    assert len(policy_expls) < len(no_policy_expls)
+
+    
+
+    # for expl in policy_expls:
+    #     print(expl)
 
 
 
@@ -748,7 +773,7 @@ def product_of_generators(generators):
 if __name__ == "__main__":
     # Makes it easier to track down segfaults
     import faulthandler; faulthandler.enable()
-    test_non_numerical_vals()
+    # test_non_numerical_vals()
     # with PrintElapse("test_build_explanation_tree"):
     #     test_build_explanation_tree()
     # with PrintElapse("test_build_explanation_tree"):
@@ -778,6 +803,8 @@ if __name__ == "__main__":
     # test_declare_fact()
     # test_declare_fact_w_conversions()
     # test_min_stop_depth()
+
+    test_policy_search()
 # from numba import njit, i8
 # from numba.typed import Dict
 # from numba.types import ListType

@@ -16,7 +16,7 @@ from cre.var import GenericVarType
 from cre.utils import (ptr_t, _struct_from_meminfo, _meminfo_from_struct, _cast_structref, cast_structref, decode_idrec, lower_getattr, _struct_from_ptr,  lower_setattr, lower_getattr,
                        _raw_ptr_from_struct, _decref_ptr, _incref_ptr, _incref_structref, _ptr_from_struct_incref,
                        _dict_from_ptr, _list_from_ptr, _load_ptr, _arr_from_data_ptr, _get_array_raw_data_ptr, _get_array_raw_data_ptr_incref)
-from cre.utils import assign_to_alias_in_parent_frame, _raw_ptr_from_struct_incref, _func_from_address
+from cre.utils import assign_to_alias_in_parent_frame, _raw_ptr_from_struct_incref, _func_from_address, _list_base_from_ptr, _listtype_sizeof_item
 from cre.subscriber import base_subscriber_fields, BaseSubscriber, BaseSubscriberType, init_base_subscriber, link_downstream
 from cre.vector import VectorType
 from cre.fact import Fact, gen_fact_import_str, get_offsets_from_member_types
@@ -32,13 +32,14 @@ from numba.experimental.function_type import _get_wrapper_address
 from operator import itemgetter
 from copy import copy
 from os import getenv
-from cre.utils import deref_info_type, listtype_sizeof_item
+from cre.utils import deref_info_type, listtype_sizeof_item, _tuple_from_data_ptrs
 import inspect, dill, pickle
 from textwrap import dedent, indent
 import time
 # Ensure that dynamic hash/eq set
 import cre.dynamic_exec
 import warnings
+import itertools
 from cre.default_ops import Identity
 
 
@@ -282,7 +283,7 @@ class SetChainingPlanner(structref.StructRefProxy):
         return planner_declare(self, val, var)
 
     def search_for_explanations(self, goal, ops=None, policy=None,
-             search_depth=1, min_stop_depth=-1,context=None):
+             search_depth=1, min_stop_depth=None,context=None):
         return search_for_explanations(self, goal, ops, policy,
                         search_depth, min_stop_depth, context)
 
@@ -568,15 +569,97 @@ def planner_declare(planner, val, var=None):
 
 #------------------------------------------------------------------
 # : Explanation Search Main Loop
+@generated_jit(cache=True)
+def recover_arg_ind(planner, arg):
+    arg_type_name = str(arg)
+    arg_type = arg
+    def impl(planner, arg):
+        flat_vals, val_map, inv_val_map, declare_records = \
+            ensure_ptr_dicts(planner, arg_type)
+        return arg_type_name, flat_vals.index(arg)
+    return impl
+
+@njit(cache=True)
+def range_product(lengths):
+    ''' Yields the iteration product from zero to 'lengths' 
+        (e.g. lengths=(2,2) -> [[0,0],[0,1],[1,0],[1,1]])
+    ''' 
+    if(not np.all(lengths)): 
+        return np.zeros((0, len(lengths),),dtype=np.int64)
+
+    n_inds = int(np.prod(lengths))
+
+    inds = np.zeros((len(lengths),),dtype=np.int64)
+    out = np.zeros((n_inds, len(lengths),),dtype=np.int64)
+    max_k = k = len(lengths)-1
+    done = False
+    c = 0
+    while(not done):
+        out[c,:] = inds[:]
+        # yield inds
+        # Gets next set of indices holding const_position to const_ind
+        inds[k] += 1
+        while(inds[k] >= lengths[k]):
+            inds[k] = 0
+            k -= 1
+            if(k < 0): done = True; break;
+            inds[k] += 1
+        k = max_k
+        c += 1
+    return out
+
+
+def should_commute_skip(arg_inds, op):
+    for k, ind in enumerate(arg_inds):
+        comm_args = op.right_commutes.get(k,[])
+        for j in comm_args:
+            if(arg_inds[k] < arg_inds[j]):
+                return True
+    return False
+
+
+
+#TODO njit it
+def commute_sensitive_arg_ind_product(op, arg_inds_by_type):
+    arg_ind_sets = [arg_inds_by_type[str(typ)] for typ in op.signature.args]
+    lengths = np.array([len(x) for x in arg_ind_sets],dtype=np.int64)
+    inds = np.zeros(len(arg_ind_sets),dtype=np.int64)
+
+    done = False
+    out = []
+    max_k = k = len(lengths)-1
+    while(not done):
+        arg_inds = np.array([arg_ind_sets[_k][inds[_k]] for _k in range(len(lengths))])
+        if(not should_commute_skip(arg_inds, op)):
+            out.append(arg_inds)
+
+        inds[k] += 1
+        while(inds[k] >= lengths[k]):
+            inds[k] = 0
+            k -= 1
+            if(k < 0): done = True; break;
+            inds[k] += 1
+        k = max_k
+    return out
+
+
 
 from numba.core.runtime.nrt import rtsys
 from cre.core import standardize_type
 def search_for_explanations(self, goal, ops=None, policy=None,
-             search_depth=1, min_stop_depth=-1,context=None):
+             search_depth=1, min_stop_depth=None,context=None):
     '''For SetChainingPlanner 'self' produce an explanation tree
         holding all cre.Op compositions of 'ops' up to depth 'search_depth'
         that produce 'goal' from the planner's declared starting values.
     '''
+
+    # If a policy is given set the min_stop_depth to be its length
+    if(min_stop_depth is None):
+        if(policy is None):
+            min_stop_depth = -1
+        else:
+            min_stop_depth = len(policy)
+
     context = cre_context(context)
     g_typ = standardize_type(type(goal), context)
 
@@ -594,11 +677,42 @@ def search_for_explanations(self, goal, ops=None, policy=None,
         if(policy is None):
             if(ops is None): raise ValueError("Must provide ops or policy.")
             forward_chain_one(self, ops, min_stop_depth)
+
+        # Policy Case
         else:
-            depth_policy = policy[depth-1]
-            # TODO : write so that forward can take whole depth_policy
-            depth_ops = [t[0] if isinstance(t, tuple) else t for t in depth_policy]
-            forward_chain_one(self, depth_ops, min_stop_depth)
+            # Convert args in policy to arg_inds
+            print()
+            print("policy", policy)
+            depth_policy = []
+            for op, arg_set in policy[depth-1]:
+
+                # If the policy didn't provide any args then try all permutations
+                if(arg_set is None or len(arg_set) == 0):
+                    depth_policy.append(op)
+                    continue
+
+
+                arg_inds_by_type = {}
+                for arg in arg_set:
+                    try:
+                        type_name, arg_ind = recover_arg_ind(self, arg)
+                    except ValueError:
+                        continue
+
+                    arr = arg_inds_by_type.get(type_name, [])
+                    arr.append(arg_ind)
+                    arg_inds_by_type[type_name] = arr
+                    
+                # Make Cartesian Product of arg_inds
+                arg_inds = commute_sensitive_arg_ind_product(op, arg_inds_by_type)
+                # arg_inds = list(itertools.product(*[arg_inds_by_type[str(typ)] for typ in op.signature.args]))
+                arg_inds = np.array(arg_inds,dtype=np.int64)
+                    
+
+                depth_policy.append((op, arg_inds))
+
+            # Apply policy
+            forward_chain_one(self, depth_policy, min_stop_depth)
             
         if(depth >= min_stop_depth):
             found_at_depth = query_goal(self, g_typ, goal, min_stop_depth)
@@ -692,17 +806,152 @@ def join_records(self, depth, ops):
 #------------------------------
 # : Forward Chaining
 
-def forward_chain_one(self, ops=None, min_stop_depth=-1):
+def forward_chain_one(self, depth_policy=None, min_stop_depth=-1):
     '''Applies 'ops' on all current inferred values'''
     nxt_depth = self.curr_infer_depth+1
-    if(ops is None): ops = self.ops
-    for op in ops:
-        rec = apply_multi(op, self, self.curr_infer_depth, min_stop_depth)
-        if(rec is not None):
-            insert_record(self, rec, op.return_type_name, nxt_depth)
+    if(depth_policy is None): depth_policy = self.ops
+
+    ops = []
+    for op in depth_policy:
+
+        # If policy provides arg_inds then apply each set 
+        #  of arg_inds one at a time.
+        if(isinstance(op, tuple)):
+            op, arg_inds = op
+            for inds in arg_inds:
+                sig = op.signature
+                print(";;",inds)
+                # v = call_op_for_inds(self, op, sig.return_type, sig.args, self.curr_infer_depth, inds)
+                # print(v)
+                rec = apply_one(op, self, sig.return_type, sig.args,
+                    inds, self.curr_infer_depth, min_stop_depth)
+
+                # Insert records
+                if(rec is not None):
+                    insert_record(self, rec, op.return_type_name, nxt_depth)
+
+        # If no arg_inds are provided then apply all permutations 
+        #  of arguments to the op.
+        else:
+            print("APPLY MULTI")
+            rec = apply_multi(op, self,
+                self.curr_infer_depth, min_stop_depth)
+
+            # Insert records
+            if(rec is not None):
+                insert_record(self, rec, op.return_type_name, nxt_depth)
+
+        
+        ops.append(op)
+
 
     join_records(self, nxt_depth, ops)
     self.curr_infer_depth = nxt_depth
+
+#---------------------------------
+# : apply_one()
+
+@generated_jit(cache=True,nopython=True) 
+def arg_from_ind(planner, ind, typ, depth):
+    '''Fill 'new_subgoals' with the actual values pointed to by
+         the arg_inds of 'typ' '''
+    _typ = typ.instance_type
+    typ_name = str(_typ)
+    lst_typ = ListType(_typ)
+    def impl(planner, ind, typ, depth):
+        _new_subgoals =  Dict.empty(typ, ExplanationTreeType)
+        _arg_inds = arg_inds[typ_name]
+
+        # In the event that we haven't produced flat vals for this 
+        #  type then do it now.
+        if((typ_name, depth) not in planner.flat_vals_ptr_dict):
+            return None
+
+        vals = _list_from_ptr(lst_typ, planner.flat_vals_ptr_dict[(typ_name, depth)])
+        return vals[ind]
+        
+    return impl
+
+@generated_jit(cache=True, nopython=True)
+def call_op_for_inds(planner, op, return_type, arg_types, depth, inds):
+    return_type = return_type.instance_type
+    arg_types = tuple([a.instance_type for a in arg_types])
+    
+    lst_types = tuple([ListType(arg_type) for arg_type in arg_types])
+    call_type = types.FunctionType(return_type(*arg_types))
+    check_type = types.FunctionType(types.boolean(*arg_types))
+    type_names = tuple([str(x) for x in arg_types])
+    # arg_types = types.TypeRef(Tuple(arg_types))
+
+    def impl(planner, op, return_type, arg_types, depth, inds):
+        arg_ptrs = np.empty(len(arg_types),dtype=np.int64)
+        i = 0
+        for lst_typ in literal_unroll(lst_types):
+            iter_base = _list_base_from_ptr(planner.flat_vals_ptr_dict[(type_names[i],depth)])
+            size = _listtype_sizeof_item(lst_typ)
+            arg_ptrs[i] = iter_base + inds[i] * size
+            i += 1
+
+        args = _tuple_from_data_ptrs(arg_types, arg_ptrs)
+
+        if(op.check_addr != -1 and op.check_addr != 0):
+            check = _func_from_address(check_type, op.check_addr)
+            if(not check(*args)):
+                return None
+
+        call = _func_from_address(call_type, op.call_addr)
+        val = call(*args)
+        return val
+
+    return impl
+
+
+@generated_jit(cache=True, nopython=True)
+def apply_one(op, planner, return_type, arg_types, inds, curr_infer_depth, min_stop_depth):
+    return_type = return_type.instance_type
+    ret_d_typ = DictType(return_type,Tuple((i8,i8)))  
+    ret_type_name = str(return_type)  
+    def impl(op, planner, return_type, arg_types, inds, curr_infer_depth, min_stop_depth):
+        v = call_op_for_inds(planner, op, return_type, arg_types, curr_infer_depth, inds)
+        if(v is None):
+            return
+
+        stride = np.empty((len(inds),2),dtype=np.int64)
+        nxt_depth = curr_infer_depth+1
+        stride[:, 0] = inds
+        stride[:, 1] = inds+1
+        nargs = len(op.head_ranges)
+        rec = SC_Record(op, nxt_depth, nargs, stride)
+        data = rec.data
+
+        val_map =  _dict_from_ptr(ret_d_typ,
+            planner.val_map_ptr_dict[ret_type_name])
+
+        d_ptr = _get_array_raw_data_ptr(data)
+        rec_ptr = _raw_ptr_from_struct(rec)
+
+        prev_depth, prev_entry = val_map.get(v, (-1,0))
+        if(nxt_depth > min_stop_depth and
+           prev_depth != -1 and
+           prev_depth < nxt_depth):
+            print("SKIP", op, inds, min_stop_depth)
+            return
+
+        data[0] = u4(rec_ptr) # get low bits
+        data[1] = u4(rec_ptr>>32) # get high bits
+        data[2] = u4(prev_entry) # get low bits
+        data[3] = u4(prev_entry>>32)# get high bits
+
+        #Put arg inds at the end
+        for i,ind in enumerate(inds):
+            data[4+i] = u4(ind)
+
+        val_map[v] = (nxt_depth, d_ptr)
+        return rec
+
+
+    return impl
+
 
 #---------------------------------
 # : Source Generation -- apply_multi()

@@ -1032,6 +1032,40 @@ def _struct_tuple_from_pointer_arr(typingctx, struct_types, ptr_arr):
 
     return sig,codegen
 
+#TODO: Might need to add an incref in here to handle objects
+@intrinsic
+def _tuple_from_data_ptrs(typingctx, member_types, ptr_arr):
+    if(isinstance(member_types,types.TypeRef)): member_types = member_types.instance_type
+    if(isinstance(member_types, types.UniTuple)):
+        typs = tuple([member_types.dtype.instance_type] * member_types.count)
+        out_type =  types.UniTuple(member_types.dtype.instance_type,member_types.count)
+    else:
+        # print(struct_types.__dict__)
+        typs = tuple([x.instance_type for x in struct_types.types])
+        out_type =  Tuple(typs)
+    
+    print(member_types)
+    # out_type = member_types.instance_type
+    # out_type = tuple([x.instance_type for x in member_types])
+    # out_type =  Tuple(out_type)
+    def codegen(context, builder, sig, args):
+        _,ptrs = args
+        vals = []
+        ary = make_array(i8[::1])(context, builder, value=ptrs)
+        for i, inst_type in enumerate(out_type):
+            i_val = context.get_constant(types.intp, i)
+
+            raw_ptr = _getitem_array_single_int(context,builder,i8,i8[::1],ary,i_val)
+
+            llrtype = context.get_value_type(inst_type)
+            data_pointer = builder.inttoptr(raw_ptr, ll_types.PointerType(llrtype))
+            vals.append(builder.load(data_pointer))
+
+        return context.make_tuple(builder, out_type, vals)
+    sig = out_type(member_types, ptr_arr)
+    return sig, codegen
+
+
 # Check for https://github.com/numba/numba/issues/6993
 def check_issue_6993():
     @njit

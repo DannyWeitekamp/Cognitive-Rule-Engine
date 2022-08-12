@@ -1191,6 +1191,10 @@ class Op(CREObjProxy,metaclass=OpMeta):
         return get_head_ranges(self)
 
     @property
+    def nargs(self):
+        return len(get_head_ranges(self))
+
+    @property
     def return_type_name(self):
         return get_return_type_name(self)
 

@@ -196,12 +196,12 @@ def test_list_operations():
         assert str(c) == "~(v.items[0] == v.items[1])"
 
         Container = define_fact("Container",{"name" : "string", "children" : "ListType(Container)"})
-        v = Var(TList,"v")
+        v = Var(Container,"v")
         print(v.children[0])
         assert ".children[0]" in str(v.children[0])
 
-        c = v.items[0] != v.items[1]
-        assert str(c) == "~(v.items[0] == v.items[1])"
+        c = v.children[0] != v.children[1]
+        assert str(c) == "~(v.children[0] == v.children[1])"
 
 @njit(cache=True)
 def hsh(x):

@@ -178,6 +178,10 @@ class Fact(CREObjTypeClass):
         # if('spec' in d): del d['spec']
         return d
 
+    def __setstate__(self, d):
+        self.__dict__ = d
+
+
 @generated_jit(cache=True)
 def call_untyped_fact(self, **kwargs):
 
@@ -569,12 +573,15 @@ class FactProxy(CREObjProxy):
     def isa(self, typ):
         return isa(self,typ)
 
-    # def asa(self, typ):
+    def asa(self, typ):
+        if(not isa(self,typ)):
+            raise TypeError(f"Cannot cast fact '{str(self)}' to '{str(typ)}.'")
+        return super().asa(typ)
     # #     instance = typ.__new__(CREObjProxy)
     # #     instance._type = typ
     # #     instance._meminfo = self._meminfo
     # #     return instance
-    #     return asa(self,typ)
+        # return asa(self,typ)
 
     def __repr__(self):
         return str(self)
@@ -966,15 +973,6 @@ define_boxing({typ}Class,{typ}Proxy)
     return code
 
 
-# def resolve_fact_attr_type(typ, attr):
-#     typ.spec[attr]
-
-
-
-
-
-
-
 
 def _fact_from_fields(name, fields, inherit_from=None, specialization_name=None, is_untyped=False, return_proxy=False, return_type_class=False):
     # context = cre_context(context)
@@ -1010,10 +1008,10 @@ def _fact_from_spec(name, spec, inherit_from=None, specialization_name=None, ret
             return_type_class=return_type_class)
 
 def _spec_eq(spec_a, spec_b):
-    print(list(spec_a.keys()), list(spec_b.keys()))
+    # print(list(spec_a.keys()), list(spec_b.keys()))
     for attr_a, attr_b in zip(spec_a, spec_b):
         if(attr_a != attr_b): 
-            print(attr_a, "!=", attr_b)
+            # print(attr_a, "!=", attr_b)
             return False
         typ_a, typ_b = spec_a[attr_a]['type'], spec_b[attr_a]['type']
 
@@ -1032,7 +1030,7 @@ def _spec_eq(spec_a, spec_b):
                 typ_strs.append(str(typ))
 
         if(typ_strs[0] != typ_strs[1]):
-            print(typ_strs[0], "!=", typ_strs[1])
+            # print(typ_strs[0], "!=", typ_strs[1])
             return False
     return True
 
@@ -1042,7 +1040,7 @@ def define_fact(name : str, spec : dict = None, context=None, return_proxy=False
 
     from cre.context import cre_context
     context = cre_context(context)
-    # print("DEFINE", name, context.name)
+    print("DEFINE", name, context.name)
     specialization_name = name
     if(spec is not None):
         spec = _standardize_spec(spec,context,name)
@@ -1061,8 +1059,10 @@ def define_fact(name : str, spec : dict = None, context=None, return_proxy=False
     if(specialization_name in context.name_to_type):
         assert _spec_eq(context.name_to_type[specialization_name].spec, spec), \
         f"Redefinition of fact '{specialization_name}' in context '{context.name}' not permitted"
-        fact_type = context.name_to_type[specialization_name]        
+        print("SPECIALIZATION NAME:", specialization_name)
+        fact_type = context.name_to_type[specialization_name]
     else:
+
         fact_type = _fact_from_spec(name, spec, inherit_from=inherit_from, 
             specialization_name= (specialization_name if specialization_name != name else None),
             return_proxy=False, return_type_class=False)
@@ -1070,12 +1070,12 @@ def define_fact(name : str, spec : dict = None, context=None, return_proxy=False
         dt.define(fact_type)
         # context._assert_flags(name, spec)
         context._register_fact_type(specialization_name, fact_type, inherit_from=inherit_from)
-        _spec = spec if(spec is not None) else {}
-        # _spec = _undeffer_spec(_spec)
-        # print({_id : str(config['type']) for _id, config in _spec.items()})
-        fact_type.spec = _spec
-        fact_type._fact_proxy.spec = _spec
-        fact_type._fact_type_class._spec = _spec
+    _spec = spec if(spec is not None) else {}
+    # _spec = _undeffer_spec(_spec)
+    # print({_id : str(config['type']) for _id, config in _spec.items()})
+    fact_type.spec = _spec
+    fact_type._fact_proxy.spec = _spec
+    fact_type._fact_type_class._spec = _spec
 
     # Needs to be done because different definitions can share a 
     #  fact_type object
@@ -1198,8 +1198,13 @@ def get_inheritance_t_ids(st):
 def isa(self, typ):
     typ = typ.instance_type
 
+
+    if(typ is BaseFact or typ is CREObjType):
+        def impl(self, typ):
+            return True
+
     # If the type has defined it's own _isa then use that
-    if(hasattr(typ, '_isa')):
+    elif(hasattr(typ, '_isa')):
         _isa = typ._isa
         def impl(self, typ):
             return _isa(self)
@@ -1228,11 +1233,32 @@ def asa(self, typ):
     _typ = typ.instance_type
     use_unsafe_cast = (_typ is CREObjType) or (_typ is BaseFact)
 
+    print("TRY CAST:", f'{str(self)} to {str(_typ)}')
     if(not use_unsafe_cast):
-        # fn1, fn2 = self._fact_name, _typ._fact_name
         error_message = f"Cannot cast fact of type '{str(self)}' to '{str(_typ)}.'"
+
+        # from cre.context import cre_context
+        # context = cre_context()    
+        
+        # print(context.children_of[self], _typ, _typ in context.children_of[self])
+        # print(context.parents_of[self], _typ, _typ in context.parents_of[self])
+        # #Check if the fact_type can be casted 
+        # if(self in context.children_of and 
+        #    _typ not in context.children_of[self] and 
+        #    self in context.parents_of and
+        #    _typ not in context.parents_of[self]
+        # ):
+
+        #     # error_message = f"Cannot cast fact of type '{val._fact_name}' to '{inst_type._fact_name}.'"
+        #     #If it shouldn't be possible then throw an error
+        #     def error(self, typ):
+        #         raise TypeError(error_message)
+        #     return error
+
+        # fn1, fn2 = self._fact_name, _typ._fact_name
         _isa = typ.instance_type._isa
         def impl(self, typ):
+            print(self, _isa(self))
             if(not _isa(self)): raise TypeError(error_message)
             return _cast_structref(typ, self)
     else:

@@ -9,7 +9,7 @@ from numba.experimental import structref
 from numba.experimental.structref import new, define_attributes
 from numba.extending import lower_cast, overload, overload_method
 from cre.memset import MemSet,MemSetType
-from cre.utils import  lower_setattr, _raw_ptr_from_struct, _ptr_from_struct_incref, decode_idrec, listtype_sizeof_item, _cast_structref, _obj_cast_codegen, DEREF_TYPE_ATTR, DEREF_TYPE_LIST, _memcpy_structref
+from cre.utils import  lower_setattr, _raw_ptr_from_struct, _ptr_from_struct_incref, decode_idrec, _listtype_sizeof_item, _cast_structref, _obj_cast_codegen, DEREF_TYPE_ATTR, DEREF_TYPE_LIST, _memcpy_structref
 from cre.vector import VectorType
 from cre.transform.incr_processor import IncrProcessorType, ChangeEventType, incr_processor_fields, init_incr_processor
 from cre.structref import CastFriendlyStructref, define_boxing
@@ -105,9 +105,6 @@ relative_encoder_fields = {
     "relational_attrs" : types.Any,
     "base_fact_type" : types.Any,
     "id_attr" : types.Any,
-
-    
-
 }
 
 @structref.register
@@ -199,7 +196,7 @@ def new_dist_matrix(n, old_dist_matrix=None):
 
 
 
-@generated_jit(cache=True, nopython=True)
+@generated_jit(cache=False, nopython=True)
 def _fill_rel_derefs(deref_info_matrix, rel_derefs, start=0):
     if(len(rel_derefs) > 0):
         def impl(deref_info_matrix, rel_derefs, start=0):
@@ -217,13 +214,14 @@ def _fill_rel_derefs(deref_info_matrix, rel_derefs, start=0):
     return impl
 
 
-@generated_jit(cache=True, nopython=True)
+@generated_jit(cache=False, nopython=True)
 def _fill_list_derefs(deref_info_matrix, list_derefs, start=0):
     if(len(list_derefs) > 0):
         def impl(deref_info_matrix, list_derefs, start=0):
             attr_id = start
             for tup in literal_unroll(list_derefs):
                 attr_t, d1, d2 = tup
+
                 deref_info_matrix[attr_id][0].type = d1[0]
                 deref_info_matrix[attr_id][0].a_id = d1[1]
                 deref_info_matrix[attr_id][0].t_id = d1[2]
@@ -231,7 +229,7 @@ def _fill_list_derefs(deref_info_matrix, list_derefs, start=0):
                 deref_info_matrix[attr_id][1].type = d2[0]
                 deref_info_matrix[attr_id][1].a_id = 0
                 deref_info_matrix[attr_id][1].t_id = d2[2]
-                item_size = listtype_sizeof_item(attr_t)
+                item_size = _listtype_sizeof_item(attr_t)
                 deref_info_matrix[attr_id][1].offset = item_size
                 attr_id += 1
     else:
@@ -262,7 +260,6 @@ def _build_deref_info_matrix(self):
     rel_derefs, list_derefs = [], []
 
     for base_t, attr_t, attr in re_type._relational_attrs:
-        # print(base_t, attr_t, attr)
         deref_info1 = base_t.get_attr_deref_info(attr.literal_value)
         if(not isinstance(attr_t,types.ListType)):
             rel_derefs.append(deref_info1.tolist())
@@ -328,7 +325,7 @@ from cre.fact_intrinsics import fact_lower_getattr
 
 #     return k+1
 
-@njit(cache=True,inline='always')
+@njit(cache=True)
 def fill_adj_inds(self, fact, k, adj_inds, attr_id, item_ind):
     ind = self.idrec_to_ind[fact.idrec]
     adj_inds[k].ind = i4(ind)
@@ -336,6 +333,19 @@ def fill_adj_inds(self, fact, k, adj_inds, attr_id, item_ind):
     adj_inds[k].attr_id = u4(attr_id)
     adj_inds[k].item_ind = i4(item_ind)
     return k+1
+
+@njit(cache=True)
+def fill_adj_list_inds(self, lst, k, adj_inds, attr_id):
+    for i, item in enumerate(lst):
+        fact = _cast_structref(self.base_fact_type, item)
+        # k = fill_adj_inds(self, base_item, k, adj_inds, attr_id, i4(i))
+        ind = self.idrec_to_ind[fact.idrec]
+        adj_inds[k].ind = i4(ind)
+        adj_inds[k].dist = f4(self.lateral_w - (1.0/(2<<(attr_id+1)*3) if attr_id < 7 else 0.0))
+        adj_inds[k].attr_id = u4(attr_id)
+        adj_inds[k].item_ind = i4(i)
+        k += 1
+    return k
 
 
 @generated_jit(cache=True,nopython=True)
@@ -369,11 +379,13 @@ def _next_list_adj(self, fact):
             attr, base_t = ltup
             if(fact.isa(base_t)):
                 typed_fact = _cast_structref(base_t, fact)
+
                 # Member is a list so go through it's items
-                member = fact_lower_getattr(typed_fact, attr)
-                for i, item in enumerate(member):
-                    base_item = _cast_structref(self.base_fact_type,item)
-                    k = fill_adj_inds(self, base_item, k, adj_inds, attr_id, i4(i))
+                lst = fact_lower_getattr(typed_fact, attr)
+                k = fill_adj_list_inds(self, lst, k, adj_inds, attr_id)
+                # for i, item in enumerate(member):
+                #     base_item = _cast_structref(self.base_fact_type,item)
+                #     k = fill_adj_inds(self, base_item, k, adj_inds, attr_id, i4(i))
             attr_id += 1
         return adj_inds, attr_id, k
     return impl

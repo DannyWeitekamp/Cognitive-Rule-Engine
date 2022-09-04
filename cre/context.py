@@ -25,7 +25,7 @@ import os
 
 context_data_fields = [
     ("name", unicode_type),
-    ("has_unhandled_retro_register", boolean),
+    ("unhandled_retro_registers", ListType(i8)),
     ("fact_to_t_id" , DictType(unicode_type,i8)),
     ("parent_t_ids", ListType(i8[::1])),
     ("child_t_ids", ListType(i8[::1]))
@@ -38,7 +38,7 @@ i8_arr_type = i8[::1]
 def new_cre_context(name):
     st = new(CREContextDataType)
     st.name = name
-    st.has_unhandled_retro_register = False
+    st.unhandled_retro_registers = List.empty_list(i8)
     st.fact_to_t_id = Dict.empty(unicode_type,i8)
     st.parent_t_ids = List.empty_list(i8_arr_type)
     st.child_t_ids = List.empty_list(i8_arr_type)
@@ -86,12 +86,19 @@ def ensure_inheritance(cd, t_id, inh_t_id=-1):
 
 
 @njit(cache=True)
-def clear_unhandled_retro_register(self):
-    self.has_unhandled_retro_register = False
+def clear_unhandled_retro_registers(self):
+    self.unhandled_retro_registers = List.empty_list(i8)
 
 @njit(cache=True)
-def get_has_unhandled_retro_register(self):
-    return self.has_unhandled_retro_register
+def get_unhandled_retro_registers(self):
+    arr = np.empty((len(self.unhandled_retro_registers),), dtype=np.int64)
+    for i, t_id in enumerate(self.unhandled_retro_registers):
+        arr[i] = t_id
+    return arr
+
+@njit(cache=True)
+def has_unhandled_retro_registers(self):
+    return len(self.unhandled_retro_registers) > 0
 
 class CREContext(object):
     _contexts = {}
@@ -160,13 +167,13 @@ class CREContext(object):
         from cre.core import DEFAULT_REGISTERED_TYPES
 
         cd = self.context_data
-        if(cd.has_unhandled_retro_register):
+        if(has_unhandled_retro_registers(cd)):
             child_t_ids = cd.child_t_ids
-            for t_id in range(len(DEFAULT_REGISTERED_TYPES), len(cd.child_t_ids)):
+            for t_id in get_unhandled_retro_registers(cd):
                 if(len(child_t_ids[t_id]) == 0):
                 # if(t_id >= len(self.t_id_to_type) or self.t_id_to_type[t_id] is None):
                     self._retroactive_register(t_id)
-            clear_unhandled_retro_register(cd)
+            clear_unhandled_retro_registers(cd)
 
     @property
     def registered_types(self):
@@ -174,8 +181,8 @@ class CREContext(object):
         return self.t_id_to_type
 
     @property
-    def has_unhandled_retro_register(self):
-        return get_has_unhandled_retro_register(self)
+    def unhandled_retro_registers(self):
+        return get_unhandled_retro_registers(self.context_data)
 
     def _assert_written_to_type_registry(self, typ):
         '''Ensures that a type is written to the on disk type registery'''
@@ -192,6 +199,9 @@ class CREContext(object):
         assign_name_to_t_id(self.context_data,name,t_id)
 
         # Fill in the python facing 'name_to_type'
+        # print(name, "->", str(typ))
+        # if(str(typ) == "TextField_vVBHx8mvD8"):
+        #     raise ValueError()
         self.name_to_type[name] = typ
         self.name_to_type[str(typ)] = typ
 
@@ -246,6 +256,7 @@ class CREContext(object):
         # If got a name then check the registry for the name 
         if(name is not None):
             if(name in self.name_to_type):
+                print("get_type->", name, self.name_to_type[name], "in", self.name)
                 return self.name_to_type[name]
             else:
                 raise ValueError(f"No type {name} registered in cre_context {self.name}.")

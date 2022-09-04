@@ -11,6 +11,7 @@ from numba.types import ListType
 import cre.dynamic_exec
 import pytest
 import operator
+import cloudpickle
 
 
 def test__standardize_spec():
@@ -73,9 +74,27 @@ def test_define_fact():
         with pytest.raises(AssertionError):
             define_fact("BOOP", spec2)
 
+    
     with cre_context("test_define_fact2") as context:
         #But is okay if defined under a different context
         typ2 = define_fact("BOOP", spec2)
+
+
+def test_fact_type_pickling():
+    LL_spec = {"name" : "string", "nxt" : "BOOP"}
+    with cre_context("test_fact_type_pickling1") as context:
+        TestLL = define_fact("TestLL", LL_spec)
+
+    # Fact types should be picklable even if they self_reference
+    typ_pickle = cloudpickle.dumps(TestLL)
+    typ1 = None
+    with cre_context("test_fact_type_pickling2") as context:
+        # And be unpicklable
+        _TestLL = cloudpickle.loads(typ_pickle)
+
+        print(_TestLL.spec)
+
+
 
 
 def test_untyped_fact():
@@ -328,9 +347,9 @@ def test_cast_fact():
         _b3 = up_cast.py_func(_b1)    
         assert type(b3) == type(_b3)    
 
-        FLOOP = define_fact("FLOOP", spec3)
-
+        
         #Bad cast
+        FLOOP = define_fact("FLOOP", {"A" : "number", "B" : "number"})
         @njit
         def bad_cast(b):
             # return cast_fact(FLOOP,b) 
@@ -876,7 +895,7 @@ if __name__ == "__main__":
     # test__merge_spec_inheritance()
     # test_define_fact()
     # test_inheritence()
-    # test_cast_fact()
+    test_cast_fact()
     # test_protected_mutability()
     # test_fact_eq()
 
@@ -886,13 +905,15 @@ if __name__ == "__main__":
     # test_as_conditions()
 
     # _test_reference_type()
-    test_hash()
-    test_eq()
+    # test_hash()
+    # test_eq()
     # test_copy()
     # test_weird_case()
     # test_inheritence()
     # test_inheritence_bytes()
     # test_context_retroactive_register()
+
+
 
 
 

@@ -579,35 +579,6 @@ def recover_arg_ind(planner, arg):
         return arg_type_name, flat_vals.index(arg)
     return impl
 
-@njit(cache=True)
-def range_product(lengths):
-    ''' Yields the iteration product from zero to 'lengths' 
-        (e.g. lengths=(2,2) -> [[0,0],[0,1],[1,0],[1,1]])
-    ''' 
-    if(not np.all(lengths)): 
-        return np.zeros((0, len(lengths),),dtype=np.int64)
-
-    n_inds = int(np.prod(lengths))
-
-    inds = np.zeros((len(lengths),),dtype=np.int64)
-    out = np.zeros((n_inds, len(lengths),),dtype=np.int64)
-    max_k = k = len(lengths)-1
-    done = False
-    c = 0
-    while(not done):
-        out[c,:] = inds[:]
-        # yield inds
-        # Gets next set of indices holding const_position to const_ind
-        inds[k] += 1
-        while(inds[k] >= lengths[k]):
-            inds[k] = 0
-            k -= 1
-            if(k < 0): done = True; break;
-            inds[k] += 1
-        k = max_k
-        c += 1
-    return out
-
 
 def should_commute_skip(arg_inds, op):
     for k, ind in enumerate(arg_inds):
@@ -616,7 +587,6 @@ def should_commute_skip(arg_inds, op):
             if(arg_inds[k] < arg_inds[j]):
                 return True
     return False
-
 
 
 #TODO njit it
@@ -681,10 +651,10 @@ def search_for_explanations(self, goal, ops=None, policy=None,
         # Policy Case
         else:
             # Convert args in policy to arg_inds
-            print()
-            print("policy", policy)
             depth_policy = []
-            for op, arg_set in policy[depth-1]:
+            # print(policy)
+            for t in policy[depth-1]:
+                op, arg_set = (t[0], t[1]) if(isinstance(t, tuple)) else (t, None)
 
                 # If the policy didn't provide any args then try all permutations
                 if(arg_set is None or len(arg_set) == 0):
@@ -820,7 +790,6 @@ def forward_chain_one(self, depth_policy=None, min_stop_depth=-1):
             op, arg_inds = op
             for inds in arg_inds:
                 sig = op.signature
-                print(";;",inds)
                 # v = call_op_for_inds(self, op, sig.return_type, sig.args, self.curr_infer_depth, inds)
                 # print(v)
                 rec = apply_one(op, self, sig.return_type, sig.args,
@@ -833,7 +802,6 @@ def forward_chain_one(self, depth_policy=None, min_stop_depth=-1):
         # If no arg_inds are provided then apply all permutations 
         #  of arguments to the op.
         else:
-            print("APPLY MULTI")
             rec = apply_multi(op, self,
                 self.curr_infer_depth, min_stop_depth)
 

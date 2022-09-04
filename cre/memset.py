@@ -331,10 +331,11 @@ def resolve_t_id(ms, fact):
         inh_t_ids = get_inheritance_t_ids(fact)
         parent_t_id = -1
         for _t_id in inh_t_ids:
+            cd.unhandled_retro_registers.append(_t_id)
             ensure_inheritance(cd, _t_id, parent_t_id)
             parent_t_id = i8(_t_id)
 
-        cd.has_unhandled_retro_register = True
+        
 
     # Ensure that the data structures in MemSet are long enough to index t_id.
     L = len(ms.facts)

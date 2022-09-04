@@ -764,8 +764,11 @@ def _list_base_from_ptr(typingctx, ptr_ty):
 def _listtype_sizeof_item(typingctx, l_ty):
     sig = i8(l_ty,)
     tl = l_ty.instance_type
+    print("??", tl, type(tl))
     def codegen(context, builder, sig, args):
+        print("--", tl, type(tl))
         llty = context.get_data_type(tl.item_type)
+        print("AFT", tl, type(tl))
         return cgutils.sizeof(builder,llty.as_pointer())
     return sig, codegen
 

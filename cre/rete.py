@@ -1383,7 +1383,7 @@ class MatchIterator(structref.StructRefProxy):
             
         
     def __next__(self):
-        # Note: only necessary for C-profiling
+        # Note: try/except appears to only be necessary for profiling quirk.
         try:
             if(self.kind == MATCH_ITER_FACT_KIND):
                 if(self.recover_types):

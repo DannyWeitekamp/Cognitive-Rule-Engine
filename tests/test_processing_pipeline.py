@@ -125,13 +125,14 @@ def new_mc_addition_state(upper, lower, ):
 
 def setup_fact_types():
     context = cre_context()
-    if("Component" in context.name_to_type):
-        print("Retrieved!!!")
-        return (context.get_type(name="Component"),
-                context.get_type(name="TextField"),
-                context.get_type(name="Button"),
-                context.get_type(name="Container"),
-                )
+    # if("Component" in context.name_to_type):
+    #     print("Retrieved!!!", context.name)
+    #     return (context.get_type(name="Component"),
+    #             context.get_type(name="TextField"),
+    #             context.get_type(name="Button"),
+    #             context.get_type(name="Container"),
+    #             )
+    print("Define!!!", context.name)
     Component = define_fact("Component", {
         "id" : str,
         # "x" : {"type" : float, "visible" : False},
@@ -164,7 +165,13 @@ def setup_fact_types():
 
 def setup_pipeline():
     Container, TextField, Component, Button = setup_fact_types()
-    print(TextField.spec)
+    if(not hasattr(TextField, 'spec')):
+        print("\nNO SPEC")
+        print(TextField.__dict__)
+        raise ValueError()
+    else:
+        print("\nHAS SPEC")
+        print(TextField.__dict__)
 
     fact_types = [Container, TextField,Component, Button]
     feat_types = [eq_f8, eq_str]
@@ -207,9 +214,9 @@ def setup_pipeline_second_run():
 def pipeline_second_run(wm, pipeline, matches, vars):
     conv, fl, fa, re, vr = pipeline
     flat_ms = fl(wm) # 0.01ms
-    print(flat_ms)
+    # print(flat_ms)q
     feat_ms = fa(flat_ms) # 0.02ms
-    print(feat_ms)
+    # print(feat_ms)
     rel_ms = re.encode_relative_to(feat_ms, matches, vars) # 0.78ms
     # print(rel_ms)
     vecs = vr(rel_ms) # 0.14ms
@@ -396,17 +403,18 @@ def test_b_pipeline_2nd_run(benchmark):
 if __name__ == "__main__":
     import faulthandler; faulthandler.enable()
 
-    # test_pipeline()
-    test_condition_generalizing()
-    # for i in range(2):
-    #     args,_ = setup_pipeline_first_run()
-    #     with PrintElapse("first_run"):
-    #         pipeline_first_run(*args)
 
-    # for i in range(2):
-    #     args,_ = setup_pipeline_second_run()
-    #     with PrintElapse("second_run"):
-    #         pipeline_second_run(*args)
+    # test_pipeline()
+    # test_condition_generalizing()
+    for i in range(2):
+        args,_ = setup_pipeline_first_run()
+        with PrintElapse("first_run"):
+            pipeline_first_run(*args)
+
+    for i in range(2):
+        args,_ = setup_pipeline_second_run()
+        with PrintElapse("second_run"):
+            pipeline_second_run(*args)
 
 
 

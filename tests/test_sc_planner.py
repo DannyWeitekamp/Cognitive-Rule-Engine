@@ -330,27 +330,29 @@ def used_bytes(garbage_collect=True):
     return stats.alloc-stats.free
 
 
+#NOTE: Need to fix this seems to leak declared objects. 
 def test_mem_leaks(n=5):
     with cre_context("test_mem_leaks") as context:
         ops = get_base_ops()
         init_used = used_bytes()
 
-        for i in range(5):
-            planner = setup_float(n=n)
-            expl_tree = search_for_explanations(planner, 36.0,
-                ops=ops, search_depth=2, context=context)
-            expl_tree_iter = iter(expl_tree)
-            for op_comp,binding in expl_tree_iter:
-                pass
+        # for i in range(5):
+        #     planner = setup_float(n=n)
+        #     expl_tree = search_for_explanations(planner, 36.0,
+        #         ops=ops, search_depth=2, context=context)
+        #     expl_tree_iter = iter(expl_tree)
+        #     for op_comp,binding in expl_tree_iter:
+        #         pass
 
-            planner = None
-            expl_tree = None
-            expl_tree_iter = None
-            if(i == 0): 
-                init_used = used_bytes()
-            else:
-                # print(used_bytes() - init_used)
-                assert used_bytes() == init_used
+        #     planner = None
+        #     expl_tree = None
+        #     expl_tree_iter = None
+        #     if(i == 0): 
+        #         init_used = used_bytes()
+        #     else:
+        #         print(used_bytes() - init_used)
+
+        # assert used_bytes() == init_used
 
 
         BOOP = define_fact("BOOP", {
@@ -361,28 +363,32 @@ def test_mem_leaks(n=5):
         def declare_em(planner,s="A"):
             for i in range(n):
                 b = BOOP(s,i)
+                print("BEF", b._meminfo.refcount)
                 planner.declare(b)
+                print("AFT", b._meminfo.refcount)
+            return b
 
         print("-----")
-        # raise ValueError()
         for i in range(5):
-
             planner = SetChainingPlanner([BOOP])
-            declare_em(planner,"A")
-            expl_tree = search_for_explanations(planner, 36.0,
-                ops=ops, search_depth=2, context=context)
-            expl_tree_iter = iter(expl_tree)
-            for op_comp,binding in expl_tree_iter:
-                pass
+            b = declare_em(planner,"A")
+            # expl_tree = search_for_explanations(planner, 36.0,
+            #     ops=ops, search_depth=2, context=context)
+            # expl_tree_iter = iter(expl_tree)
+            # for op_comp,binding in expl_tree_iter:
+            #     pass
+            print("<<", b._meminfo.refcount)
 
             planner = None
             expl_tree = None
             expl_tree_iter = None
+            b = None
             if(i == 0): 
                 init_used = used_bytes()
             else:
-                # print(used_bytes() - init_used)
-                assert used_bytes() == init_used
+                print(used_bytes() - init_used)
+
+        assert used_bytes() == init_used
 
 
 
@@ -658,10 +664,6 @@ def test_policy_search(n=5):
 
     
 
-    # for expl in policy_expls:
-    #     print(expl)
-
-
 
 
 
@@ -792,7 +794,7 @@ if __name__ == "__main__":
     # test_build_explanation_tree()
     # test_search_for_explanations()
     # test_declare_fact()
-    # test_mem_leaks(n=10)
+    test_mem_leaks(n=10)
     # benchmark_apply_multi()
     # benchmark_retrace_back_one()
         # test_apply_multi()
@@ -804,7 +806,7 @@ if __name__ == "__main__":
     # test_declare_fact_w_conversions()
     # test_min_stop_depth()
 
-    test_policy_search()
+    # test_policy_search()
 # from numba import njit, i8
 # from numba.typed import Dict
 # from numba.types import ListType

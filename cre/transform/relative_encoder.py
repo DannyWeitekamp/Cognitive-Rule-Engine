@@ -694,7 +694,7 @@ def get_rel_var(self, f_ind, source_vars, s_inds, extra_derefs=None):
 
     # return _make_rel_var(self, f_ind, s_ind, source_vars[s_i])
 from cre.core import T_ID_TUPLE_FACT, T_ID_VAR
-from cre.cre_object import copy_cre_obj, cre_obj_iter_t_id_item_ptrs, cre_obj_set_item, CREObjType, PRIMITIVE_MBR_ID, OBJECT_MBR_ID
+from cre.cre_object import copy_cre_obj, _iter_mbr_infos, cre_obj_set_item, CREObjType, PRIMITIVE_MBR_ID, OBJECT_MBR_ID
 from cre.tuple_fact import TupleFact
 from cre.utils import _load_ptr, _struct_from_ptr
 
@@ -702,7 +702,7 @@ from cre.utils import _load_ptr, _struct_from_ptr
 def rel_encode_tf(self, tf, source_vars, s_inds):
     tf_copy = copy_cre_obj(tf)
     tf_cre_obj = _cast_structref(CREObjType, tf)
-    for i, (t_id, m_id, data_ptr) in enumerate(cre_obj_iter_t_id_item_ptrs(tf_cre_obj)):
+    for i, (t_id, m_id, data_ptr) in enumerate(_iter_mbr_infos(tf_cre_obj)):
         if(t_id == T_ID_VAR):
             v = _struct_from_ptr(GenericVarType, _load_ptr(i8,data_ptr))
             f_ind = f_ind_from_id(self, v.alias)

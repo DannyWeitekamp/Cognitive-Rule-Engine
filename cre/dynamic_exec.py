@@ -5,7 +5,7 @@ from numba.typed import List
 from numba.extending import  overload, overload_method
 from cre.utils import _load_ptr, _struct_from_ptr, _cast_structref, _raw_ptr_from_struct, _raw_ptr_from_struct_incref, CastFriendlyMixin, decode_idrec, _func_from_address, _incref_structref, _struct_get_data_ptr, _sizeof_type, _decref_structref
 from cre.structref import define_structref
-from cre.cre_object import CREObjTypeClass, CREObjType, member_info_type, cre_obj_iter_t_id_item_ptrs
+from cre.cre_object import CREObjTypeClass, CREObjType, member_info_type, _iter_mbr_infos
 from numba.core.datamodel import default_manager, models
 from numba.experimental.structref import define_attributes, StructRefProxy, new, define_boxing
 import operator
@@ -118,7 +118,7 @@ def fact_eq(a, b):
 
     if(tla != tlb): return False
 
-    for (info_a), (info_b) in zip(cre_obj_iter_t_id_item_ptrs(a),cre_obj_iter_t_id_item_ptrs(b)):
+    for (info_a), (info_b) in zip(_iter_mbr_infos(a),_iter_mbr_infos(b)):
         t_id_a, m_id_a, data_ptr_a = info_a
         t_id_b, m_id_b, data_ptr_b = info_b
         if(t_id_a == T_ID_UNDEFINED): 
@@ -158,7 +158,7 @@ def tuple_fact_eq(a, b):
 
         if(tla != tlb): return False
 
-        for (info_a), (info_b) in zip(cre_obj_iter_t_id_item_ptrs(tf_a),cre_obj_iter_t_id_item_ptrs(tf_b)):
+        for (info_a), (info_b) in zip(_iter_mbr_infos(tf_a),_iter_mbr_infos(tf_b)):
             t_id_a, m_id_a, data_ptr_a = info_a
             t_id_b, m_id_b, data_ptr_b = info_b
 
@@ -340,7 +340,7 @@ def fact_hash(x):
     if(x.hash_val == 0):
         acc = _PyHASH_XXPRIME_5
         tl = x.num_chr_mbrs
-        for t_id, m_id, data_ptr in cre_obj_iter_t_id_item_ptrs(x):
+        for t_id, m_id, data_ptr in _iter_mbr_infos(x):
             if(t_id == T_ID_UNDEFINED): 
                 t_id,_, _ = decode_idrec(_struct_from_ptr(CREObjType,_load_ptr(i8, data_ptr)).idrec)
             if(t_id == T_ID_TUPLE_FACT):
@@ -372,7 +372,7 @@ def tuple_fact_hash(x):
         acc = _PyHASH_XXPRIME_5
         while(not is_done):
             tl = p.num_chr_mbrs
-            for t_id, m_id, data_ptr in cre_obj_iter_t_id_item_ptrs(p):
+            for t_id, m_id, data_ptr in _iter_mbr_infos(p):
                 # print(":: t_id", t_id, data_ptr)
                 if(t_id == T_ID_UNDEFINED): 
                     t_id,_, _ = decode_idrec(_struct_from_ptr(CREObjType,_load_ptr(i8, data_ptr)).idrec)

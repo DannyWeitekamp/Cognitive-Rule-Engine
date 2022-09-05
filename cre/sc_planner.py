@@ -403,7 +403,10 @@ def planner_declare_val(planner, val, op_or_var):
         inv_val_map[var_ptr] = val
 
         # TODO: Find something faster than this
-        return flat_vals.index(val)#len(flat_vals)-1
+        for i, _val in enumerate(flat_vals):
+            if(_val == val):
+                return i
+        return -1
     return impl 
 
 @generated_jit(cache=True,nopython=True)

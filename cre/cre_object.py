@@ -1,5 +1,5 @@
 import numpy as np
-from numba import i8, u8, u1, u2, u4, types, njit, generated_jit, literal_unroll
+from numba import i8, i4, u8, u1, u2, u4, types, njit, generated_jit, literal_unroll
 from numba.types import FunctionType, unicode_type, Tuple
 from numba.extending import  overload, lower_getattr, overload_method
 from cre.core import register_global_default, T_ID_UNDEFINED, T_ID_BOOL, T_ID_INT, T_ID_FLOAT, T_ID_STR, T_ID_TUPLE_FACT 
@@ -17,8 +17,12 @@ from numba.experimental import structref
 from numba.core import types, imputils, cgutils
 from numba.core.datamodel import default_manager, models
 from numba.core.extending import (
+    models,
     intrinsic,
     lower_cast,
+    lower_builtin,
+    register_model,
+
     # infer_getattr,
     # lower_getattr_generic,
     # lower_setattr_generic,
@@ -521,25 +525,142 @@ def cre_obj_set_item(obj, index, val):
 # np_t_id_item_ptrs_type = np.dtype([('t_id', np.uint16),  ('m_id', np.uint16), ('ptr', np.int64)])
 # t_id_item_ptrs = numba.from_dtype(np_t_id_item_ptrs_type)
 
-has_not_fixed_6993 = check_issue_6993()
 
-@generated_jit(cache=False)
-def cre_obj_iter_t_id_item_ptrs(x):
-    def impl(x):
-        # x = _cast_structref(TupleFact,_x)
-        data_ptr = _struct_get_data_ptr(x)
-        member_info_ptr = data_ptr + x.chr_mbrs_infos_offset
+# -------------------------------------------------------------------
+# : _iter_mbr_infos()
 
-        # NOTE: Using as generator causes memory leak
-        for i in range(x.num_chr_mbrs):
-            t_id, m_id, member_offset = _load_ptr(member_info_type, member_info_ptr)
-            yield t_id, m_id, data_ptr + member_offset
-            member_info_ptr += _sizeof_type(member_info_type)
 
-        if(has_not_fixed_6993):
-            _decref_structref(x)
+mbr_info_tup_type = types.Tuple((u2, u2, i8))
 
-    return impl
+class MbrInfoIterator(types.SimpleIteratorType):
+    def __init__(self):
+        name = f"MbrInfoIterator"
+        super().__init__(name, mbr_info_tup_type)
+
+MbrInfoIteratorType = MbrInfoIterator()
+
+@register_model(MbrInfoIterator)
+class MbrInfoIteratorModel(models.StructModel):
+    def __init__(self, dmm, fe_type):
+        members = [
+            ('data_ptr', i8),
+            ('member_info_ptr', types.EphemeralPointer(i8)),
+            ('nitems', i4),
+            ('index', types.EphemeralPointer(i4))
+        ]
+        super().__init__(dmm, fe_type, members)
+
+from numba.core.imputils import lower_builtin, iternext_impl, RefType, impl_ret_borrowed
+
+@intrinsic
+def _iter_mbr_infos(typingctx, cre_obj):
+    def codegen(context, builder, sig, args):
+        (cre_obj,) = args
+        # Make proxies for cre_obj and _iter
+        cre_obj = cgutils.create_struct_proxy(CREObjType)(context, builder, value=args[0])
+        _iter = cgutils.create_struct_proxy(MbrInfoIteratorType)(context, builder)
+
+        # Set data_ptr
+        raw_data_ptr = context.nrt.meminfo_data(builder, cre_obj.meminfo)
+        _iter.data_ptr = builder.ptrtoint(raw_data_ptr, cgutils.intp_t)
+
+        # Make struct proxy for underlying data
+        valtype = CREObjType.get_data_type()
+        model = context.data_model_manager[valtype]
+        alloc_type = model.get_value_type()
+        data_ptr = builder.bitcast(raw_data_ptr, alloc_type.as_pointer())
+        data_struct = cgutils.create_struct_proxy(valtype)(
+            context, builder, ref=data_ptr)
+
+        # Extract and assign nitems
+        nitems = builder.zext(getattr(data_struct, "num_chr_mbrs"), cgutils.int32_t)
+        _iter.nitems = nitems
+
+        # Extract chr_mbrs_infos_offset, assign member_info_ptr
+        chr_mbrs_infos_offset = builder.zext(getattr(data_struct, "chr_mbrs_infos_offset"), cgutils.intp_t)
+        data_ptr = builder.ptrtoint(data_ptr, cgutils.intp_t)
+        member_info_ptr = builder.add(data_ptr, chr_mbrs_infos_offset)
+        _iter.member_info_ptr = cgutils.alloca_once_value(builder, member_info_ptr)
+        
+        # Set index to 0.
+        index = context.get_constant(types.int32, 0)
+        _iter.index = cgutils.alloca_once_value(builder, index)
+
+        return _iter._getvalue()
+    sig = MbrInfoIteratorType(CREObjType)
+    return sig, codegen
+
+
+@lower_builtin('iternext', MbrInfoIterator)
+@iternext_impl(RefType.BORROWED)
+def iternext_listiter(context, builder, sig, args, result):
+    # Define Constants
+    llty = context.get_data_type(member_info_type)
+    member_info_ptr_llty = llty.as_pointer()
+    member_info_size = cgutils.sizeof(builder, member_info_ptr_llty)
+    u2_ptr = context.get_data_type(u2).as_pointer()
+
+    # Make iter proxy
+    _iter = cgutils.create_struct_proxy(sig.args[0])(context, builder, value=args[0])
+
+    # Load index and check inbounds.
+    index = builder.load(_iter.index)
+    is_valid = builder.icmp_signed('<', index, _iter.nitems)
+    result.set_valid(is_valid)
+
+    # If index is inbounds yeild and iterate 
+    with builder.if_then(is_valid):
+        member_info_ptr = builder.load(_iter.member_info_ptr)
+
+        # Extract t_id
+        t_id_ptr = builder.inttoptr(member_info_ptr, u2_ptr)
+        t_id = builder.load(t_id_ptr)
+
+        # Extract m_id
+        m_id_ptr = builder.add(member_info_ptr, context.get_constant(i8, 2))
+        m_id_ptr = builder.inttoptr(m_id_ptr, u2_ptr)
+        m_id = builder.load(m_id_ptr)
+
+        # Extract offset
+        offset_ptr = builder.add(member_info_ptr, context.get_constant(i8, 4))
+        offset_ptr = builder.inttoptr(offset_ptr, u2_ptr)
+        offset = builder.load(offset_ptr)
+
+        # DO: yield t_id, m_id, data_ptr + offset
+        mbr_pointer = builder.add(_iter.data_ptr, builder.zext(offset, cgutils.intp_t))
+        out = context.make_tuple(builder,mbr_info_tup_type,[t_id, m_id, mbr_pointer])
+        result.yield_(out)
+
+        # DO: _iter.index += 1
+        index = builder.add(index, context.get_constant(i4, 1))
+        builder.store(index, _iter.index)
+
+        # DO:_iter.member_info_ptr += member_info_size1
+        member_info_ptr = builder.load(_iter.member_info_ptr)
+        member_info_ptr = builder.add(member_info_ptr, member_info_size)
+        builder.store(member_info_ptr, _iter.member_info_ptr)
+    
+
+# has_not_fixed_6993 = check_issue_6993()
+
+# @generated_jit(cache=False)
+# def cre_obj_iter_t_id_item_ptrs(x):
+#     def impl(x):
+#         # x = _cast_structref(TupleFact,_x)
+#         data_ptr = _struct_get_data_ptr(x)
+#         member_info_ptr = data_ptr + x.chr_mbrs_infos_offset
+
+#         # NOTE: Using as generator causes memory leak
+#         for i in range(x.num_chr_mbrs):
+#             t_id, m_id, member_offset = _load_ptr(member_info_type, member_info_ptr)
+#             yield t_id, m_id, data_ptr + member_offset
+#             member_info_ptr += _sizeof_type(member_info_type)
+#             # _decref_structref(x)
+
+#         if(has_not_fixed_6993):
+#             _decref_structref(x)
+            
+#     return impl
 
 t_id_m_id_type = types.Tuple((u2,u2))
 
@@ -554,11 +675,9 @@ def cre_obj_set_member_t_id_m_id(x, i, t_id_m_id):
 @njit(cache=True)
 def cre_obj_get_member_t_ids(x):
     t_ids = np.empty((x.num_chr_mbrs,),dtype=np.uint16)
-    for i, (t_id,_, _) in enumerate(cre_obj_iter_t_id_item_ptrs(x)):
+    for i, (t_id,_, _) in enumerate(_iter_mbr_infos(x)):
         t_ids[i] = t_id
     return t_ids
-
-
 
 
 @generated_jit(cache=True,nopython=True)
@@ -580,7 +699,7 @@ def copy_cre_obj(fact):
         t_id, _, _ = decode_idrec(a.idrec)
         b.idrec = encode_idrec(t_id,0,u1(-1))
         b.hash_val = 0 
-        for info_a in cre_obj_iter_t_id_item_ptrs(a):
+        for info_a in _iter_mbr_infos(a):
             t_id_a, m_id_a, data_ptr_a = info_a
             # t_id_b, m_id_b, data_ptr_b = info_b
 
@@ -595,9 +714,6 @@ def copy_cre_obj(fact):
         # Weird extra refcounts... as much as 4 extra if call cre_obj_iter_t_id_item_ptrs
         #  on the new_fact
         _decref_structref(new_fact)
-        # _decref_structref(new_fact)
-        # _decref_structref(new_fact)
-        # _decref_structref(new_fact)
 
         return new_fact
     return impl

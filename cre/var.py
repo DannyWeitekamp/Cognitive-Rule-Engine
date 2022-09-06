@@ -127,6 +127,20 @@ class Var(CREObjProxy):
         st._head_type = typ
         st._derefs_str = ""
 
+        if(alias):
+            import inspect, ctypes
+            if(alias is not None): 
+                # Binds this instance globally in the calling python context 
+                #  so that it is bound to a variable named whatever alias was set to
+                print(inspect.stack()[2][0].f_locals)
+                # Get the calling frame
+                frame = inspect.stack()[2][0] 
+                # Assign the Var to it's alias
+                frame.f_locals[alias] = st
+                # Update locals()
+                ctypes.pythonapi.PyFrame_LocalsToFast(ctypes.py_object(frame), ctypes.c_int(1))
+            # assign_to_alias_in_parent_frame(st, alias)
+
         return st
         
     def _handle_deref(self, attr_or_ind):
@@ -561,10 +575,9 @@ def get_head_type_name(self):
 @overload_method(VarTypeClass, "get_base_type_name")
 def get_base_type_name(self):
     def impl(self):
-        # print("GET BASE")
         with objmode(base_type_name=unicode_type):
             context = cre_context()
-            base_type_name = str(context.get_type(t_id=self.base_t_id))
+            base_type_name = context.get_type(t_id=self.base_t_id)._fact_name
         return base_type_name
     return impl
 
@@ -607,6 +620,8 @@ def get_var_ptr(self):
 @njit(cache=True)    
 def get_var_ptr_incref(self):
     return _ptr_from_struct_incref(self)
+
+
 
 
 # def var_cmp_alpha(left_var, op_str, right_var,negated):
@@ -920,6 +935,11 @@ def struct_setattr_impl(context, builder, sig, args, attr):
     context.nrt.decref(builder, val_type, old_value)
     # write new
     setattr(dataval, attr, casted)
+
+
+@njit(types.void(GenericVarType, unicode_type), cache=True)
+def var_assign_alias(var, alias):
+    var.alias = alias
 
 #### dereferencing for py_funcs ####
 

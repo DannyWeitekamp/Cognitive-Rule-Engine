@@ -1,4 +1,5 @@
-from setuptools import setup, find_packages, Extension 
+from setuptools import setup, find_packages, Extension
+import os, sys, sysconfig
 
   
 with open('requirements.txt') as f: 
@@ -12,13 +13,58 @@ dev_requirements = [
     "pytest-benchmark"
 ]
 
+
+
+
+# if sys.platform.startswith('linux'):
+#     # Patch for #2555 to make wheels without libpython
+#     sysconfig.get_config_vars()['Py_ENABLE_SHARED'] = 0
+# print("<<", sysconfig.get_path('include'))
+
+def ensure_numba():
+    from importlib import import_module
+    print("Start")
+    numba = None
+    # while(numba is None):
+    try:
+        print("try")
+        numba = import_module("numba")
+    except ModuleNotFoundError:
+        print("NO Numba")
+        try:
+            import pip
+            for numba_req in requirements:
+                if("numba" in numba_req):
+                    break
+            print("numba_req", numba_req)
+            if("numba" not in numba_req):
+                return
+            thing = pip.main(['install', numba_req])  
+        except:
+            pass
+    try:
+        numba = import_module("numba")
+    except ModuleNotFoundError:
+        raise ModuleNotFoundError("Failed to install module 'numba' automatically.")
+    return numba
+
+
 def get_ext_modules():
-    import numba
+    # Check that python development headers are installed
+    python_headers_path = sysconfig.get_config_vars()['INCLUDEPY']
+    if not os.path.exists(python_headers_path):
+        major = sys.version_info.major
+        minor = sys.version_info.minor
+        raise ModuleNotFoundError(
+    f"Ensure python headers installed: `sudo apt-get install libpython{major}.{minor}-dev`"
+        )
+
+    numba = ensure_numba()
     numba_path = numba.extending.include_path()
     cre_c_funcs = Extension(
         name='cre_cfuncs', 
         sources=['cre/cfuncs/cre_cfuncs.c'],
-        include_dirs=[numba_path]
+        include_dirs=[numba_path, sysconfig.get_path('include')]
     )
     return [cre_c_funcs]
 

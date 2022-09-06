@@ -838,7 +838,8 @@ def assign_to_alias_in_parent_frame(x,alias):
     if(alias is not None): 
         # Binds this instance globally in the calling python context 
         #  so that it is bound to a variable named whatever alias was set to
-        inspect.stack()[2][0].f_globals[alias] = x
+        print(inspect.stack()[2][0])
+        inspect.stack()[2][0].f_locals[alias] = x
 
 
 ##### Helpful context for timing code ####

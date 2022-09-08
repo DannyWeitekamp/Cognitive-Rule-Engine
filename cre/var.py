@@ -45,7 +45,7 @@ var_fields_dict = {
     'conj_ptr' : i8,
 
     # The name of the Var 
-    'alias' : unicode_type,
+    'alias_' : unicode_type,
     'deref_attrs_str' : types.optional(unicode_type),
 
     # The byte offsets for each attribute relative to the previous resolved
@@ -132,7 +132,7 @@ class Var(CREObjProxy):
             if(alias is not None): 
                 # Binds this instance globally in the calling python context 
                 #  so that it is bound to a variable named whatever alias was set to
-                print(inspect.stack()[2][0].f_locals)
+                # print(inspect.stack()[2][0].f_locals)
                 # Get the calling frame
                 frame = inspect.stack()[2][0] 
                 # Assign the Var to it's alias
@@ -448,9 +448,10 @@ class Var(CREObjProxy):
 class StructAttribute(AttributeTemplate):
     key = VarTypeClass
     def generic_resolve(self, typ, attr):
-        # print("^^", attr)
+        if(attr == "alias"): return unicode_type
         from numba.cpython.hashing import _Py_hash_t
         if(attr == "__hash__"): return types.FunctionType(_Py_hash_t(CREObjType,))
+        
 
         if attr in typ.field_dict:
 
@@ -478,9 +479,24 @@ class StructAttribute(AttributeTemplate):
 
 @lower_getattr_generic(VarTypeClass)
 def var_getattr_impl(context, builder, typ, val, attr):
+    
+    #If the attr is 'alias' then retrieve the base var's alias
+    if(attr == "alias"):
+        st = cgutils.create_struct_proxy(typ)(context, builder, value=val)._getvalue()
+
+        def get_alias(self):
+            if(self.base_ptr != _raw_ptr_from_struct(self)):
+                base = _struct_from_ptr(GenericVarType, self.base_ptr)
+            else:
+                base = _cast_structref(GenericVarType, self)
+            return base.alias_
+
+        ret = context.compile_internal(builder, get_alias, unicode_type(typ,), (st,))
+        context.nrt.incref(builder, unicode_type, ret)
+        return ret
+
     #If the attribute is one of the var struct fields then retrieve it.
-    # print("**", attr)
-    if(attr in var_fields_dict):
+    elif(attr in var_fields_dict):
         # p
         # print("GETATTR", attr)
         utils = _Utils(context, builder, typ)
@@ -719,7 +735,7 @@ def var_ctor(var_struct_type, base_t_id, alias=""):
     lower_setattr(st,'head_t_id', base_t_id)
     lower_setattr(st,'base_ptr', i8(_raw_ptr_from_struct(st)))
     lower_setattr(st,'base_ptr_ref', ptr_t(0))
-    lower_setattr(st,'alias', "" if(alias is  None) else alias)
+    lower_setattr(st,'alias_', "" if(alias is  None) else alias)
     lower_setattr(st,'deref_attrs_str', None)
     lower_setattr(st,'deref_infos', np.empty(0,dtype=deref_info_type))
     # base_type_name = lower_getattr(self,"base_type_name")
@@ -823,7 +839,7 @@ def var_memcopy(self,st):
     lower_setattr(st,'is_not', lower_getattr(self,"is_not"))
     lower_setattr(st,'base_ptr', lower_getattr(self,"base_ptr"))
     lower_setattr(st,'base_ptr_ref', lower_getattr(self,"base_ptr_ref"))
-    lower_setattr(st,'alias', lower_getattr(self,"alias"))
+    lower_setattr(st,'alias_', lower_getattr(self,"alias_"))
     # lower_setattr(st,'deref_attrs',new_deref_attrs)
     lower_setattr(st,'deref_infos', lower_getattr(self,"deref_infos").copy())
     # base_type_name = lower_getattr(self,"base_type_name")
@@ -920,6 +936,9 @@ def generic_var_append_deref(self, a_id, offset, head_t_id, typ=DEREF_TYPE_ATTR)
 
 @lower_setattr_generic(VarTypeClass)
 def struct_setattr_impl(context, builder, sig, args, attr):
+
+
+
     [inst_type, val_type] = sig.args
     [instance, val] = args
     utils = _Utils(context, builder, inst_type)
@@ -939,7 +958,8 @@ def struct_setattr_impl(context, builder, sig, args, attr):
 
 @njit(types.void(GenericVarType, unicode_type), cache=True)
 def var_assign_alias(var, alias):
-    var.alias = alias
+    base = _struct_from_ptr(GenericVarType, var.base_ptr)
+    base.alias_ = alias
 
 #### dereferencing for py_funcs ####
 

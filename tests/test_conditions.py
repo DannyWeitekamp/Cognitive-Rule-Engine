@@ -1,7 +1,7 @@
 from numba import njit, f8, i8
 from numba.types import ListType
 from numba.typed import List
-from cre.conditions import OR
+from cre.conditions import OR, AND
 from cre.memset import MemSet
 from cre.context import cre_context
 from cre.cre_object import CREObjType
@@ -40,18 +40,28 @@ def test_build_conditions():
         # (l1:=Var(BOOP, 'l1')) & l1 
         # a = (  & l1 )
 
+        
+        c = \
+        AND(l1:=Var(BOOP), l1.B < 1, l1.B > 7,
+            r1:=Var(BOOP), l1.B < r1.B,
+            r2:=Var(BOOP), l1.B < r2.B,
+            l2:=Var(BOOP)
+        )
+
+
+        print(c)
 
         c = \
         OR((
-            (l1:=Var(BOOP)) & (l1.B < 1) & (l1.B > 7) &
-            (r1:=Var(BOOP)) & (l1.B < r1.B) &
-            (r2:=Var(BOOP)) & (l1.B < r2.B) &
-            (l2:=Var(BOOP))
+        (l1:=Var(BOOP)) & (l1.B < 1) & (l1.B > 7) &
+        (r1:=Var(BOOP)) & (l1.B < r1.B) &
+        (r2:=Var(BOOP)) & (l1.B < r2.B) &
+        (l2:=Var(BOOP))
         ),(
-            l1 &
-            r1 &
-            r2 &
-            l2 & (l2.B < 1) & (l2.B > 7) & (l2.B < r1.B) & (l2.B < r2.B))
+         l1 &
+         r1 &
+         r2 &
+         l2 & (l2.B < 1) & (l2.B > 7) & (l2.B < r1.B) & (l2.B < r2.B))
         )
         print(c)
         # raise ValueError()
@@ -61,13 +71,18 @@ def test_build_conditions():
         c1 = l1.B < 1
         c2 = l1.B < l2.B
 
-        assert str(c1) == "(l1.B < 1)"
-        assert str(c2) == "(l1.B < l2.B)"
+        print(c1)
+        print(c2)
+
+        assert str(c1) == "l1.B < 1"
+        assert str(c2) == "l1.B < l2.B"
+
+
 
         c12 = (l1.B < 1) & (l1.B > 7)
 
-
-        assert str(c12) == "(Var(BOOP, 'l1') & (l1.B < 1) & (l1.B > 7))"
+        print(c12)
+        assert str(c12) == "AND(l1:=Var(BOOP), l1.B < 1, l1.B > 7)"
 
         ### LT + AND/OR ###
 
@@ -78,50 +93,53 @@ def test_build_conditions():
 
         c3_str = \
 '''OR(
- (Var(BOOP, 'l1') & (l1.B < 1) & (l1.B > 7) &
-  Var(BOOP, 'r1') & (l1.B < r1.B) &
-  Var(BOOP, 'r2') & (l1.B < r2.B) &
-  Var(BOOP, 'l2')),
- (l1 &
-  r1 &
-  r2 &
-  l2 & (l2.B < 1) & (l2.B > 7) & (l2.B < r1.B) & (l2.B < r2.B))
+    AND(l1:=Var(BOOP), l1.B < 1, l1.B > 7,
+        r1:=Var(BOOP), l1.B < r1.B,
+        r2:=Var(BOOP), l1.B < r2.B,
+        l2:=Var(BOOP)
+    ),
+    AND(l1,
+        r1,
+        r2,
+        l2, l2.B < 1, l2.B > 7, l2.B < r1.B, l2.B < r2.B
+    )
 )'''    
         print(c3)
         assert str(c3) == c3_str
+
         c3_repr = \
 '''OR(
- ((l1.B < 1) & (l1.B > 7) & (l1.B < r1.B) & (l1.B < r2.B)),
- ((l2.B < 1) & (l2.B > 7) & (l2.B < r1.B) & (l2.B < r2.B))
+ AND(l1.B < 1, l1.B > 7, l1.B < r1.B, l1.B < r2.B),
+ AND(l2.B < 1, l2.B > 7, l2.B < r1.B, l2.B < r2.B)
 )'''
-        # print(repr(c3))
+        print(repr(c3))
         assert repr(c3) == c3_repr
 
         ### NOT ###
         n3 = ~c3
         # print(n3)
-        # print(repr(n3))
+        print(repr(n3))
         nc3_repr = \
 '''OR(
- (~(l1.B < 1) & ~(l2.B < 1)),
- (~(l1.B < 1) & ~(l2.B > 7)),
- (~(l1.B < 1) & ~(l2.B < r1.B)),
- (~(l1.B < 1) & ~(l2.B < r2.B)),
- (~(l1.B > 7) & ~(l2.B < 1)),
- (~(l1.B > 7) & ~(l2.B > 7)),
- (~(l1.B > 7) & ~(l2.B < r1.B)),
- (~(l1.B > 7) & ~(l2.B < r2.B)),
- (~(l1.B < r1.B) & ~(l2.B < 1)),
- (~(l1.B < r1.B) & ~(l2.B > 7)),
- (~(l1.B < r1.B) & ~(l2.B < r1.B)),
- (~(l1.B < r1.B) & ~(l2.B < r2.B)),
- (~(l1.B < r2.B) & ~(l2.B < 1)),
- (~(l1.B < r2.B) & ~(l2.B > 7)),
- (~(l1.B < r2.B) & ~(l2.B < r1.B)),
- (~(l1.B < r2.B) & ~(l2.B < r2.B))
+ AND(~(l1.B < 1), ~(l2.B < 1)),
+ AND(~(l1.B < 1), ~(l2.B > 7)),
+ AND(~(l1.B < 1), ~(l2.B < r1.B)),
+ AND(~(l1.B < 1), ~(l2.B < r2.B)),
+ AND(~(l1.B > 7), ~(l2.B < 1)),
+ AND(~(l1.B > 7), ~(l2.B > 7)),
+ AND(~(l1.B > 7), ~(l2.B < r1.B)),
+ AND(~(l1.B > 7), ~(l2.B < r2.B)),
+ AND(~(l1.B < r1.B), ~(l2.B < 1)),
+ AND(~(l1.B < r1.B), ~(l2.B > 7)),
+ AND(~(l1.B < r1.B), ~(l2.B < r1.B)),
+ AND(~(l1.B < r1.B), ~(l2.B < r2.B)),
+ AND(~(l1.B < r2.B), ~(l2.B < 1)),
+ AND(~(l1.B < r2.B), ~(l2.B > 7)),
+ AND(~(l1.B < r2.B), ~(l2.B < r1.B)),
+ AND(~(l1.B < r2.B), ~(l2.B < r2.B))
 )'''
 
-        print_str_diff(repr(n3), nc3_repr)  
+        # print_str_diff(repr(n3), nc3_repr)  
         # print(list(difflib.ndiff(repr(n3), nc3_repr)))
         assert repr(n3) == nc3_repr
 
@@ -130,50 +148,51 @@ def test_build_conditions():
         c4 = (l1.B == 5) & (l1.B == 5) & (l1.B == l2.B) & (l1.B != l2.B)
 
         c4_str = \
-'''(Var(BOOP, 'l1') & (l1.B == 5) & (l1.B == 5) &
- Var(BOOP, 'l2') & (l1.B == l2.B) & ~(l1.B == l2.B))'''
+'''AND(l1:=Var(BOOP), l1.B == 5, l1.B == 5,
+    l2:=Var(BOOP), l1.B == l2.B, ~(l1.B == l2.B)
+)'''
         # print()
-        # print(str(c4))
+        print(str(c4))
         # print_str_diff(str(c4), c4_str)
         # print(repr(c4))
         assert str(c4) == c4_str    
 
         c4_repr = \
-'''((l1.B == 5) & (l1.B == 5) & (l1.B == l2.B) & ~(l1.B == l2.B))'''
+'''AND(l1.B == 5, l1.B == 5, l1.B == l2.B, ~(l1.B == l2.B))'''
 
-        # print_str_diff(repr(c4), c4_repr)
+        print(repr(c4))
         assert repr(c4) == c4_repr    
 
         nc4 = ~c4
         # print(nc4)
-        # print(repr(nc4))
+        print(repr(nc4))
 
         nc4_repr = \
 '''OR(
- (~(l1.B == 5)),
- (~(l1.B == 5)),
- (~(l1.B == l2.B)),
- ((l1.B == l2.B))
+ AND(~(l1.B == 5)),
+ AND(~(l1.B == 5)),
+ AND(~(l1.B == l2.B)),
+ AND(l1.B == l2.B)
 )'''
         assert repr(nc4) == nc4_repr
 
         ### AND / OR btw DNFS ### 
         c3_and_c4_repr = \
 '''OR(
- ((l1.B < 1) & (l1.B > 7) & (l1.B < r1.B) & (l1.B < r2.B) & (l1.B == 5) & (l1.B == 5) & (l1.B == l2.B) & ~(l1.B == l2.B)),
- ((l2.B < 1) & (l2.B > 7) & (l2.B < r1.B) & (l2.B < r2.B) & (l1.B == 5) & (l1.B == 5) & (l1.B == l2.B) & ~(l1.B == l2.B))
+ AND(l1.B < 1, l1.B > 7, l1.B < r1.B, l1.B < r2.B, l1.B == 5, l1.B == 5, l1.B == l2.B, ~(l1.B == l2.B)),
+ AND(l2.B < 1, l2.B > 7, l2.B < r1.B, l2.B < r2.B, l1.B == 5, l1.B == 5, l1.B == l2.B, ~(l1.B == l2.B))
 )'''        
         # print()
-        # print(repr(c3 & c4))
+        print(repr(c3 & c4))
         assert repr(c3 & c4) == c3_and_c4_repr
 
         c3_or_c4_repr = \
 '''OR(
- ((l1.B < 1) & (l1.B > 7) & (l1.B < r1.B) & (l1.B < r2.B)),
- ((l2.B < 1) & (l2.B > 7) & (l2.B < r1.B) & (l2.B < r2.B)),
- ((l1.B == 5) & (l1.B == 5) & (l1.B == l2.B) & ~(l1.B == l2.B))
+ AND(l1.B < 1, l1.B > 7, l1.B < r1.B, l1.B < r2.B),
+ AND(l2.B < 1, l2.B > 7, l2.B < r1.B, l2.B < r2.B),
+ AND(l1.B == 5, l1.B == 5, l1.B == l2.B, ~(l1.B == l2.B))
 )'''
-        # print_str_diff(repr(c3 | c4),c3_or_c4_repr)
+        print(repr(c3 | c4))
         assert repr(c3 | c4) == c3_or_c4_repr
 
 

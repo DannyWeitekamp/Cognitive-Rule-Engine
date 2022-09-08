@@ -132,9 +132,24 @@ class Literal(structref.StructRefProxy):
     def op(self):
         return literal_get_pred_node(self)
 
+py_operator_chars = ("+", "-", "*", "/", "%",
+                     "=", "~", "<", ">", "!",
+                     "&", "|", "@", "^")
+@njit(cache=True)
+def has_py_operator(s):
+    for py_operator in py_operator_chars:
+        if(py_operator in s):
+            return True
+    return False
+
 @njit(cache=True)
 def literal_str(self):
-    return op_str(self.op)
+    s = op_str(self.op)
+    if(self.negated):
+        if(has_py_operator(s)):
+            s = f"({s})"
+        return f"~{s}"
+    return s    
 
 @njit(cache=True)
 def literal_get_op(self):
@@ -303,12 +318,13 @@ class Conditions(structref.StructRefProxy):
     def __and__(self, other):
         if(isinstance(other,Op)): other = op_to_cond(other)
         conds = conditions_and(self, other) 
-        with PrintElapse("auto_alias_unaliased_vars"):
-            auto_alias_unaliased_vars(conds)
+        auto_alias_unaliased_vars(conds)
         return conds
     def __or__(self, other):
         if(isinstance(other,Op)): other = op_to_cond(other)
-        return conditions_or(self, other)
+        conds = conditions_or(self, other)
+        auto_alias_unaliased_vars(conds)
+        return conds
     def __not__(self):
         return conditions_not(self)
     def __invert__(self):
@@ -695,10 +711,101 @@ def _get_sig_str(conds):
 
 #     s += conditions_str(self,add_non_conds=True)
 #     return s
+GTE_PY39 = sys.version_info >= (3,9)
+
+
+
+
+@njit(cache=True)
+def conds_repr(conds, indent="    "):
+    distr_dnf = conds_get_distr_dnf(conds)
+    is_disjunct = len(distr_dnf) > 1
+
+    s = "OR(\n" if is_disjunct  else ""
+    ind1 = indent if is_disjunct else ""
+    ind2 = indent*2 if is_disjunct else indent
+    for k, distr_conjunct in enumerate(distr_dnf):
+        s += f"{ind1}AND("
+        for j, var_conjuct in enumerate(distr_conjunct):
+            if(j > 0): s+= ind2
+
+            # Repr the Var 
+            v = conds.vars[j]
+            if(k == 0):
+                if(GTE_PY39):
+                    s += f"{v.alias}:=Var({get_base_type_name(v)})"
+                else:
+                    s += f"Var({get_base_type_name(v)}, '{v.alias}'"
+            else:
+                s += f"{v.alias}"
+
+            # Repr lits 
+            for i, lit in enumerate(var_conjuct):
+                s += f", {str(lit)}"
+
+            # End of lits for this var 
+            if(j < len(distr_conjunct)-1):
+                s += ",\n"
+            elif(len(distr_conjunct) > 1):
+                s += f"\n{ind1})"
+            else:
+                s += ")"
+        if(k < len(distr_dnf)-1): s += ",\n"
+    if is_disjunct:
+        s += "\n)"
+    return s
 
 
 @njit(cache=True)
 def conds_repr_short(self, indent=" "):
+    used_var_ptrs = Dict.empty(i8,u1)
+    is_disjunct = len(self.dnf) > 1
+
+    s = "OR(\n" if is_disjunct  else ""
+    ind = indent if is_disjunct else ""
+
+    for j, conjunct in enumerate(self.dnf):
+        s += ind+"AND("
+        for i, lit in enumerate(conjunct):
+            s += str(lit)
+            if(i < len(conjunct)-1): s += ", "
+        s += ")"
+        if(j < len(self.dnf)-1): s += ",\n"
+
+    if is_disjunct:
+        s += "\n)"        
+    return s
+
+@njit(cache=True)
+def conds_repr_ampersand(conds, indent=" "):
+    distr_dnf = conds_get_distr_dnf(conds)
+    is_disjunct = len(distr_dnf) > 1
+
+    s = "OR(\n" if is_disjunct  else ""
+    ind1 = indent if is_disjunct else ""
+    ind2 = indent*2 if is_disjunct else indent
+    for k, distr_conjunct in enumerate(distr_dnf):
+        for j, var_conjuct in enumerate(distr_conjunct):
+            v = conds.vars[j]
+            s += ind1+"(" if j == 0 else ind2
+            if(k == 0):
+                if(GTE_PY39):
+                    s += f"({v.alias}:=Var({get_base_type_name(v)}))"
+                else:
+                    s += f"(Var({get_base_type_name(v)}, '{v.alias}')"
+            else:
+                s += f" {v.alias}"
+            for i, lit in enumerate(var_conjuct):
+                s += f" & {str(lit)}"
+            if(j < len(distr_conjunct)-1): s += " &\n"
+        s += ")"
+        if(k < len(distr_dnf)-1): s += ",\n"
+    if is_disjunct:
+        s += "\n)"
+    return s
+
+@njit(cache=True)
+def conds_repr_ampersand_short(self, indent=" "):
     used_var_ptrs = Dict.empty(i8,u1)
     is_disjunct = len(self.dnf) > 1
 
@@ -709,7 +816,7 @@ def conds_repr_short(self, indent=" "):
     for j, conjunct in enumerate(self.dnf):
         s += ind+"("
         for i, lit in enumerate(conjunct):
-            s += "~" if lit.negated else ""
+            # s += "~" if lit.negated else ""
             s += str(lit)
             if(i < len(conjunct)-1): s += " & "
             # if(add_non_conds): 
@@ -730,35 +837,6 @@ def conds_repr_short(self, indent=" "):
     #             was_prev = True
     return s
 
-IS_GTE_PY39 = sys.version_info >= (3,9)
-
-@njit(cache=True)
-def conds_repr(conds, indent=" "):
-    distr_dnf = conds_get_distr_dnf(conds)
-    is_disjunct = len(distr_dnf) > 1
-
-    s = "OR(\n" if is_disjunct  else ""
-    ind1 = indent if is_disjunct else ""
-    ind2 = indent*2 if is_disjunct else indent
-    for k, distr_conjunct in enumerate(distr_dnf):
-        for j, var_conjuct in enumerate(distr_conjunct):
-            v = conds.vars[j]
-            s += ind1+"(" if j == 0 else ind2
-            if(k == 0):
-                if(IS_GTE_PY39):
-                    s += f"({v.alias}:=Var({get_base_type_name(v)}))"
-                else:
-                    s += f"(Var({get_base_type_name(v)}, '{v.alias}')"
-            else:
-                s += f" {v.alias}"
-            for i, lit in enumerate(var_conjuct):
-                s += f" & {'~' if lit.negated else ''}{str(lit)}"
-            if(j < len(distr_conjunct)-1): s += " &\n"
-        s += ")"
-        if(k < len(distr_dnf)-1): s += ",\n"
-    if is_disjunct:
-        s += "\n)"
-    return s
 
 
 
@@ -934,7 +1012,19 @@ def OR(*args):
     conds = args[0] | args[1]
     for i in range(2,len(args)):
         conds |= args[i]
+    auto_alias_unaliased_vars(conds)
     return conds
+
+def AND(*args):
+    # Note: Can probably njit a lot of this to make it faster.
+    assert len(args) >= 2, "OR requires at least two arguments"
+
+    conds = args[0] & args[1]
+    for i in range(2,len(args)):
+        conds &= args[i]
+    auto_alias_unaliased_vars(conds)
+    return conds
+
 
 
 @njit(cache=True)

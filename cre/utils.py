@@ -173,7 +173,6 @@ def lower_setattr(typingctx, inst_type, attr_type, val_type):
             # cast val to the correct type
             field_type = inst_type.field_dict[attr]
             casted = context.cast(builder, val, val_type, field_type)
-
             # read old
             old_value = getattr(dataval, attr)
             # incref new value
@@ -775,6 +774,7 @@ def _listtype_sizeof_item(typingctx, l_ty):
 
 @njit
 def listtype_sizeof_item(lt):
+    print("$$")
     return _listtype_sizeof_item(lt)
 
 ### Array Intrinsics ###
@@ -838,8 +838,7 @@ def assign_to_alias_in_parent_frame(x,alias):
     if(alias is not None): 
         # Binds this instance globally in the calling python context 
         #  so that it is bound to a variable named whatever alias was set to
-        print(inspect.stack()[2][0])
-        inspect.stack()[2][0].f_locals[alias] = x
+        inspect.stack()[2][0].f_globals[alias] = x
 
 
 ##### Helpful context for timing code ####

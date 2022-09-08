@@ -201,7 +201,8 @@ DEFAULT_REGISTERED_TYPES = {
                             'Var': types.undefined,
                             'Op' : types.undefined,
                             'Literal' : types.undefined,
-                            'Conditions' : types.undefined
+                            'Conditions' : types.undefined,
+                            'Rule' : types.undefined
                             }
 
 if(not os.path.exists(get_cache_path("type_registry",suffix=''))):
@@ -230,6 +231,7 @@ T_ID_VAR = DEFAULT_TYPE_T_IDS['Var']
 T_ID_OP = DEFAULT_TYPE_T_IDS['Op']
 T_ID_LITERAL = DEFAULT_TYPE_T_IDS['Literal']
 T_ID_CONDITIONS = DEFAULT_TYPE_T_IDS['Conditions']
+T_ID_Rule = DEFAULT_TYPE_T_IDS['Rule']
 
 
 SHORT_NAMES = {

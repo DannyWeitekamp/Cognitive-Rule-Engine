@@ -178,9 +178,9 @@ op_fields_dict = {
     "shorthand_template" : unicode_type,
 
     # Mapping variable base_ptrs to aliases
-    "base_var_map" : DictType(i8, unicode_type),
+    "base_var_map" : DictType(i8, i8),
     # Inverse of 'base_var_map'
-    "inv_base_var_map" : DictType(unicode_type, i8),
+    # "inv_base_var_map" : DictType(unicode_type, i8),
     # Pointers of op's head vars (i.e. x.nxt and x.nxt.nxt are both heads of x)
 
     "base_vars" : ListType(GenericVarType),
@@ -586,8 +586,8 @@ def op_ctor(name, return_type_name, return_t_id, arg_type_names, head_var_ptrs, 
     st.return_t_id = return_t_id
 
     st.arg_type_names = arg_type_names
-    st.base_var_map = Dict.empty(i8, unicode_type)
-    st.inv_base_var_map = Dict.empty(unicode_type, i8)
+    st.base_var_map = Dict.empty(i8, i8)
+    # st.inv_base_var_map = Dict.empty(unicode_type, i8)
     st.base_vars = List.empty_list(GenericVarType)
     st.head_vars = List.empty_list(GenericVarType)
 
@@ -604,8 +604,8 @@ def op_ctor(name, return_type_name, return_t_id, arg_type_names, head_var_ptrs, 
             if(alias == ""):
                 alias = generated_aliases[j]; j+=1;
             
-            st.base_var_map[base_ptr] = alias
-            st.inv_base_var_map[alias] = base_ptr
+            st.base_var_map[base_ptr] = len(st.base_var_map)
+            # st.inv_base_var_map[alias] = base_ptr
 
     st.head_var_ptrs = head_var_ptrs
     st.head_ranges = make_head_ranges(len(st.base_var_map), head_var_ptrs)
@@ -670,7 +670,7 @@ def op_copy(op, new_base_vars=None):
 
     if(new_base_vars is None):
         st.base_var_map = op.base_var_map 
-        st.inv_base_var_map = op.inv_base_var_map 
+        # st.inv_base_var_map = op.inv_base_var_map 
         st.base_vars = op.base_vars
         st.head_vars = op.head_vars
         st.head_var_ptrs = op.head_var_ptrs
@@ -679,12 +679,12 @@ def op_copy(op, new_base_vars=None):
 
         st.head_var_ptrs = np.empty(len(op.head_vars),dtype=np.int64)
         st.base_var_map = Dict.empty(i8, unicode_type)
-        st.inv_base_var_map = Dict.empty(unicode_type, i8)
+        # st.inv_base_var_map = Dict.empty(unicode_type, i8)
         base_var_map = Dict.empty(i8,GenericVarType)
         for i, (o_v, n_v) in enumerate(zip(op.base_vars, new_base_vars)):
             st.head_var_ptrs[i] = n_v.base_ptr
             st.base_var_map[n_v.base_ptr] = n_v.alias
-            st.inv_base_var_map[n_v.alias] = n_v.base_ptr
+            # st.inv_base_var_map[n_v.alias] = n_v.base_ptr
             base_var_map[o_v.base_ptr] = n_v
 
         st.head_vars = List.empty_list(GenericVarType)
@@ -1468,21 +1468,21 @@ from cre.var import get_base_type_name
 @njit(cache=True)
 def get_arg_seq(self,type_annotations=False):
     s = ""
-    for i,alias in enumerate(self.inv_base_var_map):
-        s += alias
+    for i,v in enumerate(self.base_vars):
+        s += v.alias
         if(type_annotations): 
-            v = _struct_from_ptr(GenericVarType, self.inv_base_var_map[alias])
+            # v = _struct_from_ptr(GenericVarType, self.inv_base_var_map[alias])
             s += ":" + get_base_type_name(v)#.base_type_name
 
-        if(i < len(self.inv_base_var_map)-1): 
+        if(i < len(self.base_vars)-1): 
             s += ", " + (" " if type_annotations else "")
     return s
 
 @njit(cache=True)
 def op_get_arg_names(self):
     arg_names = List.empty_list(unicode_type)
-    for alias in self.inv_base_var_map:
-        arg_names.append(alias)
+    for v in self.base_vars:
+        arg_names.append(v.alias)
     return arg_names
 
 #### Various Setters ####

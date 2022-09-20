@@ -9,7 +9,7 @@ from numba import njit, u8, u1, generated_jit
 from numba.typed import List
 from numba.types import ListType
 import cre.dynamic_exec
-import pytest
+# import pytest
 import operator
 import cloudpickle
 
@@ -821,6 +821,24 @@ def test_copy():
         assert m1.boop2.B == 3
         assert m2.boop2.B == 4
 
+def test_repr():
+    with cre_context("test_repr"):
+        BOOP = define_fact("BOOP",{"A": "string", "B" : "number", "C" : "BOOP"})
+        c = BOOP("C",7)
+
+
+        og_refcount = c._meminfo.refcount 
+        b = BOOP("A", 1, c)
+
+        assert "BOOP(A='A', B=1.0, C=<BOOP at " in repr(b)
+
+        # Call str on b several times + make sure no memleak in c
+        [str(b) for i in range(10)]
+        assert c._meminfo.refcount <= og_refcount + 2 # Probably should be 1 here
+
+
+
+
 
 # def test_weird_case():
 #     from cre.fact_intrinsics import fact_lower_getattr
@@ -895,7 +913,7 @@ if __name__ == "__main__":
     # test__merge_spec_inheritance()
     # test_define_fact()
     # test_inheritence()
-    test_cast_fact()
+    # test_cast_fact()
     # test_protected_mutability()
     # test_fact_eq()
 
@@ -913,7 +931,7 @@ if __name__ == "__main__":
     # test_inheritence_bytes()
     # test_context_retroactive_register()
 
-
+    test_repr()
 
 
 

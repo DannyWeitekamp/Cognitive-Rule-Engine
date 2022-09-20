@@ -35,7 +35,8 @@ from cre.fact import Fact, BaseFact, cast_fact, get_inheritance_t_ids
 from cre.tuple_fact import TF, TupleFact
 from cre.fact_intrinsics import fact_lower_setattr
 from cre.utils import CastFriendlyMixin, lower_setattr, _cast_structref, _meminfo_from_struct, decode_idrec, encode_idrec, \
- _raw_ptr_from_struct, _ptr_from_struct_incref,  _struct_from_ptr, _decref_ptr, _decref_structref, _raw_ptr_from_struct_incref, _raw_ptr_from_struct, _obj_cast_codegen, _incref_structref
+ _raw_ptr_from_struct, _ptr_from_struct_incref,  _struct_from_ptr, _decref_ptr, _decref_structref, _raw_ptr_from_struct_incref, _raw_ptr_from_struct, _obj_cast_codegen, _incref_structref, \
+ _store, _load_ptr, deref_info_type, DEREF_TYPE_ATTR, DEREF_TYPE_LIST, _ptr_to_data_ptr, _list_base_from_ptr
 from cre.vector import new_vector, VectorType
 from cre.caching import import_from_cached, source_in_cache, source_to_cache
 
@@ -69,7 +70,10 @@ memset_fields = {
 
 @structref.register
 class MemSetTypeClass(CastFriendlyStructref):
-    pass
+    def __str__(self):
+        return "cre.MemSetType"
+    def __repr__(self):
+        return self.__str__()
 
 MemSetType = MemSetTypeClass([(k,v) for k,v in memset_fields.items()])
 
@@ -514,11 +518,78 @@ def memset_modify(self, fact, attr, val):
 
     return impl
 
+@njit(i8(deref_info_type,i8),inline='never',cache=True)
+def deref_once(deref, inst_ptr):
+    if(deref.type == u1(DEREF_TYPE_ATTR)):
+        return _ptr_to_data_ptr(inst_ptr)
+    else:
+        return _list_base_from_ptr(inst_ptr)
 
+@njit(i8(BaseFact, deref_info_type[::1]),cache=True)
+def resolve_deref_data_ptr(fact, deref_infos):
+    '''
+    '''
+    inst_ptr = _raw_ptr_from_struct(fact)
+    if(len(deref_infos) > 1):
+        for k in range(len(deref_infos)-1):
+            if(inst_ptr == 0): break;
+            deref = deref_infos[k]
+            data_ptr = deref_once(deref, inst_ptr)
+            inst_ptr = _load_ptr(i8, data_ptr+deref.offset)
 
+    if(inst_ptr != 0):
+        deref = deref_infos[-1]
+        data_ptr = deref_once(deref, inst_ptr)
+        return data_ptr+deref.offset
+    else:
+        return 0
 
+@generated_jit(nopython=True, cache=True)
+def memset_modify_w_deref_infos(self, fact, deref_infos, val):
+    if(not isinstance(fact,types.StructRef)): 
+        raise TypingError(f"Modify requires a fact instance, got instance of'{type(fact)}'.")
+    print("<<", deref_infos)
+    val_type = val
+    def impl(self, fact, deref_infos, val):
+        if(len(deref_infos) == 0):
+            raise ValueError("Cannot setattr with empty deref_infos.")
 
+        final_deref_info = deref_infos[-1]
+        a_id = u1(final_deref_info.a_id)
 
+        field_data_ptr = resolve_deref_data_ptr(fact, deref_infos)
+        t_id, f_id, _ = decode_idrec(fact.idrec)
+
+        field_ptr = field_data_ptr#_load_ptr(val_type, field_data_ptr)
+    
+        # incref new value
+        _incref_structref(val)
+
+        # decref old value (must be last in case new value is old value)
+        _decref_ptr(field_ptr)
+        # print("D")
+
+        if(val is None):
+            # Attr case
+            if(final_deref_info.type == DEREF_TYPE_ATTR):
+                print("IS NONE")
+                _store(i8, field_data_ptr, 0)
+
+            # List case
+            else:
+                # TODO: some issue with this 
+                raise ValueError("List cannot be set to None")
+                new_lst = List.empty_list(val_type) 
+                _store(i8, field_data_ptr, _ptr_from_struct_incref(new_lst))
+        else:
+            print("IS normal", val)
+            _store(val_type, field_data_ptr, val)
+
+        # print("Z")
+
+        self.change_queue.add(encode_idrec(t_id, f_id, a_id))
+
+    return impl
 
 
 

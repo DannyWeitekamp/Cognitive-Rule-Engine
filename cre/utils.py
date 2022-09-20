@@ -113,7 +113,15 @@ class CastFriendlyMixin():
 
 #### deref_info_type ####
 
-np_deref_info_type = np.dtype([('type', np.uint8),  ('a_id', np.uint32), ('t_id', np.uint16), ('offset', np.int32)])
+np_deref_info_type = np.dtype([
+    # Enum for ATTR or LIST
+    ('type', np.uint8),
+    ('a_id', np.uint32),
+    ('t_id', np.uint16),
+    ('offset', np.int32)
+    # NOTE: Should pad to make 64-bit aligned
+])
+
 deref_info_type = numba.from_dtype(np_deref_info_type)
 
 DEREF_TYPE_ATTR = 0
@@ -251,7 +259,6 @@ def _obj_cast_codegen(context, builder, val, frmty, toty, incref=True):
     st.meminfo = meminfo
     
     return st._getvalue()
-
 
 
 @intrinsic
@@ -480,15 +487,23 @@ def _memcpy_structref(typingctx, inst_type):
 #### Refcounting Utils #### 
 
 
+#TODO just make _incref
 @intrinsic
-def _incref_structref(typingctx,inst_type):
+def _incref_structref(typingctx, inst_type):
     '''Increments the refcount '''
     def codegen(context, builder, sig, args):
-        d, = args
+        val, = args
 
-        ctor = cgutils.create_struct_proxy(inst_type)
-        dstruct = ctor(context, builder, value=d)
-        context.nrt.incref(builder, types.MemInfoPointer(types.voidptr), dstruct.meminfo)
+        # try:
+        # ctor = cgutils.create_struct_proxy(inst_type)
+        # dstruct = ctor(context, builder, value=d)
+        # context.nrt.incref(builder, types.MemInfoPointer(types.voidptr), dstruct.meminfo)
+        # except TypeError:
+
+        context.nrt.incref(builder, inst_type, val)
+
+        #     pass 
+        
 
     sig = void(inst_type)
     return sig, codegen
@@ -518,7 +533,6 @@ def _decref_ptr(typingctx, raw_ptr):
         raw_ptr, = args
         meminfo = builder.inttoptr(raw_ptr, cgutils.voidptr_t)
         context.nrt.decref(builder, types.MemInfoPointer(types.voidptr), meminfo)
-
 
     sig = void(raw_ptr)
     return sig, codegen

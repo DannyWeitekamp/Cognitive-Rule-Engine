@@ -142,16 +142,19 @@ def fact_getattr_codegen(context, builder, sig, args, attr):
                 return _cast_structref(ret_type, x)
             return None
         ret = context.compile_internal(builder, cast_obj, option_ret_type(field_type,), (ret,))
-        ret_type = option_ret_type
+        # ret_type = option_ret_type
+        return ret
         
     elif(isinstance(ret_type, (ListType,))):
         # List members should always be non-null
         def cast_obj(x):
             return _cast_list(ret_type, x)
         ret = context.compile_internal(builder, cast_obj, option_ret_type(field_type,), (ret,))
-        ret_type = option_ret_type
+        # ret_type = option_ret_type
+        return ret
+    else:
         
-    return imputils.impl_ret_borrowed(context, builder, ret_type, ret)
+        return imputils.impl_ret_borrowed(context, builder, ret_type, ret)
 
 
 

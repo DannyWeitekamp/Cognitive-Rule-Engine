@@ -18,7 +18,7 @@ from cre.subscriber import base_subscriber_fields, BaseSubscriber, BaseSubscribe
 from cre.vector import VectorType
 from cre.cre_object import cre_obj_field_dict,CREObjType, CREObjTypeClass, CREObjProxy, set_chr_mbrs
 # from cre.predicate_node import BasePredicateNode,BasePredicateNodeType, get_alpha_predicate_node_definition, \
- # get_beta_predicate_node_definition, deref_attrs, define_alpha_predicate_node, define_beta_predicate_node, AlphaPredicateNode, BetaPredicateNode
+# get_beta_predicate_node_definition, deref_attrs, define_alpha_predicate_node, define_beta_predicate_node, AlphaPredicateNode, BetaPredicateNode
 from numba.core import imputils, cgutils
 from numba.core.datamodel import default_manager, models
 
@@ -127,19 +127,19 @@ class Var(CREObjProxy):
         st._head_type = typ
         st._derefs_str = ""
 
-        if(alias):
-            import inspect, ctypes
-            if(alias is not None): 
-                # Binds this instance globally in the calling python context 
-                #  so that it is bound to a variable named whatever alias was set to
-                # print(inspect.stack()[2][0].f_locals)
-                # Get the calling frame
-                frame = inspect.stack()[2][0] 
-                # Assign the Var to it's alias
-                frame.f_locals[alias] = st
-                # Update locals()
-                ctypes.pythonapi.PyFrame_LocalsToFast(ctypes.py_object(frame), ctypes.c_int(1))
-            # assign_to_alias_in_parent_frame(st, alias)
+        # if(alias):
+            # import inspect, ctypes
+            # if(alias is not None): 
+            #     # Binds this instance globally in the calling python context 
+            #     #  so that it is bound to a variable named whatever alias was set to
+            #     # print(inspect.stack()[2][0].f_locals)
+            #     # Get the calling frame
+            #     frame = inspect.stack()[2][0] 
+            #     # Assign the Var to it's alias
+            #     frame.f_locals[alias] = st
+            #     # Update locals()
+            #     ctypes.pythonapi.PyFrame_LocalsToFast(ctypes.py_object(frame), ctypes.c_int(1))
+            # # assign_to_alias_in_parent_frame(st, alias)
 
         return st
         

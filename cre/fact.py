@@ -29,7 +29,7 @@ from cre.structref import gen_structref_code, define_structref
 # from cre.context import cre_context
 from cre.utils import (_struct_from_ptr, _cast_structref, struct_get_attr_offset, _obj_cast_codegen,
                        _ptr_from_struct_codegen, _raw_ptr_from_struct, CastFriendlyMixin, _obj_cast_codegen,
-                        PrintElapse, _struct_get_data_ptr)
+                        PrintElapse, _struct_get_data_ptr, _ptr_from_struct_incref)
 from cre.cre_object import CREObjTypeClass, cre_obj_field_dict, CREObjModel, CREObjType, member_info_type, CREObjProxy
 
 from numba.core.typeconv import Conversion
@@ -675,7 +675,7 @@ def repr_fact_attr(inst):
 
     ptr = inst.get_ptr()
     if(ptr != 0):
-        return f'<{inst_type._fact_name} at {hex(ptr)}>'
+        return f"<{inst_type._fact_name} at {hex(ptr)}>"
     else:
         return 'None'
 
@@ -1113,7 +1113,7 @@ def upcast(context, builder, fromty, toty, val):
     return _obj_cast_codegen(context, builder, val, fromty, toty,incref=False)
 
 
-@njit(cache=True)
+@njit(i8(CREObjType), cache=True)
 def fact_to_ptr(fact):
     return _raw_ptr_from_struct(fact)
 
@@ -1188,6 +1188,10 @@ def get_inheritance_t_ids(st):
         prev_val = val
     t_ids.append(val)    
     return t_ids
+
+
+# @njit()
+# def fact_setitem(fact, index):
 
 
 

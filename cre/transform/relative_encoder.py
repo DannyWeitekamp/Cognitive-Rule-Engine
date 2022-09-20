@@ -595,7 +595,7 @@ def _new_rel_var(source_var, head_t_id, deref_infos):
     # new_var = _memcpy_structref(source_var)
     new_var = new(GenericVarType)
     new_var.idrec = source_var.idrec
-    new_var.alias = source_var.alias
+    # new_var.alias = source_var.alias
     new_var.base_t_id = source_var.base_t_id
     new_var.head_t_id = head_t_id
     new_var.base_ptr = source_var.base_ptr

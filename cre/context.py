@@ -256,7 +256,7 @@ class CREContext(object):
         # If got a name then check the registry for the name 
         if(name is not None):
             if(name in self.name_to_type):
-                print("get_type->", name, self.name_to_type[name], "in", self.name)
+                # print("get_type->", name, self.name_to_type[name], "in", self.name)
                 return self.name_to_type[name]
             else:
                 raise ValueError(f"No type {name} registered in cre_context {self.name}.")

@@ -9,7 +9,7 @@ from numba.core.errors import TypingError
 from numba.experimental.structref import new
 import logging
 import numpy as np
-import pytest
+# import pytest
 from collections import namedtuple
 from cre.subscriber import BaseSubscriberType, init_base_subscriber
 from cre.utils import _struct_from_meminfo, PrintElapse
@@ -433,21 +433,47 @@ def test_mem_leaks():
         assert used_bytes()-init_used <= 0
 
 
+def test_modify_from_deref_infos():
+    from cre.var import Var
+    from cre.memset import memset_modify_w_deref_infos
+    with cre_context("test_modify_from_deref_infos"):
+        BOOP = define_fact("BOOP",{"A": "string", "B" : "number", "C" : "BOOP",  "D" : "List(str)"})
+        c = BOOP("C",7)
+        d = BOOP("D",8)
+        b = BOOP("A", 1, c)
+        print(b)
+
+        ms = MemSet()
+        ms.declare(b)
+
+        di_ba = Var(BOOP).A.deref_infos
+        di_bb = Var(BOOP).B.deref_infos
+        di_bc = Var(BOOP).C.deref_infos
+        di_bd = Var(BOOP).D.deref_infos
+
+        print(b.A)
+        memset_modify_w_deref_infos(ms, b, di_ba, "B")
+        print(b.A)
+        assert b.A == "B"
+
+        memset_modify_w_deref_infos(ms, b, di_bb, 2.0)
+        assert b.B == 2.0
+
+        memset_modify_w_deref_infos(ms, b, di_bc, d)
+        assert b.C == d
+
+        memset_modify_w_deref_infos(ms, b, di_bc, c)
+        assert b.C == c
+
+        memset_modify_w_deref_infos(ms, b, di_bc, None)
+        assert b.C == None
+
+        # TODO: Empty list 
+        # memset_modify_w_deref_infos(ms, b, di_bd, None)
+        # print(b.D)
+        # assert len(b.D) == 0
 
 
-
-        # print([x._meminfo.refcount for x in w.keys()])
-        
-        # print([x._meminfo.refcount for x in w.keys()])
-        
-        
-
-
-        
-        # print()
-        # print(rtsys.get_allocation_stats())
-    # print(rtsys.get_allocation_stats())
-        
 
 
 
@@ -543,7 +569,7 @@ def test_b_get_facts_10000(benchmark):
 
 if __name__ == "__main__":
     import faulthandler; faulthandler.enable()
-    test_indexer()
+    # test_indexer()
     # test_declare_retract()
     # test_retroactive_register()
     # test_declare_retract_tuple_fact()
@@ -558,3 +584,5 @@ if __name__ == "__main__":
     # _test_iter_facts()
 
     # _delcare_10000(MemSet())
+
+    test_modify_from_deref_infos()

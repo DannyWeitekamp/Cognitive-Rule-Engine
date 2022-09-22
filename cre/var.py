@@ -593,7 +593,8 @@ def get_base_type_name(self):
     def impl(self):
         with objmode(base_type_name=unicode_type):
             context = cre_context()
-            base_type_name = context.get_type(t_id=self.base_t_id)._fact_name
+            base_type = context.get_type(t_id=self.base_t_id)
+            base_type_name = getattr(base_type,'_fact_name',str(base_type))
         return base_type_name
     return impl
 

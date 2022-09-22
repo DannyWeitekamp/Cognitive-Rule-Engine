@@ -652,6 +652,6 @@ if __name__ == "__main__":
     # test_ptr_ops()
     # test_hash()
     # test_eq()
-    # test_copy()
+    test_copy()
             
 

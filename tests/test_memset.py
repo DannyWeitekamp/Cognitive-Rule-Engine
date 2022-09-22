@@ -9,7 +9,7 @@ from numba.core.errors import TypingError
 from numba.experimental.structref import new
 import logging
 import numpy as np
-# import pytest
+import pytest
 from collections import namedtuple
 from cre.subscriber import BaseSubscriberType, init_base_subscriber
 from cre.utils import _struct_from_meminfo, PrintElapse
@@ -432,8 +432,38 @@ def test_mem_leaks():
         # print(used_bytes()-init_used)
         assert used_bytes()-init_used <= 0
 
+def test_leak_circular_refs():
+    with cre_context("test_leak_circular_refs"):
+        BOOP = define_fact("BOOP", {"name" : unicode_type, "nxt" : "TestLL"})
+        TestLL = define_fact("TestLL", {"name" : unicode_type, "nxt" : "TestLL"})
+        init_used = used_bytes()
 
-def test_modify_from_deref_infos():
+        a = TestLL("a")
+        print("a_refs", a._meminfo.refcount)
+        b = TestLL("b",a)
+        print("a_refs", a._meminfo.refcount)
+        a.nxt = b
+        print("a_refs", a._meminfo.refcount)
+        print("b_refs", b._meminfo.refcount)
+        ms = MemSet()
+        ms.declare(a)
+        ms.declare(b)
+        print("a_refs", a._meminfo.refcount)
+        print("b_refs", b._meminfo.refcount)
+        ms.free()
+        ms = None
+
+        print("BYTES", used_bytes()-init_used)
+        print("a_refs", a._meminfo.refcount)
+        print("b_refs", b._meminfo.refcount)
+        a,b = None,None
+        print("BYTES", used_bytes()-init_used)
+
+
+
+
+
+def _test_modify_from_deref_infos():
     from cre.var import Var
     from cre.memset import memset_modify_w_deref_infos
     with cre_context("test_modify_from_deref_infos"):
@@ -585,4 +615,5 @@ if __name__ == "__main__":
 
     # _delcare_10000(MemSet())
 
-    test_modify_from_deref_infos()
+    _test_modify_from_deref_infos()
+    test_leak_circular_refs()

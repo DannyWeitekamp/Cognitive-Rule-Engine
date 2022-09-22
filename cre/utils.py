@@ -11,7 +11,7 @@ from llvmlite import ir
 import inspect
 import numpy as np 
 import numba
-from numba.typed.typedobjectutils import _container_get_data
+from numba.typed.typedobjectutils import _container_get_data, _nonoptional
 from numba.core.datamodel import default_manager, models
 from numba.core.typeconv import Conversion
 from numba.np.arrayobj import _getitem_array_single_int, make_array
@@ -484,6 +484,25 @@ def _memcpy_structref(typingctx, inst_type):
     sig = inst_type(inst_type)
     return sig, codegen
 
+def _meminfo_call_dtor(builder, meminfo):
+    mod = builder.module
+    fnty = ir.FunctionType(ir.VoidType(), [cgutils.voidptr_t])
+    fn = cgutils.get_or_insert_function(mod, fnty, "NRT_MemInfo_call_dtor")
+    # fn.return_value.add_attribute("noalias")
+    return builder.call(fn, [builder.bitcast(meminfo, cgutils.voidptr_t)])
+
+@intrinsic
+def _call_dtor(typingctx, inst_type):
+    def codegen(context, builder, signature, args):
+        val = args[0]
+        st = cgutils.create_struct_proxy(inst_type)(context, builder, value=val)
+        print(st)
+        meminfo = st.meminfo
+        _meminfo_call_dtor(builder, meminfo)
+    sig = types.void(inst_type)
+
+    return sig, codegen
+
 #### Refcounting Utils #### 
 
 
@@ -777,18 +796,14 @@ def _list_base_from_ptr(typingctx, ptr_ty):
 def _listtype_sizeof_item(typingctx, l_ty):
     sig = i8(l_ty,)
     tl = l_ty.instance_type
-    print("??", tl, type(tl))
     def codegen(context, builder, sig, args):
-        print("--", tl, type(tl))
         llty = context.get_data_type(tl.item_type)
-        print("AFT", tl, type(tl))
         return cgutils.sizeof(builder,llty.as_pointer())
     return sig, codegen
 
 
 @njit
 def listtype_sizeof_item(lt):
-    print("$$")
     return _listtype_sizeof_item(lt)
 
 ### Array Intrinsics ###
@@ -1106,3 +1121,63 @@ def check_issue_6993():
     lst = get_list() #BOOP("A",5)
     bar(lst)
     return lst._opaque.refcount > 1
+
+
+# ----------------------------------
+# : new_w_del
+
+def imp_dtor_w_del(context, module, instance_type, del_fn_symbol_name):
+    llvoidptr = context.get_value_type(types.voidptr)
+    llsize = context.get_value_type(types.uintp)
+    dtor_ftype = ir.FunctionType(ir.VoidType(),
+                                     [llvoidptr, llsize, llvoidptr])
+
+    fname = "_DelDtor.{0}".format(instance_type.name)
+    dtor_fn = cgutils.get_or_insert_function(module, dtor_ftype, fname)
+    if dtor_fn.is_declaration:
+        # Define
+        builder = ir.IRBuilder(dtor_fn.append_basic_block())
+
+        alloc_fe_type = instance_type.get_data_type()
+        alloc_type = context.get_value_type(alloc_fe_type)
+
+        ptr = builder.bitcast(dtor_fn.args[0], alloc_type.as_pointer())
+        data = context.make_helper(builder, alloc_fe_type, ref=ptr)
+
+        extra_fn_type = ir.FunctionType(ir.VoidType(),[llvoidptr])
+        extra_fn = cgutils.get_or_insert_function(module, extra_fn_type, del_fn_symbol_name)
+        builder.call(extra_fn, [builder.bitcast(dtor_fn.args[0], cgutils.voidptr_t)])
+
+        context.nrt.decref(builder, alloc_fe_type, data._getvalue())
+
+        builder.ret_void()
+
+    return dtor_fn
+
+@intrinsic
+def new_w_del(typingctx, struct_type, _del_fn_symbol_name):
+    inst_type = struct_type.instance_type
+    del_fn_symbol_name = _del_fn_symbol_name.literal_value
+    def codegen(context, builder, signature, args):
+        model = context.data_model_manager[inst_type.get_data_type()]
+        alloc_type = model.get_value_type()
+        alloc_size = context.get_abi_sizeof(alloc_type)
+
+        meminfo = context.nrt.meminfo_alloc_dtor(
+            builder,
+            context.get_constant(types.uintp, alloc_size),
+            imp_dtor_w_del(context, builder.module, inst_type, del_fn_symbol_name),
+        )
+        data_pointer = context.nrt.meminfo_data(builder, meminfo)
+        data_pointer = builder.bitcast(data_pointer, alloc_type.as_pointer())
+
+        # Nullify all data
+        builder.store(cgutils.get_null_value(alloc_type), data_pointer)
+
+        inst_struct = context.make_helper(builder, inst_type)
+        inst_struct.meminfo = meminfo
+
+        return inst_struct._getvalue()
+
+    sig = inst_type(struct_type, _del_fn_symbol_name)
+    return sig, codegen

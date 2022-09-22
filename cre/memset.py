@@ -14,6 +14,8 @@ from numba.core.errors import RequireLiteralValue
 from cre.core import TYPE_ALIASES, JITSTRUCTS, py_type_map, numba_type_map, numpy_type_map
 from numba.core import types, cgutils
 from numba.core.errors import TypingError
+from numba.experimental.function_type import _get_wrapper_address
+from llvmlite import binding as ll
 
 from cre.gensource import assert_gen_source
 from cre.caching import unique_hash, source_to_cache, import_from_cached, source_in_cache
@@ -34,11 +36,12 @@ from cre.structref import define_structref, define_boxing, CastFriendlyStructref
 from cre.fact import Fact, BaseFact, cast_fact, get_inheritance_t_ids
 from cre.tuple_fact import TF, TupleFact
 from cre.fact_intrinsics import fact_lower_setattr
-from cre.utils import CastFriendlyMixin, lower_setattr, _cast_structref, _meminfo_from_struct, decode_idrec, encode_idrec, \
+from cre.utils import CastFriendlyMixin, lower_setattr, _cast_structref, _meminfo_from_struct, decode_idrec, encode_idrec, _call_dtor,\
  _raw_ptr_from_struct, _ptr_from_struct_incref,  _struct_from_ptr, _decref_ptr, _decref_structref, _raw_ptr_from_struct_incref, _raw_ptr_from_struct, _obj_cast_codegen, _incref_structref, \
- _store, _load_ptr, deref_info_type, DEREF_TYPE_ATTR, DEREF_TYPE_LIST, _ptr_to_data_ptr, _list_base_from_ptr
+ _store, _load_ptr, deref_info_type, DEREF_TYPE_ATTR, DEREF_TYPE_LIST, _ptr_to_data_ptr, _list_base_from_ptr, new_w_del
 from cre.vector import new_vector, VectorType
 from cre.caching import import_from_cached, source_in_cache, source_to_cache
+from cre.cre_object import copy_cre_obj, cre_obj_clear_refs
 
 BASE_T_ID_STACK_SIZE = 16
 BASE_F_ID_STACK_SIZE = 64
@@ -48,11 +51,11 @@ BASE_CHANGE_QUEUE_SIZE = 2048
 #### mem Data Definition ####
 
 memset_fields = {
-    # Context Data object 
-    "context_data" : CREContextDataType,
-
     # Vector<*Vector<*BaseFact>> i.e. 2D vector that holds pointers to facts
     "facts" : VectorType,
+
+    # Context Data object 
+    "context_data" : CREContextDataType,
 
     # Vector<*Vector<i8>> i.e. 2D vector that holds retracted f_ids
     "retracted_f_ids" : VectorType,
@@ -80,6 +83,7 @@ MemSetType = MemSetTypeClass([(k,v) for k,v in memset_fields.items()])
 
 @njit(cache=True)
 def memset_ctor(context_data):
+    # st = new_w_del(MemSetType, "CRE_Memset_Del")
     st = new(MemSetType)
     st.context_data = context_data
     st.facts = new_vector(BASE_T_ID_STACK_SIZE)
@@ -112,23 +116,9 @@ def expand_mem_set_types(ms, n):
 
         
 
-@njit(cache=True)
-def memset_dtor(ms):
-    '''Decref out data structures in ms that we explicitly incref'ed '''
 
-    #Decref all declared facts and their container vectors 
-    for i in range(ms.facts.head):
-        facts_ptr = ms.facts.data[i]
-        facts = _struct_from_ptr(VectorType, facts_ptr)
-        for j in range(facts.head):
-            fact_ptr = facts.data[j]
-            _decref_ptr(fact_ptr)
-        _decref_ptr(facts_ptr)
 
-    #Decref the inner vectors of retracted_f_ids
-    for i in range(ms.retracted_f_ids.head):
-        ptr = ms.retracted_f_ids.data[i]
-        _decref_ptr(ptr)
+
 
 #### MemSet Definition ####
 
@@ -227,7 +217,7 @@ class MemSet(structref.StructRefProxy):
         return memset_copy(self)
 
     def free(self):
-        memset_dtor(self)
+        memset_del(self)
     
 
     def __del__(self):        
@@ -245,6 +235,42 @@ class MemSet(structref.StructRefProxy):
 
 define_boxing(MemSetTypeClass, MemSet)
 
+@njit(types.void(MemSetType),cache=True)
+def memset_del(ms):
+    '''Decref out data structures in ms that we explicitly incref'ed '''
+    # print("MEMSET DEL!!!", )
+    # ms = _struct_from_ptr(MemSetType, _raw_ptr_from_struct(_ms)-48)
+    # _incref_structref(ms)
+    # print(ms.facts)
+    facts = ms.facts#_load_ptr(VectorType, _raw_ptr_from_struct(_ms))
+    #Decref all declared facts and their container vectors 
+    for i in range(facts.head):
+        facts_ptr = facts.data[i]
+        if(facts_ptr == 0): continue
+        facts_i = _struct_from_ptr(VectorType, facts_ptr)
+        for j in range(facts_i.head):
+            fact_ptr = facts_i.data[j]
+            if(fact_ptr == 0): continue
+            # print("ptr", j, fact_ptr)
+            fact = _struct_from_ptr(BaseFact, fact_ptr)
+            cre_obj_clear_refs(fact)
+            # _iter_mbr_infos(fact)
+
+            # _decref_structref(fact)
+            # _incref_structref(fact)
+            # _call_dtor(fact)
+            # _decref_ptr(fact_ptr)
+        # _decref_ptr(facts_ptr)
+
+    #Decref the inner vectors of retracted_f_ids
+    # for i in range(ms.retracted_f_ids.head):
+    #     ptr = ms.retracted_f_ids.data[i]
+    #     _decref_ptr(ptr)
+    # print("END")
+
+
+# memset_del_addr = _get_wrapper_address(memset_del, types.void(MemSetType))
+# ll.add_symbol("CRE_Memset_Del", memset_del_addr)
 
 @overload(MemSet)
 def overload_MemSet(context_data=None, mem_data=None):
@@ -548,7 +574,7 @@ def resolve_deref_data_ptr(fact, deref_infos):
 def memset_modify_w_deref_infos(self, fact, deref_infos, val):
     if(not isinstance(fact,types.StructRef)): 
         raise TypingError(f"Modify requires a fact instance, got instance of'{type(fact)}'.")
-    print("<<", deref_infos)
+    # print("<<", deref_infos)
     val_type = val
     def impl(self, fact, deref_infos, val):
         if(len(deref_infos) == 0):
@@ -572,7 +598,7 @@ def memset_modify_w_deref_infos(self, fact, deref_infos, val):
         if(val is None):
             # Attr case
             if(final_deref_info.type == DEREF_TYPE_ATTR):
-                print("IS NONE")
+                # print("IS NONE")
                 _store(i8, field_data_ptr, 0)
 
             # List case
@@ -582,7 +608,7 @@ def memset_modify_w_deref_infos(self, fact, deref_infos, val):
                 new_lst = List.empty_list(val_type) 
                 _store(i8, field_data_ptr, _ptr_from_struct_incref(new_lst))
         else:
-            print("IS normal", val)
+            # print("IS normal", val)
             _store(val_type, field_data_ptr, val)
 
         # print("Z")
@@ -968,7 +994,7 @@ def indexer_get_fact(self, memset, val):
 # ----------------------------------------------------------------------
 # : memset_copy - Allows for .get_facts(attr=val)
 
-from cre.cre_object import copy_cre_obj
+
 @njit(cache=True)
 def memset_copy(self):
     new = memset_ctor(self.context_data)    

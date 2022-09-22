@@ -1,7 +1,7 @@
 from numba import njit, f8, i8
 from numba.types import ListType
 from numba.typed import List
-from cre.conditions import OR, AND
+from cre.conditions import OR, AND, literal_ctor, literal_not
 from cre.memset import MemSet
 from cre.context import cre_context
 from cre.cre_object import CREObjType
@@ -299,15 +299,15 @@ def test_list_operations():
         assert ".items[0]" in str(v.items[0])
 
         c = v.items[0] != v.items[1]
-        assert str(c) == "~(v.items[0] == v.items[1])"
+        # assert str(c) == "~(v.items[0] == v.items[1])"
+        assert str(c) == "AND(v:=Var(TList), ~(v.items[0] == v.items[1]))"
 
         Container = define_fact("Container",{"name" : "string", "children" : "ListType(Container)"})
         v = Var(Container,"v")
-        print(v.children[0])
         assert ".children[0]" in str(v.children[0])
 
         c = v.children[0] != v.children[1]
-        assert str(c) == "~(v.children[0] == v.children[1])"
+        assert str(c) == "AND(v:=Var(Container), ~(v.children[0] == v.children[1]))"
 
 @njit(cache=True)
 def hsh(x):
@@ -463,9 +463,13 @@ def test_anti_unify():
 
     c1 = (x < y) & (y < z) & (y < z) & (z != x) & (y != 0) 
     c2 = (x < y) & (z < y) & (z < y) & (x != z) & (z != 0) 
-    c12_ref = (x < y)
+    c12_ref = x & (x < y)
 
     c12, score = c1.antiunify(c2, return_score=True, fix_same_var=True) #conds_antiunify(c1,c2)
+
+    print(str(c12))
+    print(str(c12_ref))
+    print_str_diff(str(c12),str(c12_ref))
     assert str(c12) == str(c12_ref)
     assert score == 1./5.
 
@@ -473,7 +477,7 @@ def test_anti_unify():
 
     c1 = (x < y) & (y < z) & (y < z) & (z != x) & (y != 0) 
     c2 = (X < Y) & (Z < Y) & (Z < Y) & (X != Z) & (Z != 0) 
-    c12_ref = (x < y)
+    c12_ref = x & (x < y)
 
     c12, score = c1.antiunify(c2, return_score=True, fix_same_alias=True) #conds_antiunify(c1,c2)
     assert str(c12) == str(c12_ref)
@@ -481,10 +485,10 @@ def test_anti_unify():
     
 
 if(__name__ == "__main__"):
-    # test_anti_unify()
+    test_anti_unify()
     # test_unconditioned()
-    test_build_conditions()
-    # test_list_operations()
+    # test_build_conditions()
+    test_list_operations()
     # test_link()
     # test_initialize()
     # for i in range(10):

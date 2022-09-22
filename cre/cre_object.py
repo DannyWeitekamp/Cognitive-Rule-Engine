@@ -717,3 +717,21 @@ def copy_cre_obj(fact):
 
         return new_fact
     return impl
+
+@njit(types.void(CREObjType), cache=True)
+def cre_obj_clear_refs(fact):
+    for info_a in _iter_mbr_infos(fact):
+        t_id_a, m_id_a, data_ptr_a = info_a
+        obj_ptr = _load_ptr(i8, data_ptr_a)
+        if(m_id_a == OBJECT_MBR_ID):
+            obj_ptr = _load_ptr(i8, data_ptr_a)
+            _decref_ptr(obj_ptr)
+            _store(i8, data_ptr_a, 0)
+        # elif(t_id_a == T_ID_STR):
+        #     s = _load_ptr(unicode_type, data_ptr_a)
+        #     _incref_structref(s)
+            
+            
+
+
+

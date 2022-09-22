@@ -1040,7 +1040,7 @@ def define_fact(name : str, spec : dict = None, context=None, return_proxy=False
 
     from cre.context import cre_context
     context = cre_context(context)
-    print("DEFINE", name, context.name)
+    # print("DEFINE", name, context.name)
     specialization_name = name
     if(spec is not None):
         spec = _standardize_spec(spec,context,name)
@@ -1059,7 +1059,7 @@ def define_fact(name : str, spec : dict = None, context=None, return_proxy=False
     if(specialization_name in context.name_to_type):
         assert _spec_eq(context.name_to_type[specialization_name].spec, spec), \
         f"Redefinition of fact '{specialization_name}' in context '{context.name}' not permitted"
-        print("SPECIALIZATION NAME:", specialization_name)
+        # print("SPECIALIZATION NAME:", specialization_name)
         fact_type = context.name_to_type[specialization_name]
     else:
 
@@ -1237,7 +1237,7 @@ def asa(self, typ):
     _typ = typ.instance_type
     use_unsafe_cast = (_typ is CREObjType) or (_typ is BaseFact)
 
-    print("TRY CAST:", f'{str(self)} to {str(_typ)}')
+    # print("TRY CAST:", f'{str(self)} to {str(_typ)}')
     if(not use_unsafe_cast):
         error_message = f"Cannot cast fact of type '{str(self)}' to '{str(_typ)}.'"
 
@@ -1262,7 +1262,7 @@ def asa(self, typ):
         # fn1, fn2 = self._fact_name, _typ._fact_name
         _isa = typ.instance_type._isa
         def impl(self, typ):
-            print(self, _isa(self))
+            # print(self, _isa(self))
             if(not _isa(self)): raise TypeError(error_message)
             return _cast_structref(typ, self)
     else:

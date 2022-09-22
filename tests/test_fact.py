@@ -9,7 +9,7 @@ from numba import njit, u8, u1, generated_jit
 from numba.typed import List
 from numba.types import ListType
 import cre.dynamic_exec
-# import pytest
+import pytest
 import operator
 import cloudpickle
 
@@ -487,7 +487,8 @@ def test_as_conditions():
         conds = a.as_conditions(fact_ptr_to_var_map)
         print(conds)
 
-        assert str(conds) == "(sel.name == 'A') & (sel.prev == None) & (sel == sel.next.prev)"
+        c_ref = (sel.name == 'A') & (sel.prev == None) & (sel == sel.next.prev)
+        assert str(conds) == str(c_ref)
 
 
         spec = {"name" : "string", "parent" : "TestContainer"}
@@ -511,7 +512,6 @@ def test_as_conditions():
         fact_ptr_to_var_map = {c1.get_ptr() : sel, C.get_ptr(): sel.parent}
 
         conds = c1.as_conditions(fact_ptr_to_var_map)
-        print(str(conds))
         conds = c1.as_conditions(fact_ptr_to_var_map)
         conds = c1.as_conditions(fact_ptr_to_var_map)
         conds = c1.as_conditions(fact_ptr_to_var_map)
@@ -520,8 +520,9 @@ def test_as_conditions():
         conds = c1.as_conditions(fact_ptr_to_var_map)
         conds = c1.as_conditions(fact_ptr_to_var_map)
         conds = c1.as_conditions(fact_ptr_to_var_map)
-        print(str(conds))
-        assert str(conds) == "(sel.name == 'c1') & (sel == sel.parent.children[0])"
+
+        c_ref = (sel.name == 'c1') & (sel == sel.parent.children[0])
+        assert str(conds) == str(c_ref)
 
 
 # @njit
@@ -834,6 +835,7 @@ def test_repr():
 
         # Call str on b several times + make sure no memleak in c
         [str(b) for i in range(10)]
+        print(og_refcount, c._meminfo.refcount)
         assert c._meminfo.refcount <= og_refcount + 2 # Probably should be 1 here
 
 
@@ -920,7 +922,7 @@ if __name__ == "__main__":
     # test_untyped_fact()
     # test_fact_eq()
 
-    # test_as_conditions()
+    test_as_conditions()
 
     # _test_reference_type()
     # test_hash()
@@ -931,7 +933,7 @@ if __name__ == "__main__":
     # test_inheritence_bytes()
     # test_context_retroactive_register()
 
-    test_repr()
+    # test_repr()
 
 
 

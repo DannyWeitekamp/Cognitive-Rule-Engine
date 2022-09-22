@@ -414,17 +414,6 @@ def used_bytes():
     return stats.alloc-stats.free
 
 
-
-
-
-
-
-
-
-
-
-
-
 with cre_context("test_matching_benchmarks"):
     BOOP = define_fact("BOOP",{"name": "string", "B" : "number"})
 
@@ -635,7 +624,7 @@ def test_b_matching_betas_lit(benchmark):
 if(__name__ == "__main__"):
     import faulthandler; faulthandler.enable()
     
-    # test_mem_leaks()
+    test_mem_leaks()
     # dat = matching_alphas_setup()[0]
     # dat = matching_betas_setup()[0]
 
@@ -662,7 +651,7 @@ if(__name__ == "__main__"):
     # print(alloc_stats1.alloc-alloc_stats1.free, alloc_stats2.alloc-alloc_stats2.free)
 
 
-    test_ref_matching()
+    # test_ref_matching()
     # test_check_and_score_match()
     # test_multiple_deref()
     # test_matching_unconditioned()

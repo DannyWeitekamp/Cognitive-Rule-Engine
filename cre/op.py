@@ -678,12 +678,12 @@ def op_copy(op, new_base_vars=None):
         assert(len(new_base_vars) == len(op.base_vars))
 
         st.head_var_ptrs = np.empty(len(op.head_vars),dtype=np.int64)
-        st.base_var_map = Dict.empty(i8, unicode_type)
+        st.base_var_map = Dict.empty(i8, i8)
         # st.inv_base_var_map = Dict.empty(unicode_type, i8)
         base_var_map = Dict.empty(i8,GenericVarType)
         for i, (o_v, n_v) in enumerate(zip(op.base_vars, new_base_vars)):
             st.head_var_ptrs[i] = n_v.base_ptr
-            st.base_var_map[n_v.base_ptr] = n_v.alias
+            st.base_var_map[n_v.base_ptr] = i#n_v.alias
             # st.inv_base_var_map[n_v.alias] = n_v.base_ptr
             base_var_map[o_v.base_ptr] = n_v
 

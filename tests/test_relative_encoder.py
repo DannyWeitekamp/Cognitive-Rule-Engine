@@ -147,7 +147,7 @@ def setup_update():
         flat_ms = fl()
         feat_ms = fa()
         feat_ms, fa = None, None
-        
+
     return (re,ms,end), {}
 
 def setup_update_plus_1():
@@ -189,16 +189,18 @@ def test_re_mem_leaks():
 
             # print(re._meminfo.refcount)
             # print(ms._meminfo.refcount)
-            # print(first._meminfo.refcount)
-            # print(end._meminfo.refcount)
-
+            print(first._meminfo.refcount)
+            print(end._meminfo.refcount)
+            ms.free()
+            print(first._meminfo.refcount)
+            print(end._meminfo.refcount)
             if(i == 0):
                 init_bytes = used_bytes()
-            # else:
-            #     print("<<", used_bytes()-init_bytes)
+            else:
+                print("<<", used_bytes()-init_bytes)
 
         # Commenting out for now until larger memleak issue is resolved for facts
-        # assert used_bytes()-init_bytes == 0
+        assert used_bytes()-init_bytes == 0
 
 
 def test_downcasted_heads():
@@ -308,7 +310,7 @@ def test_b_rel_enc_100x100_encode(benchmark):
 if __name__ == "__main__":
     test_re_mem_leaks()
 
-    test_downcasted_heads()
+    # test_downcasted_heads()
     # test_relative_encoder()
 
     # np.set_printoptions(linewidth=1000)

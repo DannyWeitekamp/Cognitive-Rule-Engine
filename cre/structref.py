@@ -75,17 +75,17 @@ def define_structref_template(name, fields, define_constructor=True,define_boxin
              define_boxing=define_boxing)
         source_to_cache(name,hash_code,source)
         
-    ctor, template = import_from_cached(name,hash_code,[name,f"{name}TypeTemplate"]).values()
+    ctor, type_class = import_from_cached(name,hash_code,[name,f"{name}TypeTemplate"]).values()
     ctor._hash_code = hash_code
-    return ctor,template
+    return ctor, type_class
 
 def define_structref(name, fields, define_constructor=True, define_boxing=True, return_type_class=False):
     if(isinstance(fields,dict)): fields = [(k,v) for k,v in fields.items()]
-    ctor, template = define_structref_template(name,fields, define_constructor=define_constructor,define_boxing=define_boxing)
-    struct_type = template(fields=fields)
+    ctor, type_class = define_structref_template(name,fields, define_constructor=define_constructor,define_boxing=define_boxing)
+    struct_type = type_class(fields=fields)
     struct_type._hash_code = ctor._hash_code
     if(return_type_class):
-        return ctor, struct_type, template
+        return ctor, struct_type, type_class
     else:
         return ctor, struct_type
 
@@ -254,3 +254,7 @@ def new(typingctx, struct_type, user_dtor_type=None):
 
     sig = inst_type(struct_type, user_dtor_type)
     return sig, codegen
+
+
+
+_, StructRefType = define_structref("StructRef",[])

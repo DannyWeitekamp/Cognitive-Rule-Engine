@@ -11,8 +11,8 @@ from cre.utils import (wptr_t, ptr_t, _dict_from_ptr, _raw_ptr_from_struct, _get
         encode_idrec, deref_info_type, DEREF_TYPE_ATTR, DEREF_TYPE_LIST, _obj_cast_codegen,
          _ptr_to_data_ptr, _list_base_from_ptr, _load_ptr, PrintElapse, meminfo_type,
          _decref_structref, _decref_ptr, cast_structref, _struct_tuple_from_pointer_arr, _meminfo_from_struct,
-         lower_getattr, lower_setattr, ptr_to_meminfo)
-from cre.structref import define_structref
+         lower_getattr, lower_setattr, ptr_to_meminfo, _cast_structref)
+from cre.structref import define_structref, StructRefType
 from cre.caching import gen_import_str, unique_hash,import_from_cached, source_to_cache, source_in_cache, cache_safe_exec, get_cache_path
 from cre.memset import MemSetType
 from cre.vector import VectorType
@@ -144,8 +144,8 @@ deref_dep_typ = DictType(u8,DictType(ptr_t,u1))
 
 base_rete_node_field_dict = {
     
-    # The working memory for this graph 
-    "memset" : MemSetType, 
+    # A weak ptr to the working memory for this graph 
+    "memset_ptr" : i8, 
 
     # The Literal associated with this node
     "lit" : types.optional(LiteralType),
@@ -229,7 +229,7 @@ input_state_arr_type = input_state_type[::1]
 @njit(cache=True)
 def node_ctor(ms, t_ids, var_inds,lit=None):
     st = new(ReteNodeType)
-    st.memset = ms
+    st.memset_ptr = _raw_ptr_from_struct(ms)
     st.deref_depends = Dict.empty(u8,dict_i8_u1_type)
     st.modify_idrecs = List.empty_list(VectorType)
     st.var_inds = var_inds
@@ -325,13 +325,11 @@ rete_graph_field_dict = {
     # Maps t_ids to the root node outputs associated with facts of that t_id.
     "global_t_id_root_map" : DictType(u2, NodeIOType),
 
-    # A strong pointer the prototype instance for match iterators on this graph.
-    "match_iter_prototype_ptr" : ptr_t, #NOTE: Should really use deferred type
+    # A reference to the prototype instance for match iterators on this graph.
+    "match_iter_prototype_inst" : types.optional(StructRefType), #NOTE: Should really use deferred type
 
     # The sum of weights of all literals in the graph
     "total_weight" : f4,
-
-
 }
 
 
@@ -352,7 +350,7 @@ def rete_graph_ctor(ms, conds, nodes_by_nargs, n_nodes, var_root_nodes, var_end_
     st.var_end_join_ptrs = var_end_join_ptrs
     st.global_modify_map = global_modify_map
     st.global_t_id_root_map = global_t_id_root_map
-    st.match_iter_prototype_ptr = 0
+    # st.match_iter_prototype_ptr = 0
     st.total_weight = total_weight
     
     return st
@@ -360,8 +358,8 @@ def rete_graph_ctor(ms, conds, nodes_by_nargs, n_nodes, var_root_nodes, var_end_
 
 @njit(cache=False)
 def conds_get_rete_graph(self):
-    if(not self.matcher_inst_ptr == 0):
-        return _struct_from_ptr(ReteGraphType,self.matcher_inst_ptr)
+    if(self.matcher_inst is not None):
+        return _cast_structref(ReteGraphType,self.matcher_inst)
     return None
 
 
@@ -551,7 +549,6 @@ def build_rete_graph(ms, c):
             for var_ind in node.var_inds:
                 var_end_nodes[var_ind] = node
             
-            
     return rete_graph_ctor(ms, c, nodes_by_nargs, n_nodes, var_root_nodes, var_end_nodes,
               var_end_join_ptrs, global_modify_map, global_t_id_root_map, total_weight)
 
@@ -706,7 +703,8 @@ def resolve_head_ptr(self, arg_ind, base_t_id, f_id, deref_infos):
          regardless of the result Keep in mind that a head_ptr is the pointer
          to the address where the data is stored not the data itself.
     '''
-    facts = _struct_from_ptr(VectorType, self.memset.facts[base_t_id])
+    memset = _struct_from_ptr(MemSetType, self.memset_ptr)
+    facts = _struct_from_ptr(VectorType, memset.facts[base_t_id])
     if(len(deref_infos) > 0):
         inst_ptr = facts.data[f_id]
         if(len(deref_infos) > 1):
@@ -1384,12 +1382,15 @@ class MatchIterator(structref.StructRefProxy):
         
     def __next__(self):
         # Note: try/except appears to only be necessary for profiling quirk.
+        if(match_iter_is_empty(self)): raise StopIteration()
         try:
             if(self.kind == MATCH_ITER_FACT_KIND):
                 if(self.recover_types):
-                    return match_iter_next(self)
+                    empty, out = match_iter_next(self)
                 else:
-                    ptrs = match_iter_next_ptrs(self)
+                    empty, ptrs = match_iter_next_ptrs(self)
+                    if(empty): raise StopIteration()
+
                     arr = []
                     for ptr, proxy_typ in zip(ptrs, self.proxy_types):
                         mi = ptr_to_meminfo(ptr)
@@ -1399,9 +1400,11 @@ class MatchIterator(structref.StructRefProxy):
                         arr.append(instance)
                     return arr
             elif(self.kind == MATCH_ITER_PTR_KIND):
-                return match_iter_next_ptrs(self)
+                empty, out = match_iter_next_ptrs(self)
             else:
-                return match_iter_next_idrecs(self)
+                empty, out = match_iter_next_idrecs(self)
+            if(empty): raise StopIteration()
+            return out
 
         # Catch system errors. Needed for Cprofiling to work
         except SystemError:
@@ -1411,9 +1414,6 @@ class MatchIterator(structref.StructRefProxy):
 
     def __iter__(self):
         return self
-
-    def __del__(self):
-        pass
 
 
 @structref.register
@@ -1466,7 +1466,7 @@ def new_match_iter(graph):
 
     # Make an iterator prototype for this graph if one doesn't exist
     #  a copy of the prototype will be built when __iter__ is called.
-    if(graph.match_iter_prototype_ptr == 0):
+    if(graph.match_iter_prototype_inst is None):
         m_iter_nodes = List.empty_list(MatchIterNodeType)
         handled_vars = Dict.empty(i8,MatchIterNodeType)
 
@@ -1533,10 +1533,9 @@ def new_match_iter(graph):
         m_iter.iter_nodes = m_iter_nodes 
         m_iter.is_empty = False
         m_iter.iter_started = False
-        graph.match_iter_prototype_ptr = _ptr_from_struct_incref(m_iter)
-    # print("END NEW MATCH ITER")
+        graph.match_iter_prototype_inst = _cast_structref(StructRefType, m_iter)
     # Return a copy of the prototype 
-    prototype = _struct_from_ptr(GenericMatchIteratorType, graph.match_iter_prototype_ptr)
+    prototype = _cast_structref(GenericMatchIteratorType, graph.match_iter_prototype_inst)
     m_iter = copy_match_iter(prototype,graph)
     return m_iter
 
@@ -1632,7 +1631,7 @@ def update_from_upstream_match(m_iter, m_node):
 
         # Assign idrecs as just the parts of the buffer we filled. 
         idrecs = idrecs[:k]
-        
+
         # If the var covered by m_node has multiple dependencies then 
         #  find the set of idrecs common between them. 
         if(multiple_deps):
@@ -1696,8 +1695,12 @@ def update_no_depends(m_node):
     # print("END UPDA TERMINAL")
     return True
 
+@njit(types.boolean(GenericMatchIteratorType),cache=True)
+def match_iter_is_empty(m_iter):
+    return m_iter.is_empty
 
-@njit(u8[::1](GenericMatchIteratorType),cache=True)
+
+@njit(Tuple((types.boolean,u8[::1]))(GenericMatchIteratorType),cache=True)
 def match_iter_next_idrecs(m_iter):
     n_vars = len(m_iter.iter_nodes)
     # Increment the m_iter nodes until satisfying all upstream
@@ -1742,6 +1745,7 @@ def match_iter_next_idrecs(m_iter):
             m_node = m_iter.iter_nodes[i]
 
             # Only Update if has dependencies
+            # print("L",len(m_node.dep_m_node_inds))
             if(len(m_node.dep_m_node_inds)):
                 update_from_upstream_match(m_iter, m_node)
 
@@ -1750,38 +1754,44 @@ def match_iter_next_idrecs(m_iter):
         #  otherwise we need to keep iterating
         if(idrec_sets_are_nonzero): break
 
-    if(m_iter.is_empty or n_vars == 0): raise StopIteration()
+    
+
 
     # Fill in the matched idrecs
     idrecs = np.empty(n_vars,dtype=np.uint64) 
+    if(m_iter.is_empty):
+        return True, idrecs
+
     for i in range(n_vars-1,-1,-1):
         m_node = m_iter.iter_nodes[i]
         idrecs[m_node.var_ind] = m_node.idrecs[m_node.curr_ind]
+    return False, idrecs
 
-    return idrecs
-
-@njit(i8[::1](GenericMatchIteratorType), cache=True)
+@njit(Tuple((types.boolean, i8[::1]))(GenericMatchIteratorType), cache=True)
 def match_iter_next_ptrs(m_iter):
     ms, graph = m_iter.graph.memset, m_iter.graph
-    idrecs = match_iter_next_idrecs(m_iter)
-    # print("^^", idrecs)
+    empty, idrecs = match_iter_next_idrecs(m_iter)
+    
     ptrs = np.empty(len(idrecs),dtype=np.int64)
+    if(empty):
+        return empty, ptrs
+
     for i, idrec in enumerate(idrecs):
         t_id, f_id, _  = decode_idrec(idrec)
         facts = _struct_from_ptr(VectorType, ms.facts[t_id])
         ptrs[i] = facts.data[f_id]
         # print("END")
     # print("SLOOP")
-    return ptrs
+    return empty, ptrs
 
 @njit(cache=True)
 def match_iter_next(m_iter):
-    ptrs = match_iter_next_ptrs(m_iter)
+    empty, ptrs = match_iter_next_ptrs(m_iter)
     # print("PTRS", ptrs)
     tup = _struct_tuple_from_pointer_arr(m_iter.output_types, ptrs)
     # print("tup")
     # print(tup)
-    return tup
+    return empty, tup
 
 
 @njit(cache=True)
@@ -1796,16 +1806,18 @@ def fact_ptrs_as_tuple(typs, ptr_arr):
 def get_graph(ms, conds):
     needs_new_graph = False
 
-    if(i8(conds.matcher_inst_ptr) == 0):
+    if(conds.matcher_inst is None):
         needs_new_graph = True
     else:
-        graph = _struct_from_ptr(ReteGraphType, conds.matcher_inst_ptr)
+        graph = _cast_structref(ReteGraphType, conds.matcher_inst)
         if(_raw_ptr_from_struct(ms) != _raw_ptr_from_struct(graph.memset)):
             needs_new_graph = True
 
     # if(needs_new_graph):
     graph = build_rete_graph(ms, conds)
-    conds.matcher_inst_ptr = _ptr_from_struct_incref(graph)
+    conds.matcher_inst = _cast_structref(StructRefType, graph)
+    # if(old_graph_ptr != 0):
+    #     _decref_ptr(old_graph_ptr)
     # else:
         # raise ValueError("THIS SHOULDN't HAPPEN")
     # graph = _struct_from_ptr(ReteGraphType, conds.matcher_inst_ptr)
@@ -1825,6 +1837,9 @@ def get_match_iter(ms, conds):
     update_graph(rete_graph)
     m_iter = new_match_iter(rete_graph)
     # print("DEPS:", repr_match_iter_dependencies(m_iter))
+    if(len(m_iter.iter_nodes) == 0):
+        m_iter.is_empty = True
+        return m_iter
     for i in range(len(m_iter.iter_nodes)):
         m_node = m_iter.iter_nodes[i]
         m_node.curr_ind = 0
@@ -1906,9 +1921,9 @@ def cum_weight_of_matching_nodes(ms, conds, match_idrecs, zero_on_fail=False):
 @njit(MemSetType(ConditionsType, types.optional(MemSetType)), cache=True)
 def _ensure_ms(conds, ms):
     if(ms is None):
-        if(i8(conds.matcher_inst_ptr) == 0):
+        if(conds.matcher_inst is None):
             raise ValueError("Cannot check/score matches on Conditions object without assigned MemSet.")
-        rete_graph = _struct_from_ptr(ReteGraphType, conds.matcher_inst_ptr)
+        rete_graph = _cast_structref(ReteGraphType, conds.matcher_inst)
         return rete_graph.memset
     return ms
 

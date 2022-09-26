@@ -432,8 +432,8 @@ def test_mem_leaks():
         # print(used_bytes()-init_used)
         assert used_bytes()-init_used <= 0
 
-def test_leak_circular_refs():
-    with cre_context("test_leak_circular_refs"):
+def test_free_refs():
+    with cre_context("test_free_refs"):
         BOOP = define_fact("BOOP", {"name" : unicode_type, "nxt" : "TestLL"})
         TestLL = define_fact("TestLL", {"name" : unicode_type, "nxt" : "TestLL"})
         init_used = used_bytes()
@@ -441,13 +441,23 @@ def test_leak_circular_refs():
         a = TestLL("a")
         print("a_refs", a._meminfo.refcount)
         b = TestLL("b",a)
+        c = TestLL("c",a)
+        print('0: ---')
         print("a_refs", a._meminfo.refcount)
+        print("b_refs", b._meminfo.refcount)
         a.nxt = b
+        print('1: ---')
+        print("a_refs", a._meminfo.refcount)
+        print("b_refs", b._meminfo.refcount)
+        a.nxt = c
+        print('2: ---')
         print("a_refs", a._meminfo.refcount)
         print("b_refs", b._meminfo.refcount)
         ms = MemSet()
         ms.declare(a)
         ms.declare(b)
+        ms.declare(c)
+        print('3: ---')
         print("a_refs", a._meminfo.refcount)
         print("b_refs", b._meminfo.refcount)
         ms.free()
@@ -456,7 +466,8 @@ def test_leak_circular_refs():
         print("BYTES", used_bytes()-init_used)
         print("a_refs", a._meminfo.refcount)
         print("b_refs", b._meminfo.refcount)
-        a,b = None,None
+        print("c_refs", c._meminfo.refcount)
+        a,b,c = None,None, None
         print("BYTES", used_bytes()-init_used)
 
 
@@ -615,5 +626,5 @@ if __name__ == "__main__":
 
     # _delcare_10000(MemSet())
 
-    _test_modify_from_deref_infos()
-    test_leak_circular_refs()
+    # _test_modify_from_deref_infos()
+    test_free_refs()

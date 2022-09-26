@@ -248,15 +248,14 @@ def fact_setattr_codegen(context, builder, sig, args, attr, mutability_protected
         casted = context.compile_internal(builder, cast_obj, field_type(val_type,), (val,))
     else:
         casted = context.cast(builder, val, val_type, field_type)
+        # incref new value
+        context.nrt.incref(builder, field_type, casted)
 
     # pyapi = context.get_python_api(builder)
     
-        # read old
-        old_value = getattr(dataval, attr)
-        # incref new value
-        context.nrt.incref(builder, field_type, casted)
-        # decref old value (must be last in case new value is old value)
-        context.nrt.decref(builder, field_type, old_value)
+    # decref old value (must be last in case new value is old value)
+    old_value = getattr(dataval, attr)
+    context.nrt.decref(builder, field_type, old_value)
     # write new
     setattr(dataval, attr, casted)
 

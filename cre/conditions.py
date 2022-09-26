@@ -9,7 +9,7 @@ from numba.extending import lower_cast, overload_method, intrinsic, overload_att
 from numba.core.typing.templates import AttributeTemplate
 from cre.caching import gen_import_str, unique_hash,import_from_cached, source_to_cache, source_in_cache
 from cre.context import cre_context
-from cre.structref import define_structref, define_structref_template
+from cre.structref import define_structref, define_structref_template, StructRefType
 from cre.fact import define_fact, BaseFact, cast_fact, FactProxy
 from cre.utils import _struct_from_meminfo, _meminfo_from_struct, _cast_structref, cast_structref, decode_idrec, lower_getattr, _struct_from_ptr,  lower_setattr, lower_getattr, _raw_ptr_from_struct, _ptr_from_struct_incref, _decref_ptr
 from cre.utils import assign_to_alias_in_parent_frame, meminfo_type
@@ -29,59 +29,59 @@ import sys
 
 #### Literal Link Data ####
 
-literal_link_data_field_dict = {
-    "left_t_id" : u8,
-    "right_t_id" : u8,
-    "left_facts" : VectorType, #Vector<*Fact>
-    "right_facts" : VectorType, #Vector<*Fact>
+# literal_link_data_field_dict = {
+#     "left_t_id" : u8,
+#     "right_t_id" : u8,
+#     "left_facts" : VectorType, #Vector<*Fact>
+#     "right_facts" : VectorType, #Vector<*Fact>
     
-    "change_head": i8,
-    "grow_head": i8,
-    "change_queue": VectorType,
-    # "grow_queue": VectorType,
-    # "ms_grow_queue" : VectorType,
-    "ms_change_queue" : VectorType,
+#     "change_head": i8,
+#     "grow_head": i8,
+#     "change_queue": VectorType,
+#     # "grow_queue": VectorType,
+#     # "ms_grow_queue" : VectorType,
+#     "ms_change_queue" : VectorType,
 
 
 
-    "truth_values" : u1[:,:],
-    "left_consistency" : u1[:],
-    "right_consistency" : u1[:],
-}
+#     "truth_values" : u1[:,:],
+#     "left_consistency" : u1[:],
+#     "right_consistency" : u1[:],
+# }
 
-literal_link_data_fields = [(k,v) for k,v, in literal_link_data_field_dict.items()]
-LiteralLinkData, LiteralLinkDataType = define_structref("LiteralLinkData", 
-                literal_link_data_fields, define_constructor=False)
-
-
-@njit(cache=True)
-def generate_link_data(pn, ms):
-    '''Takes a prototype predicate node and a knowledge base and returns
-        a link_data instance for that predicate node.
-    '''
-    link_data = new(LiteralLinkDataType)
-    link_data.left_t_id = ms.context_data.fact_to_t_id[pn.left_fact_type_name]
-    link_data.left_facts = facts_for_t_id(ms,i8(link_data.left_t_id)) 
-    if(not pn.is_alpha):
-        link_data.right_t_id = ms.context_data.fact_to_t_id[pn.right_fact_type_name]
-        link_data.right_facts = facts_for_t_id(ms,i8(link_data.right_t_id)) 
-        link_data.left_consistency = np.empty((0,),dtype=np.uint8)
-        link_data.right_consistency = np.empty((0,),dtype=np.uint8)
-    else:
-        link_data.right_t_id = -1
+# literal_link_data_fields = [(k,v) for k,v, in literal_link_data_field_dict.items()]
+# LiteralLinkData, LiteralLinkDataType = define_structref("LiteralLinkData", 
+#                 literal_link_data_fields, define_constructor=False)
 
 
-    link_data.change_head = 0
-    link_data.grow_head = 0
-    link_data.change_queue = new_vector(8)
-    # link_data.grow_queue = new_vector(8)
+# @njit(cache=True)
+# def generate_link_data(pn, ms):
+#     '''Takes a prototype predicate node and a knowledge base and returns
+#         a link_data instance for that predicate node.
+#     '''
+#     link_data = new(LiteralLinkDataType)
+#     link_data.left_t_id = ms.context_data.fact_to_t_id[pn.left_fact_type_name]
+#     link_data.left_facts = facts_for_t_id(ms,i8(link_data.left_t_id)) 
+#     if(not pn.is_alpha):
+#         link_data.right_t_id = ms.context_data.fact_to_t_id[pn.right_fact_type_name]
+#         link_data.right_facts = facts_for_t_id(ms,i8(link_data.right_t_id)) 
+#         link_data.left_consistency = np.empty((0,),dtype=np.uint8)
+#         link_data.right_consistency = np.empty((0,),dtype=np.uint8)
+#     else:
+#         link_data.right_t_id = -1
 
-    # link_data.ms_grow_queue = ms.grow_queue
-    link_data.ms_change_queue = ms.change_queue
-    link_data.truth_values = np.empty((0,0),dtype=np.uint8)
+
+#     link_data.change_head = 0
+#     link_data.grow_head = 0
+#     link_data.change_queue = new_vector(8)
+#     # link_data.grow_queue = new_vector(8)
+
+#     # link_data.ms_grow_queue = ms.grow_queue
+#     link_data.ms_change_queue = ms.change_queue
+#     link_data.truth_values = np.empty((0,0),dtype=np.uint8)
         
     
-    return link_data
+#     return link_data
 
 #### Literal ####
 
@@ -91,12 +91,12 @@ literal_fields_dict = {
     **cre_obj_field_dict,
     "op" : GenericOpType,
     "var_base_ptrs" : i8[:],#UniTuple(i8,2),
-    "cre_ms_ptr" : i8,
+    # "cre_ms_ptr" : i8,
     # A weight used for scoring matches and structure remapping  
     "weight" : f4,
     "negated" : u1,
     "is_alpha" : u1,
-    "link_data" : LiteralLinkDataType,
+    # "link_data" : LiteralLinkDataType,
 }
 
 literal_fields =  [(k,v) for k,v, in literal_fields_dict.items()]
@@ -176,7 +176,7 @@ def literal_ctor(op):
     st.var_base_ptrs = np.empty(len(op.base_var_map),dtype=np.int64)
     for i, ptr in enumerate(op.base_var_map):
         st.var_base_ptrs[i] = ptr
-    st.cre_ms_ptr = 0
+    # st.cre_ms_ptr = 0
     st.weight = 1.0
     st.negated = 0
     st.is_alpha = u1(len(st.var_base_ptrs) == 1)
@@ -201,9 +201,9 @@ def literal_copy(self):
     st.weight = self.weight
     st.negated = self.negated
     st.is_alpha = self.is_alpha
-    st.cre_ms_ptr = self.cre_ms_ptr
-    if(self.cre_ms_ptr):
-        st.link_data = self.link_data
+    # st.cre_ms_ptr = self.cre_ms_ptr
+    # if(self.cre_ms_ptr):
+    #     st.link_data = self.link_data
     return st
     
 @njit(cache=True)
@@ -281,8 +281,9 @@ conditions_fields_dict = {
     "distr_dnf" : distr_dnf_type,
 
 
-    # Keep around a pointer and a meminfo for the matcher_inst
-    "matcher_inst_ptr" : ptr_t, # Keep this so we can check for zero
+    # Keep around an anonymous reference to the matcher_inst
+    #  can be casted to specialize to implementation
+    "matcher_inst" : types.optional(StructRefType), # Keep this so we can check for zero
     # "matcher_inst_meminfo" : meminfo_type, # Keep this so it is decreffed
 
     # # The alpha parts of '.dnf' organized by which Var in 'vars' they use 
@@ -421,14 +422,14 @@ class Conditions(structref.StructRefProxy):
 define_boxing(ConditionsTypeClass,Conditions)
 
 
-@njit(u2[::1](ConditionsType))
+@njit(u2[::1](ConditionsType),cache=True)
 def conds_get_var_t_ids(self):
     t_ids = np.empty((len(self.vars),),dtype=np.uint16)
     for i, v in enumerate(self.vars):
         t_ids[i] = v.base_t_id
     return t_ids
 
-@njit(types.void(ConditionsType, f4))
+@njit(types.void(ConditionsType, f4),cache=True)
 def conds_set_weight(self, weight):
     for conj in self.dnf: 
         for lit in conj:
@@ -608,7 +609,7 @@ def _conditions_ctor_dnf(dnf):
                    st.vars.append(_struct_from_ptr(GenericVarType, b_ptr))
     st.dnf = dnf
     st.has_distr_dnf = False
-    st.matcher_inst_ptr = 0
+    # st.matcher_inst_ptr = 0
     return st
 
 
@@ -625,7 +626,7 @@ def _conditions_ctor_single_var(_vars,dnf=None):
     st.dnf = dnf if(dnf) else new_dnf(1)
     st.has_distr_dnf = False
     # st.is_initialized = False
-    st.matcher_inst_ptr = 0
+    # st.matcher_inst_ptr = 0
     return st
 
 @njit(cache=True)
@@ -637,7 +638,7 @@ def _conditions_ctor_base_var_map(_vars,dnf=None):
     st.dnf = dnf if(dnf) else new_dnf(len(_vars))
     st.has_distr_dnf = False
     # st.is_initialized = False
-    st.matcher_inst_ptr = 0
+    # st.matcher_inst_ptr = 0
     return st
 
 @njit(cache=True)
@@ -653,7 +654,7 @@ def _conditions_ctor_var_list(_vars,dnf=None):
     st.dnf = dnf if(dnf) else new_dnf(len(_vars))
     st.has_distr_dnf = False
     # st.is_initialized = False
-    st.matcher_inst_ptr = 0
+    # st.matcher_inst_ptr = 0
     return st
 
 

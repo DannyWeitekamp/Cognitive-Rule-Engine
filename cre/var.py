@@ -108,7 +108,7 @@ def upcast(context, builder, fromty, toty, val):
 
 class Var(CREObjProxy):
     t_id = T_ID_VAR
-    def __new__(cls, typ, alias=None, skip_assign_alias=False):
+    def __new__(cls, typ, alias="", skip_assign_alias=False):
         # if(not isinstance(typ, types.StructRef)): typ = typ.fact_type
         typ = _standardize_type(typ, cre_context())
         base_type_name = str(typ)
@@ -121,7 +121,7 @@ class Var(CREObjProxy):
             struct_type = get_var_type(typ_ref,typ_ref)
             st = var_ctor(struct_type, base_t_id, alias)
         else:
-            st = var_ctor_generic(base_t_id, "" if alias is None else alias)
+            st = var_ctor_generic(base_t_id, alias)
         
         st._base_type = typ
         st._head_type = typ
@@ -492,7 +492,7 @@ def var_getattr_impl(context, builder, typ, val, attr):
             return base.alias_
 
         ret = context.compile_internal(builder, get_alias, unicode_type(typ,), (st,))
-        context.nrt.incref(builder, unicode_type, ret)
+        # context.nrt.incref(builder, unicode_type, ret)
         return ret
 
     #If the attribute is one of the var struct fields then retrieve it.
@@ -728,7 +728,6 @@ def get_var_type(base_type, head_type=None):
 @njit(cache=True)
 def var_ctor(var_struct_type, base_t_id, alias=""):
     st = new(var_struct_type)
-
     lower_setattr(st,'idrec', encode_idrec(T_ID_VAR,0,0xFF))
     lower_setattr(st,'is_not', u1(0))
     lower_setattr(st,'conj_ptr', i8(0))
@@ -736,7 +735,7 @@ def var_ctor(var_struct_type, base_t_id, alias=""):
     lower_setattr(st,'head_t_id', base_t_id)
     lower_setattr(st,'base_ptr', i8(_raw_ptr_from_struct(st)))
     lower_setattr(st,'base_ptr_ref', ptr_t(0))
-    lower_setattr(st,'alias_', "" if(alias is  None) else alias)
+    lower_setattr(st,'alias_', alias)
     lower_setattr(st,'deref_attrs_str', None)
     lower_setattr(st,'deref_infos', np.empty(0,dtype=deref_info_type))
     # base_type_name = lower_getattr(self,"base_type_name")
@@ -762,12 +761,12 @@ def var_ctor_generic(base_t_id, alias):
 
 
 @overload(Var)
-def overload_Var(typ,alias=None):
+def overload_Var(typ,alias=""):
     _typ = typ.instance_type
     struct_type = get_var_type(_typ,_typ)
     base_t_id = cre_context().get_t_id(_type=_typ)
     # print("@@ IMPL VAR :: ", _typ, base_t_id)
-    def impl(typ, alias=None):
+    def impl(typ, alias=""):
         return var_ctor(struct_type, base_t_id, alias)
 
     return impl
@@ -840,7 +839,7 @@ def var_memcopy(self,st):
     lower_setattr(st,'is_not', lower_getattr(self,"is_not"))
     lower_setattr(st,'base_ptr', lower_getattr(self,"base_ptr"))
     lower_setattr(st,'base_ptr_ref', lower_getattr(self,"base_ptr_ref"))
-    lower_setattr(st,'alias_', lower_getattr(self,"alias_"))
+    # lower_setattr(st,'alias_', lower_getattr(self,"alias_"))
     # lower_setattr(st,'deref_attrs',new_deref_attrs)
     lower_setattr(st,'deref_infos', lower_getattr(self,"deref_infos").copy())
     # base_type_name = lower_getattr(self,"base_type_name")

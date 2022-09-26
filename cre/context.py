@@ -1,25 +1,16 @@
 from numba import types, njit, generated_jit
-from numba.experimental import jitclass
-from numba import deferred_type, optional
 from numba import void,b1,u1,u2,u4,u8,i1,i2,i4,i8,f4,f8,c8,c16
 from numba.typed import List, Dict
-from numba.core.types import DictType, ListType, unicode_type, float64, NamedTuple, NamedUniTuple, UniTuple, Array, boolean
-from numba.cpython.unicode import  _set_code_point
+from numba.core.types import DictType, ListType, unicode_type
+# from numba.cpython.unicode import  _set_code_point
 from cre.core import TYPE_ALIASES, DEFAULT_REGISTERED_TYPES, JITSTRUCTS, py_type_map, numba_type_map, numpy_type_map, type_from_t_id, t_id_from_type_name, add_to_type_registry
-from cre.gensource import assert_gen_source
-from cre.caching import unique_hash, source_to_cache, import_from_cached, source_in_cache
+from cre.caching import unique_hash
 # from cre.struct_gen import gen_struct_code
 from cre.structref import define_structref
 from cre.utils import PrintElapse
 from numba.extending import overload_method
 from numba.experimental.structref import new
-from collections import namedtuple
 import numpy as np
-import timeit
-import itertools
-import types as pytypes
-import sys
-import __main__
 import os
 
 

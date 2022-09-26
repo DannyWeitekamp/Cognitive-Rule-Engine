@@ -245,7 +245,7 @@ def cre_obj_eq(a,b):
 
 # print(_PyHASH_XXPRIME_1, _PyHASH_XXPRIME_2, _PyHASH_XXPRIME_5)
 
-@njit(_Py_uhash_t(u2,i8))
+@njit(_Py_uhash_t(u2,i8), cache=True)
 def hash_from_t_id_ptr(t_id, data_ptr):
     if(t_id == T_ID_BOOL):
         return hash(_load_ptr(boolean, data_ptr))

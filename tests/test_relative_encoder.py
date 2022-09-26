@@ -125,23 +125,35 @@ def setup_update():
         Component, Container, TestLL = def_fact_types()
 
         ms = MemSet()
-        end = TestLL(id="q",value="1")
-        ms.declare(end)
 
-        init_bytes = used_bytes()  
+
+        # init_bytes = used_bytes()  
         
         fl = Flattener((TestLL,), in_memset=ms, id_attr="id",)
+        end = first = TestLL(id="q",value="1")
+        
         flat_ms = fl()
         fa = FeatureApplier([eq_f8,eq_str], flat_ms)
         feat_ms = fa()
+
         re = RelativeEncoder((TestLL,), ms, id_attr="id")
         re.update()
 
-        init_bytes = used_bytes()
+        ms.declare(end)
+        # print("first", first._meminfo.refcount)
+
+
+
+        # init_bytes = used_bytes()
         for i in range(100):
+            # erc0 = end._meminfo.refcount
             new_end = TestLL(str(i),str(i),end)
+            # erc1, nrc1 = end._meminfo.refcount, new_end._meminfo.refcount 
+            # print(f'{erc0}->{erc1}', f'{nrc1}')
             ms.modify(end, "prev",new_end)
             ms.declare(new_end)
+            # erc2, nrc2 = end._meminfo.refcount, new_end._meminfo.refcount 
+            # print(f'{erc1}->{erc2}', f'{nrc1}->{nrc2}')
             end = new_end
 
         flat_ms = fl()
@@ -177,24 +189,32 @@ def used_bytes(garbage_collect=True):
     # print(stats)
     return stats.alloc-stats.free
 
-# NOTE: Requires revisiting. Will definitely have a memory leak
-#  here because facts can reference each other. Should change so that
-#  facts relinquish their refcounting when declared to a memset.
+# NOTE: Requires revisiting. Definitely partial leak here.
+#   The relative encoder seems to be aquiring a reference
+#   to each of the facts in the memset at instantiation.
 def test_re_mem_leaks():
     with cre_context("test_re_mem_leaks"):
         for i in range(5):
             args, kwargs = setup_update()
             (re,ms,end) = args
-            first = ms.get_facts()[0]
+            # first = ms.get_facts()[0]
 
             # print(re._meminfo.refcount)
             # print(ms._meminfo.refcount)
-            print(first._meminfo.refcount)
-            print(end._meminfo.refcount)
+            # print("first", first._meminfo.refcount)
+            # print("end", end._meminfo.refcount)
             ms.free()
-            print(first._meminfo.refcount)
-            print(end._meminfo.refcount)
-            if(i == 0):
+            
+            # print("Free first", first._meminfo.refcount)
+            # print("Free end", end._meminfo.refcount)
+
+            ms =None; gc.collect()
+
+            # print("msnull first", first._meminfo.refcount)
+            # print("msnull end", end._meminfo.refcount)
+
+            # NOTE: really ought to be fine when == 0
+            if(i <= 1):
                 init_bytes = used_bytes()
             else:
                 print("<<", used_bytes()-init_bytes)

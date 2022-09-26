@@ -937,11 +937,11 @@ class OpMeta(type):
         cls.default_arg_names = inspect.getfullargspec(cls.call_pyfunc)[0]
         cls.default_vars = new_vars_from_types(cls.call_sig.args, cls.default_arg_names)
 
-        cls.arg_type_names = as_typed_list(unicode_type,
-                            [str(x) for x in cls.signature.args])
+        arg_type_names = [str(x) for x in cls.signature.args]
+        cls.arg_type_names = as_typed_list(unicode_type, arg_type_names)
 
         if(not hasattr(cls,'_expr_template')):
-            cls._expr_template = f"{cls.__name__}({', '.join([f'{{{i}}}' for i in range(len(cls.arg_type_names))])})"  
+            cls._expr_template = f"{cls.__name__}({', '.join([f'{{{i}}}' for i in range(len(arg_type_names))])})"  
         
         cls._shorthand_template = cls.shorthand if(hasattr(cls,'shorthand')) else cls._expr_template
 

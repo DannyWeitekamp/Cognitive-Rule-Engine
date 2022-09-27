@@ -81,41 +81,6 @@ class MemSetTypeClass(CastFriendlyStructref):
 MemSetType = MemSetTypeClass([(k,v) for k,v in memset_fields.items()])
 
 
-@njit(cache=True)
-def memset_ctor(context_data):
-    # st = new_w_del(MemSetType, "CRE_Memset_Del")
-    st = new(MemSetType)
-    st.context_data = context_data
-    st.facts = new_vector(BASE_T_ID_STACK_SIZE)
-    st.retracted_f_ids = new_vector(BASE_T_ID_STACK_SIZE)
-    st.names_to_idrecs = Dict.empty(unicode_type,u8)
-    st.change_queue = new_vector(BASE_CHANGE_QUEUE_SIZE)
-    st.all_facts = List.empty_list(BaseFact)
-    st.all_vecs = List.empty_list(VectorType)
-    L = max(len(context_data.parent_t_ids)+1,1)
-    expand_mem_set_types(st,L)
-    return st
-
-@njit(cache=True)
-def expand_mem_set_types(ms, n):
-    ''' Expands facts and retracted_f_ids by n.'''
-    for i in range(n):
-        v = new_vector(BASE_F_ID_STACK_SIZE)    
-        ms.all_vecs.append(v)
-
-        # v_ptr = _raw_ptr_from_struct_incref(v)
-        v_ptr = _raw_ptr_from_struct(v)
-        ms.retracted_f_ids.add(v_ptr)
-
-        v = new_vector(BASE_FACT_SET_SIZE)    
-        ms.all_vecs.append(v)
-        
-        # v_ptr = _raw_ptr_from_struct_incref(v)
-        v_ptr = _raw_ptr_from_struct(v)
-        ms.facts.add(v_ptr)
-
-        
-
 
 
 
@@ -124,9 +89,9 @@ def expand_mem_set_types(ms, n):
 
 class MemSet(structref.StructRefProxy):
     ''' '''
-    def __new__(cls, context=None):
+    def __new__(cls, context=None, auto_clear_refs=False):
         context = cre_context(context)
-        self = memset_ctor(context.context_data)
+        self = memset_ctor(context.context_data, auto_clear_refs)
         self._context = context
         self.indexers = {}
         return self
@@ -216,8 +181,8 @@ class MemSet(structref.StructRefProxy):
     def __copy__(self):
         return memset_copy(self)
 
-    def free(self):
-        memset_del(self)
+    def clear_refs(self):
+        memset_clear_refs(self)
     
 
     def __del__(self):        
@@ -236,7 +201,7 @@ class MemSet(structref.StructRefProxy):
 define_boxing(MemSetTypeClass, MemSet)
 
 @njit(types.void(MemSetType),cache=True)
-def memset_del(ms):
+def memset_clear_refs(ms):
     '''Decref out data structures in ms that we explicitly incref'ed '''
     # print("MEMSET DEL!!!", )
     # ms = _struct_from_ptr(MemSetType, _raw_ptr_from_struct(_ms)-48)
@@ -268,21 +233,63 @@ def memset_del(ms):
     #     _decref_ptr(ptr)
     # print("END")
 
+# HARD CODE WARNING: Pointer misalignment if layout changes inside nrt.c.
+SIZEOF_NRT_MEMINFO = 48
+@njit(types.void(i8),cache=True)
+def memset_data_clear_refs(ms_data_ptr):
+    ms = _struct_from_ptr(MemSetType, ms_data_ptr-SIZEOF_NRT_MEMINFO)
+    memset_clear_refs(ms)
 
-# memset_del_addr = _get_wrapper_address(memset_del, types.void(MemSetType))
-# ll.add_symbol("CRE_Memset_Del", memset_del_addr)
+
+memset_data_clear_refs_addr = _get_wrapper_address(memset_data_clear_refs, types.void(i8))
+ll.add_symbol("CRE_MemsetData_ClearRefs", memset_data_clear_refs_addr)
+
+@njit(cache=True)
+def expand_mem_set_types(ms, n):
+    ''' Expands facts and retracted_f_ids by n.'''
+    for i in range(n):
+        v = new_vector(BASE_F_ID_STACK_SIZE)    
+        ms.all_vecs.append(v)
+
+        # v_ptr = _raw_ptr_from_struct_incref(v)
+        v_ptr = _raw_ptr_from_struct(v)
+        ms.retracted_f_ids.add(v_ptr)
+
+        v = new_vector(BASE_FACT_SET_SIZE)    
+        ms.all_vecs.append(v)
+        
+        # v_ptr = _raw_ptr_from_struct_incref(v)
+        v_ptr = _raw_ptr_from_struct(v)
+        ms.facts.add(v_ptr)
+
+@njit(MemSetType(CREContextDataType,types.boolean), cache=True)
+def memset_ctor(context_data, auto_clear_refs=False):
+    if(auto_clear_refs):
+        st = new_w_del(MemSetType, "CRE_MemsetData_ClearRefs")
+    else:
+        st = new(MemSetType)
+    st.context_data = context_data
+    st.facts = new_vector(BASE_T_ID_STACK_SIZE)
+    st.retracted_f_ids = new_vector(BASE_T_ID_STACK_SIZE)
+    st.names_to_idrecs = Dict.empty(unicode_type,u8)
+    st.change_queue = new_vector(BASE_CHANGE_QUEUE_SIZE)
+    st.all_facts = List.empty_list(BaseFact)
+    st.all_vecs = List.empty_list(VectorType)
+    L = max(len(context_data.parent_t_ids)+1,1)
+    expand_mem_set_types(st,L)
+    return st
 
 @overload(MemSet)
-def overload_MemSet(context_data=None, mem_data=None):
+def overload_MemSet(context_data=None, auto_clear_refs=False):
     if(context_data is None):
         raise ValueError("MemSet() must be provided context_data when instantiated in jitted context.")
 
-    def impl(context_data=None, mem_data=None):
+    def impl(context_data=None, auto_clear_refs=False):
         if(context_data is None):
             # Compile-time error should prevent  
             raise ValueError()            
         else:
-            return memset_ctor(context_data)
+            return memset_ctor(context_data, auto_clear_refs)
 
     return impl
 

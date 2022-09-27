@@ -438,37 +438,39 @@ def test_free_refs():
         TestLL = define_fact("TestLL", {"name" : unicode_type, "nxt" : "TestLL"})
         init_used = used_bytes()
 
-        a = TestLL("a")
-        print("a_refs", a._meminfo.refcount)
-        b = TestLL("b",a)
-        c = TestLL("c",a)
-        print('0: ---')
-        print("a_refs", a._meminfo.refcount)
-        print("b_refs", b._meminfo.refcount)
-        a.nxt = b
-        print('1: ---')
-        print("a_refs", a._meminfo.refcount)
-        print("b_refs", b._meminfo.refcount)
-        a.nxt = c
-        print('2: ---')
-        print("a_refs", a._meminfo.refcount)
-        print("b_refs", b._meminfo.refcount)
-        ms = MemSet()
-        ms.declare(a)
-        ms.declare(b)
-        ms.declare(c)
-        print('3: ---')
-        print("a_refs", a._meminfo.refcount)
-        print("b_refs", b._meminfo.refcount)
-        ms.free()
-        ms = None
+        for i in range(2):
+            a = TestLL("a")
+            # print("a_refs", a._meminfo.refcount)
+            b = TestLL("b",a)
+            c = TestLL("c",a)
+            # print('0: ---')
+            # print("a_refs", a._meminfo.refcount)
+            # print("b_refs", b._meminfo.refcount)
+            a.nxt = b
+            # print('1: ---')
+            # print("a_refs", a._meminfo.refcount)
+            # print("b_refs", b._meminfo.refcount)
+            a.nxt = c
+            # print('2: ---')
+            # print("a_refs", a._meminfo.refcount)
+            # print("b_refs", b._meminfo.refcount)
+            ms = MemSet(auto_clear_refs=i==1)
+            ms.declare(a)
+            ms.declare(b)
+            ms.declare(c)
+            # print('3: ---')
+            # print("a_refs", a._meminfo.refcount)
+            # print("b_refs", b._meminfo.refcount)
+            if(i==0): ms.clear_refs()
+            ms = None
 
-        print("BYTES", used_bytes()-init_used)
-        print("a_refs", a._meminfo.refcount)
-        print("b_refs", b._meminfo.refcount)
-        print("c_refs", c._meminfo.refcount)
-        a,b,c = None,None, None
-        print("BYTES", used_bytes()-init_used)
+            # print("BYTES", used_bytes()-init_used)
+            # print("a_refs", a._meminfo.refcount)
+            # print("b_refs", b._meminfo.refcount)
+            # print("c_refs", c._meminfo.refcount)
+            a,b,c = None,None, None
+            # print("BYTES", used_bytes()-init_used)
+            assert used_bytes() == init_used
 
 
 

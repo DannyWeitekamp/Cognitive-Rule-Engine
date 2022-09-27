@@ -203,7 +203,7 @@ def test_re_mem_leaks():
             # print(ms._meminfo.refcount)
             # print("first", first._meminfo.refcount)
             # print("end", end._meminfo.refcount)
-            ms.free()
+            ms.clear_refs()
             
             # print("Free first", first._meminfo.refcount)
             # print("Free end", end._meminfo.refcount)

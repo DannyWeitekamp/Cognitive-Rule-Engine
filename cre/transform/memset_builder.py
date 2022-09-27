@@ -49,7 +49,7 @@ class MemSetBuilder():
 
         # Declare each fact to a new MemSet
         if(out_memset is None):
-            out_memset = self.out_memsets if(self.out_memsets) else MemSet()
+            out_memset = self.out_memsets if(self.out_memsets) else MemSet(auto_clear_refs=True)
         for _id, fact in fact_instances.items():
             out_memset.declare(fact)
 

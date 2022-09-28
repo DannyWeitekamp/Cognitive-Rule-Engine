@@ -2,6 +2,7 @@ from numba import generated_jit, njit, i8
 from cre.cre_func import CREFunc
 from cre.cre_object import _get_chr_mbrs_infos_from_attrs, _iter_mbr_infos
 from cre.fact import define_fact
+from cre.var import Var
 
 # BOOP = define_fact("BOOP", {"A" :i8, "B" :i8})
 
@@ -19,7 +20,6 @@ if __name__ == "__main__":
 
     @CREFunc(signature=i8(i8,i8,i8,i8))
     def Add(a, b, c, d):
-        #hi
         return a + b + c +d
  
     @generated_jit
@@ -32,8 +32,15 @@ if __name__ == "__main__":
         return impl
 
     print(Add)
+    a = Var(i8,'a')
+    b = Var(i8,'b')
+    c = Var(i8,'c')
 
-    print("OUT", Add(1,2))
+    z = Add(a,b,c,c)
+    print("OUT", z(1,2,3))
+
+    q = z(c,c,c)
+    print("OUT", q(7))    
     foo(Add)
 
 

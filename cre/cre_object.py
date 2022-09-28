@@ -406,7 +406,7 @@ def resolve_member_id(x):
         return PRIMITIVE_MBR_ID
 
 @intrinsic
-def _get_chr_mbrs_infos_from_attrs(typingctx, st_type, attrs_lit):
+def _get_chr_mbrs_infos_from_attrs(typingctx, structref, attrs_lit):
     '''get the base address of the struct pointed to by structref 'inst' '''
     # assert isinstance(attrs_lit, types.Literal)
     from cre.context import CREContext
@@ -421,7 +421,7 @@ def _get_chr_mbrs_infos_from_attrs(typingctx, st_type, attrs_lit):
     attrs = [x.literal_value for x in attrs_lit.types]
     # print(attrs)
     # print(ind)
-    mbr_types = [v for k,v in st_type._fields if k in attrs]
+    mbr_types = [v for k,v in structref._fields if k in attrs]
     t_ids = [context.get_t_id(_type=x) for x in mbr_types]
     m_ids = [resolve_member_id(x) for x in mbr_types]
 
@@ -432,7 +432,7 @@ def _get_chr_mbrs_infos_from_attrs(typingctx, st_type, attrs_lit):
 
     def codegen(context, builder, sig, args):
         [st,_] = args
-        utils = _Utils(context, builder, st_type)
+        utils = _Utils(context, builder, structref)
 
         baseptr = utils.get_data_pointer(st)
         baseptr_val = builder.ptrtoint(baseptr, cgutils.intp_t)
@@ -456,9 +456,8 @@ def _get_chr_mbrs_infos_from_attrs(typingctx, st_type, attrs_lit):
         ret = context.make_tuple(builder,member_infos_out_type, member_infos)
         return ret
 
-    sig = member_infos_out_type(st_type, attrs_lit)
+    sig = member_infos_out_type(structref, attrs_lit)
     return sig, codegen
-
 
 
 @njit

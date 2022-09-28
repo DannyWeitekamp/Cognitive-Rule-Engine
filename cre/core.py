@@ -147,12 +147,17 @@ def type_from_t_id(t_id):
     # fact_type = import_from_cached(name, hash_code, ['fact_type'])['fact_type']
     return typ
 
-def t_id_from_type_name(typ_name, hash_code=None):
-    if(hash_code is None): hash_code = hash(typ)
-    name = str(typ)
+def t_id_from_type_name(name, hash_code):
+    # if(hash_code is None): hash_code = hash(typ)
+    # name = str(typ)
+    # if(name == 'undefined'):
+    #     print(">?", repr(typ))
+    #     raise ValueError("Trying to register t_id for 'undefined'")
+    # print("<<",name,typ)
     with open(get_cache_path("type_registry",suffix=''),'r') as f:
         for i, line in enumerate(f):
             tokens = line.split()
+            # print(i, tokens[1], tokens[2], tokens[1] == name, tokens[2] == hash_code)
             if(tokens[1] == name and tokens[2] == hash_code):
                 return i
     return -1
@@ -178,15 +183,15 @@ def t_id_from_type_name(typ_name, hash_code=None):
 
 # NULL_MEMINFO = _get_null_meminfo()
 
-CRE_TYPE_EXECUTABLE    =int('10000000', 2)
-CRE_TYPE_VAR           =int('10010000', 2)
-CRE_TYPE_OP            =int('10100000', 2)
-CRE_TYPE_CONDITIONS    =int('10110000', 2)
-CRE_TYPE_RULE          =int('11000000', 2)
+# CRE_TYPE_EXECUTABLE    =int('10000000', 2)
+# CRE_TYPE_VAR           =int('10010000', 2)
+# CRE_TYPE_OP            =int('10100000', 2)
+# CRE_TYPE_CONDITIONS    =int('10110000', 2)
+# CRE_TYPE_RULE          =int('11000000', 2)
 
-CRE_TYPE_FACT          = int('00001000', 2)
-CRE_TYPE_ATOM          = int('00001001', 2)
-CRE_TYPE_PRED          = int('00001010', 2)
+# CRE_TYPE_FACT          = int('00001000', 2)
+# CRE_TYPE_ATOM          = int('00001001', 2)
+# CRE_TYPE_PRED          = int('00001010', 2)
 
 
 DEFAULT_REGISTERED_TYPES = {

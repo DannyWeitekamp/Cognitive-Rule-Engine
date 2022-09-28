@@ -16,6 +16,8 @@ from cre.var import Var
 
 
 if __name__ == "__main__":
+    import faulthandler; faulthandler.enable()
+
     # @global_func("Add_poop", i8(i8,i8))
 
     @CREFunc(signature=i8(i8,i8,i8,i8))
@@ -31,16 +33,24 @@ if __name__ == "__main__":
             #     print(tup)
         return impl
 
+    print("OUT", Add(1,2,3,3))
+
+
+
     print(Add)
     a = Var(i8,'a')
     b = Var(i8,'b')
     c = Var(i8,'c')
 
+    print("---------------")
     z = Add(a,b,c,c)
-    print("OUT", z(1,2,3))
-
+    print("---------------")
+    print("OUT Z", z(1,2,3))
+    # raise ValueError()
+    print("---------------")
     q = z(c,c,c)
-    print("OUT", q(7))    
-    foo(Add)
+    print("OUT Q", q(7))    
+    assert(q(7)==28)
+    # foo(Add)
 
 

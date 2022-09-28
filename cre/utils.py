@@ -466,6 +466,7 @@ def _meminfo_copy_unsafe(builder, nrt, meminfo):
 def _memcpy_structref(typingctx, inst_type):    
     def codegen(context, builder, signature, args):
         val = args[0]
+        print("___", inst_type)
         ctor = cgutils.create_struct_proxy(inst_type)
     
         dstruct = ctor(context, builder, value=val)

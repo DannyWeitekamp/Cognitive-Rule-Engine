@@ -51,6 +51,9 @@ arg_infos_type = numba.from_dtype(_arg_infos_type)
 _op_and_arg_ind = np.dtype([('op_ptr', np.int64), ('arg_ind', np.int64)])
 op_and_arg_ind = numba.from_dtype(_op_and_arg_ind)
 
+_instr_type = np.dtype([('op_ptr', np.int64), ('return_ptr', np.int64)])
+instr_type = numba.from_dtype(_instr_type)
+
 _head_info_type = np.dtype([
     ('cf_ptr', np.int64),
     ('type', np.uint32),
@@ -81,7 +84,7 @@ Using objmode (i.e. native python) instead. To ignore warning set nopython=False
 
 def CREFunc_assign_method_addr(cf_type, fn_name, addr):
     name = f"{cf_type.symbol_prefix}_{fn_name}"
-    print("88888", name)
+    # print("88888", name)
     ll.add_symbol(name, addr)
 
 def CREFunc_method(cf_type, fn_name, sig, on_error='error'):
@@ -114,17 +117,19 @@ cre_func_fields_dict = {
     "root_arg_infos" : arg_infos_type[::1],
 
     # List of other ops 
-    "children" : ListType(StructRefType),
+    # "children" : ListType(StructRefType),
 
     # References to base vars like Var(BOOP,"A")
-    "base_vars" : ListType(GenericVarType),
+    # "base_vars" : ListType(GenericVarType),
 
 
     "base_to_head_infos" : ListType(head_info_type[::1]),
 
+    "child_instr_set" : instr_type[::1],
+
     # For each base var the underlying arg_ptrs i.e. to a0,...,an
     #  that it is meant to fill in
-    "bases_to_arg_ptrs" : ListType(i8[::1]),
+    # "bases_to_arg_ptrs" : ListType(i8[::1]),
 
     
 
@@ -224,17 +229,19 @@ class CREFuncTypeClass(CREObjTypeClass):
 GenericCREFuncType = CREFuncTypeClass(cre_func_fields_dict)
 
 def get_cre_func_type(name, return_type, arg_types):
-    print(return_type, arg_types)
+    # print(return_type, arg_types)
     arg_fields = {}
     for i,t in enumerate(arg_types):
         arg_fields[f'a{i}'] = CREObjType
         arg_fields[f'h{i}'] = t
 
+    N_MINFOS = 1+len(arg_types)*3
+
     field_dict = {**cre_func_fields_dict,
         'return_val' : return_type,
         **arg_fields,
-        **{f'ref{i}' : types.optional(CREObjType) for i in range(len(arg_types))},
-        'chr_mbrs_infos' : UniTuple(member_info_type,1+len(arg_types)*2),
+        **{f'ref{i}' : CREObjType for i in range(len(arg_types))},
+        'chr_mbrs_infos' : UniTuple(member_info_type,N_MINFOS),
         'name' : types.literal(name),
         'return_type' : types.TypeRef(return_type),
         'arg_types' : types.TypeRef(types.Tuple(arg_types)),
@@ -278,7 +285,7 @@ def _get_global_fn_addr(typingctx, literal_name):
 @generated_jit(cache=True, nopython=True)
 def cre_func_assign_method_table(cf):
     prefix = cf.symbol_prefix
-    print('prefix', cf.symbol_prefix)
+    # print('prefix', cf.symbol_prefix)
     method_names = (
         f"{prefix}_call_heads",
         f"{prefix}_call_head_ptrs",
@@ -311,9 +318,9 @@ def cre_func_new(cf_type):
     for i in range(n_args):
         chr_mbr_attrs.append(f'a{i}')
         chr_mbr_attrs.append(f'h{i}')
+    for i in range(n_args):
         chr_mbr_attrs.append(f'ref{i}')
     chr_mbr_attrs = tuple(chr_mbr_attrs)
-    print(chr_mbr_attrs)
     
     def impl(cf_type):
         cf = new(cf_type)
@@ -346,6 +353,45 @@ def cre_func_new(cf_type):
         cre_func_assign_method_table(cf)
         return cf
     return impl
+
+from cre.cre_object import copy_cre_obj
+@njit(cache=True)
+def cre_func_copy(cf):
+    cf_ptr = _raw_ptr_from_struct(cf)
+    cpy = _cast_structref(GenericCREFuncType, copy_cre_obj(cf))
+    cpy_ptr = _raw_ptr_from_struct(cpy)
+
+    ##### HERE HERE HERE #####
+    # HOW TO COPY THE FUNC WHEN SUBSET OF ITS POINTERS POINT TO IT ???
+    ##########################
+
+    print(cf_ptr, "->", cpy_ptr)
+    # Make a copy of base_to_head_infos
+    base_to_head_infos = List.empty_list(head_info_arr)
+    for head_infos in cf.base_to_head_infos:
+        hi_arr = np.empty(len(head_infos),head_info_type)
+        for i in range(len(head_infos)):
+            hi_arr[i] = head_infos[i]
+            if(head_infos[i].cf_ptr == cf_ptr):
+                hi_arr[i].cf_ptr = cpy_ptr
+                hi_arr[i].arg_data_ptr = cpy_ptr+(head_infos[i].arg_data_ptr-cf_ptr)
+                hi_arr[i].head_data_ptr = cpy_ptr+(head_infos[i].head_data_ptr-cf_ptr)
+                print("THIS HAPPENED", head_infos[i].arg_data_ptr, "->", hi_arr[i].arg_data_ptr)
+        base_to_head_infos.append(hi_arr)
+    print(base_to_head_infos)
+
+    _incref_structref(cpy.base_to_head_infos)
+    cpy.base_to_head_infos = base_to_head_infos
+    _incref_structref(cpy.root_arg_infos)
+    
+    print(cpy)
+    # _incref_structref(copy.child_instr_set)
+
+    # copy = new(GenericCREFuncType)
+    # copy.n_args = cf.n_args
+    # copy.root_arg_infos = cf.root_arg_infos
+    return cpy
+    # copy.is_initialized = cf.is_initialized
 
 
 #--------------------------------------------------------------------
@@ -380,27 +426,26 @@ def set_const_arg(self, i, val):
 @njit(types.void(GenericCREFuncType,i8,GenericVarType), cache=True)
 def set_var_arg(self, i, val):
     self.is_initialized = False
-
+    print(i, self.base_to_head_infos[i])
     head_infos = self.base_to_head_infos[i]
     var_ptr = _raw_ptr_from_struct(val)
     for j in range(len(head_infos)):
         cf = _struct_from_ptr(GenericCREFuncType, head_infos[j].cf_ptr)
         arg_ind = head_infos[j].arg_ind
+        print(i,j, "<<", var_ptr)
         head_infos[j].var_ptr = var_ptr
         head_infos[j].type = ARGINFO_VAR
 
         # set 'ai' to zero, set 'hi' to val
         cre_obj_set_item(cf, i8(1+(arg_ind<<1)), var_ptr)
         # set 'ref{i}' to None
-        print("A", cf.num_chr_mbrs)
         cre_obj_set_item(cf, i8(1+cf.n_args*2 + arg_ind), val)
-        print("B")
 
         cf.root_arg_infos[arg_ind].type = ARGINFO_VAR
         cf.root_arg_infos[arg_ind].ptr = _raw_ptr_from_struct(val)
 
 @njit(types.void(GenericCREFuncType,i8,GenericCREFuncType), cache=True)
-def set_root_op_arg(self, i, val):
+def set_op_arg(self, i, val):
     self.is_initialized = False
 
     head_infos = self.base_to_head_infos[i]
@@ -420,8 +465,8 @@ def set_root_op_arg(self, i, val):
         cf.root_arg_infos[arg_ind].ptr = _raw_ptr_from_struct(val)
 
 
-# -set_root_const_arg(i, val) : Primatives
-#     -set_root_var_arg(i, val) : Vars
+# -set_const_arg(i, val) : Primatives
+#     -set_var_arg(i, val) : Vars
 #     -set_root_func_arg(i, val) : CRE_Funcs
     
 #     # For modifying with normal call conventions
@@ -432,78 +477,120 @@ def set_root_op_arg(self, i, val):
 #     # Update children, base_vars, head_vars
 #     -reinitialize()
 
+# @njit(cache=True)
+# def _get_base_head_info()
+
 i8_arr = i8[::1]
-i8_lst = ListType(i8)
+head_info_lst = ListType(head_info_type)
 @njit(cache=True)
 def reinitialize(self):
     if(self.is_initialized): return
+
+    print("REINIT")
+    base_var_map = Dict.empty(i8, head_info_lst)
+    for i, head_infos in enumerate(self.base_to_head_infos):
+        print("--L", len(head_infos))
+        for j, head_info in enumerate(head_infos):
+            print(":", i, j, head_info.type, head_info.var_ptr)
+            if(head_info.type == ARGINFO_VAR):
+                var = _struct_from_ptr(GenericVarType, head_info.var_ptr)
+                base_ptr = var.base_ptr
+                if(base_ptr not in base_var_map):
+                    base_var_map[base_ptr] = List.empty_list(head_info_type)
+                base_var_map[base_ptr].append(head_info)
+                print(base_ptr, base_var_map[base_ptr])
+
+            elif(head_info.type == ARGINFO_OP_UNEXPANDED):
+                print("HAS DEP")
+                cf = _struct_from_ptr(GenericCREFuncType, head_info.cf_ptr)
+                print("HAS DEP", cf.n_args)
+
+    print()
+    base_to_head_infos = List.empty_list(head_info_arr)
+    for base_ptr, head_infos in base_var_map.items():
+        print("++L", len(head_infos))
+        hi_arr = np.empty(len(head_infos),head_info_type)
+        for i in range(len(head_infos)):
+            hi_arr[i] = head_infos[i]
+        base_to_head_infos.append(hi_arr)
+        print(hi_arr)
+    self.base_to_head_infos = base_to_head_infos
+
+
+            # elif(head_info.type == ARGINFO_OP):
+
+            # else:
+
+
+        # print(head_infos)
+
 
     # self.children = List.empty_list(StructRefType)
     # self.base_vars = List.empty_list(GenericVarType)
     # self.bases_to_arg_ptrs = List.empty_list(i8_arr)
     # self.head_vars = List.empty_list(GenericVarType)
 
-    print(">>", self.root_arg_infos)
+    # print(">>", self.root_arg_infos)
     # Count the number of head vars in the new composition
-    n_head_vars = 0
-    for info in self.root_arg_infos:
-        if(info.type == ARGINFO_VAR):
-            n_head_vars += 1
-        elif(info.type == ARGINFO_OP):
-            n_head_vars +=len(_struct_from_ptr(GenericCREFuncType, info.ptr).head_vars) 
+    # n_head_vars = 0
+    # for info in self.root_arg_infos:
+    #     if(info.type == ARGINFO_VAR):
+    #         n_head_vars += 1
+    #     elif(info.type == ARGINFO_OP):
+    #         n_head_vars +=len(_struct_from_ptr(GenericCREFuncType, info.ptr).head_vars) 
 
     # self.arg_data_ptrs = np.empty(n_head_vars, dtype=np.int64)
-    self.arg_head_data_ptrs = np.empty(n_head_vars, dtype=np.int64)
-    # self.arg_op_and_arg_inds = np.empty(n_head_vars, dtype=op_and_arg_ind)
+    # self.arg_head_data_ptrs = np.empty(n_head_vars, dtype=np.int64)
+    # # self.arg_op_and_arg_inds = np.empty(n_head_vars, dtype=op_and_arg_ind)
 
-    c = 0
-    base_var_map = Dict.empty(i8,i8_lst)
-    self_ptr = _raw_ptr_from_struct(self)
-    for i, info in enumerate(self.root_arg_infos):
-        if(info.type == ARGINFO_VAR):
-            var = _struct_from_ptr(GenericVarType, info.ptr) 
-            if(var.base_ptr not in base_var_map):
-                base_var_map[var.base_ptr] = List.empty_list(i8)
+    # c = 0
+    # base_var_map = Dict.empty(i8,i8_lst)
+    # self_ptr = _raw_ptr_from_struct(self)
+    # for i, info in enumerate(self.root_arg_infos):
+    #     if(info.type == ARGINFO_VAR):
+    #         var = _struct_from_ptr(GenericVarType, info.ptr) 
+    #         if(var.base_ptr not in base_var_map):
+    #             base_var_map[var.base_ptr] = List.empty_list(i8)
 
             
-            self.head_vars.append(var)
-            # self.arg_data_ptrs[c] = 0 #??
+    #         self.head_vars.append(var)
+    #         # self.arg_data_ptrs[c] = 0 #??
 
-            _,_,arg_data_ptr = cre_obj_get_item_t_id_ptr(self, 1+(i<<1))
-            _,_,head_data_ptr = cre_obj_get_item_t_id_ptr(self, 1+(i<<1)+1)
-            base_arg_ptrs = base_var_map[var.base_ptr]
-            base_arg_ptrs.append(arg_data_ptr)
-            print("data_ptr", 1+(i<<1)+1, head_data_ptr)
-            self.arg_head_data_ptrs[c] = head_data_ptr #??
-            # self.arg_op_and_arg_inds[c].op_ptr = self_ptr
-            # self.arg_op_and_arg_inds[c].arg_ind = i #??
-            c += 1
+    #         _,_,arg_data_ptr = cre_obj_get_item_t_id_ptr(self, 1+(i<<1))
+    #         _,_,head_data_ptr = cre_obj_get_item_t_id_ptr(self, 1+(i<<1)+1)
+    #         base_arg_ptrs = base_var_map[var.base_ptr]
+    #         base_arg_ptrs.append(arg_data_ptr)
+    #         print("data_ptr", 1+(i<<1)+1, head_data_ptr)
+    #         self.arg_head_data_ptrs[c] = head_data_ptr #??
+    #         # self.arg_op_and_arg_inds[c].op_ptr = self_ptr
+    #         # self.arg_op_and_arg_inds[c].arg_ind = i #??
+    #         c += 1
 
-        elif(info.type == ARGINFO_OP):
-            cf = _struct_from_ptr(GenericCREFuncType, info.ptr)
-            # reinitialize(cf)
-            for bv in cf.base_vars:
-                base_var_map[bv.base_ptr] = List.empty_list(i8)
-            for hv in cf.head_vars:
-                self.head_vars.append(hv)
+    #     elif(info.type == ARGINFO_OP):
+    #         cf = _struct_from_ptr(GenericCREFuncType, info.ptr)
+    #         # reinitialize(cf)
+    #         for bv in cf.base_vars:
+    #             base_var_map[bv.base_ptr] = List.empty_list(i8)
+    #         for hv in cf.head_vars:
+    #             self.head_vars.append(hv)
 
-            L = len(cf.arg_head_data_ptrs)
-            # self.arg_data_ptrs[c:c+L] = cf.arg_data_ptrs[:L]
-            self.arg_head_data_ptrs[c:c+L] = cf.arg_head_data_ptrs[:L] #??
-            # self.arg_op_and_arg_inds[c:c+L] = cf.arg_op_and_arg_inds[:L]
+    #         L = len(cf.arg_head_data_ptrs)
+    #         # self.arg_data_ptrs[c:c+L] = cf.arg_data_ptrs[:L]
+    #         self.arg_head_data_ptrs[c:c+L] = cf.arg_head_data_ptrs[:L] #??
+    #         # self.arg_op_and_arg_inds[c:c+L] = cf.arg_op_and_arg_inds[:L]
 
 
 
-    for b_ptr,base_arg_ptrs in base_var_map.items():
-        self.base_vars.append(_struct_from_ptr(GenericVarType, b_ptr))
-        _base_arg_ptrs = np.empty(len(base_arg_ptrs),dtype=np.int64)
-        for i,v in enumerate(base_arg_ptrs):
-            _base_arg_ptrs[i] = v
-        print(_base_arg_ptrs)
-        self.bases_to_arg_ptrs.append(_base_arg_ptrs)
+    # for b_ptr,base_arg_ptrs in base_var_map.items():
+    #     self.base_vars.append(_struct_from_ptr(GenericVarType, b_ptr))
+    #     _base_arg_ptrs = np.empty(len(base_arg_ptrs),dtype=np.int64)
+    #     for i,v in enumerate(base_arg_ptrs):
+    #         _base_arg_ptrs[i] = v
+    #     print(_base_arg_ptrs)
+    #     self.bases_to_arg_ptrs.append(_base_arg_ptrs)
 
-    print("children", self.children)
-    self.is_initialized = True
+    # print("children", self.children)
+    # self.is_initialized = True
         
 
 
@@ -540,14 +627,16 @@ def set_base_arg_val(self, i, val):
     val_type = val
     if(isinstance(val_type,StructRef)):
         def impl(self, i, val):
-            arg_ptrs = self.bases_to_arg_ptrs[i]
-            for data_ptr in arg_ptrs:
-                _store(CREObjType, data_ptr, val)
+            head_infos = self.base_to_head_infos[i]
+            for head_info in head_infos:
+                _store(CREObjType, head_info.arg_data_ptr, val)
     else:
         def impl(self, i, val):
-            arg_ptrs = self.bases_to_arg_ptrs[i]
-            for data_ptr in arg_ptrs:
-                _store(val_type, data_ptr+8, val)
+            print("STR")
+            head_infos = self.base_to_head_infos[i]
+            for head_info in head_infos:
+                print("HI", head_info, val)
+                _store(val_type, head_info.head_data_ptr, val)
 
     return impl
 
@@ -574,8 +663,8 @@ def cre_func_exec_heads(self):
 
 @njit(cache=True)
 def cre_func_exec(self):
-    for child in self.children:
-        cre_func_exec_heads(_cast_structref(GenericCREFuncType, child))    
+    # for child in self.children:
+    #     cre_func_exec_heads(_cast_structref(GenericCREFuncType, child))
     cre_func_exec_heads(self)
 
 
@@ -755,7 +844,7 @@ class CREFunc(StructRefProxy):
             members["call"] = call_func
             cf_type = define_CREFunc(call_func.__name__, members)
 
-            print(">>", cf_type)
+            # print(">>", cf_type)
 
             # Since decorator replaces, ensure original function is pickle accessible. 
             # cf_type.call_pyfunc = call_func
@@ -765,6 +854,7 @@ class CREFunc(StructRefProxy):
             # print(cloudpickle.dumps(cf_type))
 
             cre_func = cre_func_new(cf_type)
+            print("<<<<<<", cre_func)
             cre_func.return_type = cf_type.return_type
             cre_func.cf_type = cf_type
             _vars = []                
@@ -793,38 +883,44 @@ class CREFunc(StructRefProxy):
         print("CALL", args)
         all_const = True
         for arg in args:
+            print("----", arg)
             if(isinstance(arg, Var) or isinstance(arg, CREFunc)):
                 all_const = False
 
         if(all_const):
+            print("START CALL OP")
             for i, arg in enumerate(args):
                 set_base_arg_val(self, i, arg)
+            print("START EXEC")
             cre_func_exec(self)
+            print("START RETURN")
             return get_return_val(self,self.return_type)
         else:
-            new_cf = cre_func_new(self.cf_type)
+            print("START COMPOSE OP", args)
+            new_cf = cre_func_copy(self)
+            print(">>", new_cf)
             new_cf.return_type = self.return_type
             new_cf.cf_type = self.cf_type
             for i, arg in enumerate(args):
                 if(isinstance(arg, Var)):
-                    set_root_var_arg(new_cf, i, arg)
+                    set_var_arg(new_cf, i, arg)
                 elif(isinstance(arg, CREFunc)):
-                    set_root_op_arg(new_cf, i, arg)
+                    set_op_arg(new_cf, i, arg)
                 else:
-                    set_root_const_arg(new_cf,i,arg)
+                    set_const_arg(new_cf,i,arg)
             reinitialize(new_cf)
             return new_cf
 
 
     
-    def set_root_var_arg(self, i, val):
-        set_root_var_arg(self, i, val)
+    def set_var_arg(self, i, val):
+        set_var_arg(self, i, val)
 
-    def set_root_op_arg(self, i, val):
-        set_root_op_arg(self, i, val)
+    def set_op_arg(self, i, val):
+        set_op_arg(self, i, val)
 
-    def set_root_const_arg(self, i, val):
-        set_root_const_arg(self, i, val)
+    def set_const_arg(self, i, val):
+        set_const_arg(self, i, val)
 
 
 
@@ -956,8 +1052,8 @@ A few things need to be settled
 
 1) Construction Conventions
     # For modifying the root CRE_Func 
-    -set_root_const_arg(i, val) : Primatives
-    -set_root_var_arg(i, val) : Vars
+    -set_const_arg(i, val) : Primatives
+    -set_var_arg(i, val) : Vars
     -set_root_func_arg(i, val) : CRE_Funcs
     
     # For modifying with normal call conventions

@@ -1,3 +1,4 @@
+
 import numba
 from numba import types, njit, u1,u2,u4,u8, i8,i2, literally
 from numba.core.imputils import impl_ret_borrowed
@@ -466,7 +467,7 @@ def _meminfo_copy_unsafe(builder, nrt, meminfo):
 def _memcpy_structref(typingctx, inst_type):    
     def codegen(context, builder, signature, args):
         val = args[0]
-        print("___", inst_type)
+        # print("___", inst_type)
         ctor = cgutils.create_struct_proxy(inst_type)
     
         dstruct = ctor(context, builder, value=val)
@@ -497,7 +498,7 @@ def _call_dtor(typingctx, inst_type):
     def codegen(context, builder, signature, args):
         val = args[0]
         st = cgutils.create_struct_proxy(inst_type)(context, builder, value=val)
-        print(st)
+        # print(st)
         meminfo = st.meminfo
         _meminfo_call_dtor(builder, meminfo)
     sig = types.void(inst_type)
@@ -527,6 +528,8 @@ def _incref_structref(typingctx, inst_type):
 
     sig = void(inst_type)
     return sig, codegen
+
+
 
 # @njit(cache=True)
 # def incref(x):
@@ -690,6 +693,70 @@ def _store(typingctx, typ, ptr, val):
         
 
     sig = types.void(typ,ptr,val)
+    return sig, codegen
+
+@intrinsic
+def _store_safe(typingctx, typ, _ptr, _val):
+    '''Get the value pointed to by 'ptr' assuming it has type 'typ' 
+    '''
+    inst_type = typ.instance_type
+    def codegen(context, builder, sig, args):
+        _,ptr,val = args
+        llrtype = context.get_value_type(inst_type)
+        ptr = builder.inttoptr(ptr, ll_types.PointerType(llrtype))
+
+        old_val = builder.load(ptr)
+        builder.store(val, ptr)
+        
+        if context.enable_nrt:
+            context.nrt.incref(builder, inst_type, val)
+            context.nrt.decref(builder, inst_type, old_val)
+        
+    sig = types.void(typ, _ptr, _val)
+    return sig, codegen
+
+@intrinsic
+def _memcpy(typingctx, dst, src, nbytes):
+    def codegen(context, builder, sig, args):
+        # print("RECOMPILE")
+        dst, src, nbytes = args
+        dst = builder.inttoptr(dst, cgutils.voidptr_t)
+        src = builder.inttoptr(src, cgutils.voidptr_t)
+        # one = context.get_constant(types.intp, 1)
+
+        # cgutils.raw_memcpy(builder, dst, src, one, nbytes, align)
+        # return context.get_dummy_value()
+
+        if isinstance(nbytes, int):
+            nbytes = ir.Constant(cgutils.intp_t, nbytes)
+
+        memcpy = builder.module.declare_intrinsic('llvm.memcpy',
+                                                  [cgutils.voidptr_t, cgutils.voidptr_t, cgutils.intp_t])
+        is_volatile = cgutils.true_bit
+        builder.call(memcpy, [dst,
+                              src,
+                              nbytes,
+                              is_volatile])
+
+
+    sig = types.void(i8,i8,i8)
+    return sig, codegen
+
+
+@intrinsic
+def _nullify_attr(typingctx, struct_type, _attr):
+    # print(struct_type, _attr)
+    attr = _attr.literal_value
+    def codegen(context, builder, sig, args):
+        [st,_] = args
+        utils = _Utils(context, builder, struct_type)
+        dataval = utils.get_data_struct(st)
+        val_data_ptr = dataval._get_ptr_by_name(attr)
+        val_type = dataval._datamodel.get_type(attr)
+        val_type = context.get_value_type(val_type)
+        builder.store(cgutils.get_null_value(val_type), val_data_ptr)
+
+    sig = types.void(struct_type, _attr)
     return sig, codegen
 
 
@@ -1011,6 +1078,7 @@ def _get_member_offset(typingctx, struct_type, attr_literal):
         # print("B")
         dataval = utils.get_data_struct(st)
         index_of_member = dataval._datamodel.get_field_position(attr)
+
         # print(index_of_member)
 
         member_ptr = builder.gep(baseptr, [cgutils.int32_t(0), cgutils.int32_t(index_of_member)], inbounds=True)

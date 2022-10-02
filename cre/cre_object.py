@@ -6,7 +6,7 @@ from cre.core import register_global_default, T_ID_UNDEFINED, T_ID_BOOL, T_ID_IN
 from cre.utils import (_memcpy_structref, _obj_cast_codegen, ptr_t,
     _raw_ptr_from_struct, _raw_ptr_from_struct_incref, _incref_ptr,
     CastFriendlyMixin, decode_idrec, _func_from_address, _incref_structref,
-    _cast_structref, _get_member_offset, _struct_get_data_ptr, _store,
+    _cast_structref, _get_member_offset, _struct_get_data_ptr, _store, _store_safe,
     _sizeof_type, _load_ptr, _struct_from_ptr, encode_idrec, _decref_ptr, _incref_ptr,
     _decref_structref, check_issue_6993, incref_meminfo)
 from cre.structref import define_structref
@@ -500,24 +500,24 @@ def cre_obj_set_item(obj, index, val):
     t_id = context.get_t_id(_type=item_type)
 
     from numba.core.datamodel import default_manager, StructModel
-    if isinstance(default_manager[item_type], StructModel):
+    # if isinstance(default_manager[item_type], StructModel):
     # self._datamodel = self._context.data_model_manager[self._fe_type]
-        def impl(obj, index, val):
-            _, m_id, item_ptr = cre_obj_get_item_t_id_ptr(obj, index)
-            old_ptr = _load_ptr(i8, item_ptr)
+    def impl(obj, index, val):
+        _, m_id, item_ptr = cre_obj_get_item_t_id_ptr(obj, index)
+        # old_ptr = _load_ptr(i8, item_ptr)
 
-            _store(item_type, item_ptr, val)
-            _incref_structref(val)
+        _store_safe(item_type, item_ptr, val)
+        # _incref_structref(val)
 
-            cre_obj_set_member_t_id_m_id(obj, index, (u2(t_id), u2(m_id)))
+        cre_obj_set_member_t_id_m_id(obj, index, (u2(t_id), u2(m_id)))
 
-            if(old_ptr != 0):
-                _decref_ptr(old_ptr)
-    else:
-        def impl(obj, index, val):
-            _, m_id, item_ptr = cre_obj_get_item_t_id_ptr(obj, index)
-            _store(item_type, item_ptr, val)        
-            cre_obj_set_member_t_id_m_id(obj, index, (u2(t_id), u2(m_id)))
+        # if(old_ptr != 0):
+        #     _decref_ptr(old_ptr)
+    # else:
+    #     def impl(obj, index, val):
+    #         _, m_id, item_ptr = cre_obj_get_item_t_id_ptr(obj, index)
+    #         _store(item_type, item_ptr, val)        
+    #         cre_obj_set_member_t_id_m_id(obj, index, (u2(t_id), u2(m_id)))
     return impl
 
 

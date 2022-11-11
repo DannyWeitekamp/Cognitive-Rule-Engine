@@ -17,6 +17,7 @@ from cre.transform.vectorizer import Vectorizer
 from cre.transform.memset_builder import MemSetBuilder
 from cre.default_ops import Equals
 from cre.conditions import Conditions
+import pytest
 
 eq_f8 = Equals(f8, f8)
 eq_str = Equals(unicode_type, unicode_type)
@@ -390,11 +391,12 @@ def test_condition_generalizing():
         assert match_names == [['1_carry', '0_upper', '0_lower']] #??
 
 
-
+@pytest.mark.benchmark(group="transform")
 def test_b_pipeline_1st_run(benchmark):
     with cre_context("test_b_pipeline_1st_run"):
         benchmark.pedantic(pipeline_first_run,setup=setup_pipeline_first_run, warmup_rounds=1, rounds=10)
 
+@pytest.mark.benchmark(group="transform")
 def test_b_pipeline_2nd_run(benchmark):
     with cre_context("test_b_pipeline_2nd_run"):
         benchmark.pedantic(pipeline_second_run,setup=setup_pipeline_second_run, warmup_rounds=1, rounds=10)

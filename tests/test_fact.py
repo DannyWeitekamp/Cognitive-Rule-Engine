@@ -12,7 +12,7 @@ import cre.dynamic_exec
 import pytest
 import operator
 import cloudpickle
-
+import pytest
 
 def test__standardize_spec():
     with cre_context("test__standardize_spec") as context:
@@ -879,7 +879,7 @@ def _b_boop_ctor_10000():
     
     # py_b_boop_ctor_100 = py_b_boop_ctor_100.py_func
 
-
+@pytest.mark.benchmark(group="fact")
 def test_b_boop_ctor_10000(benchmark):
     with cre_context("_b_boop_ctor_10000"):
         benchmark.pedantic(_b_boop_ctor_10000, warmup_rounds=1, rounds=10)
@@ -890,6 +890,7 @@ def _b_py_dict_boop_10000():
     for i in range(10000):
         b = {"A" : "HI", "B" : i}
 
+@pytest.mark.benchmark(group="fact")
 def test_b_py_dict_boop_10000(benchmark):
     with cre_context("_b_boop_ctor_10000"):
         benchmark.pedantic(_b_py_dict_boop_10000, warmup_rounds=1, rounds=10)

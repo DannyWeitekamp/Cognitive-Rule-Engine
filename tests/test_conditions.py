@@ -28,6 +28,19 @@ def print_str_diff(a,b):
         elif s[0]=='+':
             print(u'Add "{}" to position {}'.format(s[-1],i))    
 
+def test_var():
+    with cre_context("test_var"):
+        BOOP = define_fact("BOOP",{"A": "string", "B" : "number"})
+
+        @njit(cache=False)
+        def var_to_str(v):
+            return str(v)
+
+        v = Var(BOOP,'Q').A
+        assert var_to_str(v) == "Q.A"
+        assert str(v) == "Q.A"
+
+
 # from cre.conditions import conds_repr, conditions_repr
 # @njit(cache=True)
 def test_build_conditions():
@@ -485,10 +498,11 @@ def test_anti_unify():
     
 
 if(__name__ == "__main__"):
-    test_anti_unify()
+    test_var()
+    # test_anti_unify()
     # test_unconditioned()
     # test_build_conditions()
-    test_list_operations()
+    # test_list_operations()
     # test_link()
     # test_initialize()
     # for i in range(10):

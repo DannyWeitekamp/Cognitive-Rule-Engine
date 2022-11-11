@@ -15,6 +15,7 @@ import pytest
 import numpy as np
 
 import cre.dynamic_exec
+import pytest
 
 
 
@@ -217,6 +218,7 @@ def _b_dict_insert_tup_fact():
         # d[TupleFact(str(i),i)] = i
     return d
 
+@pytest.mark.benchmark(group="tuple_fact")
 def test_b_dict_insert_tup_fact(benchmark):
     _b_dict_insert_tup_fact()
     benchmark.pedantic(_b_dict_insert_tup_fact,warmup_rounds=1,rounds=20)
@@ -228,6 +230,7 @@ def _b_dict_insert_tup():
         # d[(str(i),i)] = i
     return d
 
+@pytest.mark.benchmark(group="tuple_fact")
 def test_b_dict_insert_py_tup(benchmark):
     _b_dict_insert_tup()
     benchmark.pedantic(_b_dict_insert_tup,warmup_rounds=1,rounds=20)
@@ -241,6 +244,7 @@ def _b_make_tup_fact():
         # d[TupleFact(str(i),i)] = i
     return d
 
+@pytest.mark.benchmark(group="tuple_fact")
 def test_b_make_TupleFact(benchmark):
     _b_make_tup_fact()
     benchmark.pedantic(_b_make_tup_fact,warmup_rounds=1,rounds=20)    
@@ -254,6 +258,7 @@ def _b_make_py_tup():
         # d[TupleFact(str(i),i)] = i
     return d
 
+@pytest.mark.benchmark(group="tuple_fact")
 def test_b_make_py_tup(benchmark):
     _b_make_py_tup()
     benchmark.pedantic(_b_make_py_tup,warmup_rounds=1,rounds=20)    

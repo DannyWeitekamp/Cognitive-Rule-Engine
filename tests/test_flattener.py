@@ -4,9 +4,9 @@ from cre.context import cre_context
 from cre.memset import MemSet, MemSetType 
 from cre.transform.flattener import Flattener, flattener_update
 from cre.fact import define_fact
-import pytest_benchmark
 from numba.core.runtime.nrt import rtsys
 import gc
+import pytest
 
 def flat_ms_vals(flat_ms):
     from cre.gval import gval
@@ -153,6 +153,7 @@ def do_flatten(fl,ms):
     fl.update()
     return fl.out_memset
 
+@pytest.mark.benchmark(group="transform")
 def test_b_flatten_10000(benchmark):
     with cre_context("flatten_10000") as context:
         benchmark.pedantic(do_flatten,setup=setup_flatten, warmup_rounds=1, rounds=10)

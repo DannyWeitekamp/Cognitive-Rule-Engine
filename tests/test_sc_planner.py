@@ -268,33 +268,34 @@ def setup_retrace(n=5):
     return planner
 
 
-@njit(unicode_type(ExplanationTreeType,i8), cache=True)
+@njit(unicode_type(ExplanationTreeType,i8), cache=False)
 def tree_str(root,ind=0):
     # print("START STR TREE")
     # if(len(root.children) == 0): return "?"
-    s = ' '*ind
+    s_ind = ' '*ind
+    s = ''
     for entry in root.entries:
-        pass
         # print("child.is_op", child.is_op)
         if(entry.is_op):
             op, child_arg_ptrs = entry.op, entry.child_arg_ptrs
         #     # for i in range(ind): s += " "
                 
-            s += op.name + "("
+            s += f"\n{s_ind}{op.name}("
         #     # print(child_arg_ptrs)
-            for ptr in child_arg_ptrs:
+            for i, ptr in enumerate(child_arg_ptrs):
                 
                 ch_expl = _struct_from_ptr(ExplanationTreeType, ptr)
                 # print(ch_expl)
-                tree_str(ch_expl, ind+1)
+                # tree_str(ch_expl, ind+1)
         #         # print("str",tree_str(ch_expl, ind+1))
-                # s += tree_str(ch_expl, ind+1)
-                s += ","
+                s += f'{tree_str(ch_expl, ind+1)}'
+                if (i != len(child_arg_ptrs) -1): s += ","
+                    
+                # s += ","
             s += ")"
         else:
             s += "?"
-    return s
-        
+    return s        
 
 def test_build_explanation_tree():
     planner = setup_retrace()

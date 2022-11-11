@@ -9,6 +9,7 @@ from cre.utils import _struct_from_ptr, _list_base,_list_base_from_ptr,_load_ptr
 from numba.core.runtime.nrt import rtsys
 import gc
 from cre.rete import repr_match_iter_dependencies
+import pytest
 
 # with cre_context("test_matching"):
     
@@ -672,6 +673,7 @@ def do_update_graph(c,ms):
     m_iter = new_match_iter(rete_graph)
 
 
+@pytest.mark.benchmark(group="matching")
 def test_b_matching_alphas_lit(benchmark):
     # with cre_context("test_matching_benchmarks") as ctxt:
     benchmark.pedantic(apply_get_matches,setup=matching_alphas_setup, warmup_rounds=1, rounds=10)
@@ -679,7 +681,7 @@ def test_b_matching_alphas_lit(benchmark):
     # gc.collect()
     # print(alloc_stats.alloc-alloc_stats.free)
     # assert(alloc_stats.free==alloc_stats.alloc), f'{alloc_stats}'
-
+@pytest.mark.benchmark(group="matching")
 def test_b_matching_betas_lit(benchmark):
     # with cre_context("test_matching_benchmarks") as ctxt:
     # alloc_stats1 = rtsys.get_allocation_stats()

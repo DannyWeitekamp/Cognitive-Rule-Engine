@@ -403,6 +403,7 @@ def planner_declare_val(planner, val, op_or_var):
         inv_val_map[var_ptr] = val
 
         # TODO: Find something faster than this
+        # k = 0
         for i, _val in enumerate(flat_vals):
             if(_val == val):
                 return i
@@ -765,8 +766,9 @@ def join_records_of_type(self, depth, typ):
             flat_vals.append(val) 
 
         tup = (typ_name, depth)
-        self.flat_vals_ptr_dict[tup] = \
-             _ptr_from_struct_incref(flat_vals)
+        self.flat_vals_ptr_dict[tup] = _ptr_from_struct_incref(flat_vals)
+        # print("::", depth , "::")
+        # print(flat_vals)
     return impl
 
 
@@ -905,7 +907,7 @@ def apply_one(op, planner, return_type, arg_types, inds, curr_infer_depth, min_s
         if(nxt_depth > min_stop_depth and
            prev_depth != -1 and
            prev_depth < nxt_depth):
-            print("SKIP", op, inds, min_stop_depth)
+            # print("SKIP", op, inds, min_stop_depth)
             return
 
         data[0] = u4(rec_ptr) # get low bits
@@ -1536,7 +1538,6 @@ def gen_op_comps_from_expl_tree(tree):
                 child_generators.append(child_gen)
 
             for args in product_of_generators(child_generators): 
-
                 # print("<<", op, [(str(x.base_type), str(x.head_type)) if(isinstance(x,Var)) else x for x in args])
                 op_comp = OpComp(op, *args)
                 yield op_comp

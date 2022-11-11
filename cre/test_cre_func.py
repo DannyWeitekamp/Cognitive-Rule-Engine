@@ -4,6 +4,7 @@ from cre.cre_func import CREFunc
 from cre.cre_object import _get_chr_mbrs_infos_from_attrs, _iter_mbr_infos
 from cre.fact import define_fact
 from cre.var import Var
+from cre.utils import PrintElapse
 
 from numba.core.runtime.nrt import rtsys
 def used_bytes():
@@ -54,14 +55,44 @@ if __name__ == "__main__":
     b = Var(unicode_type,'b')
     c = Var(unicode_type,'c')
 
-    for i in range(10):
+    for i in range(2):
         z = Concat(a, Concat(Concat(b,c),a ))
         print(z)
         print(z("|","X","Y"))
         if(i == 0):
             init_bytes = used_bytes()
         else:
-            print("<<", used_bytes()-init_bytes)
+            assert used_bytes() == init_bytes
+
+
+    BOOP = define_fact("BOOP", {"A" :unicode_type, "B" :i8})
+
+    @CREFunc(signature=BOOP(BOOP,BOOP),
+            shorthand='{0}+{1}')
+    def Smerpify(a, b):
+        return BOOP(a.A + b.A, a.B + b.B)
+
+    a = Var(BOOP,'a')
+    b = Var(BOOP,'b')
+    c = Var(BOOP,'c')
+
+    z = Smerpify(a,b)
+    print(z)
+    # print(z(BOOP("A",1),BOOP("B",2)))
+
+    print("<------------------->")
+
+    print()
+
+    z = Concat(a.A, b.A)
+    ba, bb = BOOP("A",1), BOOP("B",2)
+
+    with PrintElapse("Z"):
+        z(ba,bb)
+    with PrintElapse("Z"):
+        z(ba,bb)
+
+
 
 
 

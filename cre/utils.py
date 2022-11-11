@@ -1250,3 +1250,44 @@ def new_w_del(typingctx, struct_type, _del_fn_symbol_name):
 
     sig = inst_type(struct_type, _del_fn_symbol_name)
     return sig, codegen
+
+
+#--------------------------------------------------------
+#: get/set Globals
+
+def get_or_make_global(context, builder, typ,name):
+    mod = builder.module
+    try:
+        # Search for existing global
+        gv = mod.get_global(name)
+    except KeyError:
+        # Inject the symbol if not already exist.
+        # gv = ir.GlobalVariable(mod, context.get_value_type(typ), name=name)
+        lltyp = context.get_value_type(typ) 
+        gv = ir.GlobalVariable(mod, lltyp, name=name)
+        gv.linkage = 'common'
+        gv.initializer = cgutils.get_null_value(gv.type.pointee)
+    return gv
+
+@intrinsic
+def _get_global(typingctx, _typ, _name):
+    typ = _typ.instance_type
+    name = _name.literal_value
+    def codegen(context, builder, sig, args):
+        gv = get_or_make_global(context,builder,typ, name)        
+        v = builder.load(gv)
+        context.nrt.incref(builder, typ, v)
+        return v
+    sig = typ(_typ, _name)
+    return sig, codegen
+
+@intrinsic
+def _set_global(typingctx, _typ, _name, val):
+    typ = _typ.instance_type
+    name = _name.literal_value
+    def codegen(context, builder, sig, args):
+        val = args[-1]
+        gv = get_or_make_global(context,builder,typ, name)
+        builder.store(val, gv)
+    sig = types.void(_typ, _name, val)
+    return sig, codegen

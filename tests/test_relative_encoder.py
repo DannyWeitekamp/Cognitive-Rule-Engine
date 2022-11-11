@@ -15,6 +15,7 @@ from cre.context import cre_context
 import cre
 from numba.core.runtime.nrt import rtsys
 import gc
+import pytest
 # v1 = Var(Container).children[0]
 # v2 = Var(Container).children[1]
 # print(v1, v1.deref_infos, v1.deref_infos)
@@ -312,16 +313,17 @@ def test_downcasted_heads():
     
         
 
-
+@pytest.mark.benchmark(group="transform")
 def test_b_rel_enc_update_100x100(benchmark):
     with cre_context("test_relative_encoder"):
         benchmark.pedantic(do_update,setup=setup_update, warmup_rounds=1, rounds=10)
 
+@pytest.mark.benchmark(group="transform")
 def test_b_rel_enc_100x100_update_plus_1(benchmark):
     with cre_context("test_relative_encoder"):
         benchmark.pedantic(do_update,setup=setup_update_plus_1, warmup_rounds=1, rounds=10)
 
-
+@pytest.mark.benchmark(group="transform")
 def test_b_rel_enc_100x100_encode(benchmark):
     with cre_context("test_relative_encoder"):
         benchmark.pedantic(do_encode_rel,setup=setup_encoder_w_heir_state, warmup_rounds=1, rounds=10)

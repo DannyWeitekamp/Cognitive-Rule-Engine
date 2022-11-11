@@ -16,6 +16,7 @@ from cre.utils import _struct_from_meminfo, PrintElapse
 import gc
 from numba.core.runtime.nrt import rtsys
 from weakref import WeakKeyDictionary
+import pytest
 
 
 tf_spec = {"value" : "string",
@@ -524,32 +525,7 @@ def _test_modify_from_deref_infos():
 ###################### BENCHMARKS ########################
 
 
-#### b_encode_idrec ####
 
-def gen_rand_nums():
-    return (np.random.randint(1000,size=(10000,3)),), {}
-
-@njit(cache=True)
-def _b_encode_idrec(rand_nums):
-    for x in rand_nums:
-        encode_idrec(x[0],x[1],x[2])
-
-def test_b_encode_idrec(benchmark):
-    benchmark.pedantic(_b_encode_idrec,setup=gen_rand_nums, warmup_rounds=1)
-
-
-#### b_decode_idrec ####
-
-def gen_rand_idrecs():
-    return (np.random.randint(0xFFFFFFFF,size=(10000,),dtype=np.uint64),), {}
-
-@njit(cache=True)
-def _b_decode_idrec(rand_idrecs):
-    for x in rand_idrecs:
-        decode_idrec(x)
-
-def test_b_decode_idrec(benchmark):
-    benchmark.pedantic(_b_decode_idrec,setup=gen_rand_idrecs, warmup_rounds=1)
 
 #### helper funcs #####
 
@@ -573,6 +549,7 @@ def _delcare_10000(ms):
         out[i] = ms.declare(BOOP("?",i))
     return out
 
+@pytest.mark.benchmark(group="memset")
 def test_b_declare_10000(benchmark):
     benchmark.pedantic(_delcare_10000,setup=_benchmark_setup, warmup_rounds=1)
 
@@ -588,6 +565,7 @@ def _retract_10000(ms,idrecs):
     for idrec in idrecs:
         ms.retract(idrec)
 
+@pytest.mark.benchmark(group="memset")
 def test_b_retract_10000(benchmark):
     benchmark.pedantic(_retract_10000,setup=_retract_setup, warmup_rounds=1)
 
@@ -605,6 +583,7 @@ def _get_facts_10000(ms):
     for x in ms.get_facts(BOOP):
         pass
 
+@pytest.mark.benchmark(group="memset")
 def test_b_get_facts_10000(benchmark):
     benchmark.pedantic(_get_facts_10000,setup=get_facts_setup, warmup_rounds=1)
 

@@ -210,9 +210,36 @@ def test_list_intrinsics():
     assert [x.A for x in _test_list_getitem_intrinsic_BOOP()] == ["A","B","C"]
 
 
+###################### BENCHMARKS ########################
+
+#### b_encode_idrec ####
+
+def gen_rand_nums():
+    return (np.random.randint(1000,size=(10000,3)),), {}
+
+@njit(cache=True)
+def _b_encode_idrec(rand_nums):
+    for x in rand_nums:
+        encode_idrec(x[0],x[1],x[2])
+
+@pytest.mark.benchmark(group="utils")
+def test_b_encode_idrec(benchmark):
+    benchmark.pedantic(_b_encode_idrec,setup=gen_rand_nums, warmup_rounds=1)
 
 
+#### b_decode_idrec ####
 
+def gen_rand_idrecs():
+    return (np.random.randint(0xFFFFFFFF,size=(10000,),dtype=np.uint64),), {}
+
+@njit(cache=True)
+def _b_decode_idrec(rand_idrecs):
+    for x in rand_idrecs:
+        decode_idrec(x)
+
+@pytest.mark.benchmark(group="utils")
+def test_b_decode_idrec(benchmark):
+    benchmark.pedantic(_b_decode_idrec,setup=gen_rand_idrecs, warmup_rounds=1)
 
 
 

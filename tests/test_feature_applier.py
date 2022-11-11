@@ -4,13 +4,13 @@ from cre.utils import decode_idrec, PrintElapse
 from cre.context import cre_context 
 from cre.memset import MemSet, MemSetType 
 from cre.fact import define_fact
-import pytest_benchmark
 from cre.default_ops import Equals
 from cre.transform.flattener import Flattener, flattener_update
 from cre.transform.feature_applier import FeatureApplier
 from numba.core.runtime.nrt import rtsys
 import gc
 from cre.cre_object import copy_cre_obj
+import pytest
 
 
 eq_f8 = Equals(f8, f8)
@@ -164,6 +164,7 @@ def test_fa_mem_leaks():
 
         assert used_bytes()-init_bytes == 0
 
+@pytest.mark.benchmark(group="transform")
 def test_b_feat_apply_100x100(benchmark):
     with cre_context("feat_apply_100x100"):
         benchmark.pedantic(do_feat_apply,setup=setup_feat_apply_100x100, warmup_rounds=1, rounds=10)

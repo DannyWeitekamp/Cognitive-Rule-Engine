@@ -629,6 +629,14 @@ def get_deref_attrs_str(self):
         return self.deref_attrs_str
     return impl
 
+@generated_jit(cache=True)
+@overload(str)
+def var_str(self):
+    if(not isinstance(self,VarTypeClass)): return
+    def impl(self):
+        return f'{self.alias}{get_deref_attrs_str(self)}' 
+    return impl
+
 @njit(cache=True)    
 def get_var_ptr(self):
     return _raw_ptr_from_struct(self)

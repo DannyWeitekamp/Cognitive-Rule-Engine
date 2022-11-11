@@ -15,7 +15,7 @@ from cre.context import cre_context
 from cre.structref import define_structref, define_structref_template, StructRefType
 from cre.utils import (_nullify_attr, new_w_del, _memcpy, _func_from_address, _struct_from_meminfo, _meminfo_from_struct, _cast_structref, cast_structref, decode_idrec, lower_getattr, _struct_from_ptr,  
                        _raw_ptr_from_struct, _raw_ptr_from_struct_incref, _decref_ptr, _incref_ptr, _incref_structref, _decref_structref, _ptr_from_struct_incref, ptr_t, _load_ptr)
-from cre.utils import encode_idrec, assign_to_alias_in_parent_frame, as_typed_list, lower_setattr, _store, _store_safe
+from cre.utils import PrintElapse, encode_idrec, assign_to_alias_in_parent_frame, as_typed_list, lower_setattr, _store, _store_safe
 from cre.subscriber import base_subscriber_fields, BaseSubscriber, BaseSubscriberType, init_base_subscriber, link_downstream
 from cre.vector import VectorType
 from cre.fact import Fact, gen_fact_import_str, get_offsets_from_member_types
@@ -42,15 +42,15 @@ import cre_cfuncs
 
 from numba.extending import intrinsic, overload_method, overload
 
-_head_range_type = np.dtype([('start', np.uint8), ('length', np.uint8)])
-head_range_type = numba.from_dtype(_head_range_type)
+# _head_range_type = np.dtype([('start', np.uint8), ('length', np.uint8)])
+# head_range_type = numba.from_dtype(_head_range_type)
 
 # _arg_infos_type = np.dtype([('type', np.uint8), ('ptr', np.int64)])
 _arg_infos_type = np.dtype([('type', np.int64), ('ptr', np.int64)])
 arg_infos_type = numba.from_dtype(_arg_infos_type)
 
-_op_and_arg_ind = np.dtype([('op_ptr', np.int64), ('arg_ind', np.int64)])
-op_and_arg_ind = numba.from_dtype(_op_and_arg_ind)
+# _op_and_arg_ind = np.dtype([('op_ptr', np.int64), ('arg_ind', np.int64)])
+# op_and_arg_ind = numba.from_dtype(_op_and_arg_ind)
 
 _instr_type = np.dtype([('op_ptr', np.int64), ('return_data_ptr', np.int64), ('size',np.uint32), ('is_ref',np.uint32)])
 # _instr_type = np.dtype([('op_ptr', np.int64), ('return_data_ptr', np.int64), ('size',np.int64), ('is_ref',np.int64)])
@@ -351,31 +351,13 @@ class CREFunc(StructRefProxy):
                 all_const = False
 
         if(all_const):
-            # do_somethin_self(self)
-            # print("REF COUNT", self._meminfo.refcount)
-            # print("START CALL OP")
+            # Assign each argument to it's slot h{i} in the op's memory space
             for i, arg in enumerate(args):
-                # do_somethin_arg(arg)
-                # do_somethin_ind(i)
-                # do_somethin_all(self, i, arg)
-                # print(i,arg)
-                # print("BEF")
-                
-                # if(isinstance(arg, str)):
-                    # set_base_arg_str_val(self, i, arg)
-                # else:
                 impl = set_base_arg_val_impl(arg)
                 impl(self, i, arg)
-                # set_base_arg_val(self, i, arg)
-                arg = None
-            # print("START EXEC")
-            # blargle(self)
+
             cre_func_call_self(self)
             args = None
-            # print("START RETURN", self.return_type)
-            # if(self.return_type is unicode_type):
-            #     return get_str_return_val(self)
-            # else:
             ret_impl = get_str_return_val_impl(self.return_type)
             return ret_impl(self)
         else:
@@ -964,16 +946,29 @@ def reinitialize(self):
 from numba.core.typing.typeof import typeof
 set_base_arg_val_overloads = {}
 def set_base_arg_val_impl(_val):
+    # Get the type of _val or if a typeref was given use that
     nb_val_type = typeof(_val) if not isinstance(_val, types.Type) else _val
-    if(nb_val_type not in set_base_arg_val_overloads):
-        
+
+    # If is a Fact or other object type upcast to CREObjType
+    nb_val_type = CREObjType if isinstance(nb_val_type, CREObjTypeClass) else nb_val_type
+
+    # Compile the implementation if it doesn't exist
+    if(nb_val_type not in set_base_arg_val_overloads):        
         sig = types.void(GenericCREFuncType, i8, nb_val_type)
-        # print("impl",nb_val_type)
-        @njit(sig,cache=True)
-        def _set_base_arg_val(self, i, val):
-            head_infos = self.base_to_head_infos[i]
-            for head_info in head_infos:
-                _store_safe(nb_val_type, head_info.head_data_ptr, val)
+        if(nb_val_type is CREObjType):
+            # Fact case
+            @njit(sig,cache=True)
+            def _set_base_arg_val(self, i, val):
+                head_infos = self.base_to_head_infos[i]
+                for head_info in head_infos:
+                    _store_safe(nb_val_type, head_info.arg_data_ptr, val)
+        else:
+            # Primitive case
+            @njit(sig,cache=True)
+            def _set_base_arg_val(self, i, val):
+                head_infos = self.base_to_head_infos[i]
+                for head_info in head_infos:
+                    _store_safe(nb_val_type, head_info.head_data_ptr, val)
         set_base_arg_val_overloads[nb_val_type] = _set_base_arg_val
     return set_base_arg_val_overloads[nb_val_type]
 
@@ -1186,7 +1181,7 @@ def cre_func_str(self, use_shorthand):
             if(arg_info.type == ARGINFO_VAR):
                 # print("var ptr", arg_info.ptr)
                 var = _struct_from_ptr(GenericVarType, arg_info.ptr)
-                arg_strs.append(var.alias) 
+                arg_strs.append(str(var)) 
             i += 1
 
         while(i >= len(cf.root_arg_infos)):
@@ -1360,8 +1355,10 @@ from numba import njit, void, i8, boolean, objmode
 from numba.extending import lower_cast
 from numba.experimental.function_type import _get_wrapper_address
 from numba.core.errors import NumbaError, NumbaPerformanceWarning
-from cre.utils import _func_from_address, _load_ptr, _obj_cast_codegen, _store_safe, _cast_structref
-from cre.cre_func import CREFunc_method, CREFunc_assign_method_addr, get_cre_func_type, GenericCREFuncType
+from cre.utils import _struct_from_ptr, _func_from_address, _load_ptr, _obj_cast_codegen, _store_safe, _cast_structref
+from cre.cre_func import CREFunc_method, CREFunc_assign_method_addr, get_cre_func_type, GenericCREFuncType, ARGINFO_VAR, GenericVarType
+from cre.memset import resolve_deref_data_ptr
+from cre.fact import BaseFact
 import cloudpickle
 
 
@@ -1397,6 +1394,15 @@ def call_head_ptrs(ptrs):
 @CREFunc_method(cf_type, 'call_self', void(GenericCREFuncType))
 def call_self(_self):
     self = _cast_structref(cf_type, _self)
+    arg_infos = self.root_arg_infos
+    {"".join([f""" 
+    if(arg_infos[{i}].type == ARGINFO_VAR):
+        var = _struct_from_ptr(GenericVarType, arg_infos[{i}].ptr)
+        if(len(var.deref_infos) > 0):
+            data_ptr = resolve_deref_data_ptr(_cast_structref(BaseFact, self.a{i}), var.deref_infos)
+            self.h{i} = _load_ptr(h{i}_type, data_ptr)
+""" for i in range(len(arg_types))])
+    }
     return_val = call({", ".join([f'self.h{i}' for i in range(len(arg_types))])})
     # print("WW", _load_ptr(i8,self.return_data_ptr))
     _store_safe(return_type, self.return_data_ptr, return_val)
@@ -1422,7 +1428,7 @@ CREFunc_assign_method_addr(cf_type, 'check', -1)
 @CREFunc_method(cf_type, 'match', boolean(*arg_types))
 def match({arg_names}):
     {f"if(not check({arg_names})): return 0" if(check_bytes is not None) else ""}
-    return 1 if(call({arg_names})) else 0
+    return {f'1' if isinstance(return_type, StructRef) else f'1 if(call({arg_names})) else 0'}
 
 match_heads = match
 CREFunc_assign_method_addr(cf_type, 'match_heads', match.cre_method_addr)

@@ -291,6 +291,10 @@ class SetChainingPlanner(structref.StructRefProxy):
     def conversion_ops(self):
         return get_conversion_ops(self)
 
+    @property
+    def num_forward_inferences(self):
+        return count_forward_inferences(self)
+
 define_boxing(SetChainingPlannerTypeClass, SetChainingPlanner)
 
 @njit(cache=True)
@@ -650,6 +654,7 @@ def search_for_explanations(self, goal, ops=None, policy=None,
         # Apply the input ops in the forward direction once.
         if(policy is None):
             if(ops is None): raise ValueError("Must provide ops or policy.")
+            # with PrintElapse("forward"):
             forward_chain_one(self, ops, min_stop_depth)
 
         # Policy Case
@@ -924,6 +929,19 @@ def apply_one(op, planner, return_type, arg_types, inds, curr_infer_depth, min_s
 
 
     return impl
+
+
+#--------------------------------
+# : Counting search size
+@njit(cache=True)
+def count_forward_inferences(self):
+    n = 0
+    for recs_at_depth in self.forward_records:
+        for recs in recs_at_depth.values():
+            for rec in recs:
+                if(rec.is_op):
+                    n += np.prod(rec.stride[:,1] - rec.stride[:,0])
+    return n
 
 
 #---------------------------------

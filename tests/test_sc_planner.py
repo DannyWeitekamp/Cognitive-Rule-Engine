@@ -246,6 +246,8 @@ def test_forward_chain_one():
         (30, 'A', 'EE', 30, 'A', 'EE')
 
 
+    print("<<", planner.num_forward_inferences)
+
     forward_chain_one(planner, [Add,Multiply,Concatenate])
 
 
@@ -791,11 +793,11 @@ if __name__ == "__main__":
     # test_apply_multi()
     # test_insert_record()
     # test_join_records_of_type()
-    # test_forward_chain_one()
+    test_forward_chain_one()
     # test_build_explanation_tree()
     # test_search_for_explanations()
     # test_declare_fact()
-    test_mem_leaks(n=10)
+    # test_mem_leaks(n=10)
     # benchmark_apply_multi()
     # benchmark_retrace_back_one()
         # test_apply_multi()

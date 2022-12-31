@@ -1004,7 +1004,7 @@ def indexer_get_fact(self, memset, val):
 
 @njit(cache=True)
 def memset_copy(self):
-    new = memset_ctor(self.context_data)    
+    new = memset_ctor(self.context_data, False)    
 
     #Decref all declared facts and their container vectors 
     for i in range(self.facts.head):

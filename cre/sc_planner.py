@@ -608,7 +608,10 @@ def commute_sensitive_arg_ind_product(op, arg_inds_by_type):
     max_k = k = len(lengths)-1
     while(not done):
         arg_inds = np.array([arg_ind_sets[_k][inds[_k]] for _k in range(len(lengths))])
-        if(not should_commute_skip(arg_inds, op)):
+
+        # No redundant Indicies
+        if(np.sum(inds.reshape(1,-1) == inds.reshape(-1,1)) <= len(inds) and
+           not should_commute_skip(arg_inds, op)):
             out.append(arg_inds)
 
         inds[k] += 1
@@ -664,9 +667,14 @@ def search_for_explanations(self, goal, ops=None, policy=None,
             # print(policy)
             for t in policy[depth-1]:
                 op, arg_set = (t[0], t[1]) if(isinstance(t, tuple)) else (t, None)
+                # print(depth, "::", op, arg_set)
 
                 # If the policy didn't provide any args then try all permutations
-                if(arg_set is None or len(arg_set) == 0):
+                if(arg_set is None or len(arg_set) == 0 or
+                    # TODO: For now also try all combinations if the number of args is too small
+                    #  but in the future can do all vs this.
+                    len(arg_set) < op.nargs
+                    ):
                     depth_policy.append(op)
                     continue
 
@@ -681,7 +689,7 @@ def search_for_explanations(self, goal, ops=None, policy=None,
                     arr = arg_inds_by_type.get(type_name, [])
                     arr.append(arg_ind)
                     arg_inds_by_type[type_name] = arr
-                    
+                
                 # Make Cartesian Product of arg_inds
                 arg_inds = commute_sensitive_arg_ind_product(op, arg_inds_by_type)
                 # arg_inds = list(itertools.product(*[arg_inds_by_type[str(typ)] for typ in op.signature.args]))

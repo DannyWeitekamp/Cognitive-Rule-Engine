@@ -641,6 +641,36 @@ def _struct_get_attr_offset(typingctx, inst, attr):
 def struct_get_attr_offset(inst,attr):
     return _struct_get_attr_offset(inst,literally(attr))
 
+
+@intrinsic
+def _struct_get_attr_ptr(typingctx, inst, attr):
+    '''Get the offset of the attribute 'attr' from the base address of the struct
+        pointed to by structref 'inst'
+    '''
+    attr_literal = attr.literal_value
+    def codegen(context, builder, sig, args):
+        inst_type,_ = sig.args
+        val,_ = args
+
+        if(not isinstance(inst_type, types.StructRef)):
+            #If we get just get the type and not an instance make a dummy instance
+            inst_type = inst_type.instance_type
+            val = context.make_helper(builder, inst_type)._getvalue()
+
+        #Get the base address of the struct data
+        utils = _Utils(context, builder, inst_type)
+        baseptr = utils.get_data_pointer(val)
+        baseptr = builder.ptrtoint(baseptr, cgutils.intp_t)
+
+        #Get the address of member for 'attr'
+        dataval = utils.get_data_struct(val)
+        attrptr = dataval._get_ptr_by_name(attr_literal)
+        attrptr = builder.ptrtoint(attrptr, cgutils.intp_t)
+        return attrptr
+
+    sig = i8(inst,attr)
+    return sig, codegen
+
 @intrinsic
 def _struct_get_data_ptr(typingctx, inst_type):
     '''get the base address of the struct pointed to by structref 'inst' '''
@@ -757,6 +787,22 @@ def _nullify_attr(typingctx, struct_type, _attr):
         builder.store(cgutils.get_null_value(val_type), val_data_ptr)
 
     sig = types.void(struct_type, _attr)
+    return sig, codegen
+
+@intrinsic
+def _attr_is_null(typingctx, struct_type, _attr):
+    # print(struct_type, _attr)
+    attr = _attr.literal_value
+    def codegen(context, builder, sig, args):
+        [st,_] = args
+        utils = _Utils(context, builder, struct_type)
+        dataval = utils.get_data_struct(st)
+        val_data_ptr = dataval._get_ptr_by_name(attr)
+        val_data_ptr = builder.bitcast(val_data_ptr, cgutils.intp_t.as_pointer())
+        val = builder.load(val_data_ptr)
+        return cgutils.is_null(builder,val)
+        
+    sig = types.boolean(struct_type, _attr)
     return sig, codegen
 
 

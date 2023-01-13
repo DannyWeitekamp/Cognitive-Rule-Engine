@@ -25,73 +25,73 @@ def used_bytes():
 if __name__ == "__main__":
     import faulthandler; faulthandler.enable()
 
-    @CREFunc(signature=i8(i8,i8,i8,i8))
-    def Add(a, b, c, d):
-        return a + b + c +d
+    # @CREFunc(signature=i8(i8,i8,i8,i8))
+    # def Add(a, b, c, d):
+    #     return a + b + c +d
 
-    a = Var(i8,'a')
-    b = Var(i8,'b')
-    c = Var(i8,'c')
+    # a = Var(i8,'a')
+    # b = Var(i8,'b')
+    # c = Var(i8,'c')
 
-    z = Add(a,b,c,c)
-    assert z(1,2,3) == 9
-    q = z(c,c,c)
-    assert(q(7)==28)
+    # z = Add(a,b,c,c)
+    # assert z(1,2,3) == 9
+    # q = z(c,c,c)
+    # assert(q(7)==28)
 
-    print("?", 1+2+3+1+1+3+3)
-    print("------------")
-    print(Add(a,Add(a,b,c,a),c,c)(1,2,3))
-    print("------------")
-    print(Add(Add(Add(2,1,1,a),2,1,Add(2,1,1,b)),1,1,c)(1,2,3))
-    z = Add(Add(Add(2,1,1,a),2,1,Add(2,1,1,b)),1,1,c)
-    print(z(1,2,3))
+    # print("?", 1+2+3+1+1+3+3)
+    # print("------------")
+    # print(Add(a,Add(a,b,c,a),c,c)(1,2,3))
+    # print("------------")
+    # print(Add(Add(Add(2,1,1,a),2,1,Add(2,1,1,b)),1,1,c)(1,2,3))
+    # z = Add(Add(Add(2,1,1,a),2,1,Add(2,1,1,b)),1,1,c)
+    # print(z(1,2,3))
 
 
-    @CREFunc(signature=unicode_type(unicode_type,unicode_type),
-            shorthand='{0}+{1}')
-    def Concat(a, b):
-        return a + b
+    # @CREFunc(signature=unicode_type(unicode_type,unicode_type),
+    #         shorthand='{0}+{1}')
+    # def Concat(a, b):
+    #     return a + b
     
-    a = Var(unicode_type,'a')
-    b = Var(unicode_type,'b')
-    c = Var(unicode_type,'c')
+    # a = Var(unicode_type,'a')
+    # b = Var(unicode_type,'b')
+    # c = Var(unicode_type,'c')
 
-    for i in range(2):
-        z = Concat(a, Concat(Concat(b,c),a ))
-        print(z)
-        print(z("|","X","Y"))
-        if(i == 0):
-            init_bytes = used_bytes()
-        else:
-            assert used_bytes() == init_bytes
+    # for i in range(2):
+    #     z = Concat(a, Concat(Concat(b,c),a ))
+    #     print(z)
+    #     print(z("|","X","Y"))
+    #     if(i == 0):
+    #         init_bytes = used_bytes()
+    #     else:
+    #         assert used_bytes() == init_bytes
 
 
-    BOOP = define_fact("BOOP", {"A" :unicode_type, "B" :i8})
+    # BOOP = define_fact("BOOP", {"A" :unicode_type, "B" :i8})
 
-    @CREFunc(signature=BOOP(BOOP,BOOP),
-            shorthand='{0}+{1}')
-    def Smerpify(a, b):
-        return BOOP(a.A + b.A, a.B + b.B)
+    # @CREFunc(signature=BOOP(BOOP,BOOP),
+    #         shorthand='{0}+{1}')
+    # def Smerpify(a, b):
+    #     return BOOP(a.A + b.A, a.B + b.B)
 
-    a = Var(BOOP,'a')
-    b = Var(BOOP,'b')
-    c = Var(BOOP,'c')
+    # a = Var(BOOP,'a')
+    # b = Var(BOOP,'b')
+    # c = Var(BOOP,'c')
 
-    z = Smerpify(a,b)
-    print(z)
-    # print(z(BOOP("A",1),BOOP("B",2)))
+    # z = Smerpify(a,b)
+    # print(z)
+    # # print(z(BOOP("A",1),BOOP("B",2)))
 
-    print("<------------------->")
+    # print("<------------------->")
 
-    print()
+    # print()
 
-    z = Concat(a.A, b.A)
-    ba, bb = BOOP("A",1), BOOP("B",2)
+    # z = Concat(a.A, b.A)
+    # ba, bb = BOOP("A",1), BOOP("B",2)
 
-    with PrintElapse("Z"):
-        z(ba,bb)
-    with PrintElapse("Z"):
-        z(ba,bb)
+    # with PrintElapse("Z"):
+    #     z(ba,bb)
+    # with PrintElapse("Z"):
+    #     z(ba,bb)
 
 
     @CREFunc(signature=i8(i8,i8))

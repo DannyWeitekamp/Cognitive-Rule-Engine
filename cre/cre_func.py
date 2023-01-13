@@ -14,7 +14,8 @@ from cre.caching import gen_import_str, unique_hash,import_from_cached, source_t
 from cre.context import cre_context
 from cre.structref import define_structref, define_structref_template, StructRefType
 from cre.utils import (_nullify_attr, new_w_del, _memcpy, _func_from_address, _struct_from_meminfo, _meminfo_from_struct, _cast_structref, cast_structref, decode_idrec, lower_getattr, _struct_from_ptr,  
-                       _raw_ptr_from_struct, _raw_ptr_from_struct_incref, _decref_ptr, _incref_ptr, _incref_structref, _decref_structref, _ptr_from_struct_incref, ptr_t, _load_ptr)
+                       _raw_ptr_from_struct, _raw_ptr_from_struct_incref, _decref_ptr, _incref_ptr, _incref_structref, _decref_structref, _ptr_from_struct_incref, ptr_t, _load_ptr,
+                       _obj_cast_codegen)
 from cre.utils import PrintElapse, encode_idrec, assign_to_alias_in_parent_frame, as_typed_list, lower_setattr, _store, _store_safe
 from cre.subscriber import base_subscriber_fields, BaseSubscriber, BaseSubscriberType, init_base_subscriber, link_downstream
 from cre.vector import VectorType
@@ -100,6 +101,9 @@ def CREFunc_method(cf_type, fn_name, sig, on_error='error'):
         addr = _get_wrapper_address(dispatcher, sig)
         CREFunc_assign_method_addr(cf_type, fn_name, addr)
         dispatcher.cre_method_addr = addr
+        if(not hasattr(cf_type,'dispatchers')):
+            cf_type.dispatchers = {}    
+        cf_type.dispatchers[fn_name] = dispatcher
         return dispatcher
     return wrapper
 
@@ -203,32 +207,71 @@ cre_func_fields_dict = {
 }
 
 @structref.register
-class CREFuncTypeClass(CREObjTypeClass):
+class CREFuncTypeClass(types.Callable, CREObjTypeClass):
     t_id = T_ID_OP
 
-    def __new__(cls,fields, func_name="GenericCREFunc", return_type=None, arg_types=None):
+    def __new__(cls, return_type=None, arg_types=None, is_composed=False, name="GenericCREFunc", long_hash=None):
         self = super().__new__(cls)
-        self.func_name = func_name
+
+        if(name == "GenericCREFunc"):
+            field_dict = {**cre_func_fields_dict}
+        else:
+            arg_fields = {}
+            for i,t in enumerate(arg_types):
+                arg_fields[f'a{i}'] = CREObjType
+                arg_fields[f'h{i}'] = t
+
+            N_MINFOS = 1+len(arg_types)*3
+
+            field_dict = {**cre_func_fields_dict,
+                'return_val' : return_type,
+                **arg_fields,
+                **{f'ref{i}' : CREObjType for i in range(len(arg_types))},
+                'chr_mbrs_infos' : UniTuple(member_info_type,N_MINFOS),
+                # 'name' : types.literal(name),
+                # 'return_type' : types.TypeRef(return_type),
+                # 'arg_types' : types.TypeRef(types.Tuple(arg_types)),
+                # 'head_chr_mbrs_infos' : UniTuple(member_info_type,len(arg_types)),
+            }
+        self.func_name = name
         self.return_type = return_type
         self.arg_types = arg_types
-        return self
-    def preprocess_fields(self, fields):
+        self.is_composed = is_composed
         self.t_id = T_ID_OP
-        self._field_dict = fields if isinstance(fields,dict) else {k:v for k,v in fields}
-        # self.return_type = self._field_dict['return_type']
-        # self.arg_types = self._field_dict['arg_types']
-        # self.func_name = "GenericCREFunc"
-        return fields
+        self.long_hash = long_hash
+        self._field_dict = field_dict
+        return self
+
+    def __init__(self,*args,**kwargs):
+        types.StructRef.__init__(self,[(k,v) for k,v in self._field_dict.items()])
+        self.name = repr(self)
+
+
+    # Impl these 3 funcs to subclass types.Callable so can @overload_method('__call__')
+    def get_call_type(self, context, args, kws):
+        return self.return_type(args)
+
+    def get_call_signatures(self):
+        return [self.return_type(self.arg_types)]
+
+    def get_impl_key(self, sig):
+        return (type(self), '__call__')
+
+    
 
     def __str__(self):
-        if(self.return_type is not types.Any):
-            return f"CREFuncType({self.func_name!r}, {self.arg_types}->{self.return_type})"
+        if(self.return_type is not None):
+            arg_s = str(self.arg_types) if self.arg_types is not None else "(...)"
+            return f"{self.func_name}{arg_s}->{self.return_type}{':c' if self.is_composed else ''}"
         else:
             return f"{self.func_name}"
 
     def __repr__(self):
-        if(self.return_type is not types.Any):
-            return f"CREFuncType(name={self.func_name!r}, arg_types={self.arg_types}, return_type={self.return_type})"
+        if(self.return_type is not None):
+            hsh = f"_{self.long_hash}" if self.long_hash is not None else ""
+            arg_s = str(self.arg_types) if self.arg_types is not None else "(...)"
+            return f"CREFunc[{self.func_name}{hsh}{arg_s}->{self.return_type}{':c' if self.is_composed else ''}]"
+            # return f"CREFunc(name={self.func_name!r}, arg_types={self.arg_types}, return_type={self.return_type}, is_composed={self.is_composed})"
         else:
             return f"{self.func_name}"
 
@@ -251,33 +294,21 @@ class CREFuncTypeClass(CREObjTypeClass):
     #     return f"{self.name}({self.arg_types}->{self.return_type})"
 
 
-GenericCREFuncType = CREFuncTypeClass(cre_func_fields_dict)
+GenericCREFuncType = CREFuncTypeClass()
+
+@lower_cast(CREFuncTypeClass, GenericCREFuncType)
+def upcast(context, builder, fromty, toty, val):
+    return _obj_cast_codegen(context, builder, val, fromty, toty,incref=False)
 # print(GenericCREFuncType)
 
-def get_cre_func_type(name, return_type, arg_types):
-    # print(return_type, arg_types)
-    arg_fields = {}
-    for i,t in enumerate(arg_types):
-        arg_fields[f'a{i}'] = CREObjType
-        arg_fields[f'h{i}'] = t
-
-    N_MINFOS = 1+len(arg_types)*3
-
-    field_dict = {**cre_func_fields_dict,
-        'return_val' : return_type,
-        **arg_fields,
-        **{f'ref{i}' : CREObjType for i in range(len(arg_types))},
-        'chr_mbrs_infos' : UniTuple(member_info_type,N_MINFOS),
-        # 'name' : types.literal(name),
-        # 'return_type' : types.TypeRef(return_type),
-        # 'arg_types' : types.TypeRef(types.Tuple(arg_types)),
-        # 'head_chr_mbrs_infos' : UniTuple(member_info_type,len(arg_types)),
-    }
-    cf_type = CREFuncTypeClass(field_dict)
-    cf_type.func_name = name
-    cf_type.return_type = return_type
-    cf_type.arg_types = tuple(arg_types)
-    return cf_type
+# def get_cre_func_type(name, return_type, arg_types, is_composed=False):
+#     # print(return_type, arg_types)
+    
+#     cf_type = CREFuncTypeClass(field_dict, name, return_type, arg_types, is_composed)
+#     cf_type.func_name = name
+#     cf_type.return_type = return_type
+#     cf_type.arg_types = tuple(arg_types)
+#     return cf_type
 
 # -----------------------------------------------------------------------
 # : CREFunc Proxy Class
@@ -304,7 +335,7 @@ class CREFunc(StructRefProxy):
             n_args = len(members['arg_types'])
             expr_template = f"{name}({', '.join([f'{{{i}}}' for i in range(n_args)])})"
             shorthand_template = members.get('shorthand',expr_template)
-            print("shorthand_template:", shorthand_template)
+            # print("shorthand_template:", shorthand_template)
 
             cre_func = cre_func_new(
                 cf_type,
@@ -325,6 +356,9 @@ class CREFunc(StructRefProxy):
                 set_base_arg_val_impl(typ)
                 set_const_arg_impl(typ)
             reinitialize(cre_func)
+
+            cre_func._type = cf_type
+            # print(cre_func.__dict__.keys())
 
             # This prevent _vars from freeing until after reinitialize
             _vars = None 
@@ -380,6 +414,8 @@ class CREFunc(StructRefProxy):
                     impl(new_cf, i, arg)
                     # print("AF")
             reinitialize(new_cf)
+
+            new_cf._type = CREFuncTypeClass(self.return_type,None,True)
             args = None
             return new_cf
 
@@ -450,7 +486,7 @@ def cre_func_assign_method_table(cf):
         f"{prefix}_call_self",
     )
     def impl(cf):
-        # cf.call_heads_addr = _get_global_fn_addr(method_names[0])
+        cf.call_heads_addr = _get_global_fn_addr(method_names[0])
         # cf.call_head_ptrs_addr = _get_global_fn_addr(method_names[1])
         # cf.call_addr = _get_global_fn_addr(method_names[2])
         # cf.match_heads_addr = _get_global_fn_addr(method_names[3])
@@ -477,7 +513,7 @@ ll.add_symbol("CRE_cf_del_inject", cf_del_inject_addr)
 
 
 
-head_info_arr = head_info_type[::1]
+head_info_arr_type = head_info_type[::1]
 
 @generated_jit(cache=True, nopython=True)
 def cre_func_new(cf_type, n_args, name, expr_template, shorthand_template):
@@ -506,7 +542,7 @@ def cre_func_new(cf_type, n_args, name, expr_template, shorthand_template):
         cf.return_data_ptr = return_data_ptr
 
         self_ptr = _raw_ptr_from_struct(cf)
-        cf.base_to_head_infos = List.empty_list(head_info_arr)
+        cf.base_to_head_infos = List.empty_list(head_info_arr_type)
         cf.prereq_instrs = np.zeros(0, dtype=instr_type)
         for i in range(n_args):
             head_infos = np.zeros(1,dtype=head_info_type)
@@ -547,7 +583,7 @@ def cre_func_copy(cf):
     cpy_delta = cpy_ptr-cf_ptr
 
     # Make a copy of base_to_head_infos
-    base_to_head_infos = List.empty_list(head_info_arr)
+    base_to_head_infos = List.empty_list(head_info_arr_type)
     for head_infos in cf.base_to_head_infos:
         hi_arr = np.empty(len(head_infos),head_info_type)
         for i in range(len(head_infos)):
@@ -813,7 +849,7 @@ def reinitialize(self):
 
     # print([len(x) for x in base_var_map.values()])
     c = 0
-    base_to_head_infos = List.empty_list(head_info_arr)
+    base_to_head_infos = List.empty_list(head_info_arr_type)
     for base_ptr, head_infos in base_var_map.items():
         # print("++L", len(head_infos))
         hi_arr = np.empty(len(head_infos),head_info_type)
@@ -1157,6 +1193,55 @@ def get_str_return_val_impl(_val):
 
 
 #-----------------------------------------------------------------
+# : CREFunc Overload __call__
+@overload_method(CREFuncTypeClass, '__call__')#, strict=False)
+def overload_call(cf, *args):
+    # print(cf.__dict__.keys())
+    # print("overload_call:", cf, args)
+    # print(cf.name)
+    cf_type = cf
+    if(not hasattr(cf_type, 'return_type')):
+        raise ValueError("Cannot call CREFunc without return_type")
+    return_type = cf_type.return_type
+    if(cf_type.is_composed):
+        if(len(args) > 0 and isinstance(args[0],types.BaseTuple)):
+            print("isinstance tup")
+            args = tuple(x for x in args[0])
+
+        print("args", args)
+        set_base_impls = tuple(set_base_arg_val_impl(a) for a in args)
+        print(set_base_impls)
+        set_base = set_base_impls[0]
+        ret_impl = get_str_return_val_impl(cf_type.return_type)
+        def impl(cf,*args):
+            # i = 0
+            # for set_base in literal_unroll(set_base_impls):
+                # set_base(cf, i, args[i])
+                # i += 1
+            set_base(cf, 0, args[0])
+            set_base(cf, 1, args[1])
+            cre_func_call_self(cf)
+            return ret_impl(cf)
+
+    elif(hasattr(cf_type,'dispatchers') and 'call' in cf_type.dispatchers):
+        call = cf_type.dispatchers['call']
+        # print(call)
+        def impl(cf, *args):
+            return call(*args)
+            # return args[0] + args[1]
+            # return i8(a + b)
+    else:
+        fn_type = types.FunctionType(cf_type.signature)
+        def impl(cf, *args):
+            f = _func_from_address(fn_type, cf.call_heads_addr)
+            return f(*args)
+
+            
+    # print(impl)
+    return impl
+
+
+#-----------------------------------------------------------------
 # : cre_func_str()
 
 # cf_ind_lst_tup_t = Tuple((GenericCREFuncType,i8,ListType(unicode_type)))
@@ -1317,7 +1402,7 @@ def define_CREFunc(name, members):
     l = import_from_cached(name, long_hash, to_import)
 
     typ = l['cf_type']
-    typ.name = f'{name}_{long_hash}'
+    # typ.name = f'{name}_{long_hash}'
     typ.func_name = name
     # print("??", typ.name)
     typ.call = l['call']
@@ -1356,7 +1441,7 @@ from numba.extending import lower_cast
 from numba.experimental.function_type import _get_wrapper_address
 from numba.core.errors import NumbaError, NumbaPerformanceWarning
 from cre.utils import _struct_from_ptr, _func_from_address, _load_ptr, _obj_cast_codegen, _store_safe, _cast_structref
-from cre.cre_func import CREFunc_method, CREFunc_assign_method_addr, get_cre_func_type, GenericCREFuncType, ARGINFO_VAR, GenericVarType
+from cre.cre_func import CREFunc_method, CREFunc_assign_method_addr, CREFuncTypeClass, GenericCREFuncType, ARGINFO_VAR, GenericVarType
 from cre.memset import resolve_deref_data_ptr
 from cre.fact import BaseFact
 import cloudpickle
@@ -1364,8 +1449,7 @@ import cloudpickle
 
 return_type = cloudpickle.loads({cloudpickle.dumps(return_type)})
 arg_types = cloudpickle.loads({cloudpickle.dumps(arg_types)})
-cf_type = get_cre_func_type({name!r},return_type, arg_types)
-cf_type.long_hash = {long_hash!r}
+cf_type = CREFuncTypeClass(return_type, arg_types,is_composed=False, name={name!r}, long_hash={long_hash!r})
 
 @lower_cast(cf_type, GenericCREFuncType)
 def upcast(context, builder, fromty, toty, val):

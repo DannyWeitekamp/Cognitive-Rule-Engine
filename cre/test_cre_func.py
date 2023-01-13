@@ -1,5 +1,5 @@
 from numba import generated_jit, njit, i8
-from numba.types import unicode_type
+from numba.types import unicode_type, FunctionType
 from cre.cre_func import CREFunc
 from cre.cre_object import _get_chr_mbrs_infos_from_attrs, _iter_mbr_infos
 from cre.fact import define_fact
@@ -28,6 +28,7 @@ if __name__ == "__main__":
     @CREFunc(signature=i8(i8,i8,i8,i8))
     def Add(a, b, c, d):
         return a + b + c +d
+
     a = Var(i8,'a')
     b = Var(i8,'b')
     c = Var(i8,'c')
@@ -91,6 +92,115 @@ if __name__ == "__main__":
         z(ba,bb)
     with PrintElapse("Z"):
         z(ba,bb)
+
+
+    @CREFunc(signature=i8(i8,i8))
+    def Add(a, b):
+        return a + b
+
+    from cre.cre_func import (set_base_arg_val_impl, _func_from_address,
+        cre_func_call_self, get_str_return_val_impl, call_self_f_type)
+
+    @njit(cache=True)
+    def baz(op):
+        z = 0
+        for i in range(1000):
+            for j in range(1000):
+                z += op(i, j)
+        return z
+
+    a = Var(i8,'a')
+    b = Var(i8,'b')
+    comp = Add(Add(0,b),a)
+
+    print(Add._type.name)
+    print(comp._type.name)
+
+    baz(Add)
+    baz(comp)
+
+    with PrintElapse("baz"):
+        print(baz(Add))
+
+    with PrintElapse("baz comp"):
+        print(baz(comp))
+
+    # _func_from_address(call_self_f_type, self.call_self_addr)(self)
+
+    i8_ft = FunctionType(i8(i8,i8))
+
+    set_base = set_base_arg_val_impl(0)
+    ret_impl = get_str_return_val_impl(i8)
+
+
+    @njit(cache=True)
+    def foo(op):
+        z = 0
+        for i in range(1000):
+            for j in range(1000):
+                set_base(op, 0, i)
+                set_base(op, 1, j)
+                cre_func_call_self(op)
+                z += ret_impl(op)
+        return z
+
+    @njit(cache=True)
+    def foo_fast(op):
+        z = 0
+        # f = _func_from_address(i8_ft, op.call_heads_addr)
+        for i in range(1000):
+            for j in range(1000):
+                f = _func_from_address(i8_ft,op.call_heads_addr)
+                z += f(i,j)
+                
+        return z
+
+    @njit(i8(i8,i8), cache=True)
+    def njit_add(a,b):
+        return a + b
+
+    @njit(i8(FunctionType(i8(i8,i8))), cache=True)
+    def bar(op):
+        z = 0
+        for i in range(1000):
+            for j in range(1000):
+                z += op(i, j)
+        return z
+
+    @njit(i8(), cache=True)
+    def inline():
+        z = 0
+        for i in range(1000):
+            for j in range(1000):
+                z += njit_add(i, j)
+        return z
+
+    foo(Add)
+    foo_fast(Add)
+    bar(njit_add)
+    inline()
+
+    with PrintElapse("foo"):
+        foo(Add)
+
+    with PrintElapse("foo fast"):
+        foo_fast(Add)
+
+    with PrintElapse("foo python"):
+        foo.py_func(Add)
+        
+
+    with PrintElapse("bar"):
+        bar(njit_add)
+
+    with PrintElapse("bar  python"):
+        bar.py_func(njit_add)
+
+
+    with PrintElapse("inline"):
+        inline()
+
+
 
 
     

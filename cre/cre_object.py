@@ -115,7 +115,7 @@ def impl_cre_obj_upcast(context, builder, fromty, toty, val):
     return _obj_cast_codegen(context, builder, val, fromty, toty,incref=False)
 
 class CREObjTypeClass(CastFriendlyMixin, types.StructRef):
-    def __init__(self, fields):
+    def __init__(self, fields,*args,**kwargs):
         if(isinstance(fields,dict)): fields = [(k,v) for k,v in fields.items()]
         types.StructRef.__init__(self,fields)
 

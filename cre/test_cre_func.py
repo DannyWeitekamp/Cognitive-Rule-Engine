@@ -11,87 +11,103 @@ def used_bytes():
     stats = rtsys.get_allocation_stats()
     return stats.alloc-stats.free
 
-# BOOP = define_fact("BOOP", {"A" :i8, "B" :i8})
+
+def test_numerical():
+    @CREFunc(signature=i8(i8,i8,i8,i8))
+    def Add(a, b, c, d):
+        return a + b + c +d
+
+    a = Var(i8,'a')
+    b = Var(i8,'b')
+    c = Var(i8,'c')
+
+    z = Add(a,b,c,c)
+    # print("<<", str(z))
+    assert z(1,2,3) == 9
+    assert str(z) == "Add(a, b, c, c)"
+    q = z(c,c,c)
+    # print("<<", q)
+    assert(q(7)==28)
+    assert str(q) == "Add(c, c, c, c)"
+
+    assert Add(a,Add(a,b,c,a),c,c)(1,2,3) == 14
 
 
-# @njit
-# def foo():
-#     b = BOOP(0,1)
-#     return _get_chr_mbrs_infos_from_attrs(b, ("A",))
+    assert Add(Add(Add(2,1,1,a),2,1,Add(2,1,1,b)),1,1,c)(1,2,3) == 19
 
-# print(foo())
+    z = Add(Add(Add(2,1,1,a),2,1,Add(2,1,1,b)),1,1,c)
+    assert str(z) == "Add((Add((Add(2, 1, 1, a)), 2, 1, (Add(2, 1, 1, b)))), 1, 1, c)"
+
+
+def test_string():
+    @CREFunc(signature=unicode_type(unicode_type,unicode_type),
+            shorthand='{0}+{1}')
+    def Concat(a, b):
+        return a + b
+    
+    a = Var(unicode_type,'a')
+    b = Var(unicode_type,'b')
+    c = Var(unicode_type,'c')
+
+    for i in range(2):
+        z = Concat(a, Concat(Concat(b,c),a ))
+
+        assert z("|","X","Y") == "|XY|"
+        assert str(z) == "a+((b+c)+a)"
+
+        if(i == 0):
+            init_bytes = used_bytes()
+        else:
+            assert used_bytes() == init_bytes
+
+
+def test_obj():
+    print("--START OBJ--")
+    BOOP = define_fact("BOOP", {"A" :unicode_type, "B" :i8})
+
+    @CREFunc(signature=unicode_type(unicode_type,unicode_type),
+            shorthand='{0}+{1}')
+    def Concat(a, b):
+        return a + b
+
+    @CREFunc(signature=BOOP(BOOP,BOOP),
+            shorthand='{0}+{1}')
+    def CatBOOPs(a, b):
+        return BOOP(a.A + b.A, a.B + b.B)
+
+    a = Var(BOOP,'a')
+    b = Var(BOOP,'b')
+    c = Var(BOOP,'c')
+    
+    for i in range(5):
+        ba, bb = BOOP("A",1), BOOP("B",2)
+
+        z = Concat(a.A, b.A)
+
+        assert z(ba,bb) == "AB"
+        assert str(z) == "a.A+b.A"
+
+        zboop = CatBOOPs(a,b)
+
+        assert zboop(ba,bb) == BOOP(A="AB", B=3)
+        assert str(zboop) == "a+b"
+
+        z = None
+        zboop = None
+        if(i == 0):
+            init_bytes = used_bytes()
+        else:
+            assert used_bytes() == init_bytes
+            # print(used_bytes(), init_bytes)
+
 
 
 if __name__ == "__main__":
     import faulthandler; faulthandler.enable()
 
-    # @CREFunc(signature=i8(i8,i8,i8,i8))
-    # def Add(a, b, c, d):
-    #     return a + b + c +d
-
-    # a = Var(i8,'a')
-    # b = Var(i8,'b')
-    # c = Var(i8,'c')
-
-    # z = Add(a,b,c,c)
-    # assert z(1,2,3) == 9
-    # q = z(c,c,c)
-    # assert(q(7)==28)
-
-    # print("?", 1+2+3+1+1+3+3)
-    # print("------------")
-    # print(Add(a,Add(a,b,c,a),c,c)(1,2,3))
-    # print("------------")
-    # print(Add(Add(Add(2,1,1,a),2,1,Add(2,1,1,b)),1,1,c)(1,2,3))
-    # z = Add(Add(Add(2,1,1,a),2,1,Add(2,1,1,b)),1,1,c)
-    # print(z(1,2,3))
-
-
-    # @CREFunc(signature=unicode_type(unicode_type,unicode_type),
-    #         shorthand='{0}+{1}')
-    # def Concat(a, b):
-    #     return a + b
-    
-    # a = Var(unicode_type,'a')
-    # b = Var(unicode_type,'b')
-    # c = Var(unicode_type,'c')
-
-    # for i in range(2):
-    #     z = Concat(a, Concat(Concat(b,c),a ))
-    #     print(z)
-    #     print(z("|","X","Y"))
-    #     if(i == 0):
-    #         init_bytes = used_bytes()
-    #     else:
-    #         assert used_bytes() == init_bytes
-
-
-    # BOOP = define_fact("BOOP", {"A" :unicode_type, "B" :i8})
-
-    # @CREFunc(signature=BOOP(BOOP,BOOP),
-    #         shorthand='{0}+{1}')
-    # def Smerpify(a, b):
-    #     return BOOP(a.A + b.A, a.B + b.B)
-
-    # a = Var(BOOP,'a')
-    # b = Var(BOOP,'b')
-    # c = Var(BOOP,'c')
-
-    # z = Smerpify(a,b)
-    # print(z)
-    # # print(z(BOOP("A",1),BOOP("B",2)))
-
-    # print("<------------------->")
-
-    # print()
-
-    # z = Concat(a.A, b.A)
-    # ba, bb = BOOP("A",1), BOOP("B",2)
-
-    # with PrintElapse("Z"):
-    #     z(ba,bb)
-    # with PrintElapse("Z"):
-    #     z(ba,bb)
+    test_numerical()
+    test_string()
+    test_obj()
 
 
     @CREFunc(signature=i8(i8,i8))
@@ -101,11 +117,14 @@ if __name__ == "__main__":
     from cre.cre_func import (set_base_arg_val_impl, _func_from_address,
         cre_func_call_self, get_str_return_val_impl, call_self_f_type)
 
+
+    N = 100
+
     @njit(cache=True)
     def baz(op):
         z = 0
-        for i in range(1000):
-            for j in range(1000):
+        for i in range(N):
+            for j in range(N):
                 z += op(i, j)
         return z
 
@@ -136,8 +155,8 @@ if __name__ == "__main__":
     @njit(cache=True)
     def foo(op):
         z = 0
-        for i in range(1000):
-            for j in range(1000):
+        for i in range(N):
+            for j in range(N):
                 set_base(op, 0, i)
                 set_base(op, 1, j)
                 cre_func_call_self(op)
@@ -148,8 +167,8 @@ if __name__ == "__main__":
     def foo_fast(op):
         z = 0
         # f = _func_from_address(i8_ft, op.call_heads_addr)
-        for i in range(1000):
-            for j in range(1000):
+        for i in range(N):
+            for j in range(N):
                 f = _func_from_address(i8_ft,op.call_heads_addr)
                 z += f(i,j)
                 
@@ -162,16 +181,16 @@ if __name__ == "__main__":
     @njit(i8(FunctionType(i8(i8,i8))), cache=True)
     def bar(op):
         z = 0
-        for i in range(1000):
-            for j in range(1000):
+        for i in range(N):
+            for j in range(N):
                 z += op(i, j)
         return z
 
     @njit(i8(), cache=True)
     def inline():
         z = 0
-        for i in range(1000):
-            for j in range(1000):
+        for i in range(N):
+            for j in range(N):
                 z += njit_add(i, j)
         return z
 

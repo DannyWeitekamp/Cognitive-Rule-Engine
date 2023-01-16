@@ -118,6 +118,7 @@ class CREObjTypeClass(CastFriendlyMixin, types.StructRef):
     def __init__(self, fields,*args,**kwargs):
         if(isinstance(fields,dict)): fields = [(k,v) for k,v in fields.items()]
         types.StructRef.__init__(self,fields)
+        self.name = f'CREObjType'
 
     def __init_subclass__(cls, **kwargs):
         super().__init_subclass__(**kwargs)
@@ -126,7 +127,12 @@ class CREObjTypeClass(CastFriendlyMixin, types.StructRef):
         
 
     def __str__(self):
-        return f"cre.CREObjType"
+        return f"CREObjType"
+
+    def __repr__(self):
+        return f"CREObjType"
+
+
 
     def hrepr():
         '''A human-readable repr for cre objects'''

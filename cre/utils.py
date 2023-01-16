@@ -786,6 +786,9 @@ def _nullify_attr(typingctx, struct_type, _attr):
         val_type = context.get_value_type(val_type)
         builder.store(cgutils.get_null_value(val_type), val_data_ptr)
 
+        # if context.enable_nrt:
+        #     context.nrt.decref(builder, val_type, dataval)
+
     sig = types.void(struct_type, _attr)
     return sig, codegen
 

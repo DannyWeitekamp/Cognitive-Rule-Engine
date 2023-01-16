@@ -173,9 +173,8 @@ class Fact(CREObjTypeClass):
                     d_spec[attr] = attr_spec_copy
             d['spec'] = d_spec
             # print(d)
-
-        
-        # if('spec' in d): del d['spec']
+        if('_code' in d): del d['_code']
+                    
         return d
 
     def __setstate__(self, d):

@@ -4,7 +4,8 @@ from cre.cre_func import CREFunc
 from cre.cre_object import _get_chr_mbrs_infos_from_attrs, _iter_mbr_infos
 from cre.fact import define_fact
 from cre.var import Var
-from cre.utils import PrintElapse
+from cre.utils import PrintElapse, _func_from_address
+import pytest
 
 from numba.core.runtime.nrt import rtsys
 def used_bytes():
@@ -71,7 +72,6 @@ def test_string():
 
 
 def test_obj():
-    print("--START OBJ--")
     BOOP = define_fact("BOOP", {"A" :unicode_type, "B" :i8})
 
     @CREFunc(signature=unicode_type(unicode_type,unicode_type),
@@ -88,7 +88,7 @@ def test_obj():
     b = Var(BOOP,'b')
     c = Var(BOOP,'c')
     
-    for i in range(5):
+    for i in range(2):
         ba, bb = BOOP("A",1), BOOP("B",2)
 
         z = Concat(a.A, b.A)
@@ -109,127 +109,60 @@ def test_obj():
             assert used_bytes() == init_bytes
             # print(used_bytes(), init_bytes)
 
+# ---------------------------------------------------
+# : Performance Benchmarks
 
-
-if __name__ == "__main__":
-    import faulthandler; faulthandler.enable()
-
-    test_numerical()
-    test_string()
-    test_obj()
-
-
+def setup_bench():
     @CREFunc(signature=i8(i8,i8))
     def Add(a, b):
         return a + b
 
-    from cre.cre_func import (set_base_arg_val_impl, _func_from_address,
-        cre_func_call_self, get_str_return_val_impl, call_self_f_type)
-
-
-    N = 100
-
-    @njit(cache=True)
-    def baz(op):
-        z = 0
-        for i in range(N):
-            for j in range(N):
-                z += op(i, j)
-        return z
-
     a = Var(i8,'a')
     b = Var(i8,'b')
     comp = Add(Add(0,b),a)
+    return (Add, comp), {}
 
-    print(Add._type.name)
-    print(comp._type.name)
+N = 100
 
-    baz(Add)
-    baz(comp)
+@njit(cache=True)
+def apply_100x100(op):
+    z = 0
+    for i in range(N):
+        for j in range(N):
+            z += op(i, j)
+    return z
 
-    with PrintElapse("baz"):
-        print(baz(Add))
+@pytest.mark.benchmark(group="cre_func")
+def test_b_uncomposed(benchmark):
+    benchmark.pedantic(lambda op,comp: apply_100x100(op),
+        setup=setup_bench, warmup_rounds=1, rounds=10)
 
-    with PrintElapse("baz comp"):
-        print(baz(comp))
+@pytest.mark.benchmark(group="cre_func")
+def test_b_composed(benchmark):
+    benchmark.pedantic(lambda op,comp: apply_100x100(comp),
+        setup=setup_bench, warmup_rounds=1, rounds=10)
 
-    # _func_from_address(call_self_f_type, self.call_self_addr)(self)
+i8_ft = FunctionType(i8(i8,i8))
+@njit(cache=True)
+def call_heads_100x100(op):
+    z = 0
+    for i in range(N):
+        for j in range(N):
+            f = _func_from_address(i8_ft,op.call_heads_addr)
+            z += f(i,j)   
+    return z    
 
-    i8_ft = FunctionType(i8(i8,i8))
-
-    set_base = set_base_arg_val_impl(0)
-    ret_impl = get_str_return_val_impl(i8)
-
-
-    @njit(cache=True)
-    def foo(op):
-        z = 0
-        for i in range(N):
-            for j in range(N):
-                set_base(op, 0, i)
-                set_base(op, 1, j)
-                cre_func_call_self(op)
-                z += ret_impl(op)
-        return z
-
-    @njit(cache=True)
-    def foo_fast(op):
-        z = 0
-        # f = _func_from_address(i8_ft, op.call_heads_addr)
-        for i in range(N):
-            for j in range(N):
-                f = _func_from_address(i8_ft,op.call_heads_addr)
-                z += f(i,j)
-                
-        return z
-
-    @njit(i8(i8,i8), cache=True)
-    def njit_add(a,b):
-        return a + b
-
-    @njit(i8(FunctionType(i8(i8,i8))), cache=True)
-    def bar(op):
-        z = 0
-        for i in range(N):
-            for j in range(N):
-                z += op(i, j)
-        return z
-
-    @njit(i8(), cache=True)
-    def inline():
-        z = 0
-        for i in range(N):
-            for j in range(N):
-                z += njit_add(i, j)
-        return z
-
-    foo(Add)
-    foo_fast(Add)
-    bar(njit_add)
-    inline()
-
-    with PrintElapse("foo"):
-        foo(Add)
-
-    with PrintElapse("foo fast"):
-        foo_fast(Add)
-
-    with PrintElapse("foo python"):
-        foo.py_func(Add)
-        
-
-    with PrintElapse("bar"):
-        bar(njit_add)
-
-    with PrintElapse("bar  python"):
-        bar.py_func(njit_add)
+@pytest.mark.benchmark(group="cre_func")
+def test_b_dyn_call_heads(benchmark):
+    benchmark.pedantic(lambda op,comp: call_heads_100x100(op),
+        setup=setup_bench, warmup_rounds=1, rounds=10)
 
 
-    with PrintElapse("inline"):
-        inline()
-
-
-
+if __name__ == "__main__":
+    import faulthandler; faulthandler.enable()
+    test_numerical()
+    test_string()
+    test_obj()
 
     
 

@@ -1,4 +1,4 @@
-from numba import generated_jit, njit, i8
+from numba import generated_jit, njit, i8, f8
 from numba.types import unicode_type, FunctionType
 from cre.cre_func import CREFunc
 from cre.cre_object import _get_chr_mbrs_infos_from_attrs, _iter_mbr_infos
@@ -31,12 +31,21 @@ def test_numerical():
     assert str(q) == "Add(c, c, c, c)"
 
     assert Add(a,Add(a,b,c,a),c,c)(1,2,3) == 14
-
-
     assert Add(Add(Add(2,1,1,a),2,1,Add(2,1,1,b)),1,1,c)(1,2,3) == 19
-
     z = Add(Add(Add(2,1,1,a),2,1,Add(2,1,1,b)),1,1,c)
     assert str(z) == "Add((Add((Add(2, 1, 1, a)), 2, 1, (Add(2, 1, 1, b)))), 1, 1, c)"
+
+    @CREFunc(signature=f8(f8,f8),
+            shorthand='{0}+{1}')
+    def Add(a, b):
+        return a + b
+
+    assert Add(9.0, 7.0) == 16.0
+
+    Incr = Add(Var(f8,'a'),1.0)
+    assert Incr(3.0) == 4.0
+    assert str(Incr) == "a+1.0"
+
 
 
 def test_string():
@@ -50,10 +59,10 @@ def test_string():
     c = Var(unicode_type,'c')
 
     for i in range(2):
-        z = Concat(a, Concat(Concat(b,c),a ))
+        z = Concat("|", Concat(Concat(b,c),"|" ))
 
-        assert z("|","X","Y") == "|XY|"
-        assert str(z) == "a+((b+c)+a)"
+        assert z("X","Y") == "|XY|"
+        assert str(z) == "'|'+((b+c)+'|')"
 
         if(i == 0):
             init_bytes = used_bytes()

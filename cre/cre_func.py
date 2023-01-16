@@ -362,7 +362,10 @@ class CREFunc(StructRefProxy):
             # print("ALL CONST")
             # Assign each argument to it's slot h{i} in the op's memory space
             for i, arg in enumerate(args):
-                impl = set_base_arg_val_impl(arg)
+                if(isinstance(arg,CREObjProxy)):
+                    impl = set_base_arg_val_impl(CREObjType)
+                else:
+                    impl = set_base_arg_val_impl(self.arg_types[i])
                 impl(self, i, arg)
 
             cre_func_call_self(self)
@@ -531,12 +534,19 @@ def ensure_repr_const(typ):
                 if(i > 0):
                     raise NotImplementedError("str not implemented for fact types")  
                 return ""
+
+        #TODO SHOULD PROPERLY IMPLEMENT REPR For int, float, unicode_type
+        elif(typ == unicode_type):
+            @njit(sig, cache=True)
+            def repr_const(cf, i):
+                v = cre_obj_get_item(cf, typ, i8(1+(i<<1)+1))
+                return f"'{str(v)}'"
         else:
             @njit(sig, cache=True)
             def repr_const(cf, i):
-                # cf = _cast_structref(GenericCREFuncType, _cf)
                 v = cre_obj_get_item(cf, typ, i8(1+(i<<1)+1))
                 return str(v)
+                
         addr = _get_wrapper_address(repr_const, sig)
         name = f"CREFunc_repr_const_{repr(typ)}"
         ll.add_symbol(name, addr)
@@ -940,7 +950,6 @@ def set_base_arg_val_impl(_val):
 
     # If is a Fact or other object type upcast to CREObjType
     nb_val_type = CREObjType if isinstance(nb_val_type, CREObjTypeClass) else nb_val_type
-
     # Compile the implementation if it doesn't exist
     if(nb_val_type not in set_base_arg_val_overloads):        
         sig = types.void(GenericCREFuncType, u8, nb_val_type)

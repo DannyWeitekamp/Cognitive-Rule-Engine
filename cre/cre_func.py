@@ -1301,20 +1301,14 @@ def call_head_ptrs(ptrs):
 def call_self(_self):
     self = _cast_structref(cf_type, _self)
     {"".join([f"""
-    # print({i}>=len(self.head_infos))
     if(self.root_arg_infos[{i}].has_deref):
-    # if(self.head_infos[{i}].has_deref):
-    # if(not _attr_is_null(self,'a{i}')):
         var = _cast_structref(GenericVarType, self.ref{i})
         a = _cast_structref(BaseFact, self.a{i})
         data_ptr = resolve_deref_data_ptr(a, var.deref_infos)
         self.h{i} = _load_ptr(h{i}_type, data_ptr)
-        #NOTE: Including decref slows down quite a bit even if not called
-        # _decref_structref(a) 
-        # _nullify_attr(self,'a{i}') 
 """ for i in range(len(arg_types))])
     }
-    return_val = call({", ".join([f'self.h{i}' for i in range(len(arg_types))])})
+    return_val = call_heads({", ".join([f'self.h{i}' for i in range(len(arg_types))])})
     _store_safe(return_type, self.return_data_ptr, return_val)
 '''
     if(check_bytes is not None):

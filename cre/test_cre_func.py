@@ -160,9 +160,15 @@ def test_b_dyn_call_heads(benchmark):
 
 if __name__ == "__main__":
     import faulthandler; faulthandler.enable()
-    test_numerical()
-    test_string()
-    test_obj()
+    # test_numerical()
+    # test_string()
+    # test_obj()
+
+    @njit(f8(f8,f8),cache=True)
+    def Divide(a, b):
+        return a / b
+
+    print(list(Divide.overloads.values())[0].fndesc)
 
     
 

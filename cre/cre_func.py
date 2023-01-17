@@ -94,6 +94,7 @@ def CREFunc_assign_method_addr(cf_type, fn_name, addr):
 
 def CREFunc_method(cf_type, fn_name, sig, on_error='error'):
     def wrapper(func):
+        # Try to compile the CREFunc
         try:
             dispatcher = njit(sig, cache=True)(func)
         except NumbaError as e:
@@ -992,7 +993,14 @@ def cre_func_call_self(self):
             _incref_ptr(new_obj_ptr)
         
         _memcpy(instr.return_data_ptr, cf.return_data_ptr, instr.size)
-    _func_from_address(call_self_f_type, self.call_self_addr)(self)
+    
+    fn = _func_from_address(call_self_f_type, self.call_self_addr)
+    print("A")
+    try:
+        fn(self)
+    except:
+        raise ValueError("BAD")
+    print("B")
 
 from numba.core.typing.typeof import typeof
 get_str_return_val_overloads = {}

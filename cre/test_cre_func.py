@@ -158,17 +158,56 @@ def test_b_dyn_call_heads(benchmark):
         setup=setup_bench, warmup_rounds=1, rounds=10)
 
 
+
+# class ShouldRaise():
+#     def __enter__(self):
+
+
+
 if __name__ == "__main__":
     import faulthandler; faulthandler.enable()
     # test_numerical()
     # test_string()
     # test_obj()
 
-    @njit(f8(f8,f8),cache=True)
+    # @njit(f8(f8,f8),cache=True)
+    @CREFunc(signature=f8(f8,f8),
+            shorthand='{0}/{1}')
     def Divide(a, b):
-        return a / b
+        if(a == 0):
+            raise ValueError("Bad a")
+        else:
+            return a / b
 
-    print(list(Divide.overloads.values())[0].fndesc)
+
+    Divide(0,2)
+    # with pytest.raises(ValueError):
+    Divide(0,2)    
+
+    print("::")
+    # with pytest.raises(ZeroDivisionError):
+    print(Divide(1,0))
+
+    @njit(cache=True)
+    def boop(op,a,b):
+        op(a,b)
+
+    boop(Divide, 0,2)
+    # boop(Divide, 1,0)
+
+
+
+    f8_ft = FunctionType(f8(f8,f8))
+    @njit(cache=True)
+    def boop(cf,a,b):
+        fn = _func_from_address(f8_ft, cf.call_heads_addr)
+        fn(a,b)
+
+    boop(Divide, 0,2)
+    # boop(Divide, 1,0)
+
+    # print(list(Divide.overloads.values())[0].type_annotation.__dict__)
+    # print(list(Divide.overloads.values())[0].entry_point)
 
     
 

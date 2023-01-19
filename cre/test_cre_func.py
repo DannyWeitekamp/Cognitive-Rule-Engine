@@ -109,6 +109,50 @@ def test_obj():
             assert used_bytes() == init_bytes
             # print(used_bytes(), init_bytes)
 
+def test_njit_compose():
+    from cre.cre_func import set_op_arg, set_var_arg, reinitialize, CREFuncTypeClass, cre_func_copy
+    from cre.utils import _cast_structref
+    @CREFunc(signature=f8(f8,f8), shorthand="{0}*{1}")
+    def Multiply(a, b):
+        return a * b
+
+    @CREFunc(signature=f8(f8), shorthand="{0}+1")
+    def Increment(a):
+        return a + 1
+
+    new_f_type = CREFuncTypeClass(f8,(f8,f8),is_composed=True,name="Composed")
+    @njit(cache=True)
+    def compose_hardcoded(f, g):
+        _f = cre_func_copy(f)
+        g1 = cre_func_copy(g)
+        g2 = cre_func_copy(g)
+        set_var_arg(g1, 0, Var(f8,"x"))
+        reinitialize(g1)
+        set_var_arg(g2, 0, Var(f8,"y"))
+        reinitialize(g2)
+        set_op_arg(_f, 0, g1)
+        set_op_arg(_f, 1, g2)
+        reinitialize(_f)
+        return _cast_structref(new_f_type, _f)
+
+    with PrintElapse("compose_hardcoded"):
+        comp = compose_hardcoded(Multiply, Increment)
+
+    with PrintElapse("compose_hardcoded"):
+        for i in range(1000):
+            comp = compose_hardcoded(Multiply, Increment)
+
+    print(comp)
+
+    with PrintElapse("call compose_hardcoded"):
+        print(comp(1,2))
+
+    with PrintElapse("call compose_hardcoded"):
+        print(comp(1,2))
+
+
+
+
 # ---------------------------------------------------
 # : Performance Benchmarks
 
@@ -166,9 +210,16 @@ def test_b_dyn_call_heads(benchmark):
 
 if __name__ == "__main__":
     import faulthandler; faulthandler.enable()
+    import sys
     # test_numerical()
     # test_string()
     # test_obj()
+    test_njit_compose()
+
+    sys.exit()
+
+
+
 
     # @njit(f8(f8,f8),cache=True)
     @CREFunc(signature=f8(f8,f8),
@@ -180,9 +231,11 @@ if __name__ == "__main__":
             return a / b
 
 
-    Divide(0,2)
-    # with pytest.raises(ValueError):
-    Divide(0,2)    
+    with pytest.raises(ValueError):
+        Divide(0,2)
+    
+    with pytest.raises(ValueError):
+        Divide(0,2)    
 
     print("::")
     # with pytest.raises(ZeroDivisionError):

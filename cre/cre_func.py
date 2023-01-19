@@ -63,7 +63,8 @@ _head_info_type = np.dtype([
     ('type', np.uint8),
     ('has_deref', np.uint8),
     ('n_more', np.uint16),
-    ('arg_ind', np.uint32),
+    ('arg_ind', np.uint16),
+    ('t_id', np.uint16),
     ('var_ptr', np.int64),
     ('arg_data_ptr', np.int64),
     ('head_data_ptr', np.int64)])
@@ -282,9 +283,7 @@ def upcast(context, builder, fromty, toty, val):
 
 # -----------------------------------------------------------------------
 # : CREFunc Proxy Class
-@njit(i8(GenericCREFuncType), cache=True)
-def cf_get_n_args(self):
-    return self.n_args
+
 
 class CREFunc(StructRefProxy):
 
@@ -320,8 +319,8 @@ class CREFunc(StructRefProxy):
                 shorthand_template                
             )
 
-            cre_func.return_type = members['return_type']
-            cre_func.arg_types = members['arg_types']
+            cre_func._return_type = members['return_type']
+            cre_func._arg_types = members['arg_types']
             cre_func.cf_type = cf_type
             _vars = []
             get_str_return_val_impl(cre_func.return_type)
@@ -349,10 +348,33 @@ class CREFunc(StructRefProxy):
 
         return wrapper
 
+    @property
+    def return_type(self):
+        self._ensure_has_types()        
+        return self._return_type
+
+    @property
+    def arg_types(self):
+        self._ensure_has_types()        
+        return self._arg_types
+
+    @property
+    def signature(self):
+        self._ensure_has_types()        
+        return self._return_type(*self._arg_types)
+
+    def _ensure_has_types(self):
+        if(not hasattr(self, '_return_type')):
+            if(hasattr(self, '_type')):
+                self._return_type = self._type.return_type
+                self._arg_types = self._type.arg_types
+
     def __call__(self,*args):
         if(len(args) != self.n_args):
             raise ValueError(f"Got {len(args)} args for ?? with {self.n_args} positional arguments.")
         # print("CALL", args)
+        # print("_type", self._type)
+        self._ensure_has_types()
         all_const = True
         for arg in args:
             # print("----", arg)
@@ -360,26 +382,28 @@ class CREFunc(StructRefProxy):
                 all_const = False
 
         if(all_const):
+            
             # print("ALL CONST")
             # Assign each argument to it's slot h{i} in the op's memory space
             for i, arg in enumerate(args):
                 if(isinstance(arg,CREObjProxy)):
                     impl = set_base_arg_val_impl(CREObjType)
                 else:
-                    impl = set_base_arg_val_impl(self.arg_types[i])
+                    impl = set_base_arg_val_impl(self._arg_types[i])
                 impl(self, i, arg)
 
             cre_func_call_self(self)
             args = None
-            ret_impl = get_str_return_val_impl(self.return_type)
+            ret_impl = get_str_return_val_impl(self._return_type)
             return ret_impl(self)
         else:
             # print("START COMPOSE OP", args)
-            new_cf = cre_func_copy(self)
+            new_cf = cre_func_copy_generic(self)
             # print(">>", new_cf)
-            new_cf.return_type = self.return_type
-            new_cf.arg_types = self.arg_types
+            new_cf._return_type = self._return_type
+            new_cf._arg_types = self._arg_types
             new_cf.cf_type = self.cf_type
+
             for i, arg in enumerate(args):
                 if(isinstance(arg, Var)):
                     set_var_arg(new_cf, i, arg)
@@ -393,8 +417,10 @@ class CREFunc(StructRefProxy):
                     impl(new_cf, i, arg)
                     # print("AF")
             reinitialize(new_cf)
+            self.recover_reinit_arg_types()
 
-            new_cf._type = CREFuncTypeClass(self.return_type,None,True)
+
+            new_cf._type = CREFuncTypeClass(self._return_type, self._arg_types, True)
             args = None
             return new_cf
 
@@ -415,7 +441,38 @@ class CREFunc(StructRefProxy):
     def set_const_arg(self, i, val):
         set_const_arg(self, i, val)
 
-    n_args = property(cf_get_n_args)
+    @property
+    @njit(i8(GenericCREFuncType), cache=True)
+    def n_args(self):
+        return self.n_args
+
+    @property
+    @njit(u4[::1](GenericCREFuncType), cache=True)
+    def base_to_head_inds(self):
+        return self.base_to_head_inds
+
+    @property
+    @njit(head_info_type[::1](GenericCREFuncType), cache=True)
+    def head_infos(self):
+        return self.head_infos
+
+    def recover_reinit_arg_types(self):
+        context = cre_context()
+        self._base_type = context.get_type(t_id=self.base_t_id)
+        arg_types = []
+        base_to_head_inds = self.base_to_head_inds
+        head_infos = self.head_infos
+        for start in base_to_head_inds:
+            start = base_to_head_inds[i]
+            end = start + head_infos[start].n_more
+            for j in range(start,end+1):
+                hi = head_info[j]
+                t_id = hi.t_id
+                arg_types.append(context.get_type(t_id=self.base_t_id))
+        self._arg_types = arg_types
+
+
+
 
 
 
@@ -621,7 +678,8 @@ def cre_func_new(_cf_type, name, expr_template, shorthand_template):
             head_infos[i].has_deref = 0
             head_infos[i].n_more = 0
             _,_,arg_data_ptr = cre_obj_get_item_t_id_ptr(cf, 1+(i<<1))
-            _,_,head_data_ptr = cre_obj_get_item_t_id_ptr(cf, 1+(i<<1)+1)
+            _,t_id,head_data_ptr = cre_obj_get_item_t_id_ptr(cf, 1+(i<<1)+1)
+            head_infos[i].t_id = t_id
             head_infos[i].arg_data_ptr = arg_data_ptr
             head_infos[i].head_data_ptr = head_data_ptr
             cf.base_to_head_inds[i] = i
@@ -650,10 +708,10 @@ def cre_func_new(_cf_type, name, expr_template, shorthand_template):
     return impl
 
 from cre.cre_object import copy_cre_obj
-@njit(GenericCREFuncType(GenericCREFuncType), cache=True)
+@njit(cache=True)
 def cre_func_copy(cf):
     # Make a copy of the CreFunc via a memcpy
-    cpy = _cast_structref(GenericCREFuncType, copy_cre_obj(cf))
+    cpy = copy_cre_obj(cf)
 
     # Find the the byte offset between the op and its copy
     cf_ptr = _raw_ptr_from_struct(cf)
@@ -675,7 +733,8 @@ def cre_func_copy(cf):
     _nullify_attr(cpy, 'name_data')
     _nullify_attr(cpy, 'prereq_instrs')
 
-    rebuild_buffer(cpy, old_base_to_head_inds, old_head_infos, old_prereq_instrs)
+    cpy_generic = _cast_structref(GenericCREFuncType,cpy)
+    rebuild_buffer(cpy_generic, old_base_to_head_inds, old_head_infos, old_prereq_instrs)
 
     # Make the arg_data_ptr and head_data_ptr point to the copy
     for i, head_info in enumerate(cf.head_infos):
@@ -700,8 +759,11 @@ def cre_func_copy(cf):
     # print("&&>",cf_ptr,cf.return_data_ptr,cf.return_data_ptr-cf_ptr)
     # print("&&<",cpy_ptr,cpy.return_data_ptr,cpy.return_data_ptr-cpy_ptr)
 
-    # Return as a GenericCREFuncType to avoid overloading 
-    return _cast_structref(GenericCREFuncType,cpy)
+    return cpy
+
+@njit(GenericCREFuncType(GenericCREFuncType), cache=True)
+def cre_func_copy_generic(cf):
+    return cre_func_copy(_cast_structref(GenericCREFuncType,cf))
 
 #--------------------------------------------------------------------
 # Construction Functions

@@ -88,6 +88,7 @@ class VarTypeClass(CREObjTypeClass):
             return f"cre.GenericVarType"
         else:
             return f"cre.Var[base_type={base_type.instance_type}, head_type={head_type.instance_type}])"
+    # __repr__ = __str__
 
 # @lower_cast(VarTypeClass, CREObjType)
 # def upcast(context, builder, fromty, toty, val):
@@ -404,8 +405,13 @@ class Var(CREObjProxy):
     def __and__(self, other):
         from cre.conditions import conditions_and, op_to_cond
         from cre.op import Op
-        if(isinstance(other,Op)): other = op_to_cond(other)
-        return conditions_and(self, other)
+        if(isinstance(other,Op)):
+            print("DO THIS")
+            other = op_to_cond(other)
+        print(self._meminfo.refcount, other._meminfo.refcount)
+        out = conditions_and(self, other)
+        print("END LAST", out._meminfo.refcount)
+        return out
 
     def __or__(self, other):
         from cre.conditions import conditions_or, op_to_cond

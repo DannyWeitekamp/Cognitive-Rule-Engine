@@ -1,10 +1,10 @@
 from numba import generated_jit, njit, i8, f8
 from numba.types import unicode_type, FunctionType
-from cre.cre_func import CREFunc
+from cre.cre_func import CREFunc, set_op_arg, set_var_arg, reinitialize, CREFuncTypeClass, cre_func_copy
 from cre.cre_object import _get_chr_mbrs_infos_from_attrs, _iter_mbr_infos
 from cre.fact import define_fact
 from cre.var import Var
-from cre.utils import PrintElapse, _func_from_address
+from cre.utils import PrintElapse, _func_from_address, _cast_structref
 import pytest
 
 from numba.core.runtime.nrt import rtsys
@@ -109,9 +109,30 @@ def test_obj():
             assert used_bytes() == init_bytes
             # print(used_bytes(), init_bytes)
 
-def test_njit_compose():
-    from cre.cre_func import set_op_arg, set_var_arg, reinitialize, CREFuncTypeClass, cre_func_copy
-    from cre.utils import _cast_structref
+
+new_f_type = CREFuncTypeClass(f8,(f8,f8),is_composed=True,name="Composed")
+@njit(cache=True)
+def compose_hardcoded(f, g):
+    _f = cre_func_copy(f)
+    g1 = cre_func_copy(g)
+    g2 = cre_func_copy(g)
+    set_var_arg(g1, 0, Var(f8,"x"))
+    reinitialize(g1)
+    set_var_arg(g2, 0, Var(f8,"y"))
+    reinitialize(g2)
+    set_op_arg(_f, 0, g1)
+    set_op_arg(_f, 1, g2)
+    reinitialize(_f)
+    return _cast_structref(new_f_type, _f)
+
+@njit(cache=True)
+def compose_overloaded(f, g):
+    x,y = Var(f8,"x"), Var(f8,"y")
+    h = f(g(x),g(y))
+    return h
+
+
+def test_njit_compose():    
     @CREFunc(signature=f8(f8,f8), shorthand="{0}*{1}")
     def Multiply(a, b):
         return a * b
@@ -120,37 +141,17 @@ def test_njit_compose():
     def Increment(a):
         return a + 1
 
-    new_f_type = CREFuncTypeClass(f8,(f8,f8),is_composed=True,name="Composed")
-    @njit(cache=True)
-    def compose_hardcoded(f, g):
-        _f = cre_func_copy(f)
-        g1 = cre_func_copy(g)
-        g2 = cre_func_copy(g)
-        set_var_arg(g1, 0, Var(f8,"x"))
-        reinitialize(g1)
-        set_var_arg(g2, 0, Var(f8,"y"))
-        reinitialize(g2)
-        set_op_arg(_f, 0, g1)
-        set_op_arg(_f, 1, g2)
-        reinitialize(_f)
-        return _cast_structref(new_f_type, _f)
+    f = compose_hardcoded(Multiply, Increment)
 
-    with PrintElapse("compose_hardcoded"):
-        comp = compose_hardcoded(Multiply, Increment)
+    assert f(1,2) == 6
+    assert str(f) == "(x+1)*(y+1)"
 
-    with PrintElapse("compose_hardcoded"):
-        for i in range(1000):
-            comp = compose_hardcoded(Multiply, Increment)
+    f = compose_overloaded(Multiply, Increment)
 
-    print(comp)
-
-    with PrintElapse("call compose_hardcoded"):
-        print(comp(1,2))
-
-    with PrintElapse("call compose_hardcoded"):
-        print(comp(1,2))
-
-
+    print(f)
+    print(f(1,2))
+    assert f(1,2) == 6
+    assert str(f) == "(x+1)*(y+1)"
 
 
 # ---------------------------------------------------

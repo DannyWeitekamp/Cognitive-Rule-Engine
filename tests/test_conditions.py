@@ -498,10 +498,11 @@ def test_anti_unify():
     
 
 if(__name__ == "__main__"):
-    test_var()
+    import faulthandler; faulthandler.enable()
+    # test_var()
     # test_anti_unify()
     # test_unconditioned()
-    # test_build_conditions()
+    test_build_conditions()
     # test_list_operations()
     # test_link()
     # test_initialize()

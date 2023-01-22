@@ -167,7 +167,6 @@ from cre.utils import PrintElapse
 class CREObjProxy(StructRefProxy):
     @classmethod
     def _numba_box_(cls, ty, mi):
-
         instance = ty.__new__(cls)
         instance._type = ty
         instance._meminfo = mi

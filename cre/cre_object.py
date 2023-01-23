@@ -118,7 +118,7 @@ class CREObjTypeClass(CastFriendlyMixin, types.StructRef):
     def __init__(self, fields,*args,**kwargs):
         if(isinstance(fields,dict)): fields = [(k,v) for k,v in fields.items()]
         types.StructRef.__init__(self,fields)
-        self.name = f'CREObjType'
+        # self.name = f'CREObjType'
 
     def __init_subclass__(cls, **kwargs):
         super().__init_subclass__(**kwargs)

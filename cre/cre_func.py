@@ -183,7 +183,7 @@ cre_func_fields_dict = {
     "root_arg_infos" : arg_infos_type[::1],
 
     # Maps base arguments to particular head_infos
-    "base_to_head_inds" : u4[::1],
+    "head_ranges" : head_range_type[::1],
 
     # Keeps references to each head, their types, the CREFunc they live in 
     #  among other things
@@ -482,8 +482,6 @@ class CREFunc(StructRefProxy):
     def __repr__(self):
         return cre_func_str(self, True)
 
-
-    
     def set_var_arg(self, i, val):
         set_var_arg(self, i, val)
 
@@ -500,9 +498,9 @@ class CREFunc(StructRefProxy):
         return self.n_args
 
     @property
-    @njit(u4[::1](GenericCREFuncType), cache=True)
-    def base_to_head_inds(self):
-        return self.base_to_head_inds
+    @njit(head_range_type[::1](GenericCREFuncType), cache=True)
+    def head_ranges(self):
+        return self.head_ranges
 
     @property
     @njit(head_info_type[::1](GenericCREFuncType), cache=True)
@@ -512,17 +510,53 @@ class CREFunc(StructRefProxy):
     def recover_reinit_arg_types(self):
         context = cre_context()
         arg_types = []
-        base_to_head_inds = self.base_to_head_inds
+        head_ranges = self.head_ranges
         head_infos = self.head_infos
-        for start in base_to_head_inds:
-            end = start + head_infos[start]['n_more']
-            for j in range(start,end+1):
+        for hrng in head_ranges:
+            start, end = hrng['start'], hrng['end']
+            for j in range(start, end):
                 hi = head_infos[j]
                 t_id = hi['t_id']
                 arg_types.append(context.get_type(t_id=t_id))
         self._arg_types = arg_types
 
+    @property    
+    def base_var_ptrs(self):
+        return get_base_var_ptrs(self)  
+
+    @property    
+    def head_var_ptrs(self):
+        return get_head_var_ptrs(self)    
+
 define_boxing(CREFuncTypeClass, CREFunc)
+
+@njit(i8[::1](GenericCREFuncType), cache=True)
+def get_base_var_ptrs(self):
+    base_var_ptrs = np.empty(self.n_args,dtype=np.int64)
+    for i, hrng in enumerate(self.head_ranges):
+        hi = self.head_infos[hrng.start]
+        v = _struct_from_ptr(GenericVarType, hi.var_ptr)
+        base_var_ptrs[i] = v.base_ptr
+    return base_var_ptrs
+
+@overload_attribute(CREFuncTypeClass, "base_var_ptrs")
+def overload_base_var_ptrs(self):
+    return get_base_var_ptrs
+
+@njit(i8[::1](GenericCREFuncType), cache=True)
+def get_head_var_ptrs(self):
+    head_var_ptrs = np.empty(self.n_args,dtype=np.int64)
+    for i, hrng in enumerate(self.head_ranges):
+        for j in range(hrng.start,hrng.end):
+            hi = self.head_infos[j]
+            head_var_ptrs[i] = hi.var_ptr
+    return head_var_ptrs
+
+@overload_attribute(CREFuncTypeClass, "head_var_ptrs")
+def overload_head_var_ptrs(self):
+    return get_head_var_ptrs
+
+
 
 # ------------------------------
 # : CREFunc initialization
@@ -585,24 +619,24 @@ ll.add_symbol("CRE_cf_del_inject", cf_del_inject_addr)
     # types.optional(head_info_type[::1]),
     # types.optional(instr_type[::1])),
      cache=True)
-def rebuild_buffer(self, base_to_head_inds=None, head_infos=None, prereq_instrs=None):
-    ''' 'base_to_head_inds', 'head_infos', and 'prereq_instrs' are held in a single
+def rebuild_buffer(self, head_ranges=None, head_infos=None, prereq_instrs=None):
+    ''' 'head_ranges', 'head_infos', and 'prereq_instrs' are held in a single
          buffer to ensure data contiguity. This function rebuilds that buffer.
     '''
 
-    n_args = self.n_args if(base_to_head_inds is None) else len(base_to_head_inds)
+    n_args = self.n_args if(head_ranges is None) else len(head_ranges)
     n_heads = self.n_args if(head_infos is None) else len(head_infos)
     n_prereqs = 0 if prereq_instrs is None else len(prereq_instrs)
 
-    # Layout: base_to_head_inds | head_infos | prereq_instrs
+    # Layout: head_ranges | head_infos | prereq_instrs
     L_ = L = n_args + 10*n_heads
     L += 6 * n_prereqs
 
     buff = np.zeros(L, dtype=np.uint32)
 
-    if(base_to_head_inds is not None):
-        # print("A", n_args, len(base_to_head_inds[:].view(np.uint32)))
-        buff[:n_args] = base_to_head_inds[:].view(np.uint32)
+    if(head_ranges is not None):
+        # print("A", n_args, len(head_ranges[:].view(np.uint32)))
+        buff[:n_args] = head_ranges[:].view(np.uint32)
     if(head_infos is not None):
         # print("B", L_-n_args, len(head_infos[:].view(np.uint32)))
         buff[n_args: L_] = head_infos[:].view(np.uint32)
@@ -611,7 +645,7 @@ def rebuild_buffer(self, base_to_head_inds=None, head_infos=None, prereq_instrs=
         buff[L_: L] = prereq_instrs[:].view(np.uint32)
 
     # print("BEF")
-    self.base_to_head_inds = buff[:n_args]
+    self.head_ranges = buff[:n_args].view(_head_range_type)
     self.head_infos = buff[n_args: L_].view(_head_info_type)
     self.prereq_instrs = buff[L_:L].view(_instr_type)
     # print("END")
@@ -708,7 +742,7 @@ def cre_func_new(_cf_type, name, expr_template, shorthand_template):
 
         self_ptr = _raw_ptr_from_struct(cf)
 
-        # Init: base_to_head_inds | head_infos | prereq_instrs
+        # Init: head_ranges | head_infos | prereq_instrs
         rebuild_buffer(_cast_structref(GenericCREFuncType,cf))
 
         head_infos = cf.head_infos
@@ -723,7 +757,8 @@ def cre_func_new(_cf_type, name, expr_template, shorthand_template):
             head_infos[i].t_id = t_id
             head_infos[i].arg_data_ptr = arg_data_ptr
             head_infos[i].head_data_ptr = head_data_ptr
-            cf.base_to_head_inds[i] = i
+            cf.head_ranges[i].start = i
+            cf.head_ranges[i].end = i+1
 
         # cre_func_assign_method_table(cf)
         cf.call_heads_addr = _get_global_fn_addr(method_names[0])
@@ -761,21 +796,21 @@ def cre_func_copy(cf):
 
     # Make a copy of base_to_head_infos
     # base_to_head_infos = List.empty_list(head_info_arr_type)
-    old_base_to_head_inds = cf.base_to_head_inds.copy()
+    old_head_ranges = cf.head_ranges.copy()
     old_head_infos = cf.head_infos.copy()
     old_prereq_instrs = cf.prereq_instrs.copy()
 
     # Nullify these attributes since we don't want the pointers from the 
     #  original to get decref'ed on assignment
     # _nullify_attr(cpy, 'base_to_head_infos')
-    _nullify_attr(cpy, 'base_to_head_inds')
+    _nullify_attr(cpy, 'head_ranges')
     _nullify_attr(cpy, 'head_infos')
     _nullify_attr(cpy, 'root_arg_infos')
     _nullify_attr(cpy, 'name_data')
     _nullify_attr(cpy, 'prereq_instrs')
 
     cpy_generic = _cast_structref(GenericCREFuncType,cpy)
-    rebuild_buffer(cpy_generic, old_base_to_head_inds, old_head_infos, old_prereq_instrs)
+    rebuild_buffer(cpy_generic, old_head_ranges, old_head_infos, old_prereq_instrs)
 
     # Make the arg_data_ptr and head_data_ptr point to the copy
     for i, head_info in enumerate(cf.head_infos):
@@ -822,9 +857,9 @@ def set_const_arg_impl(_val):
             self.is_initialized = False
 
             head_infos = self.head_infos
-            start = self.base_to_head_inds[i]
-            end = start + head_infos[start].n_more
-            for j in range(start,end+1):
+            start = self.head_ranges[i].start
+            end = self.head_ranges[i].end
+            for j in range(start,end):
                 cf = _struct_from_ptr(GenericCREFuncType, head_infos[j].cf_ptr)
                 arg_ind = head_infos[j].arg_ind
 
@@ -852,12 +887,12 @@ def set_const_arg(self, i, val):
 def set_var_arg(self, i, var):
     self.is_initialized = False
     head_infos = self.head_infos
-    start = self.base_to_head_inds[i]
-    end = start + head_infos[start].n_more
+    start = self.head_ranges[i].start
+    end = self.head_ranges[i].end
 
     var_ptr = _raw_ptr_from_struct(var)
     hd = u1(len(var.deref_infos) > 0)
-    for j in range(start,end+1):
+    for j in range(start,end):
         cf = _struct_from_ptr(GenericCREFuncType, head_infos[j].cf_ptr)
         arg_ind = head_infos[j].arg_ind
         head_infos[j].var_ptr = var_ptr
@@ -881,11 +916,11 @@ def set_op_arg(self, i, op):
     # _incref_structref(val)
     # head_infos = self.base_to_head_infos[i]
     head_infos = self.head_infos
-    start = self.base_to_head_inds[i]
-    end = start + head_infos[start].n_more
+    start = self.head_ranges[i].start
+    end = self.head_ranges[i].end
 
     op_ptr = _raw_ptr_from_struct(op)
-    for j in range(start,end+1):
+    for j in range(start,end):
         cf = _struct_from_ptr(GenericCREFuncType, head_infos[j].cf_ptr)
         arg_ind = head_infos[j].arg_ind
 
@@ -980,12 +1015,9 @@ def reinitialize(self):
 
     # print("REINIT")
     base_var_map = Dict.empty(i8, head_info_lst)
-    for start in self.base_to_head_inds:
-        # start = self.base_to_head_inds[i]
-        end = start + self.head_infos[start].n_more
-
+    for hrng in self.head_ranges:
         # print("--L", start,end)
-        for j in range(start,end+1):
+        for j in range(hrng.start,hrng.end):
             head_info = self.head_infos[j]
             # print(":", start, j, head_info.type, head_info.var_ptr)
             if(head_info.type == ARGINFO_VAR):
@@ -1000,13 +1032,9 @@ def reinitialize(self):
                 # print("HAS DEP")
                 cf = _struct_from_ptr(GenericCREFuncType, head_info.cf_ptr)
                 # print(cf.base_to_head_inds)
-                for start_k in cf.base_to_head_inds:
-                    # print("--k", k, len(cf.base_to_head_inds))
-                    # start_k = cf.base_to_head_inds[k]
-                    end_k = start_k + cf.head_infos[start_k].n_more
-
+                for hrng_k in cf.head_ranges:
                     # print("--D", start_k,end_k,len(cf.head_infos))
-                    for n  in range(start_k, end_k+1):
+                    for n  in range(hrng_k.start, hrng_k.end):
                         # print("N", n)
                         head_info_n = cf.head_infos[n]
                         # print("-N", n, head_info_n.type, head_info_n.var_ptr)
@@ -1024,11 +1052,12 @@ def reinitialize(self):
                         # print("head_infos",head_infos)
                 # print("HAS DEP", cf.n_args)
     n_bases = len(base_var_map)
-    base_to_head_inds = np.zeros(n_bases, dtype=np.uint32)
+    head_ranges = np.zeros(n_bases, dtype=head_range_type)
 
     n_heads = 0
     for i, base_head_infos in enumerate(base_var_map.values()):
-        base_to_head_inds[i] = n_heads
+        head_ranges[i].start = n_heads
+        head_ranges[i].end = n_heads+len(base_head_infos)
         n_heads += len(base_head_infos)
 
     head_infos = np.zeros(n_heads,dtype=head_info_type)
@@ -1043,7 +1072,7 @@ def reinitialize(self):
     self.n_args = n_bases
 
     prereq_instrs = build_instr_set(self)
-    rebuild_buffer(self, base_to_head_inds, head_infos, prereq_instrs)
+    rebuild_buffer(self, head_ranges, head_infos, prereq_instrs)
   
 
 
@@ -1065,21 +1094,21 @@ def set_base_arg_val_impl(_val):
             # Fact case
             @njit(sig,cache=True)
             def _set_base_arg_val(self, i, val):
-                start = self.base_to_head_inds[i]
-                end = start + self.head_infos[start].n_more
-                for i in range(start,end+1):
-                    if(self.head_infos[i].has_deref):
-                        _store_safe(nb_val_type, self.head_infos[i].arg_data_ptr, val)
+                start = self.head_ranges[i].start
+                end = self.head_ranges[i].end
+                for j in range(start,end):
+                    if(self.head_infos[j].has_deref):
+                        _store_safe(nb_val_type, self.head_infos[j].arg_data_ptr, val)
                     else:
-                        _store_safe(nb_val_type, self.head_infos[i].head_data_ptr, val)
+                        _store_safe(nb_val_type, self.head_infos[j].head_data_ptr, val)
         else:
             # Primitive case
             @njit(sig,cache=True)
             def _set_base_arg_val(self, i, val):
-                start = self.base_to_head_inds[i]
-                end = start + self.head_infos[start].n_more
-                for i in range(start,end+1):
-                    _store_safe(nb_val_type, self.head_infos[i].head_data_ptr, val)
+                start = self.head_ranges[i].start
+                end = self.head_ranges[i].end
+                for j in range(start,end):
+                    _store_safe(nb_val_type, self.head_infos[j].head_data_ptr, val)
         set_base_arg_val_overloads[nb_val_type] = _set_base_arg_val
     return set_base_arg_val_overloads[nb_val_type]
 
@@ -1141,17 +1170,13 @@ def overload_compose_codegen(cf_type, arg_types):
         for tup in literal_unroll(ind_kinds):
             i, kind = tup
             arg = args[i]
-
-
             if(kind==ARGINFO_VAR):
-                print(i, "VAR", _cast_structref(GenericVarType,arg))
                 set_var_arg(_cf, i, _cast_structref(GenericVarType,arg))
             elif(kind==ARGINFO_OP):
-                print(i, "OP", _cast_structref(GenericCREFuncType,arg))
+                # NOTE: Copying the OP here causes issue, but might be necessary
                 # f = cre_func_copy(_cast_structref(GenericCREFuncType,arg))
                 set_op_arg(_cf, i, _cast_structref(GenericCREFuncType,arg))
             elif(kind==ARGINFO_CONST):
-                print(i, "CONST", arg)
                 set_const_arg(_cf, i, arg)
             
             reinitialize(_cf)
@@ -1223,18 +1248,15 @@ def cre_func_str(self, use_shorthand):
     while(keep_looping):
         arg_info = cf.root_arg_infos[i]
         if(arg_info.type == ARGINFO_OP):
-            print("STACK OP")
             stack.append((cf, i+1,arg_strs))
             cf = _struct_from_ptr(GenericCREFuncType, arg_info.ptr)
             arg_strs = List.empty_list(unicode_type)
             i = 0 
         else:
             if(arg_info.type == ARGINFO_VAR):
-                print("PRNT VAR")
                 var = _struct_from_ptr(GenericVarType, arg_info.ptr)
                 arg_strs.append(str(var)) 
             elif(arg_info.type == ARGINFO_CONST):
-                print("PRNT CONST")
                 addr = cf.name_data.repr_const_addrs[i]
                 fn = _func_from_address(rc_fn_typ, addr)
                 arg_strs.append(fn(cf,i))

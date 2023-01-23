@@ -406,11 +406,8 @@ class Var(CREObjProxy):
         from cre.conditions import conditions_and, op_to_cond
         from cre.op import Op
         if(isinstance(other,Op)):
-            print("DO THIS")
             other = op_to_cond(other)
-        print(self._meminfo.refcount, other._meminfo.refcount)
         out = conditions_and(self, other)
-        print("END LAST", out._meminfo.refcount)
         return out
 
     def __or__(self, other):

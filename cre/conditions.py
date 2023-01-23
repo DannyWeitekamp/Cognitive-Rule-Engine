@@ -631,18 +631,12 @@ def _conditions_ctor_single_var(_vars,dnf=None):
 
 @njit(cache=True)
 def _conditions_ctor_base_var_map(_vars,dnf=None):
-    print("#")
     st = new(ConditionsType)
     st.idrec = encode_idrec(T_ID_CONDITIONS, 0, 0)
-    print("!")
     st.vars = build_var_list(_vars)
     st.base_var_map = _vars.copy() # is shallow copy
-    print("*")
     st.dnf = dnf if(dnf) else new_dnf(len(_vars))
     st.has_distr_dnf = False
-    # st.is_initialized = False
-    # st.matcher_inst_ptr = 0
-    print("&")
     return st
 
 @njit(cache=True)
@@ -666,7 +660,6 @@ def _conditions_ctor_var_list(_vars,dnf=None):
 @generated_jit(cache=True)
 @overload(Conditions,strict=False)
 def conditions_ctor(_vars, dnf=None):
-    print("CONDITIONS CONSTRUCTOR", _vars, dnf)
     if(isinstance(_vars,VarTypeClass)):
         # _vars is single Var
         def impl(_vars,dnf=None):
@@ -920,13 +913,9 @@ def op_to_cond(op):
 def _conditions_and(left, right):
     '''AND is distributive
     AND((ab+c), (de+f)) = abde+abf+cde+cf'''
-    print("BEF1")
     bvm = build_base_var_map(left.vars,right.vars)
-    print("BEF2")
     dnf = dnf_and(left.dnf, right.dnf)
-    print("BEF3")
     out = _conditions_ctor_base_var_map(bvm, dnf)
-    print("BEF4")
     return out
 
 # @njit(cache=True)
@@ -957,11 +946,8 @@ def conditions_and(self, other):
                 return _conditions_and(self_c,other_c)
         else:
             def impl(self,other):
-                print("A")
                 other_c = _conditions_ctor_single_var(other)
-                print("B")
                 out = _conditions_and(self,other_c)
-                print("C")
                 return out
     else:
         if(isinstance(self,VarTypeClass)):
@@ -970,7 +956,6 @@ def conditions_and(self, other):
                 return _conditions_and(self_c,other)
         else:
             def impl(self,other):
-                print("LAST")
                 return _conditions_and(self,other)
 
     return impl

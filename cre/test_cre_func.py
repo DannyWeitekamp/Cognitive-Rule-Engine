@@ -5,6 +5,7 @@ from cre.cre_object import _get_chr_mbrs_infos_from_attrs, _iter_mbr_infos
 from cre.fact import define_fact
 from cre.var import Var
 from cre.utils import PrintElapse, _func_from_address, _cast_structref
+from cre.context import cre_context
 import pytest
 
 from numba.core.runtime.nrt import rtsys
@@ -23,6 +24,7 @@ def test_numerical():
     c = Var(i8,'c')
 
     z = Add(a,b,c,c)
+
     # print("<<", str(z))
     assert z(1,2,3) == 9
     assert str(z) == "Add(a, b, c, c)"
@@ -72,42 +74,46 @@ def test_string():
 
 
 def test_obj():
-    BOOP = define_fact("BOOP", {"A" :unicode_type, "B" :i8})
+    with cre_context("test_obj"):
+        BOOP = define_fact("BOOP", {"A" :unicode_type, "B" :i8})
 
-    @CREFunc(signature=unicode_type(unicode_type,unicode_type),
-            shorthand='{0}+{1}')
-    def Concat(a, b):
-        return a + b
+        @CREFunc(signature=unicode_type(unicode_type,unicode_type),
+                shorthand='{0}+{1}')
+        def Concat(a, b):
+            return a + b
 
-    @CREFunc(signature=BOOP(BOOP,BOOP),
-            shorthand='{0}+{1}')
-    def CatBOOPs(a, b):
-        return BOOP(a.A + b.A, a.B + b.B)
+        @CREFunc(signature=BOOP(BOOP,BOOP),
+                shorthand='{0}+{1}')
+        def CatBOOPs(a, b):
+            return BOOP(a.A + b.A, a.B + b.B)
 
-    a = Var(BOOP,'a')
-    b = Var(BOOP,'b')
-    c = Var(BOOP,'c')
-    
-    for i in range(2):
-        ba, bb = BOOP("A",1), BOOP("B",2)
+        a = Var(BOOP,'a')
+        b = Var(BOOP,'b')
+        c = Var(BOOP,'c')
+        
+        for i in range(2):
+            ba, bb = BOOP("A",1), BOOP("B",2)
 
-        z = Concat(a.A, b.A)
+            z = Concat(a.A, b.A)
 
-        assert z(ba,bb) == "AB"
-        assert str(z) == "a.A+b.A"
+            assert z(ba,bb) == "AB"
+            assert str(z) == "a.A+b.A"
 
-        zboop = CatBOOPs(a,b)
+            zboop = CatBOOPs(a,b)
 
-        assert zboop(ba,bb) == BOOP(A="AB", B=3)
-        assert str(zboop) == "a+b"
+            assert zboop(ba,bb) == BOOP(A="AB", B=3)
+            assert str(zboop) == "a+b"
 
-        z = None
-        zboop = None
-        if(i == 0):
-            init_bytes = used_bytes()
-        else:
-            assert used_bytes() == init_bytes
-            # print(used_bytes(), init_bytes)
+            # Make sure "head_var_ptrs" actually grabs vars w/ derefs
+            assert not any(z.base_var_ptrs == z.head_var_ptrs)
+
+            z = None
+            zboop = None
+            if(i == 0):
+                init_bytes = used_bytes()
+            else:
+                assert used_bytes() == init_bytes
+                # print(used_bytes(), init_bytes)
 
 
 new_f_type = CREFuncTypeClass(f8,(f8,f8),is_composed=True,name="Composed")
@@ -148,8 +154,6 @@ def test_njit_compose():
 
     f = compose_overloaded(Multiply, Increment)
 
-    print(f)
-    print(f(1,2))
     assert f(1,2) == 6
     assert str(f) == "(x+1)*(y+1)"
 
@@ -212,12 +216,12 @@ def test_b_dyn_call_heads(benchmark):
 if __name__ == "__main__":
     import faulthandler; faulthandler.enable()
     import sys
-    # test_numerical()
-    # test_string()
-    # test_obj()
+    test_numerical()
+    test_string()
+    test_obj()
     test_njit_compose()
 
-    sys.exit()
+    sys.exit() # Stuff below still has issues
 
 
 

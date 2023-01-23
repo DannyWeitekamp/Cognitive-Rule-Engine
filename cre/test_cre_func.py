@@ -216,24 +216,32 @@ def test_b_dyn_call_heads(benchmark):
 if __name__ == "__main__":
     import faulthandler; faulthandler.enable()
     import sys
-    test_numerical()
-    test_string()
-    test_obj()
-    test_njit_compose()
+    # test_numerical()
+    # test_string()
+    # test_obj()
+    # test_njit_compose()
+
+    
+    # @njit(f8(f8,f8),cache=True)
+    with PrintElapse("DEFINE DIVIDE"):
+        @CREFunc(signature=f8(f8,f8),
+                shorthand='{0}/{1}')
+        def Divide(a, b):
+            if(a == 0):
+                raise ValueError("Bad a")
+            else:
+                return a / b
+
+    with PrintElapse("DEFINE QDIVIDE"):
+        @CREFunc(signature=f8(f8,f8),
+                shorthand='{0}/{1}')
+        def ZDivide(a, b):
+            if(a == 0):
+                raise ValueError("Bad a")
+            else:
+                return a / b
 
     sys.exit() # Stuff below still has issues
-
-
-
-
-    # @njit(f8(f8,f8),cache=True)
-    @CREFunc(signature=f8(f8,f8),
-            shorthand='{0}/{1}')
-    def Divide(a, b):
-        if(a == 0):
-            raise ValueError("Bad a")
-        else:
-            return a / b
 
 
     with pytest.raises(ValueError):

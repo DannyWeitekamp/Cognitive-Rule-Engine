@@ -199,10 +199,10 @@ cre_func_fields_dict = {
     # "call_addr" : i8,
     "call_self_addr" : i8,
     "call_heads_addr" : i8,
-    # "call_head_ptrs_addr" : i8,
+    "call_head_ptrs_addr" : i8,
     # "match_addr" : i8,
-    # "match_heads_addr" : i8,
-    # "match_head_ptrs_addr" : i8,
+    "match_heads_addr" : i8,
+    "match_head_ptrs_addr" : i8,
     # "check_addr" : i8,
 
     # True if the op has beed initialized
@@ -591,12 +591,12 @@ def cre_func_assign_method_table(cf):
     )
     def impl(cf):
         cf.call_heads_addr = _get_global_fn_addr(method_names[0])
-        # cf.call_head_ptrs_addr = _get_global_fn_addr(method_names[1])
+        cf.call_head_ptrs_addr = _get_global_fn_addr(method_names[1])
         # cf.call_addr = _get_global_fn_addr(method_names[2])
-        # cf.match_heads_addr = _get_global_fn_addr(method_names[3])
-        # cf.match_head_ptrs_addr = _get_global_fn_addr(method_names[4])
+        cf.match_heads_addr = _get_global_fn_addr(method_names[3])
+        cf.match_head_ptrs_addr = _get_global_fn_addr(method_names[4])
         # cf.match_addr = _get_global_fn_addr(method_names[5])
-        # # cf.check_addr = _get_global_fn_addr(method_names[6])
+        # cf.check_addr = _get_global_fn_addr(method_names[6])
         cf.call_self_addr = _get_global_fn_addr(method_names[7])
     return impl
 

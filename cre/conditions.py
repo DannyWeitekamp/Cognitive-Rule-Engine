@@ -380,7 +380,7 @@ class Conditions(structref.StructRefProxy):
             # print(self)
             sig_str = _get_sig_str(self)
             fact_types = sig_str[1:-1].split(",")
-            print(fact_types)
+            # print(fact_types)
             self._signature = types.void(*[context.name_to_type[x] for x in fact_types])            
 
         return self._signature

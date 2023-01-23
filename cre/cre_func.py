@@ -28,6 +28,9 @@ from numba.core import imputils, cgutils
 from numba.core.datamodel import default_manager, models, register_default
 from numba.experimental.function_type import _get_wrapper_address
 
+# Import to ensure that .format is defined
+import cre.type_conv
+
 
 from operator import itemgetter
 from copy import copy
@@ -53,6 +56,17 @@ def all_args_are_const(arg_types):
             all_const = False
             break
     return all_const
+
+def dispatcher_sig_from_arg_types(disp, arg_types):
+    cres = disp.overloads.get(arg_types,None)
+    if(cres is not None):
+        sig = cres.signature
+    else:
+        # Note: get_call_template is an internal method of numba.Dispatcher 
+        (template,*rest) = disp.get_call_template(arg_types,{})
+        #Note: this can be finicky might need to find the best one
+        sig = [x for x in template.cases if x.args==arg_types][0]
+    return sig
 
 # ----------------------------------------------------------------------
 # : Record Array Struct definitions
@@ -211,9 +225,11 @@ cre_func_fields_dict = {
     # True if this op is a ptr op
     "is_ptr_op" : types.boolean,
 
+    # NOTE: Not Used 
     # True if dereferencing the head args succeeded  
     "heads_derefs_succeeded" : types.boolean,
 
+    # NOTE: Not Used 
     # True if check in this and all children suceeded
     "exec_passed_checks" : types.boolean,
     
@@ -334,6 +350,54 @@ def upcast(context, builder, fromty, toty, val):
 # : CREFunc Proxy Class
 
 
+def new_cre_func(name, members):
+    call_func = members['call']
+    arg_names = members['arg_names']
+
+    cf_type = define_CREFunc(name, members)
+    if(not hasattr(members, 'arg_types')): 
+        members['arg_types'] = members['signature'].args
+    if(not hasattr(members, 'return_type')): 
+        members['return_type'] = members['signature'].return_type
+    n_args = len(members['arg_types'])
+
+
+    # Make sure that constant members can be repr'ed
+    # for arg_type in cf_type.arg_types:
+    #     ensure_repr_const(arg_type)
+
+    expr_template = f"{name}({', '.join([f'{{{i}}}' for i in range(n_args)])})"
+    shorthand_template = members.get('shorthand',expr_template)
+    # print("shorthand_template:", shorthand_template)
+
+    # with PrintElapse("new"):
+    cre_func = cf_type.ctor(
+        # n_args,
+        name,
+        expr_template,
+        shorthand_template                
+    )
+
+    cre_func._return_type = members['return_type']
+    cre_func._arg_types = members['arg_types']
+    cre_func.cf_type = cf_type
+    _vars = []
+    get_str_return_val_impl(cre_func.return_type)
+    for i, (arg_alias, typ) in enumerate(zip(arg_names,cf_type.arg_types)):
+        v = Var(typ,arg_alias); _vars.append(v);
+        set_var_arg(cre_func, i, v)
+        set_base_arg_val_impl(typ)
+        set_const_arg_impl(typ)
+    reinitialize(cre_func)
+
+    cre_func._type = cf_type
+    # print(cre_func.__dict__.keys())
+
+    # This prevent _vars from freeing until after reinitialize
+    _vars = None 
+    return cre_func
+
+
 class CREFunc(StructRefProxy):
 
     def __new__(self,*args, **kwargs):
@@ -344,48 +408,14 @@ class CREFunc(StructRefProxy):
             # Make new cre_func_type
             members = kwargs
             members["call"] = call_func
-            # print(">>", members)
-
+            members["arg_names"] = inspect.getfullargspec(call_func)[0]
             name = call_func.__name__
-            arg_names = inspect.getfullargspec(call_func)[0]
-
-            cf_type = define_CREFunc(call_func.__name__, members)
-            n_args = len(members['arg_types'])
-
-            # Make sure that constant members can be repr'ed
-            # for arg_type in cf_type.arg_types:
-            #     ensure_repr_const(arg_type)
-
-            expr_template = f"{name}({', '.join([f'{{{i}}}' for i in range(n_args)])})"
-            shorthand_template = members.get('shorthand',expr_template)
-            # print("shorthand_template:", shorthand_template)
-
-            # with PrintElapse("new"):
-            cre_func = cf_type.ctor(
-                # n_args,
-                name,
-                expr_template,
-                shorthand_template                
-            )
-
-            cre_func._return_type = members['return_type']
-            cre_func._arg_types = members['arg_types']
-            cre_func.cf_type = cf_type
-            _vars = []
-            get_str_return_val_impl(cre_func.return_type)
-            for i, (arg_alias, typ) in enumerate(zip(arg_names,cf_type.arg_types)):
-                v = Var(typ,arg_alias); _vars.append(v);
-                set_var_arg(cre_func, i, v)
-                set_base_arg_val_impl(typ)
-                set_const_arg_impl(typ)
-            reinitialize(cre_func)
-
-            cre_func._type = cf_type
-            # print(cre_func.__dict__.keys())
-
-            # This prevent _vars from freeing until after reinitialize
-            _vars = None 
-            return cre_func
+            # If no signature is given then create an untyped instance that can be specialized later
+            if('signature' not in members):
+                return UntypedCREFunc(name,members)
+            # print(">>", members)
+            return new_cre_func(name, members)
+            
 
         if(len(args) == 1):
             if(isinstance(args[0],(str, numba.core.typing.templates.Signature))):
@@ -397,29 +427,6 @@ class CREFunc(StructRefProxy):
 
         return wrapper
 
-    @property
-    def return_type(self):
-        self._ensure_has_types()        
-        return self._return_type
-
-    @property
-    def arg_types(self):
-        self._ensure_has_types()        
-        return self._arg_types
-
-    @property
-    def signature(self):
-        self._ensure_has_types()        
-        return self._return_type(*self._arg_types)
-
-    def _ensure_has_types(self):
-        if(not hasattr(self, '_return_type')):
-            if(hasattr(self, '_type')):
-                self._return_type = self._type.return_type
-                if(self._type.arg_types is None):
-                    self.recover_reinit_arg_types()
-                else:
-                    self._arg_types = self._type.arg_types
 
     def __call__(self,*args):
         if(len(args) != self.n_args):
@@ -482,6 +489,30 @@ class CREFunc(StructRefProxy):
     def __repr__(self):
         return cre_func_str(self, True)
 
+    @property
+    def return_type(self):
+        self._ensure_has_types()        
+        return self._return_type
+
+    @property
+    def arg_types(self):
+        self._ensure_has_types()        
+        return self._arg_types
+
+    @property
+    def signature(self):
+        self._ensure_has_types()        
+        return self._return_type(*self._arg_types)
+
+    def _ensure_has_types(self):
+        if(not hasattr(self, '_return_type')):
+            if(hasattr(self, '_type')):
+                self._return_type = self._type.return_type
+                if(self._type.arg_types is None):
+                    self.recover_reinit_arg_types()
+                else:
+                    self._arg_types = self._type.arg_types
+
     def set_var_arg(self, i, val):
         set_var_arg(self, i, val)
 
@@ -528,6 +559,95 @@ class CREFunc(StructRefProxy):
     def head_var_ptrs(self):
         return get_head_var_ptrs(self)    
 
+    def __lt__(self, other): 
+        from cre.builtin_cre_funcs import LessThan
+        return LessThan(self, other)
+    def __le__(self, other): 
+        from cre.builtin_cre_funcs import LessThanEq
+        return LessThanEq(self, other)
+    def __gt__(self, other): 
+        from cre.builtin_cre_funcs import GreaterThan
+        return GreaterThan(self, other)
+    def __ge__(self, other):
+        from cre.builtin_cre_funcs import GreaterThanEq
+        return GreaterThanEq(self, other)
+    def __eq__(self, other): 
+        from cre.builtin_cre_funcs import Equals
+        return Equals(self, other)
+    def __ne__(self, other): 
+        from cre.builtin_cre_funcs import Equals
+        return ~Equals(self, other)
+
+    def __add__(self, other):
+        from cre.builtin_cre_funcs import Add
+        return Add(self, other)
+
+    def __radd__(self, other):
+        from cre.builtin_cre_funcs import Add
+        return Add(other, self)
+
+    def __sub__(self, other):
+        from cre.builtin_cre_funcs import Subtract
+        return Subtract(self, other)
+
+    def __rsub__(self, other):
+        from cre.builtin_cre_funcs import Subtract
+        return Subtract(other, self)
+
+    def __mul__(self, other):
+        from cre.builtin_cre_funcs import Multiply
+        return Multiply(self, other)
+
+    def __rmul__(self, other):
+        from cre.builtin_cre_funcs import Multiply
+        return Multiply(other, self)
+
+    def __truediv__(self, other):
+        from cre.builtin_cre_funcs import Divide
+        return Divide(self, other)
+
+    def __rtruediv__(self, other):
+        from cre.builtin_cre_funcs import Divide
+        return Divide(other, self)
+
+    def __floordiv__(self, other):
+        from cre.builtin_cre_funcs import FloorDivide
+        return FloorDivide(self, other)
+
+    def __rfloordiv__(self, other):
+        from cre.builtin_cre_funcs import FloorDivide
+        return FloorDivide(other, self)
+
+    def __pow__(self, other):
+        from cre.builtin_cre_funcs import Power
+        return Power(self, other)
+
+    def __rpow__(self, other):
+        from cre.builtin_cre_funcs import Power
+        return Power(other, self)
+
+    def __mod__(self, other):
+        from cre.builtin_cre_funcs import Modulus
+        return Modulus(other, self)
+
+    def __and__(self,other):
+        from cre.conditions import cre_func_to_cond, conditions_and
+        self = cre_func_to_cond(self)
+        if(isinstance(other, CREFunc)): other = cre_func_to_cond(other)
+        # print("<<", type(self), type(other))
+        return conditions_and(self, other)
+
+    def __or__(self,other):
+        from cre.conditions import cre_func_to_cond, conditions_or
+        self = cre_func_to_cond(self)
+        if(isinstance(other, CREFunc)): other = cre_func_to_cond(other)
+        return conditions_or(self, other)
+
+    def __invert__(self):
+        from cre.conditions import literal_ctor, literal_to_cond, literal_not
+        return literal_to_cond(literal_not(literal_ctor(self)))
+
+
 define_boxing(CREFuncTypeClass, CREFunc)
 
 @njit(i8[::1](GenericCREFuncType), cache=True)
@@ -541,7 +661,7 @@ def get_base_var_ptrs(self):
 
 @overload_attribute(CREFuncTypeClass, "base_var_ptrs")
 def overload_base_var_ptrs(self):
-    return get_base_var_ptrs
+    return get_base_var_ptrs.py_func
 
 @njit(i8[::1](GenericCREFuncType), cache=True)
 def get_head_var_ptrs(self):
@@ -554,7 +674,7 @@ def get_head_var_ptrs(self):
 
 @overload_attribute(CREFuncTypeClass, "head_var_ptrs")
 def overload_head_var_ptrs(self):
-    return get_head_var_ptrs
+    return get_head_var_ptrs.py_func
 
 
 
@@ -688,13 +808,18 @@ def ensure_repr_const(typ):
 
 head_info_arr_type = head_info_type[::1]
 
-@generated_jit(cache=True, nopython=True)
-def cre_func_new(_cf_type, name, expr_template, shorthand_template):
-    # SentryLiteralArgs(['cf_type','n_args']).for_function(cre_func_new).bind(cf_type, n_args, name, expr_template, shorthand_template)
+@generated_jit(nopython=True)
+def cre_func_ctor(_cf_type, name, expr_template, shorthand_template, is_ptr_op):
+    # SentryLiteralArgs(['cf_type','n_args']).for_function(cre_func_ctor).bind(cf_type, n_args, name, expr_template, shorthand_template)
     cf_type = _cf_type.instance_type
     fd = cf_type._field_dict
     arg_types = cf_type.arg_types
-    n_args = len(arg_types)
+    print("BOB", is_ptr_op.literal_value, getattr(cf_type,'n_args',None))
+    if(is_ptr_op.literal_value and hasattr(cf_type,'n_args')):
+        print("has N", cf_type.n_args)
+        n_args = cf_type.n_args
+    else:
+        n_args = len(arg_types)
     # n_args = n_args.literal_value
     chr_mbr_attrs = ["return_val"]
     for i in range(n_args):
@@ -704,14 +829,14 @@ def cre_func_new(_cf_type, name, expr_template, shorthand_template):
         chr_mbr_attrs.append(f'ref{i}')
     chr_mbr_attrs = tuple(chr_mbr_attrs)
     
-
-    rc_fn_typ = types.FunctionType(unicode_type(CREObjType, i8))
-    repr_const_symbols = tuple(ensure_repr_const(at) for  at in arg_types)
+    if(is_ptr_op.literal_value):
+        repr_const_symbols = (ensure_repr_const(i8),)
+    else:
+        repr_const_symbols = tuple(ensure_repr_const(at) for  at in arg_types)
+    
     unroll_inds = tuple(range(len(arg_types)))
 
-
     prefix = cf_type.symbol_prefix
-    # print('prefix', cf.symbol_prefix)
     method_names = (
         f"{prefix}_call_heads",
         f"{prefix}_call_head_ptrs",
@@ -723,18 +848,15 @@ def cre_func_new(_cf_type, name, expr_template, shorthand_template):
         f"{prefix}_call_self",
     )
 
-    # print("repr_const_symbols", repr_const_symbols)
-    # repr_const_impl_ptrs = tuple(_get_wrapper_address(fn, rc_fn_typ)
-                                 # for fn in repr_const_impls)
-    # print("repr_const_impl_ptrs", repr_const_impl_ptrs)
-    # @njit(GenericCREFuncType(unicode_type,unicode_type,unicode_type), cache=True)
-    def impl(_cf_type, name, expr_template, shorthand_template):
+    def impl(_cf_type, name, expr_template, shorthand_template, is_ptr_op):
         cf = new(cf_type)
         # cf = new_w_del(cf_type, 'CRE_cf_del_inject')
+        print('n_args', n_args)
         cf.n_args = n_args
         cf.root_n_args = n_args
         cf.root_arg_infos = np.zeros(n_args, dtype=arg_infos_type)
         cf.is_initialized = False
+        cf.is_ptr_op = is_ptr_op
         set_chr_mbrs(cf, chr_mbr_attrs)
         # Point the return_data_ptr to 'return_val'
         _,_,return_data_ptr = cre_obj_get_item_t_id_ptr(cf, 0)
@@ -760,15 +882,26 @@ def cre_func_new(_cf_type, name, expr_template, shorthand_template):
             cf.head_ranges[i].start = i
             cf.head_ranges[i].end = i+1
 
+        if(not is_ptr_op):
+            cf.call_heads_addr = _get_global_fn_addr(method_names[0])
+            cf.call_self_addr = _get_global_fn_addr(method_names[7])
+            # cf.match_addr = _get_global_fn_addr(method_names[5])
+            # # cf.check_addr = _get_global_fn_addr(method_names[6])
+            # cf.call_addr = _get_global_fn_addr(method_names[2])
+            # cf.match_heads_addr = _get_global_fn_addr(method_names[3])
+
+        cf.call_head_ptrs_addr = _get_global_fn_addr(method_names[1])
+        cf.match_head_ptrs_addr = _get_global_fn_addr(method_names[4])
+
+
         # cre_func_assign_method_table(cf)
-        cf.call_heads_addr = _get_global_fn_addr(method_names[0])
-        # cf.call_head_ptrs_addr = _get_global_fn_addr(method_names[1])
-        # cf.call_addr = _get_global_fn_addr(method_names[2])
-        # cf.match_heads_addr = _get_global_fn_addr(method_names[3])
-        # cf.match_head_ptrs_addr = _get_global_fn_addr(method_names[4])
-        # cf.match_addr = _get_global_fn_addr(method_names[5])
-        # # cf.check_addr = _get_global_fn_addr(method_names[6])
-        cf.call_self_addr = _get_global_fn_addr(method_names[7])
+        
+        
+        
+        
+        
+        
+        
 
         repr_const_addrs = np.zeros(n_args, dtype=np.int64)
         # for i in range(n_args):
@@ -953,7 +1086,6 @@ def build_instr_set(self):
     n_iter = 0
     keep_looping = True
     while(keep_looping):
-        
         # any_children = False
         # for i, arg_info in enumerate(cf.root_arg_infos):
         arg_info = cf.root_arg_infos[i]
@@ -1237,6 +1369,7 @@ def overload_call(cf, *args):
 
 rc_fn_typ = types.FunctionType(unicode_type(CREObjType, i8))
 
+
 @njit(unicode_type(GenericCREFuncType, types.boolean), cache=True)
 def cre_func_str(self, use_shorthand):
     stack = List()
@@ -1260,9 +1393,6 @@ def cre_func_str(self, use_shorthand):
                 addr = cf.name_data.repr_const_addrs[i]
                 fn = _func_from_address(rc_fn_typ, addr)
                 arg_strs.append(fn(cf,i))
-                # s = cf.name_data.repr_consts[i](cf,i)
-                
-                # arg_strs.append("?")
             i += 1
         while(i >= len(cf.root_arg_infos)):
             nd = cf.name_data
@@ -1276,6 +1406,13 @@ def cre_func_str(self, use_shorthand):
             cf, i, arg_strs = stack.pop(-1)
             arg_strs.append(s)
     return s
+
+@overload(str)
+def overload_cre_func_str(self):
+    if(self is not GenericCREFuncType): return
+    def impl(self):
+        return cre_func_str(self, True)
+    return impl
 
 #------------------------------------------------------------------
 # : define_CREFunc()
@@ -1334,6 +1471,20 @@ def _standardize_string_templates(members):
     if('shorthand' not in members):
         members['shorthand'] = members['expression']
 
+def _py_func_unq(py_func):
+    codebytes = py_func.__code__.co_code
+    return codebytes
+    # TODO: ALSO NEED __closure__?
+    # print("cb:", codebytes)
+    # if py_func.__closure__ is not None:
+    #     cvars = tuple([x.cell_contents for x in self._py_func.__closure__])
+    #     # Note: cloudpickle serializes a function differently depending
+    #     #       on how the process is launched; e.g. multiprocessing.Process
+    #     cvarbytes = dumps(cvars)
+    # else:
+    #     cvarbytes = b''
+
+
 def _standardize_method(members, method_name):
     ''' Extract the py_funcs associated with 'call' or 'check' and pickle them.'''
     if(method_name in members):
@@ -1351,9 +1502,9 @@ def _standardize_method(members, method_name):
             members[f'{method_name}_bytes'] = cp_bytes
             py_func._cre_cloudpickle_bytes = cp_bytes
 
-        return members[f'{method_name}_bytes']
+        return members[f'{method_name}_bytes'], _py_func_unq(py_func)
     else:
-        return None
+        return None, None
     
 def define_CREFunc(name, members):
     ''' Defines a new CREFuncType '''
@@ -1364,9 +1515,6 @@ def define_CREFunc(name, members):
     assert hasattr(members['call'], '__call__'), "call() must be a function"
     assert not (has_check and not hasattr(members['check'], '__call__')), "check() must be a function"
 
-    # If no signature is given then create an untyped instance that can be specialized later
-    if('signature' not in members):
-        return UntypedCREFunc(name,members)
 
     # inp_members = {**members}
 
@@ -1380,14 +1528,15 @@ def define_CREFunc(name, members):
     nopy_call, nopy_check = _standardize_nopython(members)
 
     # Get pickle bytes for 'call' and 'check'
-    call_bytes =_standardize_method(members, 'call')
-    check_bytes = _standardize_method(members, 'check')
+    call_bytes, call_unq =_standardize_method(members, 'call')
+    check_bytes, check_unq = _standardize_method(members, 'check')
 
     # Regenerate the source for this type if wasn't cached or if 'cache=False' 
+    unq_args = [name, return_type, arg_types, nopy_call, nopy_check, call_unq, check_unq]
     gen_src_args = [name, return_type, arg_types, nopy_call, nopy_check, call_bytes, check_bytes]
 
-    # print(gen_src_args)
-    long_hash = unique_hash(gen_src_args)
+    # print("::", gen_src_args)
+    long_hash = unique_hash(unq_args)
 
     # print(name, long_hash)
     if(not source_in_cache(name, long_hash)): #or members.get('cache',True) == False):
@@ -1429,10 +1578,9 @@ f'''import numpy as np
 from numba import njit, void, i8, boolean, objmode
 from numba.types import unicode_type
 from numba.extending import lower_cast
-from numba.experimental.function_type import _get_wrapper_address
 from numba.core.errors import NumbaError, NumbaPerformanceWarning
-from cre.utils import PrintElapse, _struct_from_ptr, _func_from_address, _load_ptr, _obj_cast_codegen, _store_safe, _cast_structref, _attr_is_null, _nullify_attr, _decref_structref
-from cre.cre_func import ensure_repr_const, cre_func_new, CREFunc_method, CREFunc_assign_method_addr, CREFuncTypeClass, GenericCREFuncType, ARGINFO_VAR, GenericVarType
+from cre.utils import PrintElapse, _struct_from_ptr, _load_ptr, _obj_cast_codegen, _store_safe, _cast_structref
+from cre.cre_func import ensure_repr_const, cre_func_ctor, CREFunc_method, CREFunc_assign_method_addr, CREFuncTypeClass, GenericCREFuncType, GenericVarType
 from cre.memset import resolve_deref_data_ptr
 from cre.fact import BaseFact
 import cloudpickle
@@ -1524,8 +1672,251 @@ for at in arg_types:
 
 @njit(GenericCREFuncType(unicode_type, unicode_type, unicode_type), cache=True)
 def ctor(name, expr_template, shorthand_template):
-    return cre_func_new(cf_type, name, expr_template, shorthand_template)
+    return cre_func_ctor(cf_type, name, expr_template, shorthand_template, False)
 cf_type.ctor = ctor
 '''
 
+    return source
+
+
+
+# ----------------------------------------------------------------------------
+# : UntypeCREFunc
+
+
+def resolve_return_type(x):
+    # Helper function for determining how to type CREFunc arguments
+    if(isinstance(x,Var)):
+        return x.head_type
+    elif(isinstance(x,CREFunc)):
+        return x.return_type
+    # elif(isinstance(x, OpComp)):
+    #     return x.op.signature.return_type
+    elif(isinstance(x, UntypedCREFunc)):
+        raise ValueError(f"Cannot resolve return type of UntypedCREFunc {x}")
+    elif(isinstance(x, (int))):
+        return types.int64
+    elif(isinstance(x, (float))):
+        return types.float64
+    elif(isinstance(x, (str))):
+        return types.unicode_type
+
+
+
+class UntypedCREFunc():
+    '''An Op that has not been given a signature yet'''
+    def __init__(self,name,members):
+        self.name = name
+        self.members = members
+        self.members['call'] = njit(cache=True)(self.members['call'])
+        # self._specialize_cache = {}
+    @property
+    def arg_names(self):
+        if(not hasattr(self,"_arg_names")):
+            f = self.members['call']
+            py_func = f.py_func if isinstance(f, Dispatcher) else f
+            self._arg_names = inspect.getfullargspec(py_func)[0]
+        return self._arg_names
+
+    def __repr__(self):
+        return f'UntypedCREFunc(name={self.name}, members={self.members})'
+
+    def __str__(self):
+        return f'{self.name}({", ".join(self.arg_names)})'
+
+
+    def __call__(self,*py_args):
+        arg_types = [] 
+        head_types = [] 
+        # all_const = True
+        # any_not_var = False
+        # any_deref_vars = False
+        py_args = list(py_args)
+        for i, x in enumerate(py_args):
+            # If given a type make into a Var
+            if(isinstance(x,types.Type)):
+                head_types.append(x)
+                arg_types.append(x)
+                x = py_args[i] = Var(x)
+            else:
+                arg_types.append(typeof(x))
+                head_types.append(resolve_return_type(x))
+
+
+        all_const = all_args_are_const(arg_types)
+        
+
+        call = self.members['call']
+        if(all_const):
+            return call(*py_args)
+
+        sig = dispatcher_sig_from_arg_types(call, tuple(head_types))
+        # print(tuple(arg_types),tuple(arg_types) in call.overloads)
+        # print("-- overloads",call.overloads.keys())
+        # cres = call.overloads.get(head_types,None)
+        # if(cres is not None):
+        #     sig = cres.signature
+        # else:
+        #     # Note: get_call_template is an internal method of numba.Dispatcher 
+        #     (template,*rest) = call.get_call_template(head_types,{})
+        #     #Note: this can be finicky might need to find the best one
+        #     sig = [x for x in template.cases if x.args==head_types][0]
+        # # self.members['signature'] = sig
+        members = {**self.members, 'signature': sig}#
+        cf = new_cre_func(self.name, members)
+        return cf(*py_args)
+
+# ----------------------------------------------------------------------------
+# : PtrCREFunc
+
+def define_PtrCREFunc(name, members):
+    ''' Defines a new CREFuncType '''
+
+    # Ensure that 'call' is present and that 'call' and 'check' are functions
+    assert 'call_head_ptrs' in members, "PtrCREFunc must have call_head_ptrs() defined"
+    assert hasattr(members['call_head_ptrs'], '__call__'), "call_head_ptrs() must be a function"
+
+    # Get pickle bytes for 'call_head_ptrs'
+    call_head_ptrs_bytes, call_heads_unq = \
+        _standardize_method(members, 'call_head_ptrs')
+
+    # Regenerate the source for this type if wasn't cached or if 'cache=False' 
+    gen_src_args = [name, members['return_type'], call_head_ptrs_bytes]
+    unq_args = [name, members['return_type'], call_heads_unq]
+
+    long_hash = unique_hash(unq_args)
+
+    # print(name, long_hash)
+    if(not source_in_cache(name, long_hash)): #or members.get('cache',True) == False):
+        source = gen_ptr_cre_func_source(*gen_src_args, long_hash)
+        source_to_cache(name, long_hash, source)
+
+    # Update members with jitted 'call_head_ptrs'
+    to_import = ['cf_type', 'call_head_ptrs']
+    l = import_from_cached(name, long_hash, to_import)
+
+    typ = l['cf_type']
+    typ.func_name = name
+    typ.call_head_ptrs = l['call_head_ptrs']
+    
+    for k,v in members.items():
+        setattr(typ,k,v)
+
+    return typ
+
+def new_ptr_cre_func(name, members):
+    call_head_ptrs = members['call_head_ptrs']
+
+    # Determine the signature 
+    if('signature' not in members):
+        if('return_type' in members):
+            members['signature'] = members['return_type'](i8[::1])
+        else:
+            # If return_type not given then determine it dynamically
+            # cres = call_head_ptrs.overloads.get((i8[::1],),None)
+            # if(cres is not None):
+            #     sig = cres.signature
+            # else:
+            #     # Note: get_call_template is an internal method of numba.Dispatcher 
+            #     (template,*rest) = call_head_ptrs.get_call_template((i8[::1],),{})
+            #     #Note: this can be finicky might need to find the best one
+            #     sig = [x for x in template.cases if x.args==(i8[::1],)][0] 
+            sig = dispatcher_sig_from_arg_types(call_head_ptrs, (i8[::1],))
+            members['signature'] = sig
+            members['return_type'] = sig.return_type
+
+    cf_type = define_PtrCREFunc(name, members)
+
+    if('n_args' in members):
+        n_args = members['n_args']
+        expr_template = f"{name}({', '.join([f'{{{i}}}' for i in range(n_args)])})"
+    else:
+        expr_template = f"{name}(...)"
+    shorthand_template = members.get('shorthand',expr_template)
+
+    cre_func = cf_type.ctor(
+        name,
+        expr_template,
+        shorthand_template                
+    )
+
+    cre_func._return_type = members['return_type']
+    cre_func._arg_types = (i8[::1],)
+    cre_func.cf_type = cf_type
+    return cre_func
+
+class PtrCREFunc(CREFunc):
+
+    def __new__(self,*args, **kwargs):
+        ''' A decorator function that builds a new Op'''
+        # if(len(args) > 1): raise ValueError("PtrCREFunc() takes at most one position argument 'signature'.")
+        
+        def wrapper(call_head_ptrs_func):
+            # Make new cre_func_type
+            members = kwargs
+            members["call_head_ptrs"] = njit(cache=True)(call_head_ptrs_func)
+            name = call_head_ptrs_func.__name__
+            # If no signature is given then create an untyped instance that can be specialized later
+            # if('signature' not in members):
+            #     return UntypedCREFunc(name,members)
+            # print(">>", members)
+            return new_ptr_cre_func(name, members)
+            
+
+        if(len(args) == 1):
+            if(isinstance(args[0],(str, numba.core.typing.templates.Signature))):
+                kwargs['signature'] = args[0]
+            elif(hasattr(args[0],'__call__')):
+                return wrapper(args[0])
+            else:
+                raise ValueError(f"Unrecognized type {type(args[0])} for 'signature'")        
+
+        return wrapper
+
+    def __call__(self,*py_args):
+        assert len(py_args) == self.nargs, f"{str(self)} takes {self.nargs}, but got {len(py_args)}"
+        if(any([not isinstance(x,Var) for x in py_args])):
+            raise ValueError("PtrOps only take Vars as input")
+            # If all of the arguments are constants then just call the Op
+            # return self.call(*py_args)
+        else:
+            # head_var_ptrs = np.empty((self.nargs,),dtype=np.int64)
+            # for i, v in enumerate(py_args):
+            #     head_var_ptrs[i] = v.get_ptr()
+            return self.__class__.make_singleton_inst(py_args)
+
+
+
+def gen_ptr_cre_func_source(name, return_type, call_head_ptrs_bytes, long_hash):
+    source = \
+f'''import numpy as np
+from numba import njit, void, i8, boolean, objmode
+from numba.types import unicode_type
+from numba.extending import lower_cast
+from numba.core.errors import NumbaError, NumbaPerformanceWarning
+from cre.utils import PrintElapse, _struct_from_ptr, _load_ptr, _obj_cast_codegen, _store_safe, _cast_structref
+from cre.cre_func import ensure_repr_const, cre_func_ctor, CREFunc_method, CREFunc_assign_method_addr, CREFuncTypeClass, GenericCREFuncType, GenericVarType
+import cloudpickle
+
+return_type = cloudpickle.loads({cloudpickle.dumps(return_type)})
+
+cf_type = CREFuncTypeClass(return_type, arg_types=(i8[::1],),is_composed=False, name={name!r}, long_hash={long_hash!r})
+
+call_head_ptrs_pyfunc = cloudpickle.loads({call_head_ptrs_bytes})
+call_head_ptrs_sig = return_type(i8[::1])
+call_head_ptrs = CREFunc_method(cf_type, 'call_head_ptrs', call_head_ptrs_sig, on_error='error')(call_head_ptrs_pyfunc)
+
+@CREFunc_method(cf_type, 'match_head_ptrs', boolean(i8[::1]))
+def match_head_ptrs(ptrs):
+    return {f'1' if isinstance(return_type, StructRef) else
+            f'1 if(call_head_ptrs(ptrs)) else 0'}
+
+#Placeholder 
+ensure_repr_const(i8)
+
+@njit(GenericCREFuncType(unicode_type, unicode_type, unicode_type), cache=True)
+def ctor(name, expr_template, shorthand_template):
+    return cre_func_ctor(cf_type, name, expr_template, shorthand_template, True)
+cf_type.ctor = ctor
+'''
     return source

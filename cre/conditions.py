@@ -15,7 +15,10 @@ from cre.utils import _incref_structref, _struct_from_meminfo, _meminfo_from_str
 from cre.utils import assign_to_alias_in_parent_frame, meminfo_type
 from cre.subscriber import base_subscriber_fields, BaseSubscriber, BaseSubscriberType, init_base_subscriber, link_downstream
 from cre.vector import VectorType
-from cre.op import GenericOpType, op_str, op_repr, Op, op_copy
+
+# from cre.op import GenericCREFuncType, op_str, Op
+from cre.cre_func import GenericCREFuncType, CREFunc
+
 from cre.cre_object import CREObjType, CREObjTypeClass
 from cre.core import T_ID_CONDITIONS, T_ID_LITERAL, register_global_default
 from numba.core import imputils, cgutils
@@ -89,8 +92,8 @@ import sys
 literal_fields_dict = {
     # "str_val" : unicode_type,
     **cre_obj_field_dict,
-    "op" : GenericOpType,
-    "var_base_ptrs" : i8[:],#UniTuple(i8,2),
+    "op" : GenericCREFuncType,
+    "base_var_ptrs" : i8[:],#UniTuple(i8,2),
     # "cre_ms_ptr" : i8,
     # A weight used for scoring matches and structure remapping  
     "weight" : f4,
@@ -136,7 +139,7 @@ py_operator_chars = ("+", "-", "*", "/", "%",
                      "=", "~", "<", ">", "!",
                      "&", "|", "@", "^")
 @njit(cache=True)
-def has_py_operator(s):
+def has_operator_char(s):
     for py_operator in py_operator_chars:
         if(py_operator in s):
             return True
@@ -144,9 +147,9 @@ def has_py_operator(s):
 
 @njit(cache=True)
 def literal_str(self):
-    s = op_str(self.op)
+    s = str(self.op)
     if(self.negated):
-        if(has_py_operator(s)):
+        if(has_operator_char(s)):
             s = f"({s})"
         return f"~{s}"
     return s    
@@ -167,19 +170,16 @@ define_boxing(LiteralTypeClass, Literal)
 LiteralType = LiteralTypeClass(literal_fields)
 register_global_default("Literal", LiteralType)
 
-@njit(LiteralType(GenericOpType),cache=True)
+@njit(LiteralType(GenericCREFuncType),cache=True)
 # @overload(Literal)
 def literal_ctor(op):
     st = new(LiteralType)
     st.idrec = encode_idrec(T_ID_LITERAL, 0, 0)
     st.op = op
-    st.var_base_ptrs = np.empty(len(op.base_var_map),dtype=np.int64)
-    for i, ptr in enumerate(op.base_var_map):
-        st.var_base_ptrs[i] = ptr
-    # st.cre_ms_ptr = 0
+    st.base_var_ptrs = op.base_var_ptrs
     st.weight = 1.0
     st.negated = 0
-    st.is_alpha = u1(len(st.var_base_ptrs) == 1)
+    st.is_alpha = u1(len(st.base_var_ptrs) == 1)
     return st
 
 
@@ -197,7 +197,7 @@ def literal_copy(self):
     # st.str_val = self.str_val
     st.idrec = self.idrec
     st.op = self.op
-    st.var_base_ptrs = self.var_base_ptrs
+    st.base_var_ptrs = self.base_var_ptrs
     st.weight = self.weight
     st.negated = self.negated
     st.is_alpha = self.is_alpha
@@ -220,7 +220,8 @@ def literal_get_unique_tuple(self):
          of a literal independant of the base Vars of its underlying op.
     '''
     deref_str = ""
-    for var in self.op.head_vars:
+    for var_ptr in self.op.head_var_ptrs:
+        var = _struct_from_ptr(GenericVarType, var_ptr)
         deref_strs = List.empty_list(unicode_type)    
         if(len(var.deref_infos) > 0):
             s = ""
@@ -310,19 +311,19 @@ register_global_default("Conditions", ConditionsType)
 # default_manager.register(VarTypeClass, models.StructRefModel)
 class Conditions(structref.StructRefProxy):
     def __new__(cls, _vars, dnf=None):
-        if(isinstance(_vars,Op)):
-            return op_to_cond(_vars)
+        if(isinstance(_vars,CREFunc)):
+            return cre_func_to_cond(_vars)
         else:
             return conditions_ctor(_vars, dnf)
     def __str__(self):
         return conds_repr(self)
     def __and__(self, other):
-        if(isinstance(other,Op)): other = op_to_cond(other)
+        if(isinstance(other,CREFunc)): other = cre_func_to_cond(other)
         conds = conditions_and(self, other) 
         auto_alias_unaliased_vars(conds)
         return conds
     def __or__(self, other):
-        if(isinstance(other,Op)): other = op_to_cond(other)
+        if(isinstance(other,CREFunc)): other = op_to_cond(other)
         conds = conditions_or(self, other)
         auto_alias_unaliased_vars(conds)
         return conds
@@ -490,7 +491,7 @@ def auto_alias_unaliased_vars(conds):
 #         _decref_ptr(self.matcher_inst_ptr)
 
 
-### Helper Functions for expressing conditions as python lists of cre.Op instances ###
+### Helper Functions for expressing conditions as python lists of cre.CREFunc instances ###
 
 @njit(cache=True)
 def _nxt_distr(distr_dnf, disj_i, var_i, lit_i):
@@ -603,7 +604,7 @@ def _conditions_ctor_dnf(dnf):
     st.base_var_map = Dict.empty(i8,i8)
     for conj in dnf: 
         for lit in conj:
-            for b_ptr in lit.var_base_ptrs:
+            for b_ptr in lit.base_var_ptrs:
                 if(b_ptr not in st.base_var_map):
                    st.base_var_map[b_ptr] = len(st.base_var_map)
                    st.vars.append(_struct_from_ptr(GenericVarType, b_ptr))
@@ -818,7 +819,7 @@ def conds_repr_ampersand_short(self, indent=" "):
             s += str(lit)
             if(i < len(conjunct)-1): s += " & "
             # if(add_non_conds): 
-            #     for var_ptr in lit.var_base_ptrs:
+            #     for var_ptr in lit.base_var_ptrs:
             #         used_var_ptrs[var_ptr] = u1(1)
         s += ")"
         if(j < len(self.dnf)-1): s += ",\n"
@@ -893,7 +894,7 @@ def literal_to_cond(lit):
     dnf[0].append(lit)
     _vars = List.empty_list(GenericVarType)
 
-    for ptr in lit.var_base_ptrs:
+    for ptr in lit.base_var_ptrs:
         _vars.append(_struct_from_ptr(GenericVarType, ptr))
     # if(right_var is not None):
     #     _vars.append(right_var)
@@ -902,8 +903,8 @@ def literal_to_cond(lit):
     # c = Conditions(_vars, dnf)
     return c
 
-@njit(ConditionsType(GenericOpType,), cache=True)
-def op_to_cond(op):
+@njit(ConditionsType(GenericCREFuncType,), cache=True)
+def cre_func_to_cond(op):
     return literal_to_cond(literal_ctor(op))
 
 
@@ -1110,10 +1111,10 @@ def _conditions_NOT(c):
 
     for i, (alpha_conjuncts, beta_conjuncts) in enumerate(dnf):
         for alpha_literal in alpha_conjuncts: 
-            alpha_literal.var_base_ptrs = (ptr_map[alpha_literal.var_base_ptrs[0]],0)
+            alpha_literal.base_var_ptrs = (ptr_map[alpha_literal.base_var_ptrs[0]],0)
         for beta_literal in beta_conjuncts:
-            t = (ptr_map[beta_literal.var_base_ptrs[0]], ptr_map[beta_literal.var_base_ptrs[1]])
-            beta_literal.var_base_ptrs = t
+            t = (ptr_map[beta_literal.base_var_ptrs[0]], ptr_map[beta_literal.base_var_ptrs[1]])
+            beta_literal.base_var_ptrs = t
 
     return Conditions(new_vars, dnf)
 
@@ -1282,17 +1283,17 @@ def build_distributed_dnf(c,index_map=None):
         distr_conjuct = distr_dnf[i]
         for j, lit in enumerate(conjunct):
             max_ind = -1
-            for base_ptr in lit.op.base_var_map:
+            for base_ptr in lit.op.base_var_ptrs:
                 ind = index_map[i8(base_ptr)]
                 if(ind > max_ind): max_ind = ind
 
             insertion_conj = distr_conjuct[max_ind]
             was_inserted = False
             
-            lit_n_vars = len(lit.op.base_var_map)
+            lit_n_vars = lit.op.n_args
 
             for k in range(len(insertion_conj)-1,-1,-1):
-                if(lit_n_vars >= len(insertion_conj[k].op.base_var_map)):
+                if(lit_n_vars >= insertion_conj[k].op.n_args):
                     was_inserted = True
                     insertion_conj.insert(k+1, lit)
                     break
@@ -1334,9 +1335,9 @@ def conds_to_lit_sets(self):
             else:
                 l = d[unq_tup]
 
-            base_var_ptrs = np.empty(len(lit.op.base_vars), dtype=np.int64)
-            for i, base_var in enumerate(lit.op.base_vars):
-                base_var_ptrs[i] = base_var.base_ptr
+            # base_var_ptrs = np.empty(len(lit.op.base_vars), dtype=np.int64)
+            # for i, base_var in enumerate(lit.op.base_vars):
+            #     base_var_ptrs[i] = base_var.base_ptr
 
             l.append(lit)
 
@@ -1368,7 +1369,7 @@ def lit_set_to_ind_sets(lit_set, base_ptrs_to_inds):
         and outputs a list of arrays of indicies'''
     l = List.empty_list(u2_arr)
     for lit in lit_set:
-        base_set = lit.var_base_ptrs
+        base_set = lit.base_var_ptrs
         base_inds = np.empty(len(base_set), dtype=np.uint16)
         for i, v in enumerate(base_set):
             base_inds[i] = base_ptrs_to_inds[v]
@@ -2392,15 +2393,15 @@ for k,remap in enumerate(arr):
 #         for _ in range(n_vars): alpha_conjuncts.append(List.empty_list(LiteralType))
         
 #         for term in ac:
-#             i = conds.base_var_map[term.var_base_ptrs[0]]
+#             i = conds.base_var_map[term.base_var_ptrs[0]]
 #             alpha_conjuncts[i].append(term)
 
         
 
 #         beta_inds = -np.ones((n_vars,n_vars),dtype=np.int64)
 #         for term in bc:
-#             i = conds.base_var_map[term.var_base_ptrs[0]]
-#             j = conds.base_var_map[term.var_base_ptrs[1]]
+#             i = conds.base_var_map[term.base_var_ptrs[0]]
+#             j = conds.base_var_map[term.base_var_ptrs[1]]
 #             if(beta_inds[i,j] == -1):
 #                 k = len(beta_conjuncts)
 #                 beta_inds[i,j] = k
@@ -2436,7 +2437,7 @@ for k,remap in enumerate(arr):
 #         b_is_in_this_conj = np.zeros(len(conds.vars),dtype=np.uint8)
 
 #         for term in conjunct:
-#             ptr = term.var_base_ptrs[0]
+#             ptr = term.base_var_ptrs[0]
 #             # ptr = _raw_ptr_from_struct(l_var)
 #             # print(">>>", ptr, conds.base_var_map)
 #             ind = conds.base_var_map[ptr]

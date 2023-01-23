@@ -85,10 +85,10 @@ class VarTypeClass(CREObjTypeClass):
         base_type = getattr(self,"_base_type",None)
         head_type = getattr(self,"_head_type",None)
         if(base_type is None and head_type is None):
-            return f"cre.GenericVarType"
+            return f"GenericVarType"
         else:
-            return f"cre.Var[base_type={base_type.instance_type}, head_type={head_type.instance_type}])"
-    # __repr__ = __str__
+            return f"Var[base_type={base_type.instance_type}, head_type={head_type.instance_type}])"
+    __repr__ = __str__
 
 # @lower_cast(VarTypeClass, CREObjType)
 # def upcast(context, builder, fromty, toty, val):
@@ -303,28 +303,28 @@ class Var(CREObjProxy):
     
 
     def __lt__(self, other): 
-        from cre.default_ops import LessThan, FactIdrecsLessThan
+        from cre.builtin_cre_funcs import LessThan, FactIdrecsLessThan
         if(isinstance(other,Var) and isinstance(other.head_type,Fact)):
             return FactIdrecsLessThan(self,other)
         else:
             return LessThan(self, other)
     def __le__(self, other): 
-        from cre.default_ops import LessThanEq
+        from cre.builtin_cre_funcs import LessThanEq
         return LessThanEq(self, other)
             
     def __gt__(self, other): 
-        from cre.default_ops import GreaterThan, FactIdrecsLessThan
+        from cre.builtin_cre_funcs import GreaterThan, FactIdrecsLessThan
         if(isinstance(other,Var) and isinstance(other.head_type,Fact)):
             return FactIdrecsLessThan(other,self)
         else:
             return GreaterThan(self, other)
 
     def __ge__(self, other):
-        from cre.default_ops import GreaterThanEq
+        from cre.builtin_cre_funcs import GreaterThanEq
         return GreaterThanEq(self, other)
     def __eq__(self, other): 
-        from cre.default_ops import Equals, ObjEquals, ObjIsNone
-        from cre.conditions import op_to_cond
+        from cre.builtin_cre_funcs import Equals, ObjEquals, ObjIsNone
+        from cre.conditions import cre_func_to_cond
 
         # with PrintElapse("new_ptr_op"):
         #     npo = ObjIsNone(self)
@@ -334,16 +334,16 @@ class Var(CREObjProxy):
 
         if(other is None):
             # with PrintElapse("new_ObjIsNone"):
-            return op_to_cond(ObjIsNone(self))
+            return cre_func_to_cond(ObjIsNone(self))
         if(isinstance(other,Var) and isinstance(other.head_type,Fact)):
             # print("ObjEquals")
             # with PrintElapse("new_ObjEquals"):
-            return op_to_cond(ObjEquals(self,other))
+            return cre_func_to_cond(ObjEquals(self,other))
         # print("Equals")
         return Equals(self, other)
     def __ne__(self, other): 
         return ~(self == other)
-        # from cre.default_ops import Equals, ObjEquals, ObjIsNone
+        # from cre.builtin_cre_funcs import Equals, ObjEquals, ObjIsNone
         # if(other is None):
         #     return ~ObjIsNone(other)
         # if(isinstance(other,Var) and isinstance(other.head_type,Fact)):
@@ -351,69 +351,69 @@ class Var(CREObjProxy):
         # return ~Equals(self, other)
 
     def __add__(self, other):
-        from cre.default_ops import Add
+        from cre.builtin_cre_funcs import Add
         return Add(self, other)
 
     def __radd__(self, other):
-        from cre.default_ops import Add
+        from cre.builtin_cre_funcs import Add
         return Add(other, self)
 
     def __sub__(self, other):
-        from cre.default_ops import Subtract
+        from cre.builtin_cre_funcs import Subtract
         return Subtract(self, other)
 
     def __rsub__(self, other):
-        from cre.default_ops import Subtract
+        from cre.builtin_cre_funcs import Subtract
         return Subtract(other, self)
 
     def __mul__(self, other):
-        from cre.default_ops import Multiply
+        from cre.builtin_cre_funcs import Multiply
         return Multiply(self, other)
 
     def __rmul__(self, other):
-        from cre.default_ops import Multiply
+        from cre.builtin_cre_funcs import Multiply
         return Multiply(other, self)
 
     def __truediv__(self, other):
-        from cre.default_ops import Divide
+        from cre.builtin_cre_funcs import Divide
         return Divide(self, other)
 
     def __rtruediv__(self, other):
-        from cre.default_ops import Divide
+        from cre.builtin_cre_funcs import Divide
         return Divide(other, self)
 
     def __floordiv__(self, other):
-        from cre.default_ops import FloorDivide
+        from cre.builtin_cre_funcs import FloorDivide
         return FloorDivide(self, other)
 
     def __rfloordiv__(self, other):
-        from cre.default_ops import FloorDivide
+        from cre.builtin_cre_funcs import FloorDivide
         return FloorDivide(other, self)
 
     def __pow__(self, other):
-        from cre.default_ops import Power
+        from cre.builtin_cre_funcs import Power
         return Power(self, other)
 
     def __rpow__(self, other):
-        from cre.default_ops import Power
+        from cre.builtin_cre_funcs import Power
         return Power(other, self)
 
     def __mod__(self, other):
-        from cre.default_ops import Modulus
+        from cre.builtin_cre_funcs import Modulus
         return Modulus(other, self)
 
     def __and__(self, other):
-        from cre.conditions import conditions_and, op_to_cond
-        from cre.op import Op
-        if(isinstance(other,Op)):
-            other = op_to_cond(other)
+        from cre.conditions import conditions_and, cre_func_to_cond
+        from cre.cre_func import CREFunc
+        if(isinstance(other,CREFunc)):
+            other = cre_func_to_cond(other)
         out = conditions_and(self, other)
         return out
 
     def __or__(self, other):
-        from cre.conditions import conditions_or, op_to_cond
-        from cre.op import Op
-        if(isinstance(other,Op)): other = op_to_cond(other)
+        from cre.conditions import conditions_or, cre_func_to_cond
+        from cre.cre_func import CREFunc
+        if(isinstance(other,CREFunc)): other = cre_func_to_cond(other)
         return conditions_or(self, other)
 
     def __invert__(self):
@@ -541,18 +541,11 @@ def var_getattr_impl(context, builder, typ, val, attr):
 def resolve_deref_attrs(self):
     '''Gets the chain of attribute strings for a Var e.g. x.A.B.C -> ['A','B','C']
     '''
-    # print("Q")
     context = cre_context()
     deref_infos = var_get_deref_infos(self)
-    # print("Y")
-    # print(deref_infos)
     deref_attrs = []
     typ = self.base_type
-    # print("\nbase", typ)
-    # print("deref_infos", deref_infos)
     for i, x in enumerate(deref_infos):
-        # print(i, "X")
-        # print(i, typ)
         if(isinstance(typ, ListType)):
             deref_attrs.append(str(x['a_id']))
         else:
@@ -567,12 +560,7 @@ def resolve_deref_attrs(self):
                 f"Chain: {deref_infos}"
                 )
 
-        # print(i, "U")
         typ = context.get_type(t_id=x['t_id'])
-        # print(i, typ, x['t_id'])
-        # print(i, "R")
-    # print("Z")
-    # print("<<", deref_attrs)
     return deref_attrs
 
 ### Methods that require python interpreter ### 

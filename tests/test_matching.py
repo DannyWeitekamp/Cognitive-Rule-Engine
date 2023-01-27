@@ -5,7 +5,7 @@ from cre.conditions import *
 from cre.memset import MemSet
 from cre.context import cre_context
 # from cre.matching import get_ptr_matches,_get_matches
-from cre.utils import _struct_from_ptr, _list_base,_list_base_from_ptr,_load_ptr, _incref_structref, _raw_ptr_from_struct
+from cre.utils import PrintElapse, _struct_from_ptr, _list_base,_list_base_from_ptr,_load_ptr, _incref_structref, _raw_ptr_from_struct
 from numba.core.runtime.nrt import rtsys
 import gc
 from cre.rete import repr_match_iter_dependencies
@@ -180,8 +180,12 @@ def test_check_and_score_match():
         c = Var(BOOP,"c")
 
         conds = a & b & (a.val < b.val) 
+        print(conds)
 
         match =[bps[7], bps[9]]
+        print("match", match)
+        print(conds.check_match(match, ms))
+        print(conds.score_match(match, ms))
         assert conds.check_match(match, ms) == True
         assert conds.score_match(match, ms) == 1.0
 
@@ -200,10 +204,14 @@ def test_check_and_score_match():
         assert conds.score_match(match, ms) == 5./6
 
         match =[bps[8], bps[0],bps[9]]
+        print(conds.check_match(match, ms))
+        print(conds.score_match(match, ms))
         assert conds.check_match(match, ms) == False
         assert conds.score_match(match, ms) == 5./6
 
         match =[bps[9], bps[4],bps[0]]
+        print(conds.check_match(match, ms))
+        print(conds.score_match(match, ms))
         assert conds.check_match(match, ms) == False
         assert conds.score_match(match, ms) == 4./6
 
@@ -463,15 +471,16 @@ def test_mem_leaks():
     # Shorthand 1 literal
     for i in range(2):
         l1, l2 = Var(BOOP,"l1"), Var(BOOP,"l2")
-        c = (l1.B > 0)
+        c = (l1.B < 0)
+        # print(type(c),l1._meminfo.refcount, l2._meminfo.refcount)
         c = None; gc.collect()
-        # print(type(c),l1._msinfo.refcount,l2._msinfo.refcount)
+        # print(l1._meminfo.refcount,l2._meminfo.refcount)
         c, l1, l2 = None, None,None; gc.collect()
         if(i==0): init_used = used_bytes()
-        # print(used_bytes()-init_used)
+        # print(used_bytes())
         assert used_bytes()==init_used
     # print()
-
+    # raise ValueError()
     # AND
     for i in range(2):
         l1, l2 = Var(BOOP,"l1"), Var(BOOP,"l2")
@@ -531,56 +540,60 @@ from cre.rete import get_graph, match_iter_next_ptrs
 
 def test_swap_memset():
     
-    init_used = used_bytes()
-    # Test that we can swap the memset without leaks
-    (c,ms),_ = matching_betas_setup()
-    # print(foo(ms))
-    # print("<< ms BEF",ms._meminfo.refcount)
-
-    # bef = used_bytes()
-    # graph = get_graph(ms,c)
-    # graph_bytes =  used_bytes()-bef
-    # print(">>", graph_bytes)
-    m_iter = c.get_matches(ms)    
-    m_iter = c.get_matches(ms)    
-    print("m_iter", m_iter._meminfo.refcount)
-    print("<< ms AFT",ms._meminfo.refcount)
-    match_iter_next_ptrs(m_iter)
-    print("m_iter", m_iter._meminfo.refcount)
-    print("<< ms AFT",ms._meminfo.refcount)
-    matches = list(m_iter)
-    matches=None
-    print("m_iter", m_iter._meminfo.refcount)
-    print("<< ms AFT",ms._meminfo.refcount)
-
-    # print("<< ms AFT",ms._meminfo.refcount)
-    # print("<< graph AFT",graph._meminfo.refcount)
-
-    (_,ms2),_ = matching_betas_setup()
-    # graph2 = get_graph(ms2,c)
-    # bef = used_bytes()
-    m_iter2 = c.get_matches(ms2)
-    matches2 = list(m_iter2)
-
-
-    graph = None; graph2 = None;
-    print("<< ms CLN",ms._meminfo.refcount)
-    m_iter = None; m_iter2 = None;
-    print("<< ms CLN",ms._meminfo.refcount)
-    matches = None; matches2 = None;
-    print("<< ms CLN",ms._meminfo.refcount)
-
-    ms = None; ms2 = None; c=None; _=None;
-    gc.collect()
-    # print("!!!", bef-used_bytes())
-
-    # print("<< graph CLN",graph._meminfo.refcount)
     
-    
+    for i in range(2):
+        # Test that we can swap the memset without leaks
+        (c,ms),_ = matching_betas_setup()
+        # print(foo(ms))
+        # print("<< ms BEF",ms._meminfo.refcount)
 
-    # assert len(matches)==len(matches2)
-    print(used_bytes()-init_used)
-    assert used_bytes()==init_used
+        # bef = used_bytes()
+        # graph = get_graph(ms,c)
+        # graph_bytes =  used_bytes()-bef
+        # print(">>", graph_bytes)
+        m_iter = c.get_matches(ms)    
+        m_iter = c.get_matches(ms)    
+        print("m_iter", m_iter._meminfo.refcount)
+        print("<< ms AFT",ms._meminfo.refcount)
+        match_iter_next_ptrs(m_iter)
+        print("m_iter", m_iter._meminfo.refcount)
+        print("<< ms AFT",ms._meminfo.refcount)
+        matches = list(m_iter)
+        matches=None
+        print("m_iter", m_iter._meminfo.refcount)
+        print("<< ms AFT",ms._meminfo.refcount)
+
+        # print("<< ms AFT",ms._meminfo.refcount)
+        # print("<< graph AFT",graph._meminfo.refcount)
+
+        (_,ms2),_ = matching_betas_setup()
+        # graph2 = get_graph(ms2,c)
+        # bef = used_bytes()
+        m_iter2 = c.get_matches(ms2)
+        matches2 = list(m_iter2)
+
+
+        graph = None; graph2 = None;
+        print("<< ms CLN",ms._meminfo.refcount)
+        m_iter = None; m_iter2 = None;
+        print("<< ms CLN",ms._meminfo.refcount)
+        matches = None; matches2 = None;
+        print("<< ms CLN",ms._meminfo.refcount)
+
+        ms = None; ms2 = None; c=None; _=None;
+        gc.collect()
+        # print("!!!", bef-used_bytes())
+
+        # print("<< graph CLN",graph._meminfo.refcount)
+        
+        
+
+        # assert len(matches)==len(matches2)
+        if(i == 0):
+            init_used = used_bytes()
+        else:
+            print(used_bytes()-init_used)
+            assert used_bytes()==init_used
 
 
 
@@ -697,8 +710,8 @@ def test_b_matching_betas_lit(benchmark):
 if(__name__ == "__main__"):
     import faulthandler; faulthandler.enable()
     
-    # test_mem_leaks()
-    test_swap_memset()
+    test_mem_leaks()
+    # test_swap_memset()
     # dat = matching_alphas_setup()[0]
     # dat = matching_betas_setup()[0]
 

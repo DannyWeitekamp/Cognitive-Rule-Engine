@@ -644,8 +644,7 @@ def struct_get_attr_offset(inst,attr):
 
 @intrinsic
 def _struct_get_attr_ptr(typingctx, inst, attr):
-    '''Get the offset of the attribute 'attr' from the base address of the struct
-        pointed to by structref 'inst'
+    '''Get the data ptr of the attribute 'attr' in 'inst'
     '''
     attr_literal = attr.literal_value
     def codegen(context, builder, sig, args):
@@ -1081,6 +1080,15 @@ def iter_typed_list(lst):
 
 #     return sig,codegen
 
+@intrinsic
+def _tuple_setitem(typingctx, tup, i, val):
+    #NOTE: Haven't properly tested... 'i' must be constant 
+    def codegen(context, builder, sig, args):
+        tup,i,val = args
+        return builder.insert_value(tup, val, i)
+        # print(llty.__dict__)
+        
+    return tup(tup, i, val), codegen
 
 @intrinsic
 def _sizeof_type(typingctx, typ_ref):
@@ -1339,4 +1347,55 @@ def _set_global(typingctx, _typ, _name, val):
         gv = get_or_make_global(context,builder,typ, name)
         builder.store(val, gv)
     sig = types.void(_typ, _name, val)
+    return sig, codegen
+
+
+# --------------------------------
+# : _call_fast implementation
+@intrinsic
+def _call_fast(typingctx, func, args):
+    '''Calls a first-class FunctionType with attrs=("nounwind",'readnone') '''    
+    func_type = func
+    def codegen(context, builder, sig, _args):        
+        _, inp_types = sig.args
+        arg_types = func_type.signature.args
+        func, args = _args
+
+        # Unpack args and cast types to the types specified in the func signature
+        args = cgutils.unpack_tuple(builder, args, len(inp_types))
+        args = [context.cast(builder, a, it, at) for a, it, at in zip(args, inp_types, arg_types)]
+            
+        # Grab the function address
+        sfunc = cgutils.create_struct_proxy(func_type)(context, builder, func)
+        llty = context.get_value_type(func_type.ftype)
+        fn_addr = builder.bitcast(sfunc.addr, llty)        
+
+        # Call the function with special attributes
+        ret = builder.call(fn_addr, args, cconv=func_type.cconv, attrs=("nounwind",'readnone'))
+        return ret 
+    sig = func.signature.return_type(func, args)
+    return sig, codegen
+
+@intrinsic
+def _call_nounwind(typingctx, func, args):
+    '''Calls a first-class FunctionType with attrs=("nounwind",'readnone') '''    
+    func_type = func
+    def codegen(context, builder, sig, _args):        
+        _, inp_types = sig.args
+        arg_types = func_type.signature.args
+        func, args = _args
+
+        # Unpack args and cast types to the types specified in the func signature
+        args = cgutils.unpack_tuple(builder, args, len(inp_types))
+        args = [context.cast(builder, a, it, at) for a, it, at in zip(args, inp_types, arg_types)]
+            
+        # Grab the function address
+        sfunc = cgutils.create_struct_proxy(func_type)(context, builder, func)
+        llty = context.get_value_type(func_type.ftype)
+        fn_addr = builder.bitcast(sfunc.addr, llty)        
+
+        # Call the function with special attributes
+        ret = builder.call(fn_addr, args, cconv=func_type.cconv, attrs=("nounwind"))
+        return ret 
+    sig = func.signature.return_type(func, args)
     return sig, codegen

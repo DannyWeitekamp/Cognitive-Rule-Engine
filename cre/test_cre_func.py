@@ -45,9 +45,16 @@ def test_numerical():
 
     assert Add(9.0, 7.0) == 16.0
 
-    Incr = Add(Var(f8,'a'),1.0)
-    assert Incr(3.0) == 4.0
-    assert str(Incr) == "a+1.0"
+    for i in range(2):
+        a = Var(f8,'a')
+        Incr = Add(Var(f8,'a'),1.0)
+        assert Incr(3.0) == 4.0
+        assert str(Incr) == "a+1.0"
+
+        if(i == 0):
+            init_bytes = used_bytes()
+        else:
+            assert used_bytes() == init_bytes
 
 
 
@@ -166,9 +173,13 @@ def setup_bench():
     def Add(a, b):
         return a + b
 
+    @CREFunc(signature=i8(i8,i8,i8))
+    def Add3(a, b, c):
+        return a + b + c
+
     a = Var(i8,'a')
     b = Var(i8,'b')
-    comp = Add(Add(0,b),a)
+    comp = Add3(0,a,b)
     return (Add, comp), {}
 
 N = 100
@@ -182,7 +193,7 @@ def apply_100x100(op):
     return z
 
 @pytest.mark.benchmark(group="cre_func")
-def test_b_uncomposed(benchmark):
+def test_b_inlined_uncomposed(benchmark):
     benchmark.pedantic(lambda op,comp: apply_100x100(op),
         setup=setup_bench, warmup_rounds=1, rounds=10)
 
@@ -202,7 +213,7 @@ def call_heads_100x100(op):
     return z    
 
 @pytest.mark.benchmark(group="cre_func")
-def test_b_dyn_call_heads(benchmark):
+def test_b_dyn_call(benchmark):
     benchmark.pedantic(lambda op,comp: call_heads_100x100(op),
         setup=setup_bench, warmup_rounds=1, rounds=10)
 
@@ -216,7 +227,7 @@ def test_b_dyn_call_heads(benchmark):
 if __name__ == "__main__":
     import faulthandler; faulthandler.enable()
     import sys
-    # test_numerical()
+    test_numerical()
     # test_string()
     # test_obj()
     # test_njit_compose()

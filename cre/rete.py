@@ -11,13 +11,14 @@ from cre.utils import (wptr_t, ptr_t, _dict_from_ptr, _raw_ptr_from_struct, _get
         encode_idrec, deref_info_type, DEREF_TYPE_ATTR, DEREF_TYPE_LIST, _obj_cast_codegen,
          _ptr_to_data_ptr, _list_base_from_ptr, _load_ptr, PrintElapse, meminfo_type,
          _decref_structref, _decref_ptr, cast_structref, _struct_tuple_from_pointer_arr, _meminfo_from_struct,
-         lower_getattr, lower_setattr, ptr_to_meminfo, _cast_structref)
+         lower_getattr, lower_setattr, ptr_to_meminfo, _cast_structref, _memcpy, _incref_ptr, _incref_structref)
 from cre.structref import define_structref, StructRefType
 from cre.caching import gen_import_str, unique_hash,import_from_cached, source_to_cache, source_in_cache, cache_safe_exec, get_cache_path
 from cre.memset import MemSetType
 from cre.vector import VectorType
 from cre.var import GenericVarType
-from cre.op import GenericOpType
+# from cre.op import GenericCREFuncType
+from cre.cre_func import GenericCREFuncType, CFSTATUS_TRUTHY, get_best_call_self, set_base_arg_val_impl, REFKIND_UNICODE, REFKIND_STRUCTREF
 from cre.conditions import LiteralType, build_distributed_dnf, ConditionsType
 from cre.vector import VectorType, new_vector
 from cre.fact import BaseFact 
@@ -151,7 +152,7 @@ base_rete_node_field_dict = {
     "lit" : types.optional(LiteralType),
 
     # The Op for the node's literal
-    "op" : types.optional(GenericOpType),
+    "op" : types.optional(GenericCREFuncType),
 
     # ???
     "deref_depends" : deref_dep_typ, 
@@ -247,9 +248,9 @@ def node_ctor(ms, t_ids, var_inds,lit=None):
     st.lit = lit
     if(lit is not None):
         st.op = op = lit.op
-        n_vars = st.n_vars = len(op.base_var_map)
+        n_vars = st.n_vars = op.n_args
         for i in range(n_vars):
-            l = op.head_ranges[i].length
+            l = op.head_ranges[i].end-op.head_ranges[i].start
             st.head_ptr_buffers.append(np.empty((INIT_BUFF_LEN,l),dtype=np.int64))
             st.input_state_buffers.append(np.zeros(INIT_BUFF_LEN, dtype=input_state_type))
 
@@ -376,8 +377,8 @@ def _get_degree_order(c, index_map):
     for distr_conjunct in c.distr_dnf:
         for j, var_conjuct in enumerate(distr_conjunct):
             for lit in var_conjuct:
-                var_inds = np.empty((len(lit.var_base_ptrs),),dtype=np.int64)
-                for i, base_var_ptr in enumerate(lit.var_base_ptrs):
+                var_inds = np.empty((len(lit.base_var_ptrs),),dtype=np.int64)
+                for i, base_var_ptr in enumerate(lit.base_var_ptrs):
                     var_inds[i] = index_map[i8(base_var_ptr)]
                 if(len(var_inds) > 1):
                     has_pairs[var_inds[0],var_inds[1]] = 1
@@ -424,12 +425,12 @@ def _make_rete_nodes(ms, c, index_map):
             var_conjuct = distr_conjunct[var_ind]
 
             for lit in var_conjuct:
-                nargs = len(lit.var_base_ptrs)
+                nargs = len(lit.base_var_ptrs)
                 _ensure_long_enough(nodes_by_nargs, nargs)
                 # print("A")
                 t_ids = np.empty((nargs,),dtype=np.uint16)
                 var_inds = np.empty((nargs,),dtype=np.int64)
-                for i, base_var_ptr in enumerate(lit.var_base_ptrs):
+                for i, base_var_ptr in enumerate(lit.base_var_ptrs):
                     var_inds[i] = index_map[i8(base_var_ptr)]
                     base_var = _struct_from_ptr(GenericVarType, base_var_ptr)
                     t_id = base_var.base_t_id
@@ -439,9 +440,9 @@ def _make_rete_nodes(ms, c, index_map):
                 node = node_ctor(ms, t_ids, var_inds, lit)
                 nodes_by_nargs[nargs-1].append(node)
                 # print("<< aft", lit.op.head_var_ptrs)
-                for i, head_var_ptr in enumerate(lit.op.head_var_ptrs):
-                    head_var = _struct_from_ptr(GenericVarType, head_var_ptr)
-                    arg_ind = np.min(np.nonzero(lit.var_base_ptrs==i8(head_var.base_ptr))[0])
+                for i, hi, in enumerate(lit.op.head_infos):
+                    head_var = _struct_from_ptr(GenericVarType, hi.var_ptr)
+                    arg_ind = np.min(np.nonzero(lit.base_var_ptrs==i8(head_var.base_ptr))[0])
                     t_id = t_ids[arg_ind]
                     # print("START")
                     for d_offset in head_var.deref_infos:
@@ -748,14 +749,14 @@ def validate_head_or_retract(self, arg_ind, idrec, head_ptrs, r):
     t_id, f_id, a_id = decode_idrec(idrec)
     is_valid = True
     if(a_id != RETRACT):
-        for i in range(r.length):
-            head_var = _struct_from_ptr(GenericVarType,self.op.head_var_ptrs[r.start+i])
+        for i in range(r.start,r.end):
+            head_var = _struct_from_ptr(GenericVarType, self.op.head_infos[i].var_ptr)
             deref_infos = head_var.deref_infos
             head_ptr = resolve_head_ptr(self, arg_ind, t_id, f_id, deref_infos)
             if(head_ptr == 0): 
                 is_valid=False;
                 break; 
-            head_ptrs[i] = head_ptr
+            head_ptrs[i-r.start] = head_ptr
 
     else:
         is_valid = False
@@ -988,15 +989,15 @@ def _upstream_true(u_tt, aligned, pind_i, pind_j):
     else:
         return u_tt[pind_j, pind_i]
 
-@njit(cache=True, inline='always')
-def _check_beta(negated, j, j_strt, j_len, inp_buffers_j, 
-         head_ptrs_j, ind_j, match_head_ptrs_func, match_inp_ptrs, match_inp_inds):    
-    inp_state_j = inp_buffers_j[ind_j]
-    if(not inp_state_j.is_valid): return u1(0)
-    match_inp_inds[j] = ind_j
-    match_inp_ptrs[j_strt:j_strt+j_len] = head_ptrs_j[ind_j]
-    is_match = match_head_ptrs_func(match_inp_ptrs) ^ negated
-    return is_match
+# @njit(cache=True, inline='always')
+# def _check_beta(negated, j, j_strt, j_end, inp_buffers_j, 
+#          head_ptrs_j, ind_j, match_head_ptrs_func, match_inp_ptrs, match_inp_inds):    
+#     inp_state_j = inp_buffers_j[ind_j]
+#     if(not inp_state_j.is_valid): return u1(0)
+#     match_inp_inds[j] = ind_j
+#     match_inp_ptrs[j_strt:j_end] = head_ptrs_j[ind_j]
+#     is_match = match_head_ptrs_func(match_inp_ptrs) ^ negated
+#     return is_match
 
 @njit(cache=True, inline='always')
 def _update_truth_table(tt, is_match, match_inp_inds, inp_state_i, inp_state_j):
@@ -1009,6 +1010,19 @@ def _update_truth_table(tt, is_match, match_inp_inds, inp_state_i, inp_state_j):
     inp_state_j.true_count += count_diff
 
 
+@njit(types.void(GenericCREFuncType, u8, i8[::1]), cache=True, locals={"i" : u8,"k":u8, "j": u8})
+def set_heads_from_data_ptrs(cf, i, data_ptrs):
+    for k, j in enumerate(range(cf.head_ranges[i].start, cf.head_ranges[i].end)):
+        hi = cf.head_infos[j]
+        if(hi.ref_kind==REFKIND_UNICODE): 
+            # _decref_structref(_load_ptr(unicode_type, hi.head_data_ptr))
+            _incref_structref(_load_ptr(unicode_type, data_ptrs[k]))
+        elif(hi.ref_kind==REFKIND_STRUCTREF):
+            # _decref_ptr(_load_ptr(i8, hi.head_data_ptr))
+            _incref_ptr(_load_ptr(i8, data_ptrs[k]))
+
+        _memcpy(hi.head_data_ptr, data_ptrs[k], hi.head_size)
+
 @njit(cache=True)
 def update_matches(self):
     head_ranges = self.op.head_ranges
@@ -1020,10 +1034,17 @@ def update_matches(self):
         resize_truth_table(self)
 
     # Load the 'match' function for this node's op.
-    match_head_ptrs_func = _func_from_address(match_heads_f_type, self.op.match_head_ptrs_addr)
+    # match_head_ptrs_func = _func_from_address(match_heads_f_type, self.op.match_head_ptrs_addr)
+
+    # Get the best call_self() implmentation that ignores dereferencing
+    
+    op = self.op
+    # if(op.call_self_addr == 0): print("BAD OP", op)
+    call_self_func = get_best_call_self(op,True)
+
 
     # Buffers that will be loaded with ptrs, indrecs, or inds of candidates.
-    match_inp_ptrs = np.zeros(len(self.op.head_var_ptrs),dtype=np.int64)
+    match_inp_ptrs = np.zeros(len(self.op.head_infos),dtype=np.int64)
     match_inp_inds = np.zeros(len(self.var_inds),dtype=np.int64)
     tt = self.truth_table
 
@@ -1032,7 +1053,7 @@ def update_matches(self):
         # Extract various things used below
         # idrecs_to_inds_i = self.idrecs_to_inds[i]
         head_ptrs_i = self.head_ptr_buffers[i]
-        i_strt, i_len = head_ranges[i][0], head_ranges[i][1]
+        i_strt, i_end = head_ranges[i][0], head_ranges[i][1]
         changed_inds_i = self.changed_inds[i]
 
         # BETA CASE (i.e. n_vars = 2)
@@ -1056,7 +1077,7 @@ def update_matches(self):
             j = 1 if i == 0 else 0
             
             # Extract various things used below
-            j_strt, j_len = head_ranges[j][0], head_ranges[j][1]        
+            j_strt, j_end = head_ranges[j][0], head_ranges[j][1]        
             # idrecs_to_inds_j = self.idrecs_to_inds[j]
             head_ptrs_j = self.head_ptr_buffers[j]
             inp_buffers_i = self.input_state_buffers[i]
@@ -1078,7 +1099,8 @@ def update_matches(self):
                 # idrec_i = encode_idrec(t_id_i, f_id_i, 0)
                 
                 # Fill in the 'i' part of ptrs, indrecs, inds 
-                match_inp_ptrs[i_strt:i_strt+i_len] = head_ptrs_i[ind_i]
+                set_heads_from_data_ptrs(op, i, head_ptrs_i[ind_i])
+                # match_inp_ptrs[i_strt:i_end] = head_ptrs_i[ind_i]
                 match_inp_inds[i] = ind_i
 
                 # NOTE: Sections below have lots of repeated code. Couldn't find a way to inline
@@ -1101,8 +1123,11 @@ def update_matches(self):
 
                             if(input_state_j.is_valid):
                                 match_inp_inds[j] = ind_j
-                                match_inp_ptrs[j_strt:j_strt+j_len] = head_ptrs_j[ind_j]
-                                is_match = match_head_ptrs_func(match_inp_ptrs) ^ negated
+
+                                # match_inp_ptrs[j_strt:j_end] = head_ptrs_j[ind_j]
+                                set_heads_from_data_ptrs(op, j, head_ptrs_j[ind_j])
+                                is_match = (call_self_func(op) == CFSTATUS_TRUTHY) ^ negated
+                                # is_match = match_head_ptrs_func(match_inp_ptrs) ^ negated
                             else:
                                 is_match = u1(0)
                             _update_truth_table(tt, is_match, match_inp_inds, inp_state_i, input_state_j)
@@ -1117,8 +1142,10 @@ def update_matches(self):
 
                             if(input_state_j.is_valid):
                                 match_inp_inds[j] = ind_j
-                                match_inp_ptrs[j_strt:j_strt+j_len] = head_ptrs_j[ind_j]
-                                is_match = match_head_ptrs_func(match_inp_ptrs) ^ negated
+                                # match_inp_ptrs[j_strt:j_end] = head_ptrs_j[ind_j]
+                                set_heads_from_data_ptrs(op, j, head_ptrs_j[ind_j])
+                                is_match = (call_self_func(op) == CFSTATUS_TRUTHY) ^ negated
+                                # is_match = match_head_ptrs_func(match_inp_ptrs) ^ negated
                             else:
                                 is_match = u1(0)
                             _update_truth_table(tt, is_match, match_inp_inds, inp_state_i, input_state_j)
@@ -1132,8 +1159,10 @@ def update_matches(self):
                             input_state_j = inp_buffers_j[ind_j]
                             if(input_state_j.is_valid):
                                 match_inp_inds[j] = ind_j
-                                match_inp_ptrs[j_strt:j_strt+j_len] = head_ptrs_j[ind_j]
-                                is_match = match_head_ptrs_func(match_inp_ptrs) ^ negated
+                                # match_inp_ptrs[j_strt:j_end] = head_ptrs_j[ind_j]
+                                # is_match = match_head_ptrs_func(match_inp_ptrs) ^ negated
+                                set_heads_from_data_ptrs(op, j, head_ptrs_j[ind_j])
+                                is_match = (call_self_func(op) == CFSTATUS_TRUTHY) ^ negated
                             else:
                                 is_match = u1(0)
                             _update_truth_table(tt, is_match, match_inp_inds, inp_state_i, input_state_j)
@@ -1143,8 +1172,10 @@ def update_matches(self):
                             input_state_j = inp_buffers_j[ind_j]
                             if(input_state_j.is_valid):
                                 match_inp_inds[j] = ind_j
-                                match_inp_ptrs[j_strt:j_strt+j_len] = head_ptrs_j[ind_j]
-                                is_match = match_head_ptrs_func(match_inp_ptrs) ^ negated
+                                # match_inp_ptrs[j_strt:j_end] = head_ptrs_j[ind_j]
+                                # is_match = match_head_ptrs_func(match_inp_ptrs) ^ negated
+                                set_heads_from_data_ptrs(op, j, head_ptrs_j[ind_j])
+                                is_match = (call_self_func(op) == CFSTATUS_TRUTHY) ^ negated
                             else:
                                 is_match = u1(0)
                             _update_truth_table(tt, is_match, match_inp_inds, inp_state_i, input_state_j)
@@ -1158,8 +1189,10 @@ def update_matches(self):
                 inp_state_i = input_state_buffers_i[ind_i]
 
                 # Check if the op matches this candidate
-                match_inp_ptrs[i_strt:i_strt+i_len] = head_ptrs_i[ind_i]
-                is_match = match_head_ptrs_func(match_inp_ptrs) ^ negated
+                # match_inp_ptrs[i_strt:i_end] = head_ptrs_i[ind_i]
+                # is_match = match_head_ptrs_func(match_inp_ptrs) ^ negated
+                set_heads_from_data_ptrs(op, i, head_ptrs_i[ind_i])
+                is_match = (call_self_func(op) == CFSTATUS_TRUTHY) ^ negated
                 inp_state_i.true_count = i8(is_match)
 
 
@@ -1544,11 +1577,13 @@ def new_match_iter(graph):
 def repr_match_iter_dependencies(m_iter):
     rep = ""
     for i, m_node in enumerate(m_iter.iter_nodes):
-        s = f'({str(m_node.node.lit.op.base_vars[m_node.associated_arg_ind].alias)}'
+        base_var_ptr_i = m_node.node.lit.base_var_ptrs[m_node.associated_arg_ind]
+        s = f'({str(_struct_from_ptr(GenericVarType, base_var_ptr_i).alias)}'
         for j, dep_m_node_ind in enumerate(m_node.dep_m_node_inds):
             dep_m_node = m_iter.iter_nodes[dep_m_node_ind]
+            base_var_ptr_j = dep_m_node.node.lit.base_var_ptrs[dep_m_node.associated_arg_ind]
             # s += f",dep={str(dep_m_node.var_ind)}"
-            s += f",dep={str(dep_m_node.node.lit.op.base_vars[dep_m_node.associated_arg_ind].alias)}"
+            s += f",dep={str(_struct_from_ptr(GenericVarType, base_var_ptr_j).alias)}"
         s += f")"
 
         rep += s
@@ -1567,7 +1602,7 @@ def update_from_upstream_match(m_iter, m_node):
     if(multiple_deps):
         idrecs_set = Dict.empty(u8,u1)
     
-    # print("-- UPDATE FROM UPSTREAM:", _struct_from_ptr(GenericVarType, m_node.node.lit.var_base_ptrs[m_node.associated_arg_ind]).alias, "--")
+    # print("-- UPDATE FROM UPSTREAM:", _struct_from_ptr(GenericVarType, m_node.node.lit.base_var_ptrs[m_node.associated_arg_ind]).alias, "--")
 
     for i, dep_m_node_ind in enumerate(m_node.dep_m_node_inds):
         # Each dep_node is the terminal beta node (i.e. a graph node not an iter node) 
@@ -1613,7 +1648,7 @@ def update_from_upstream_match(m_iter, m_node):
             #     print("-", decode_idrec(sdifojsdf)[1])
             fixed_intern_ind = dn_idrecs_to_inds[dep_idrec]
 
-        fixed_var = _struct_from_ptr(GenericVarType, dep_node.lit.var_base_ptrs[dep_arg_ind])
+        fixed_var = _struct_from_ptr(GenericVarType, dep_node.lit.base_var_ptrs[dep_arg_ind])
         fixed_idrec = dep_node.input_state_buffers[dep_arg_ind][fixed_intern_ind].idrec
         # print("\tFixed:",  fixed_var.alias, dep_m_node.curr_ind, "==", decode_idrec(fixed_idrec)[1])#m_iter.graph.memset.get_fact(fixed_idrec))
         
@@ -1855,67 +1890,42 @@ def get_match_iter(ms, conds):
 # ----------------------------------------------------------------------
 # : score_match, check_match
 
+# Compile implementation of set_base_arg for BaseFact type
+set_base_fact_arg = set_base_arg_val_impl(BaseFact)
+
 @njit(cache=True)
 def cum_weight_of_matching_nodes(ms, conds, match_idrecs, zero_on_fail=False):
-
     rete_graph = get_graph(ms, conds)
 
-    # n_matches = 0
+    # Get the instance pointers from match_idrecs
+    match_ptrs = np.empty(len(match_idrecs),dtype=np.int64)
+    for i, idrec in enumerate(match_idrecs):
+        t_id, f_id, _  = decode_idrec(idrec)
+        facts = _struct_from_ptr(VectorType, ms.facts[t_id])
+        match_ptrs[i] = facts.data[f_id]
+
     cum_weight = 0.0
     for lst in rete_graph.nodes_by_nargs:
         for node in lst:
+            # TODO: Handle cases of Exists() and truncated match lists
+            # If is an identiy node then give weight automatically
             if(node.op is None):
                 cum_weight += 1.0
-                # n_matches += 1
                 continue
-            match_inp_ptrs = np.zeros(len(node.op.head_var_ptrs),dtype=np.int64)
-            
-            is_match, all_valid, skip = False, True, False
-            # Validate
+
+            # Set arguments
             for i, var_ind in enumerate(node.var_inds):
-                head_ptr_buffers_i = node.head_ptr_buffers[i]
-                head_ranges_i = node.op.head_ranges[i]
-                
-                head_ptrs = np.empty(head_ptr_buffers_i.shape[1],dtype=np.int64)
+                set_base_fact_arg(node.op, i, _struct_from_ptr(BaseFact, match_ptrs[var_ind]))
+            
+            # Call
+            call_self = get_best_call_self(node.op, False)
+            status = call_self(node.op)
 
-                #TODO: This function could be called with Exists() or a trucated 
-                # match list... for now just skip.
-                if(var_ind >= len(match_idrecs)):
-                    skip = True
-                    continue 
-
-                idrec = match_idrecs[var_ind]
-                if(idrec == 0):
-                    skip = True
-                    continue
-
-                # print("IDREC", idrec)
-                is_valid = validate_head_or_retract(node, i, idrec, 
-                     head_ptrs, head_ranges_i)
-                # print("is_valid", is_valid)
-
-                if(not is_valid):
-                    all_valid = False
-
-                i_strt, i_len = head_ranges_i[0], head_ranges_i[1]
-                match_inp_ptrs[i_strt:i_strt+i_len] = head_ptrs
-
-            if(skip): continue
-            if(all_valid):
-                # Match
-                match_head_ptrs_func = _func_from_address(match_heads_f_type,
-                     node.op.match_head_ptrs_addr)
-
-                is_match = match_head_ptrs_func(match_inp_ptrs) ^ node.lit.negated
-
-            if(is_match):
-                # print("++", node.lit, node.lit.weight)
+            # Add weight if match
+            if((status == CFSTATUS_TRUTHY) ^ node.lit.negated):
                 cum_weight += node.lit.weight
             elif(zero_on_fail):
-
                 return 0.0
-            # else:
-            #     print("--", node.lit, node.lit.weight)
     return cum_weight
 
 @njit(MemSetType(ConditionsType, types.optional(MemSetType)), cache=True)

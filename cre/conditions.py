@@ -17,7 +17,7 @@ from cre.subscriber import base_subscriber_fields, BaseSubscriber, BaseSubscribe
 from cre.vector import VectorType
 
 # from cre.op import GenericCREFuncType, op_str, Op
-from cre.cre_func import GenericCREFuncType, CREFunc
+from cre.cre_func import GenericCREFuncType, CREFunc, cre_func_unique_string
 
 from cre.cre_object import CREObjType, CREObjTypeClass
 from cre.core import T_ID_CONDITIONS, T_ID_LITERAL, register_global_default
@@ -213,26 +213,27 @@ def literal_not(self):
     return n
 
 
-literal_unique_tuple_type = Tuple((i8, i8, unicode_type))
+literal_unique_tuple_type = Tuple((i8, unicode_type))
 @njit(literal_unique_tuple_type(LiteralType), cache=True)
 def literal_get_unique_tuple(self):
     '''Outputs a tuple that uniquely identifies an instance
          of a literal independant of the base Vars of its underlying op.
     '''
-    deref_str = ""
-    for var_ptr in self.op.head_var_ptrs:
-        var = _struct_from_ptr(GenericVarType, var_ptr)
-        deref_strs = List.empty_list(unicode_type)    
-        if(len(var.deref_infos) > 0):
-            s = ""
-            for i, d in enumerate(var.deref_infos):
-                delim = "," if i != len(var.deref_infos)-1 else ""
-                s += f'({str(i8(d.type))},{str(i8(d.t_id))},{str(i8(d.a_id))},{str(i8(d.offset))}){delim}'
-                deref_strs.append(s)
+    # print("THIS IS RUN")
+    # deref_str = ""
+    # for var_ptr in self.op.head_var_ptrs:
+    #     var = _struct_from_ptr(GenericVarType, var_ptr)
+    #     deref_strs = List.empty_list(unicode_type)    
+    #     if(len(var.deref_infos) > 0):
+    #         s = ""
+    #         for i, d in enumerate(var.deref_infos):
+    #             delim = "," if i != len(var.deref_infos)-1 else ""
+    #             s += f'({str(i8(d.type))},{str(i8(d.t_id))},{str(i8(d.a_id))},{str(i8(d.offset))}){delim}'
+    #             deref_strs.append(s)
         
-        deref_str += f"[{','.join(deref_strs)}]"
+    #     deref_str += f"[{','.join(deref_strs)}]"
 
-    return (i8(self.negated), self.op.match_head_ptrs_addr, deref_str)
+    return (i8(self.negated), cre_func_unique_string(self.op))
 
 
 #TODO compartator helper?
@@ -1314,12 +1315,12 @@ def build_distributed_dnf(c,index_map=None):
 # : Conditions.antiunify()
 
 lit_list = ListType(LiteralType)
-lit_unq_tup_type = Tuple((i8,i8,unicode_type))
+lit_unq_tup_type = Tuple((i8,unicode_type))
 
 @njit(cache=True)
 def conds_to_lit_sets(self):
     ''' Convert a Conditions object to a list of dictionaries (one for each
-        conjunct) that map the unique tuple (negated, op_addr) for each Literal 
+        conjunct) that map the unique tuple (negated, unique_str) for each Literal 
         to a list of literals that have the same unique tuple. This reorganization
         ensures that cases like antiunify( (a != b), (x != y) & (y != z) ) try
         remappings where like-terms get chances to be remapped.'''

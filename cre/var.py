@@ -331,7 +331,7 @@ class Var(CREObjProxy):
 
         # with PrintElapse("op_to_cond"):
         #     op_to_cond(npo)
-
+        
         if(other is None):
             # with PrintElapse("new_ObjIsNone"):
             return cre_func_to_cond(ObjIsNone(self))

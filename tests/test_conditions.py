@@ -362,6 +362,15 @@ def test_hash():
         assert hsh(a1) != hsh(b2)
         assert hsh(a1) != hsh(b3)
 
+        ### LITERAL w/ Consts ###
+
+        a1 = literal_ctor((x + z) + (y + 1))
+        a2 = literal_ctor((x + z) + (y + 1))
+        b1 = literal_ctor((x + z) + (y + 7))
+
+        assert hsh(a1) == hsh(a2)
+        assert hsh(a1) != hsh(b1)
+
         ### CONDITIONS ### 
         X,Y = Var(TestLL,"X"), Var(TestLL,"Y")
         a1 = ( (X.B == 0) &
@@ -422,6 +431,16 @@ def test_eq():
         assert not eq(a1,b2)
         assert not eq(a1,b3)
 
+
+        ### LITERAL w/ Consts ###
+
+        a1 = literal_ctor((x + z) + (y + 1))
+        a2 = literal_ctor((x + z) + (y + 1))
+        b1 = literal_ctor((x + z) + (y + 7))
+
+        assert eq(a1,a2)
+        assert not eq(a1,b1)
+
         ### CONDITIONS ### 
         X,Y = Var(TestLL,"X"), Var(TestLL,"Y")
         a1 = ( (X.B == 0) &
@@ -452,7 +471,6 @@ def test_anti_unify():
     c12_ref = ((x < y) & (y < z) & (y < z) & (z != x) & (y != 0))
 
     c12 = c1.antiunify(c2) 
-
     assert str(c12) == str(c12_ref)
 
     # Disjunction of Conjunctions Case
@@ -471,6 +489,8 @@ def test_anti_unify():
 
     c12, score = c1.antiunify(c2,return_score=True) #conds_antiunify(c1,c2)
 
+    print(str(c12))
+    print(str(c12_ref))
     assert str(c12) == str(c12_ref)
     assert score == 8./9.
 
@@ -499,8 +519,14 @@ def test_anti_unify():
 
 if(__name__ == "__main__"):
     import faulthandler; faulthandler.enable()
+    from cre.cre_func import cre_func_unique_string
+    x, y, z = Var(f8,'x'), Var(f8,'y'), Var(f8,'z')
+
+    print(cre_func_unique_string((x + z) + (y + z)))
+    print(cre_func_unique_string((x + z) + (y + 1)))
+    print(cre_func_unique_string((x + 1) + (y + z)))
     # test_var()
-    # test_anti_unify()
+    test_anti_unify()
     # test_unconditioned()
     # test_build_conditions()
     # test_list_operations()
@@ -514,12 +540,11 @@ if(__name__ == "__main__"):
     #     t0 = time_ns()
     #     test_unconditioned()
     #     print(f'{(time_ns()-t0)/1e6} ms')
-    test_multiple_deref()
+    # test_multiple_deref()
     # test_existential_not()
 # bar.py_func()
     # bar()
     # test_hash()
-
     # test_eq()
     # 
     # exit()

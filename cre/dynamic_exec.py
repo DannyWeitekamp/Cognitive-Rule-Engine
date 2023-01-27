@@ -13,7 +13,8 @@ from cre.core import T_ID_CONDITIONS, T_ID_LITERAL, T_ID_OP, T_ID_FACT, T_ID_VAR
 # from cre.primitive import BooleanPrimitiveType, IntegerPrimitiveType, FloatPrimitiveType, StringPrimitiveType
 from cre.tuple_fact import TupleFact
 from cre.var import GenericVarType
-from cre.op import GenericOpType
+# from cre.op import GenericOpType
+from cre.cre_func import GenericCREFuncType, ARGINFO_VAR, ARGINFO_OP, ARGINFO_CONST
 from cre.fact import BaseFact
 from cre.conditions import LiteralType, ConditionsType
 from numba.cpython.hashing import _Py_hash_t, _Py_uhash_t, _PyHASH_XXROTATE, _PyHASH_XXPRIME_1, _PyHASH_XXPRIME_2, _PyHASH_XXPRIME_5, process_return
@@ -63,18 +64,41 @@ def var_eq(a, b):
     return True
 
 @njit(boolean(CREObjType, CREObjType),cache=True)
-def op_eq(a, b):
+def cre_func_eq(a, b):
     t_id_b,_, _ = decode_idrec(b.idrec)
     if(t_id_b != T_ID_OP): return False
 
-    oa = _cast_structref(GenericOpType, a)
-    ob = _cast_structref(GenericOpType, b)
+    oa = _cast_structref(GenericCREFuncType, a)
+    ob = _cast_structref(GenericCREFuncType, b)
 
-    if(oa.call_addr != ob.call_addr): return False
-    if(len(oa.head_vars) != len(ob.head_vars)): return False
+    stack = List()
+    stack.append((oa,ob))
 
-    for oa_var, ob_var in zip(oa.head_vars, ob.head_vars):
-        if(not var_eq(oa_var, ob_var)): return False
+    while(len(stack) > 0):
+        oa,ob = stack.pop()
+        if(oa.call_heads_addr != ob.call_heads_addr): return False
+        if(oa.n_args != ob.n_args): return False
+        if(len(oa.head_infos) != len(ob.head_infos)): return False
+
+        infs_a = oa.root_arg_infos
+        infs_b = ob.root_arg_infos
+
+        for inf_a, inf_b in zip(infs_a, infs_b):
+
+            if(inf_a.type != inf_b.type): return False
+            if(inf_a.t_id != inf_b.t_id): return False
+            if(inf_a.type == ARGINFO_VAR):
+                va = _struct_from_ptr(GenericVarType, inf_a.ptr)
+                vb = _struct_from_ptr(GenericVarType, inf_b.ptr)
+                if(not var_eq(va,vb)): return False
+            elif(inf_a.type == ARGINFO_CONST):
+                is_eq = eq_from_t_id_ptr(inf_a.t_id, 
+                    inf_a.ptr, inf_b.ptr)
+                if(not is_eq): return False
+            elif(inf_a.type == ARGINFO_OP):
+                _oa = _struct_from_ptr(GenericCREFuncType, inf_a.ptr)
+                _ob = _struct_from_ptr(GenericCREFuncType, inf_b.ptr)
+                stack.append((_oa,_ob))
 
     return True
 
@@ -86,7 +110,7 @@ def literal_eq(a, b):
     la = _cast_structref(LiteralType, a)
     lb = _cast_structref(LiteralType, b)
 
-    if(not op_eq(la.op, lb.op)): return False
+    if(not cre_func_eq(la.op, lb.op)): return False
     if(la.negated != lb.negated): return False
     
     return True
@@ -193,7 +217,7 @@ def tuple_fact_eq(a, b):
                 if(t_id_a==T_ID_VAR):
                     if(not var_eq(mbr_a,mbr_b)): return False
                 elif(t_id_a==T_ID_OP):
-                    if(not op_eq(mbr_a,mbr_b)): return False
+                    if(not cre_func_eq(mbr_a,mbr_b)): return False
                 elif(t_id_a==T_ID_LITERAL):
                     if(not literal_eq(mbr_a,mbr_b)): return False
                 elif(t_id_a==T_ID_CONDITIONS):
@@ -225,7 +249,7 @@ def _cre_obj_eq(a,b):
             elif(t_id==T_ID_VAR):
                 return var_eq(a,b)
             elif(t_id==T_ID_OP):
-                return op_eq(a,b)
+                return cre_func_eq(a,b)
             elif(t_id==T_ID_LITERAL):
                 return literal_eq(a,b)
             elif(t_id==T_ID_CONDITIONS):
@@ -289,20 +313,30 @@ def var_hash(x):
 
 
 @njit(_Py_hash_t(CREObjType),cache=True)
-def op_hash(x):
+def cre_func_hash(x):
     if(x.hash_val == 0):
-        ox = _cast_structref(GenericOpType, x)
+        ox = _cast_structref(GenericCREFuncType, x)
+        stack = List()
+        stack.append(ox)
 
         acc = _PyHASH_XXPRIME_5
-        
-        acc = accum_item_hash(acc, ox.call_addr) 
-        acc = accum_item_hash(acc, len(ox.head_vars))
-        # print("??", ox.head_ranges, ox.call_addr)
-        for ox_var in ox.head_vars:
-            # print("<<:", var_hash(ox_var), ox_var.alias)
-            acc = accum_item_hash(acc, var_hash(ox_var)) 
-        x.hash_val = acc
 
+        while(len(stack) > 0):
+            ox = stack.pop()
+            acc = accum_item_hash(acc, ox.call_heads_addr) 
+            acc = accum_item_hash(acc, ox.n_args)
+            
+            for inf in ox.root_arg_infos:
+                if(inf.type == ARGINFO_VAR):
+                    _var = _struct_from_ptr(GenericVarType, inf.ptr)
+                    acc = accum_item_hash(acc, var_hash(_var)) 
+                elif(inf.type == ARGINFO_CONST):
+                    const_hash = hash_from_t_id_ptr(inf.t_id, inf.ptr)
+                    acc = accum_item_hash(acc, const_hash) 
+                elif(inf.type == ARGINFO_OP):
+                    _ox = _struct_from_ptr(GenericCREFuncType, inf.ptr)
+                    stack.append(_ox)
+        x.hash_val = acc
     return x.hash_val
 
 
@@ -312,7 +346,7 @@ def literal_hash(x):
     if(x.hash_val == 0):
         lx = _cast_structref(LiteralType, x)
 
-        acc = op_hash(lx.op)
+        acc = cre_func_hash(lx.op)
         acc = accum_item_hash(acc, lx.negated) 
 
         x.hash_val = acc
@@ -401,7 +435,7 @@ def tuple_fact_hash(x):
                         mbr_hash = var_hash(mbr)
                     elif(t_id==T_ID_OP):
                         # print("----- OP -----")
-                        mbr_hash = op_hash(mbr)
+                        mbr_hash = cre_func_hash(mbr)
                     elif(t_id==T_ID_LITERAL):
                         mbr_hash = literal_hash(mbr)
                     elif(t_id==T_ID_CONDITIONS):
@@ -449,7 +483,7 @@ def _cre_obj_hash(x):
             elif(t_id==T_ID_VAR):
                 return var_hash(x) 
             elif(t_id==T_ID_OP):
-                return op_hash(x) 
+                return cre_func_hash(x) 
             elif(t_id==T_ID_LITERAL):
                 return literal_hash(x)
             elif(t_id==T_ID_CONDITIONS):

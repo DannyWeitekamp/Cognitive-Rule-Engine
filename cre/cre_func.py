@@ -80,16 +80,35 @@ _head_range_type = np.dtype([
 head_range_type = numba.from_dtype(_head_range_type)
 
 
-ARGINFO_CONST = u1(0)
-ARGINFO_VAR = u1(1)
-ARGINFO_OP = u1(2)
-ARGINFO_OP_UNEXPANDED = u1(3)
+# ------------------------------
+# ARGINFO type enums
+ARGINFO_CONST = u1(1)
+ARGINFO_VAR = u1(2)
+ARGINFO_OP = u1(3)
+ARGINFO_OP_UNEXPANDED = u1(4)
+
+
+# ------------------------------
+# STATUS enums
+CFSTATUS_FALSEY = u1(0)
+CFSTATUS_TRUTHY = u1(1)
+CFSTATUS_NULL_DEREF = u1(2)
+CFSTATUS_ERROR = u1(3)
+
+
+# ------------------------------
+# REFKIND enums
+REFKIND_PRIMATIVE = u4(1)
+REFKIND_UNICODE = u4(2)
+REFKIND_STRUCTREF = u4(3)
 
 # Struct for each argument to a CREFunc which might be assigned 
 #  to a primative constant, Var, or other CREFunc.
 _arg_infos_type = np.dtype([
     # Enum for CONST, VAR, OP, OP_UNEXPANDED.
-    ('type', np.int32), 
+    ('type', np.uint16), 
+    # t_id of the argument
+    ('t_id', np.uint16), 
     # Whether is Var w/ dereference (e.g. V.nxt.nxt).
     ('has_deref', np.int32), 
     # Ptr to Var or CREFUnc.
@@ -123,7 +142,9 @@ _head_info_type = np.dtype([
     ('t_id', np.uint16),
     ('var_ptr', np.int64),
     ('arg_data_ptr', np.int64),
-    ('head_data_ptr', np.int64)])
+    ('head_data_ptr', np.int64),
+    ('ref_kind', np.uint32),
+    ('head_size', np.uint32)])
 head_info_type = numba.from_dtype(_head_info_type)
 
 
@@ -146,14 +167,15 @@ def CREFunc_assign_method_addr(cf_type, fn_name, addr):
     name = f"{cf_type.symbol_prefix}_{fn_name}"
     ll.add_symbol(name, addr)
 
-def CREFunc_method(cf_type, fn_name, sig, on_error='error'):
+def CREFunc_method(cf_type, sig, _fn_name=None, on_error='error',**kwargs):
     '''A decorator used in CREFunc codegens for trying to compile member
          methods like 'call_heads' and registering their ptrs as globals.
     '''
     def wrapper(func):
+        fn_name = func.__name__ if _fn_name is None else _fn_name 
         # Try to compile the CREFunc
         try:
-            dispatcher = njit(sig, cache=True)(func)
+            dispatcher = njit(sig, cache=True,**kwargs)(func)
         except NumbaError as e:
             if(on_error == "error"): raise e
             if(on_error == "warn"):
@@ -191,7 +213,7 @@ cre_func_fields_dict = {
     "n_args" : i8,
 
     # The number of arguments taken by the original call() of this cf.
-    "root_n_args" : i8,
+    "n_root_args" : i8,
 
     # The args to the root op 
     "root_arg_infos" : arg_infos_type[::1],
@@ -217,6 +239,7 @@ cre_func_fields_dict = {
     # "match_addr" : i8,
     "match_heads_addr" : i8,
     "match_head_ptrs_addr" : i8,
+    "resolve_heads_addr" : i8,
     # "check_addr" : i8,
 
     # True if the op has beed initialized
@@ -236,7 +259,7 @@ cre_func_fields_dict = {
     "return_t_id" : u2,
 
     # Placeholders to keep 64-bit aligned, might not be necessary
-    "padding0": u1,
+    "has_any_derefs": u1,
     "padding1": u1,
     
     # Literals and Types Specialized by
@@ -326,8 +349,11 @@ class CREFuncTypeClass(types.Callable, CREObjTypeClass):
     @property
     def symbol_prefix(self):
         if(not hasattr(self, "_symbol_prefix")):
-            shortened_hash = self.long_hash[:18]
-            self._symbol_preix = f"CREFunc_{self.func_name}_{shortened_hash}"
+            if(self.func_name == "GenericCREFunc"):
+                self._symbol_preix = "GenericCREFunc"
+            else:
+                shortened_hash = self.long_hash[:18]
+                self._symbol_preix = f"CREFunc_{self.func_name}_{shortened_hash}"
         return self._symbol_preix
 
     def __getstate__(self):
@@ -349,6 +375,10 @@ def upcast(context, builder, fromty, toty, val):
 # -----------------------------------------------------------------------
 # : CREFunc Proxy Class
 
+# from numba.core.runtime.nrt import rtsys
+# def used_bytes():
+#     stats = rtsys.get_allocation_stats()
+#     return stats.alloc-stats.free
 
 def new_cre_func(name, members):
     call_func = members['call']
@@ -382,7 +412,7 @@ def new_cre_func(name, members):
     cre_func._arg_types = members['arg_types']
     cre_func.cf_type = cf_type
     _vars = []
-    get_str_return_val_impl(cre_func.return_type)
+    get_return_val_impl(cre_func.return_type)
     for i, (arg_alias, typ) in enumerate(zip(arg_names,cf_type.arg_types)):
         v = Var(typ,arg_alias); _vars.append(v);
         set_var_arg(cre_func, i, v)
@@ -436,7 +466,6 @@ class CREFunc(StructRefProxy):
         self._ensure_has_types()
         all_const = True
         for arg in args:
-            # print("----", arg)
             if(isinstance(arg, Var) or isinstance(arg, CREFunc)):
                 all_const = False
 
@@ -451,9 +480,9 @@ class CREFunc(StructRefProxy):
                     impl = set_base_arg_val_impl(self._arg_types[i])
                 impl(self, i, arg)
 
-            cre_func_call_self(self)
+            cre_func_resolve_call_self(self)
             args = None
-            ret_impl = get_str_return_val_impl(self._return_type)
+            ret_impl = get_return_val_impl(self._return_type)
             return ret_impl(self)
         else:
             # print("START COMPOSE OP", args)
@@ -708,6 +737,7 @@ def cre_func_assign_method_table(cf):
         f"{prefix}_match",
         f"{prefix}_check",
         f"{prefix}_call_self",
+        f"{prefix}_resolve_heads",
     )
     def impl(cf):
         cf.call_heads_addr = _get_global_fn_addr(method_names[0])
@@ -732,10 +762,12 @@ ll.add_symbol("CRE_cf_del_inject", cf_del_inject_addr)
 ##############################################
 
 
+head_info_size = head_info_type.dtype.itemsize
+instr_type_size = instr_type.dtype.itemsize
+
 @njit(#types.void(
     # GenericCREFuncType, 
-    # types
-    # types.optional(u4[::1]),
+    # types.optional(head_range_type[::1]),
     # types.optional(head_info_type[::1]),
     # types.optional(instr_type[::1])),
      cache=True)
@@ -749,11 +781,10 @@ def rebuild_buffer(self, head_ranges=None, head_infos=None, prereq_instrs=None):
     n_prereqs = 0 if prereq_instrs is None else len(prereq_instrs)
 
     # Layout: head_ranges | head_infos | prereq_instrs
-    L_ = L = n_args + 10*n_heads
-    L += 6 * n_prereqs
+    L_ = L = n_args + (head_info_size>>2)*n_heads
+    L += (instr_type_size>>2) * n_prereqs
 
     buff = np.zeros(L, dtype=np.uint32)
-
     if(head_ranges is not None):
         # print("A", n_args, len(head_ranges[:].view(np.uint32)))
         buff[:n_args] = head_ranges[:].view(np.uint32)
@@ -764,18 +795,16 @@ def rebuild_buffer(self, head_ranges=None, head_infos=None, prereq_instrs=None):
         # print("C", L-L_, len(prereq_instrs[:].view(np.uint32)), "n_prereqs", n_prereqs)
         buff[L_: L] = prereq_instrs[:].view(np.uint32)
 
-    # print("BEF")
     self.head_ranges = buff[:n_args].view(_head_range_type)
     self.head_infos = buff[n_args: L_].view(_head_info_type)
     self.prereq_instrs = buff[L_:L].view(_instr_type)
-    # print("END")
 
 
 cached_repr_const_symbols = {}
 def ensure_repr_const(typ):
     # print("A")
     # with PrintElapse("ensure"):
-    if(isinstance(typ, Fact)):
+    if(isinstance(typ, (Fact,CREObjTypeClass))):
         typ = None
     if(typ not in cached_repr_const_symbols):
         sig = unicode_type(CREObjType, i8)
@@ -814,25 +843,26 @@ def cre_func_ctor(_cf_type, name, expr_template, shorthand_template, is_ptr_op):
     cf_type = _cf_type.instance_type
     fd = cf_type._field_dict
     arg_types = cf_type.arg_types
-    print("BOB", is_ptr_op.literal_value, getattr(cf_type,'n_args',None))
-    if(is_ptr_op.literal_value and hasattr(cf_type,'n_args')):
-        print("has N", cf_type.n_args)
-        n_args = cf_type.n_args
-    else:
-        n_args = len(arg_types)
+    # print("BOB", is_ptr_op.literal_value, getattr(cf_type,'n_args',None))
+    # if(is_ptr_op.literal_value and hasattr(cf_type,'n_args')):
+    #     print("has N", cf_type.n_args)
+    #     n_args = cf_type.n_args
+    # else:
+    n_args = len(arg_types)
     # n_args = n_args.literal_value
     chr_mbr_attrs = ["return_val"]
     for i in range(n_args):
+        # NOTE: order of a{i} then h{i} matters.
         chr_mbr_attrs.append(f'a{i}')
         chr_mbr_attrs.append(f'h{i}')
     for i in range(n_args):
         chr_mbr_attrs.append(f'ref{i}')
     chr_mbr_attrs = tuple(chr_mbr_attrs)
     
-    if(is_ptr_op.literal_value):
-        repr_const_symbols = (ensure_repr_const(i8),)
-    else:
-        repr_const_symbols = tuple(ensure_repr_const(at) for  at in arg_types)
+    # if(is_ptr_op.literal_value):
+    #     repr_const_symbols = (ensure_repr_const(i8),)
+    # else:
+    repr_const_symbols = tuple(ensure_repr_const(at) for  at in arg_types)
     
     unroll_inds = tuple(range(len(arg_types)))
 
@@ -846,14 +876,16 @@ def cre_func_ctor(_cf_type, name, expr_template, shorthand_template, is_ptr_op):
         f"{prefix}_match",
         f"{prefix}_check",
         f"{prefix}_call_self",
+        f"{prefix}_resolve_heads",
     )
 
     def impl(_cf_type, name, expr_template, shorthand_template, is_ptr_op):
         cf = new(cf_type)
         # cf = new_w_del(cf_type, 'CRE_cf_del_inject')
-        print('n_args', n_args)
+        # print('n_args', n_args)
+        cf.idrec = encode_idrec(T_ID_OP,0,0xFF)
         cf.n_args = n_args
-        cf.root_n_args = n_args
+        cf.n_root_args = n_args
         cf.root_arg_infos = np.zeros(n_args, dtype=arg_infos_type)
         cf.is_initialized = False
         cf.is_ptr_op = is_ptr_op
@@ -869,38 +901,42 @@ def cre_func_ctor(_cf_type, name, expr_template, shorthand_template, is_ptr_op):
 
         head_infos = cf.head_infos
         for i in range(n_args):
-            head_infos[i].cf_ptr = self_ptr
-            head_infos[i].arg_ind = u4(i)
-            head_infos[i].type = ARGINFO_VAR
-            head_infos[i].has_deref = 0
-            head_infos[i].n_more = 0
+            hi = head_infos[i]
+            hi.cf_ptr = self_ptr
+            hi.arg_ind = u4(i)
+            hi.type = ARGINFO_VAR
+            hi.has_deref = 0
+            hi.n_more = 0
             _,_,arg_data_ptr = cre_obj_get_item_t_id_ptr(cf, 1+(i<<1))
-            t_id,_,head_data_ptr = cre_obj_get_item_t_id_ptr(cf, 1+(i<<1)+1)
-            head_infos[i].t_id = t_id
-            head_infos[i].arg_data_ptr = arg_data_ptr
-            head_infos[i].head_data_ptr = head_data_ptr
+            t_id, m_id, head_data_ptr = cre_obj_get_item_t_id_ptr(cf, 1+(i<<1)+1)
+            hi.t_id = t_id
+            hi.arg_data_ptr = arg_data_ptr
+            hi.head_data_ptr = head_data_ptr
+
+            _,_,elm_aft_ptr = cre_obj_get_item_t_id_ptr(cf, 1+(i<<1)+2)
+            hi.head_size = u4(elm_aft_ptr-head_data_ptr)
+
+            if(t_id == T_ID_STR):
+                hi.ref_kind = REFKIND_UNICODE
+            elif(m_id != PRIMITIVE_MBR_ID):
+                hi.ref_kind = REFKIND_STRUCTREF
+            else:
+                hi.ref_kind = REFKIND_PRIMATIVE
+
             cf.head_ranges[i].start = i
             cf.head_ranges[i].end = i+1
 
         if(not is_ptr_op):
             cf.call_heads_addr = _get_global_fn_addr(method_names[0])
             cf.call_self_addr = _get_global_fn_addr(method_names[7])
+            cf.resolve_heads_addr = _get_global_fn_addr(method_names[8])
             # cf.match_addr = _get_global_fn_addr(method_names[5])
             # # cf.check_addr = _get_global_fn_addr(method_names[6])
             # cf.call_addr = _get_global_fn_addr(method_names[2])
             # cf.match_heads_addr = _get_global_fn_addr(method_names[3])
 
-        cf.call_head_ptrs_addr = _get_global_fn_addr(method_names[1])
-        cf.match_head_ptrs_addr = _get_global_fn_addr(method_names[4])
-
-
-        # cre_func_assign_method_table(cf)
-        
-        
-        
-        
-        
-        
+        # cf.call_head_ptrs_addr = _get_global_fn_addr(method_names[1])
+        # cf.match_head_ptrs_addr = _get_global_fn_addr(method_names[4])
         
 
         repr_const_addrs = np.zeros(n_args, dtype=np.int64)
@@ -960,7 +996,7 @@ def cre_func_copy(cf):
     #  to be allocated on the stack because some cf copies seem to be sharing
     #  root_arg_infos instances even though they are independantly instantiated
     #  making a copy() on instantiation seems to fix it.
-    cpy.root_arg_infos = np.zeros(cf.root_n_args, dtype=arg_infos_type).copy()
+    cpy.root_arg_infos = np.zeros(cf.n_root_args, dtype=arg_infos_type).copy()
     cpy.name_data = cf.name_data
     cpy.is_initialized = False
 
@@ -1001,11 +1037,12 @@ def set_const_arg_impl(_val):
                 # set 'h{i}' to val
                 cre_obj_set_item(cf, i8(1+(arg_ind<<1)+1), val)
                 # set 'ref{i}' to None
-                cre_obj_set_item(cf, i8(1+cf.root_n_args*2 + arg_ind), None)
+                cre_obj_set_item(cf, i8(1+cf.n_root_args*2 + arg_ind), None)
 
                 cf.root_arg_infos[arg_ind].type = ARGINFO_CONST
                 cf.root_arg_infos[arg_ind].has_deref = 0
-                cf.root_arg_infos[arg_ind].ptr = 0
+                cf.root_arg_infos[arg_ind].ptr = head_infos[j].head_data_ptr
+                cf.root_arg_infos[arg_ind].t_id = head_infos[j].t_id
 
         set_const_arg_overloads[nb_val_type] = _set_const_arg
     return set_const_arg_overloads[nb_val_type]
@@ -1037,11 +1074,15 @@ def set_var_arg(self, i, var):
         # set 'a{i}' to zero, set 'h{i}' to var
         # cre_obj_set_item(cf, i8(1+(arg_ind<<1)), var_ptr)
         # set 'ref{i}' to var
-        cre_obj_set_item(cf, i8(1+cf.root_n_args*2 + arg_ind), var)
+        cre_obj_set_item(cf, i8(1+cf.n_root_args*2 + arg_ind), var)
 
         cf.root_arg_infos[arg_ind].type = ARGINFO_VAR
         cf.root_arg_infos[arg_ind].has_deref = hd
         cf.root_arg_infos[arg_ind].ptr = _raw_ptr_from_struct(var)
+        cf.root_arg_infos[arg_ind].t_id = head_infos[j].t_id
+
+    
+
 
 @njit(types.void(GenericCREFuncType,i8,GenericCREFuncType), cache=True, debug=False)
 def set_op_arg(self, i, op):
@@ -1060,7 +1101,7 @@ def set_op_arg(self, i, op):
         head_infos[j].cf_ptr = op_ptr
         head_infos[j].has_deref = 0
         head_infos[j].type = ARGINFO_OP_UNEXPANDED
-        cre_obj_set_item(cf, i8(1+cf.root_n_args*2 + arg_ind), op)
+        cre_obj_set_item(cf, i8(1+cf.n_root_args*2 + arg_ind), op)
 
         # set 'ai' to zero, set 'hi' to val
         # cre_obj_set_item(cf, i8(1+(head_infos[j].arg_ind<<1)), var_ptr)
@@ -1068,6 +1109,7 @@ def set_op_arg(self, i, op):
         cf.root_arg_infos[arg_ind].type = ARGINFO_OP
         cf.root_arg_infos[arg_ind].has_deref = 0
         cf.root_arg_infos[arg_ind].ptr = op_ptr
+        cf.root_arg_infos[arg_ind].t_id = head_infos[j].t_id
 
 
 
@@ -1105,10 +1147,11 @@ def build_instr_set(self):
             instr.size = u4(first_data_ptr-ret_data_ptr)
 
             if(t_id == T_ID_STR):
-                instr.ref_kind = u4(1)
+                instr.ref_kind = REFKIND_UNICODE
             elif(m_id != PRIMITIVE_MBR_ID):
-                instr.ref_kind = u4(2)
-
+                instr.ref_kind = REFKIND_STRUCTREF
+            else:
+                instr.ref_kind = REFKIND_PRIMATIVE
             # print("SIZE-ISREF", instr.size, instr.ref_kind, arg_info.ptr)
 
             instrs.append(instr)
@@ -1205,11 +1248,19 @@ def reinitialize(self):
 
     prereq_instrs = build_instr_set(self)
     rebuild_buffer(self, head_ranges, head_infos, prereq_instrs)
+
+    any_hd = False
+    for inf in self.root_arg_infos:
+        any_hd = any_hd | inf.has_deref
+    self.has_any_derefs = any_hd
   
 
 
 #--------------------------------------------------------------------
 # Execution Functions
+
+#--------------------------------
+# Set Arguments
         
 from numba.core.typing.typeof import typeof
 set_base_arg_val_overloads = {}
@@ -1244,36 +1295,134 @@ def set_base_arg_val_impl(_val):
         set_base_arg_val_overloads[nb_val_type] = _set_base_arg_val
     return set_base_arg_val_overloads[nb_val_type]
 
+set_obj_base_val = set_base_arg_val_impl
 
-call_self_f_type = types.FunctionType(types.void(GenericCREFuncType))
-@njit(types.void(GenericCREFuncType), locals={"i":u4}, cache=True, inline='always')
+@njit(types.void(GenericCREFuncType, u4, i8[::1]), cache=True, locals={"i" : u4,"k":u4, "j": u4})
+def set_heads_from_data_ptrs(cf, i, data_ptrs):
+    for k, j in enumerate(range(cf.head_ranges[i].start, cf.head_ranges[i].end)):
+        hi = cf.head_infos[j]
+        if(hi.ref_kind==REFKIND_UNICODE): 
+            # _decref_structref(_load_ptr(unicode_type, hi.head_data_ptr))
+            _incref_structref(_load_ptr(unicode_type, data_ptrs[k]))
+        elif(hi.ref_kind==REFKIND_STRUCTREF):
+            # _decref_ptr(_load_ptr(i8, hi.head_data_ptr))
+            _incref_ptr(_load_ptr(i8, data_ptrs[k]))
+
+        _memcpy(hi.head_data_ptr, data_ptrs[k], hi.head_size)
+
+# @njit(types.void(GenericCREFuncType, u4, i8), cache=True, locals={"i" : u4})
+# def set_arg_from_inst_ptr(cf, i, inst_ptr):
+#     hi = cf.head_infos[i]
+#     # _decref_ptr(_load_ptr(i8, hi.arg_data_ptr))
+#     # _incref_ptr(inst_ptr)
+#     # print(hi.arg_data_ptr, inst_ptr, hi.head_size)
+#     _store_safe(i8, hi.arg_data_ptr, inst_ptr)
+
+# @njit(types.void(GenericCREFuncType, u4, i8), cache=True, locals={"i" : u4})
+# def set_head_from_inst_ptr(cf, i, inst_ptr):
+#     hi = cf.head_infos[i]
+#     _decref_ptr(_load_ptr(i8, hi.head_data_ptr))
+#     _incref_ptr(inst_ptr)
+#     _memcpy(hi.head_data_ptr, inst_ptr, hi.head_size)
+
+#--------------------------------
+# Call
+
+call_self_f_type = types.FunctionType(u1(GenericCREFuncType))
+# @njit(u1(GenericCREFuncType), locals={"i":u8}, cache=True)
+@CREFunc_method(GenericCREFuncType, u1(GenericCREFuncType),"call_self")
 def cre_func_call_self(self):
+    ''' Calls the CREFunc including any dependant CREFuncs in its composition
+        Each CREFunc's a{i} and h{i} characteristic members are used as
+        intermediate memory spaces for the results of these calculations.
+    '''
     for i in range(len(self.prereq_instrs)):
         instr = self.prereq_instrs[i]
         cf = _struct_from_ptr(GenericCREFuncType, instr.cf_ptr)
-        _func_from_address(call_self_f_type, cf.call_self_addr)(cf)
 
-        if(instr.ref_kind==1):
+        status = _func_from_address(call_self_f_type, cf.call_self_addr)(cf)
+        if(status > 1): return status
+
+        if(instr.ref_kind==REFKIND_UNICODE):
             new_obj = _load_ptr(unicode_type, cf.return_data_ptr)   
             _incref_structref(new_obj)
-        elif(instr.ref_kind==2):
+        elif(instr.ref_kind==REFKIND_STRUCTREF):
+            new_obj_ptr = _load_ptr(i8, cf.return_data_ptr)   
+            _incref_ptr(new_obj_ptr)
+
+        _memcpy(instr.return_data_ptr, cf.return_data_ptr, instr.size)
+    status = _func_from_address(call_self_f_type, self.call_self_addr)(self)
+    return status
+
+# @njit(u1(GenericCREFuncType), locals={"i":u8}, cache=True)
+@CREFunc_method(GenericCREFuncType, u1(GenericCREFuncType), "resolve_call_self")
+def cre_func_resolve_call_self(self):
+    ''' As 'cre_func_call_self' but also dereferences in the composition's
+        head variables. For instance like my_cf(a.nxt.B, b.nxt.A).
+    '''
+    for i in range(len(self.prereq_instrs)):
+        instr = self.prereq_instrs[i]
+        cf = _struct_from_ptr(GenericCREFuncType, instr.cf_ptr)
+        # if(cf.has_any_derefs):
+        if(cf.has_any_derefs):
+            status = _func_from_address(call_self_f_type, cf.resolve_heads_addr)(cf)
+            if(status): return status
+
+        status = _func_from_address(call_self_f_type, cf.call_self_addr)(cf)
+        if(status > 1): return status
+
+        if(instr.ref_kind==REFKIND_UNICODE):
+            new_obj = _load_ptr(unicode_type, cf.return_data_ptr)   
+            _incref_structref(new_obj)
+        elif(instr.ref_kind==REFKIND_STRUCTREF):
             new_obj_ptr = _load_ptr(i8, cf.return_data_ptr)   
             _incref_ptr(new_obj_ptr)
         
         _memcpy(instr.return_data_ptr, cf.return_data_ptr, instr.size)
-    
-    _func_from_address(call_self_f_type, self.call_self_addr)(self)
+
+    if(self.has_any_derefs):
+        status = _func_from_address(call_self_f_type, self.resolve_heads_addr)(self)
+        if(status): return status
+            
+    status = _func_from_address(call_self_f_type, self.call_self_addr)(self)
+    if(status > 1): return status
+    return status
+
+cs_gbl_name = 'GenericCREFunc_call_self'
+res_cs_gbl_name = 'GenericCREFunc_resolve_call_self'
+
+# call_self_f_type = types.FunctionType(u1(GenericCREFuncType))
+@njit
+def get_best_call_self(self, ignore_derefs=False):
+    '''Returns the fastest implementation of call_self for a CREFunc.
+        In the best case, if the CREFunc doesn't have other CREFuncs in it's 
+        composition and no head Vars with dereference instructions then the 
+        fastest implementation is it's type specific implementation.
+    '''
+    if(not ignore_derefs and self.has_any_derefs):
+        # Use cre_func_resolve_call_self
+        cs_addr = _get_global_fn_addr(res_cs_gbl_name)
+    elif(len(self.prereq_instrs) > 0):
+        # Use cre_func_call_self
+        cs_addr = _get_global_fn_addr(cs_gbl_name)
+    else:
+        # Use base type-specific implementation
+        cs_addr = self.call_self_addr
+    return _func_from_address(call_self_f_type, cs_addr)
+
+#--------------------------------
+# Get Return Value
     
 from numba.core.typing.typeof import typeof
-get_str_return_val_overloads = {}
-def get_str_return_val_impl(_val):
+get_return_val_overloads = {}
+def get_return_val_impl(_val):
     nb_val_type = typeof(_val) if not isinstance(_val, types.Type) else _val
-    if(nb_val_type not in get_str_return_val_overloads):
+    if(nb_val_type not in get_return_val_overloads):
         @njit(nb_val_type(GenericCREFuncType),cache=True, inline='always')
-        def _get_str_return_val(self):
+        def _get_return_val(self):
             return _load_ptr(nb_val_type, self.return_data_ptr)
-        get_str_return_val_overloads[nb_val_type] = _get_str_return_val
-    return get_str_return_val_overloads[nb_val_type]
+        get_return_val_overloads[nb_val_type] = _get_return_val
+    return get_return_val_overloads[nb_val_type]
 
 
 # def cleanup_base_args(self):
@@ -1284,6 +1433,8 @@ def get_str_return_val_impl(_val):
 #             _decref_structref(a) 
 #             _store_safe(arg_data_ptr)
 
+#--------------------------------------------------------------------
+# Overload call/compose
 
 def overload_compose_codegen(cf_type, arg_types):
     ind_kinds = []
@@ -1323,7 +1474,7 @@ def overload_call_codegen(cf_type, arg_types):
 
         set_base_impls = tuple(set_base_arg_val_impl(a) for a in arg_types)
         set_base = set_base_impls[0]
-        ret_impl = get_str_return_val_impl(cf_type.return_type)
+        ret_impl = get_return_val_impl(cf_type.return_type)
         range_inds = tuple(u8(i) for i in range(len(arg_types)))
         def impl(cf,*args):
             for i in literal_unroll(range_inds):
@@ -1518,10 +1669,19 @@ def define_CREFunc(name, members):
 
     # inp_members = {**members}
 
+    no_raise = members.get('no_raise',False)
+    ptr_args = members.get('ptr_args',False)
+
     # Unpack signature
     signature = members['signature']
     return_type = members['return_type'] = signature.return_type
-    arg_types = members['arg_types'] = signature.args
+    if(not ptr_args):
+        arg_types = members['arg_types'] = signature.args
+    else:
+        arg_types = members['arg_types'] = tuple([CREObjType]*len(signature.args))
+        members['signature'] = return_type(*arg_types)
+
+    
     
     # Standardize commutes and nopython
     _standardize_commutes(members)
@@ -1532,13 +1692,13 @@ def define_CREFunc(name, members):
     check_bytes, check_unq = _standardize_method(members, 'check')
 
     # Regenerate the source for this type if wasn't cached or if 'cache=False' 
-    unq_args = [name, return_type, arg_types, nopy_call, nopy_check, call_unq, check_unq]
-    gen_src_args = [name, return_type, arg_types, nopy_call, nopy_check, call_bytes, check_bytes]
+    unq_args = [name, return_type, arg_types, nopy_call, nopy_check, call_unq, check_unq, no_raise, ptr_args]
+    gen_src_args = [name, return_type, arg_types, nopy_call, nopy_check, call_bytes, check_bytes, no_raise, ptr_args]
 
     # print("::", gen_src_args)
     long_hash = unique_hash(unq_args)
 
-    # print(name, long_hash)
+    print(name, long_hash)
     if(not source_in_cache(name, long_hash)): #or members.get('cache',True) == False):
         source = gen_cre_func_source(*gen_src_args, long_hash)
         source_to_cache(name, long_hash, source)
@@ -1563,8 +1723,9 @@ def define_CREFunc(name, members):
 # -------------------------------------------------------------
 # : CREFunc Source Generation
 
-def gen_cre_func_source(name, return_type, arg_types,
-            nopy_call, nopy_check, call_bytes, check_bytes, long_hash):
+def gen_cre_func_source(name, return_type, arg_types, nopy_call, nopy_check,
+             call_bytes, check_bytes, no_raise, ptr_args,
+             long_hash ):
     '''Generate source code for the relevant functions of a user defined CREFunc.'''
     arg_names = ', '.join([f'a{i}' for i in range(len(arg_types))])
 
@@ -1575,12 +1736,13 @@ def gen_cre_func_source(name, return_type, arg_types,
     nl = "\n"
     source = \
 f'''import numpy as np
-from numba import njit, void, i8, boolean, objmode
+from numba import njit, void, i8, u1, boolean, objmode
 from numba.types import unicode_type
 from numba.extending import lower_cast
 from numba.core.errors import NumbaError, NumbaPerformanceWarning
-from cre.utils import PrintElapse, _struct_from_ptr, _load_ptr, _obj_cast_codegen, _store_safe, _cast_structref
-from cre.cre_func import ensure_repr_const, cre_func_ctor, CREFunc_method, CREFunc_assign_method_addr, CREFuncTypeClass, GenericCREFuncType, GenericVarType
+from cre.utils import PrintElapse, _struct_from_ptr, _load_ptr, _obj_cast_codegen, _store_safe, _cast_structref, _raw_ptr_from_struct, _struct_get_attr_ptr
+from cre.cre_func import (ensure_repr_const, cre_func_ctor, CREFunc_method, CREFunc_assign_method_addr,
+    CREFuncTypeClass, GenericCREFuncType, GenericVarType, CFSTATUS_TRUTHY, CFSTATUS_FALSEY, CFSTATUS_NULL_DEREF, CFSTATUS_ERROR)
 from cre.memset import resolve_deref_data_ptr
 from cre.fact import BaseFact
 import cloudpickle
@@ -1590,15 +1752,18 @@ return_type = cloudpickle.loads({cloudpickle.dumps(return_type)})
 arg_types = cloudpickle.loads({cloudpickle.dumps(arg_types)})
 cf_type = CREFuncTypeClass(return_type, arg_types,is_composed=False, name={name!r}, long_hash={long_hash!r})
 
+print("{name} argtypes:", arg_types)
+
 @lower_cast(cf_type, GenericCREFuncType)
 def upcast(context, builder, fromty, toty, val):
     return _obj_cast_codegen(context, builder, val, fromty, toty, incref=False)
 
-call_sig = return_type(*arg_types)
+{"call_sig = return_type(*arg_types)" if not ptr_args else
+ "call_sig = return_type(*([i8]*len(arg_types)))"}
 call_pyfunc = cloudpickle.loads({call_bytes})
-{"".join([f'h{i}_type, ' for i in range(len(arg_types))])} = call_sig.args
+{"".join([f'h{i}_type, ' for i in range(len(arg_types))])} = arg_types
 
-call = CREFunc_method(cf_type, 'call', call_sig, on_error={on_error_call!r})(call_pyfunc)
+call = CREFunc_method(cf_type, call_sig, 'call', on_error={on_error_call!r})(call_pyfunc)
 if(call is None):
     @CREFunc_method(cf_type, 'call', call_sig)
     def call({arg_names}):
@@ -1609,55 +1774,117 @@ if(call is None):
 call_heads = call
 CREFunc_assign_method_addr(cf_type, 'call_heads', call.cre_method_addr)
 
-@CREFunc_method(cf_type, 'call_head_ptrs', return_type(i8[::1],))
-def call_head_ptrs(ptrs):
-{indent(nl.join([f'i{i} = _load_ptr(h{i}_type,ptrs[{i}])' for i in range(len(arg_types))]),prefix='    ')}
-    return call_heads({",".join([f'i{i}' for i in range(len(arg_types))])})
+# @CREFunc_method(cf_type, return_type(i8[::1]))
+# def call_head_ptrs(ptrs):
+# {indent(nl.join([f'#i{i} = _load_ptr(h{i}_type,ptrs[{i}])' for i in range(len(arg_types))]),prefix='    ')}
+#     return call_heads({",".join([f'i{i}' for i in range(len(arg_types))])})
 
-@CREFunc_method(cf_type, 'call_self', void(GenericCREFuncType))
-def call_self(_self):
+@CREFunc_method(cf_type, u1(GenericCREFuncType))
+def resolve_heads(_self):
     self = _cast_structref(cf_type, _self)
+    has_null_deref = False
     {"".join([f"""
     if(self.root_arg_infos[{i}].has_deref):
         var = _cast_structref(GenericVarType, self.ref{i})
         a = _cast_structref(BaseFact, self.a{i})
         data_ptr = resolve_deref_data_ptr(a, var.deref_infos)
-        self.h{i} = _load_ptr(h{i}_type, data_ptr)
+        if(data_ptr != 0):
+            self.h{i} = _load_ptr(h{i}_type, data_ptr)
+        else:
+            has_null_deref = True
 """ for i in range(len(arg_types))])
     }
-    return_val = call_heads({", ".join([f'self.h{i}' for i in range(len(arg_types))])})
-    _store_safe(return_type, self.return_data_ptr, return_val)
+    if(has_null_deref):
+        return CFSTATUS_NULL_DEREF
+    return u1(0)
+
+@CREFunc_method(cf_type, u1(GenericCREFuncType))
+def call_self(_self):
+    self = _cast_structref(cf_type, _self)
 '''
+    if(no_raise):
+        source +=f'''
+    return_val = call_heads({", ".join([
+            (f'_load_ptr(i8,_struct_get_attr_ptr(self,"h{i}"))' if(ptr_args) else f'self.h{i}') 
+            for i in range(len(arg_types))])
+        })
+    _store_safe(return_type, self.return_data_ptr, return_val)
+    return {"u1(return_val > 0)"
+            if(isinstance(return_type, types.Number)) else (
+             "CFSTATUS_TRUTHY if(return_val) else CFSTATUS_FALSEY"
+             if(not isinstance(return_type, types.StructRef)) else
+             "CFSTATUS_TRUTHY"
+            )}
+'''
+    else:    
+        source +=f'''
+    try:
+        return_val = call_heads({", ".join([
+            (f'_raw_ptr_from_struct(self.h{i})' if(ptr_args) else f'self.h{i}')
+            for i in range(len(arg_types))])
+        })
+        _store_safe(return_type, self.return_data_ptr, return_val)
+        return {"u1(return_val > 0)"
+                if(isinstance(return_type, types.Number)) else (
+                 "CFSTATUS_TRUTHY if(return_val) else CFSTATUS_FALSEY"
+                 if(not isinstance(return_type, types.StructRef)) else
+                 "CFSTATUS_TRUTHY"
+                )}
+    except Exception:
+        return CFSTATUS_ERROR    
+'''
+# @CREFunc_method(cf_type, 'call_self', void(GenericCREFuncType, i8[::1]))
+# def set_heads(_self, head_data_ptrs):
+#     self = _cast_structref(cf_type, _self)
+#     head_infos = self.head_infos
+#     for i, dp in enumerate(head_data_ptrs):
+#         dp, arg_ind = head_infos[i].head_data_ptr, head_infos[i].arg_ind
+#         arg_ty = arg_types[arg_ind]
+#         _store_safe(arg_ty,dp, _load_ptr(arg_ty, head_data_ptrs[i]))
+
+# @CREFunc_method(cf_type, 'call_self', u1(GenericCREFuncType, i8[::1]))
+# def set_heads(_self, head_data_ptrs):
+#     self = _cast_structref(cf_type, _self)
+#     {indent(nl.join([
+#         f'_store_safe(h{i}_type, cf.head_infos[i],  _load_ptr(h{i}_type,ptrs[{i}]))'
+#         for i in range(len(arg_types))]),prefix='    ')
+#     }
+
+#     for i, dp in enumerate(head_data_ptrs):
+#         _store_safe(f8,
+#             cf.head_infos[i].head_data_ptr,
+#             _load_ptr(f8, head_data_ptrs[i])
+#         )
     if(check_bytes is not None):
         source += f'''
-check_pyfunc = cloudpickle.loads({check_bytes})
-check_sig = boolean(*arg_types)
+# check_pyfunc = cloudpickle.loads({check_bytes})
+# check_sig = boolean(*arg_types)
 
-check = CREFunc_method(cf_type, 'check', check_sig, on_error={on_error_check!r})(check_pyfunc)
-if(check is None):
-    @CREFunc_method(cf_type, 'check', check_sig)
-    def check({arg_names}):
-        with objmode(_return=boolean):
-            _return = check_pyfunc({arg_names})
-        return _return
+# check = CREFunc_method(cf_type, check_sig, 'check', on_error={on_error_check!r})(check_pyfunc)
+# if(check is None):
+#     @CREFunc_method(cf_type, 'check', check_sig)
+#     def check({arg_names}):
+#         with objmode(_return=boolean):
+#             _return = check_pyfunc({arg_names})
+#         return _return
 '''
     else:
         source += f'''
-CREFunc_assign_method_addr(cf_type, 'check', -1)
+# CREFunc_assign_method_addr(cf_type, 'check', -1)
 '''
     source += f'''
-@CREFunc_method(cf_type, 'match', boolean(*arg_types))
-def match({arg_names}):
-    {f"if(not check({arg_names})): return 0" if(check_bytes is not None) else ""}
-    return {f'1' if isinstance(return_type, StructRef) else f'1 if(call({arg_names})) else 0'}
+# @CREFunc_method(cf_type, boolean(*arg_types))
+# def match({arg_names}):
+#     {f"if(not check({arg_names})): return 0" if(check_bytes is not None) else ""}
+#     return {f'1' if isinstance(return_type, StructRef) else f'1 if(call({arg_names})) else 0'}
 
-match_heads = match
-CREFunc_assign_method_addr(cf_type, 'match_heads', match.cre_method_addr)
+# match_heads = match
+# CREFunc_assign_method_addr(cf_type, 'match_heads', match.cre_method_addr)
 
-@CREFunc_method(cf_type, 'match_head_ptrs', boolean(i8[::1],))
-def match_head_ptrs(ptrs):
-{indent(nl.join([f'i{i} = _load_ptr(h{i}_type,ptrs[{i}])' for i in range(len(arg_types))]),prefix='    ')}
-    return match_heads({",".join([f'i{i}' for i in range(len(arg_types))])})
+# @CREFunc_method(cf_type, boolean(i8[::1],))
+# def match_head_ptrs(ptrs):
+# {indent(nl.join([f'#i{i} = _load_ptr(h{i}_type,ptrs[{i}])' for i in range(len(arg_types))]),prefix='    ')}
+#     return match_heads({",".join([f'i{i}' for i in range(len(arg_types))])})
 
 
 '''
@@ -1677,6 +1904,57 @@ cf_type.ctor = ctor
 '''
 
     return source
+
+
+
+
+
+# ---------------------------------------------------------------------------
+# : Unique String (independant of base variables)
+
+@njit(unicode_type(GenericCREFuncType), cache=True)
+def cre_func_unique_string(self):
+    '''Outputs a tuple that uniquely identifies an instance
+         of a literal independant of the base Vars of its underlying op.
+    '''
+    stack = List()
+    cf = self
+    i = 0 
+    arg_strs = List.empty_list(unicode_type)
+    s = ""
+    keep_looping = True
+    while(keep_looping):
+        arg_info = cf.root_arg_infos[i]
+        if(arg_info.type == ARGINFO_OP):
+            stack.append((cf, i+1,arg_strs))
+            cf = _struct_from_ptr(GenericCREFuncType, arg_info.ptr)
+            arg_strs = List.empty_list(unicode_type)
+            i = 0 
+        else:
+            if(arg_info.type == ARGINFO_VAR):
+                var = _struct_from_ptr(GenericVarType, arg_info.ptr)
+                vs = ""
+                for j, d in enumerate(var.deref_infos):
+                    delim = "," if j != len(var.deref_infos)-1 else ""
+                    vs += f'({str(i8(d.type))},{str(i8(d.t_id))},{str(i8(d.a_id))},{str(i8(d.offset))}){delim}'
+                arg_strs.append(vs) 
+            elif(arg_info.type == ARGINFO_CONST):
+                addr = cf.name_data.repr_const_addrs[i]
+                fn = _func_from_address(rc_fn_typ, addr)
+                arg_strs.append(fn(cf,i))
+            i += 1
+        while(i >= len(cf.root_arg_infos)):
+            _a = ','.join([f'{{{str(i)}}}' for i in range(len(cf.root_arg_infos))])
+            tmp = f"{str(cf.call_self_addr)}({_a})"
+            s = tmp.format(arg_strs)
+            if(len(stack) == 0):
+                keep_looping = False
+                break
+
+            cf, i, arg_strs = stack.pop(-1)
+            arg_strs.append(s)
+    return s
+
 
 
 
@@ -1709,7 +1987,7 @@ class UntypedCREFunc():
         self.name = name
         self.members = members
         self.members['call'] = njit(cache=True)(self.members['call'])
-        # self._specialize_cache = {}
+        self._specialize_cache = {}
     @property
     def arg_names(self):
         if(not hasattr(self,"_arg_names")):
@@ -1728,9 +2006,6 @@ class UntypedCREFunc():
     def __call__(self,*py_args):
         arg_types = [] 
         head_types = [] 
-        # all_const = True
-        # any_not_var = False
-        # any_deref_vars = False
         py_args = list(py_args)
         for i, x in enumerate(py_args):
             # If given a type make into a Var
@@ -1742,28 +2017,24 @@ class UntypedCREFunc():
                 arg_types.append(typeof(x))
                 head_types.append(resolve_return_type(x))
 
+        head_types = tuple(head_types)
 
-        all_const = all_args_are_const(arg_types)
-        
-
+        all_const = all_args_are_const(arg_types)        
         call = self.members['call']
         if(all_const):
             return call(*py_args)
 
-        sig = dispatcher_sig_from_arg_types(call, tuple(head_types))
-        # print(tuple(arg_types),tuple(arg_types) in call.overloads)
-        # print("-- overloads",call.overloads.keys())
-        # cres = call.overloads.get(head_types,None)
-        # if(cres is not None):
-        #     sig = cres.signature
-        # else:
-        #     # Note: get_call_template is an internal method of numba.Dispatcher 
-        #     (template,*rest) = call.get_call_template(head_types,{})
-        #     #Note: this can be finicky might need to find the best one
-        #     sig = [x for x in template.cases if x.args==head_types][0]
-        # # self.members['signature'] = sig
-        members = {**self.members, 'signature': sig}#
-        cf = new_cre_func(self.name, members)
+        if(head_types not in self._specialize_cache):
+            if(not self.members.get("ptr_args", False)):
+                sig = dispatcher_sig_from_arg_types(call, tuple(head_types))
+            else:
+                sig = dispatcher_sig_from_arg_types(call, tuple([i8]*len(head_types)))
+            # # self.members['signature'] = sig
+            members = {**self.members, 'signature': sig}#
+            cf = new_cre_func(self.name, members)
+            self._specialize_cache[head_types] = cf
+
+        cf = self._specialize_cache[head_types]
         return cf(*py_args)
 
 # ----------------------------------------------------------------------------
@@ -1773,31 +2044,30 @@ def define_PtrCREFunc(name, members):
     ''' Defines a new CREFuncType '''
 
     # Ensure that 'call' is present and that 'call' and 'check' are functions
-    assert 'call_head_ptrs' in members, "PtrCREFunc must have call_head_ptrs() defined"
-    assert hasattr(members['call_head_ptrs'], '__call__'), "call_head_ptrs() must be a function"
+    assert 'call' in members, "PtrCREFunc must have call() defined"
+    assert hasattr(members['call'], '__call__'), "call() must be a function"
 
     # Get pickle bytes for 'call_head_ptrs'
-    call_head_ptrs_bytes, call_heads_unq = \
-        _standardize_method(members, 'call_head_ptrs')
+    call_bytes, call_unq = _standardize_method(members, 'call')
 
     # Regenerate the source for this type if wasn't cached or if 'cache=False' 
-    gen_src_args = [name, members['return_type'], call_head_ptrs_bytes]
-    unq_args = [name, members['return_type'], call_heads_unq]
+    gen_src_args = [name, members['return_type'], call_bytes]
+    unq_args = [name, members['return_type'], call_unq]
 
     long_hash = unique_hash(unq_args)
 
     # print(name, long_hash)
     if(not source_in_cache(name, long_hash)): #or members.get('cache',True) == False):
-        source = gen_ptr_cre_func_source(*gen_src_args, long_hash)
+        source = gen_ptr_cre_func_source(*gen_src_args, members['arg_types'], long_hash)
         source_to_cache(name, long_hash, source)
 
     # Update members with jitted 'call_head_ptrs'
-    to_import = ['cf_type', 'call_head_ptrs']
+    to_import = ['cf_type', 'call']
     l = import_from_cached(name, long_hash, to_import)
 
     typ = l['cf_type']
     typ.func_name = name
-    typ.call_head_ptrs = l['call_head_ptrs']
+    typ.call = l['call']
     
     for k,v in members.items():
         setattr(typ,k,v)
@@ -1805,33 +2075,21 @@ def define_PtrCREFunc(name, members):
     return typ
 
 def new_ptr_cre_func(name, members):
-    call_head_ptrs = members['call_head_ptrs']
+    call = members['call']
+    arg_types = members['arg_types'] = tuple([i8]*len(members['arg_names']))
 
     # Determine the signature 
     if('signature' not in members):
         if('return_type' in members):
-            members['signature'] = members['return_type'](i8[::1])
+            members['signature'] = members['return_type'](arg_types)
         else:
-            # If return_type not given then determine it dynamically
-            # cres = call_head_ptrs.overloads.get((i8[::1],),None)
-            # if(cres is not None):
-            #     sig = cres.signature
-            # else:
-            #     # Note: get_call_template is an internal method of numba.Dispatcher 
-            #     (template,*rest) = call_head_ptrs.get_call_template((i8[::1],),{})
-            #     #Note: this can be finicky might need to find the best one
-            #     sig = [x for x in template.cases if x.args==(i8[::1],)][0] 
-            sig = dispatcher_sig_from_arg_types(call_head_ptrs, (i8[::1],))
+            sig = dispatcher_sig_from_arg_types(call, arg_types)
             members['signature'] = sig
             members['return_type'] = sig.return_type
 
     cf_type = define_PtrCREFunc(name, members)
 
-    if('n_args' in members):
-        n_args = members['n_args']
-        expr_template = f"{name}({', '.join([f'{{{i}}}' for i in range(n_args)])})"
-    else:
-        expr_template = f"{name}(...)"
+    expr_template = f"{name}({', '.join([f'{{{i}}}' for i in range(len(arg_types))])})"
     shorthand_template = members.get('shorthand',expr_template)
 
     cre_func = cf_type.ctor(
@@ -1841,7 +2099,7 @@ def new_ptr_cre_func(name, members):
     )
 
     cre_func._return_type = members['return_type']
-    cre_func._arg_types = (i8[::1],)
+    cre_func._arg_types = arg_types
     cre_func.cf_type = cf_type
     return cre_func
 
@@ -1851,11 +2109,12 @@ class PtrCREFunc(CREFunc):
         ''' A decorator function that builds a new Op'''
         # if(len(args) > 1): raise ValueError("PtrCREFunc() takes at most one position argument 'signature'.")
         
-        def wrapper(call_head_ptrs_func):
+        def wrapper(call_func):
             # Make new cre_func_type
             members = kwargs
-            members["call_head_ptrs"] = njit(cache=True)(call_head_ptrs_func)
-            name = call_head_ptrs_func.__name__
+            members["call"] = njit(cache=True)(call_func)
+            name = call_func.__name__
+            members["arg_names"] = inspect.getfullargspec(call_func)[0]
             # If no signature is given then create an untyped instance that can be specialized later
             # if('signature' not in members):
             #     return UntypedCREFunc(name,members)
@@ -1887,7 +2146,7 @@ class PtrCREFunc(CREFunc):
 
 
 
-def gen_ptr_cre_func_source(name, return_type, call_head_ptrs_bytes, long_hash):
+def gen_ptr_cre_func_source(name, return_type, call_bytes, arg_types, long_hash):
     source = \
 f'''import numpy as np
 from numba import njit, void, i8, boolean, objmode
@@ -1899,19 +2158,26 @@ from cre.cre_func import ensure_repr_const, cre_func_ctor, CREFunc_method, CREFu
 import cloudpickle
 
 return_type = cloudpickle.loads({cloudpickle.dumps(return_type)})
+arg_types = cloudpickle.loads({cloudpickle.dumps(arg_types)})
 
-cf_type = CREFuncTypeClass(return_type, arg_types=(i8[::1],),is_composed=False, name={name!r}, long_hash={long_hash!r})
+cf_type = CREFuncTypeClass(return_type, arg_types, is_composed=False, name={name!r}, long_hash={long_hash!r})
 
-call_head_ptrs_pyfunc = cloudpickle.loads({call_head_ptrs_bytes})
-call_head_ptrs_sig = return_type(i8[::1])
-call_head_ptrs = CREFunc_method(cf_type, 'call_head_ptrs', call_head_ptrs_sig, on_error='error')(call_head_ptrs_pyfunc)
+call_pyfunc = cloudpickle.loads({call_bytes})
+call_sig = return_type(*arg_types)
+call = CREFunc_method(cf_type, call_sig, 'call', on_error='error')(call_pyfunc)
 
-@CREFunc_method(cf_type, 'match_head_ptrs', boolean(i8[::1]))
+call_heads = call
+
+@CREFunc_method(cf_type, return_type(i8[::1]))
+def call_head_ptrs(ptrs):
+    return call_heads({",".join([f'ptrs[{i}]' for i in range(len(arg_types))])})
+
+@CREFunc_method(cf_type, boolean(i8[::1]))
 def match_head_ptrs(ptrs):
     return {f'1' if isinstance(return_type, StructRef) else
             f'1 if(call_head_ptrs(ptrs)) else 0'}
 
-#Placeholder 
+#Placeholder repr
 ensure_repr_const(i8)
 
 @njit(GenericCREFuncType(unicode_type, unicode_type, unicode_type), cache=True)

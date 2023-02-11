@@ -487,7 +487,7 @@ def cre_obj_get_item_t_id_ptr(x, index):
 @overload_method(CREObjTypeClass,'get_item')
 def cre_obj_get_item(obj, item_type, index):
     # print("obj", obj)
-    if(obj is not CREObjType): return
+    # if(obj is not CREObjType): return
     def impl(obj, item_type, index):
         _, _, item_ptr = cre_obj_get_item_t_id_ptr(obj, index)
         out = _load_ptr(item_type, item_ptr)

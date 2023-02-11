@@ -1,8 +1,8 @@
 import numpy as np
-from numba import njit, f8, i8, generated_jit
+from numba import njit, f8, i8, u2, generated_jit
 from numba.typed import List, Dict
 from numba.types import DictType, ListType, unicode_type, Tuple
-from cre.op import Op
+# from cre.op import Op
 from cre.sc_planner import (gen_apply_multi_source, search_for_explanations,
                      apply_multi, SetChainingPlanner, insert_record,
                      join_records_of_type, forward_chain_one, extract_rec_entry,
@@ -13,7 +13,9 @@ from cre.utils import _ptr_from_struct_incref, _list_from_ptr, _dict_from_ptr, _
 from cre.var import Var
 from cre.context import cre_context
 from cre.fact import define_fact
-from cre.default_ops import CastFloat, CastStr
+from cre.core import T_ID_FLOAT
+# from cre.builtin_cre_funcs import CastFloat, CastStr
+from cre.builtin_cre_funcs import CastFloat, CastStr
 from numba.core.runtime.nrt import rtsys
 import gc
 
@@ -29,9 +31,10 @@ class PrintElapse():
 
 
 def get_base_ops():
-    from cre.default_ops import Add, Multiply, Concatenate
+    from cre.builtin_cre_funcs import Add, Multiply, Concatenate
     Add_f8 = Add(Var(f8),Var(f8))
     Multiply_f8 = Multiply(Var(f8),Var(f8))
+    print(Add_f8, Multiply_f8)
     return Add_f8, Multiply_f8, Concatenate
     # Concatenate_str = Add(Var(unicode_type), Var(unicode_type))
     # class Add(Op):
@@ -125,14 +128,15 @@ def test_apply_multi():
     planner = setup_float()
     rec = apply_multi(Add, planner, 0)
     d_typ = DictType(f8,i8_2x_tuple)
+    f8_t_id = cre_context().get_t_id(f8)
     @njit(cache=True)
     def summary_vals_map(planner,target=6.0):
-        d = _dict_from_ptr(d_typ, planner.val_map_ptr_dict['float64'])
+        d = _dict_from_ptr(d_typ, planner.val_map_ptr_dict[u2(f8_t_id)])
         return len(d), min(d), max(d)
 
     @njit(cache=True)
     def args_for(planner,target=6.0):
-        d = _dict_from_ptr(d_typ, planner.val_map_ptr_dict['float64'])
+        d = _dict_from_ptr(d_typ, planner.val_map_ptr_dict[u2(f8_t_id)])
         l = List()
         re_ptr = d[target][1]
         # re_rec, re_next_re_ptr, re_args = extract_rec_entry(re_ptr)
@@ -151,12 +155,14 @@ def test_insert_record():
     Add, Multiply, Concatenate = get_base_ops()
     planner = setup_float()
     rec = apply_multi(Add, planner, 0)
-    insert_record(planner, rec, 'float64', 1)
-    @njit(cache=True)
-    def len_f_recs(planner,typ_name,depth):
-        return len(planner.forward_records[depth][typ_name])
 
-    assert len_f_recs(planner,'float64',1) == 1
+    float64_t_id = cre_context().get_t_id(f8)
+    insert_record(planner, rec, u2(float64_t_id), 1)
+    @njit(cache=True)
+    def len_f_recs(planner, t_id, depth):
+        return len(planner.forward_records[depth][u2(t_id)])
+    
+    assert len_f_recs(planner,float64_t_id,1) == 1
 
 @generated_jit(cache=True, nopython=True)
 def summarize_depth_vals(planner, typ, depth):
@@ -167,15 +173,18 @@ def summarize_depth_vals(planner, typ, depth):
     from cre.fact import Fact
     _typ = typ.instance_type
     typ_name = str(_typ)
+    typ_t_id = cre_context().get_t_id(_typ)
     l_typ = ListType(_typ)
-    d_typ = DictType(_typ, i8)
+    d_typ = DictType(_typ, Tuple((i8,i8)))
     if(isinstance(_typ, Fact)):
         def impl(planner, typ, depth): 
             print("----",typ_name, depth,"-----")
-            if((typ_name,depth) not in planner.flat_vals_ptr_dict): return 0,None, None, 0,None, None
+            tup = (u2(typ_t_id),depth)
+            if(tup not in planner.flat_vals_ptr_dict): return 0,None, None, 0,None, None
 
-            l = _list_from_ptr(l_typ, planner.flat_vals_ptr_dict[(typ_name,depth)])
-            d = _dict_from_ptr(d_typ, planner.val_map_ptr_dict[typ_name])
+            l = _list_from_ptr(l_typ, planner.flat_vals_ptr_dict[tup])
+            d = _dict_from_ptr(d_typ, planner.val_map_ptr_dict[u2(typ_t_id)])
+            print(l,d)
             first_l, last_l = None, None
             for i,x in enumerate(l):
                 if(i == 0):
@@ -196,10 +205,12 @@ def summarize_depth_vals(planner, typ, depth):
         def impl(planner, typ, depth): 
 
             print("----",typ_name, depth,"-----")
-            if((typ_name,depth) not in planner.flat_vals_ptr_dict): return 0,None, None, 0,None, None
+            tup = (u2(typ_t_id),depth)
+            if(tup not in planner.flat_vals_ptr_dict): return 0,None, None, 0,None, None
 
-            l = _list_from_ptr(l_typ, planner.flat_vals_ptr_dict[(typ_name,depth)])
-            d = _dict_from_ptr(d_typ, planner.val_map_ptr_dict[typ_name])
+            l = _list_from_ptr(l_typ, planner.flat_vals_ptr_dict[tup])
+            d = _dict_from_ptr(d_typ, planner.val_map_ptr_dict[u2(typ_t_id)])
+            print(l,d)
             # print(l)
             # print(d)
             return len(l), min(l),max(l),len(d), min(d),max(d)
@@ -209,9 +220,9 @@ def test_join_records_of_type():
     Add, Multiply, Concatenate = get_base_ops()
     planner = setup_float()
     rec = apply_multi(Add, planner, 0)
-    insert_record(planner, rec, 'float64', 1)
+    insert_record(planner, rec, T_ID_FLOAT, 1)
     rec = apply_multi(Multiply, planner, 0)
-    insert_record(planner, rec, 'float64', 1)
+    insert_record(planner, rec, T_ID_FLOAT, 1)
 
     # d_typ = DictType(f8, i8)
     # l_typ = ListType(f8)
@@ -282,7 +293,7 @@ def tree_str(root,ind=0):
             op, child_arg_ptrs = entry.op, entry.child_arg_ptrs
         #     # for i in range(ind): s += " "
                 
-            s += f"\n{s_ind}{op.name}("
+            s += f"\n{s_ind}{op}("
         #     # print(child_arg_ptrs)
             for i, ptr in enumerate(child_arg_ptrs):
                 
@@ -304,8 +315,8 @@ def test_build_explanation_tree():
     print("BEF EX")
     root = build_explanation_tree(planner, f8, 36.0)
     print("BEF STR")
-    for op_comp in root:
-        print(op_comp)
+    for op in root:
+        print(op)
         # print(op_comp.vars)
     print()
     # print(tree_str(root,0))
@@ -321,8 +332,8 @@ def test_search_for_explanations(n=5):
 
     expl_tree = search_for_explanations(planner, 36.0, ops=ops, search_depth=2)
     # print(tree_str(expl_tree))
-    for op_comp in expl_tree:
-        print(op_comp)
+    for op in expl_tree:
+        print(op)
 
 
 
@@ -439,8 +450,8 @@ def test_declare_fact():
         assert len(AB_op_comp_binding_pairs) >= 4 * len(A_op_comp_binding_pairs)
 
         # print("(()()))")
-        for i, (op_comp, binding) in enumerate(A_op_comp_binding_pairs):
-            op = op_comp.flatten()
+        for i, (op, binding) in enumerate(A_op_comp_binding_pairs):
+            # op = op_comp.flatten()
             print("<<", op, binding)
 
 
@@ -494,8 +505,8 @@ def test_declare_fact_w_conversions():
 
         assert len(AB_op_comp_binding_pairs) >= 4 * len(A_op_comp_binding_pairs)
 
-        for i, (op_comp, binding) in enumerate(A_op_comp_binding_pairs):
-            op = op_comp.flatten()
+        for i, (op, binding) in enumerate(A_op_comp_binding_pairs):
+            # op = op_comp.flatten()
             print("<<", op, binding)
 
             assert(op(*binding)==36.0)
@@ -505,7 +516,7 @@ def test_declare_fact_w_conversions():
 
         print("---------------------------------------------------------")
         # Check for key error bug when don't have Ops for all decalared types.
-        from cre.default_ops import Add, Multiply
+        from cre.builtin_cre_funcs import Add, Multiply
         Add_f8 = Add(f8, f8)
         Multiply_f8 = Multiply(f8, f8)
         ops = [Add_f8, Multiply_f8]
@@ -520,8 +531,8 @@ def test_declare_fact_w_conversions():
 
         assert len(AB_op_comp_binding_pairs) > 0
 
-        for i, (op_comp, binding) in enumerate(AB_op_comp_binding_pairs):
-            op = op_comp.flatten()
+        for i, (op, binding) in enumerate(AB_op_comp_binding_pairs):
+            # op = op_comp.flatten()
             print("<<", op, binding)
 
             assert(op(*binding)==36.0)
@@ -536,7 +547,7 @@ def test_min_stop_depth():
             "B" : {"type": str, "visible":  True,
                  "semantic" : True, 'conversions' : {float : CastFloat}}
         })
-        from cre.default_ops import Add, Multiply
+        from cre.builtin_cre_funcs import Add, Multiply
         Add_f8 = Add(f8, f8)
         Multiply_f8 = Multiply(f8, f8)
 
@@ -547,11 +558,9 @@ def test_min_stop_depth():
             planner.declare(b)
 
         expls = planner.search_for_explanations(36.0, ops=[Add_f8, Multiply_f8], search_depth=2)
-        op_comp, match = list(expls)[0]
-        print(op_comp, match)
-        new_op = op_comp.flatten()
-
+        new_op, match = list(expls)[0]
         print(new_op, match)
+        # new_op = op_comp.flatten()
 
         planner = SetChainingPlanner([BOOP])
 
@@ -565,9 +574,9 @@ def test_min_stop_depth():
             search_depth=1, min_stop_depth=1)
         assert len(list(expls)) > 0
 
-        op_comp, match = list(expls)[0]
+        op, match = list(expls)[0]
 
-        print(op_comp, op_comp.op, match)
+        print(op, match)
 
         planner = SetChainingPlanner([BOOP])
         for i in range(2,5):
@@ -611,8 +620,8 @@ def test_min_stop_depth():
 
         # raise ValueError()
 
-        for i, (op_comp, binding) in enumerate(expls):
-            print(op_comp)
+        for i, (op, binding) in enumerate(expls):
+            print(op)
 
         print("END")
 
@@ -625,7 +634,7 @@ def test_non_numerical_vals():
             "B" : {"type": str, "visible":  True,
                  "semantic" : True, 'conversions' : {float : CastFloat}}
         })
-        from cre.default_ops import Add, Multiply
+        from cre.builtin_cre_funcs import Add, Multiply
         Add_f8 = Add(f8, f8)
 
         planner = SetChainingPlanner([BOOP])
@@ -640,8 +649,8 @@ def test_non_numerical_vals():
         expls = planner.search_for_explanations(2.0, ops=[Add_f8], 
             search_depth=1)
 
-        for i, (op_comp, binding) in enumerate(expls):
-            print(op_comp, binding)
+        for i, (op, binding) in enumerate(expls):
+            print(op, binding)
 
 def test_policy_search(n=5):
     [Add_f8, Multiply_f8, Concatenate] = ops = get_base_ops()
@@ -793,7 +802,7 @@ if __name__ == "__main__":
     # test_apply_multi()
     # test_insert_record()
     # test_join_records_of_type()
-    test_forward_chain_one()
+    # test_forward_chain_one()
     # test_build_explanation_tree()
     # test_search_for_explanations()
     # test_declare_fact()
@@ -807,7 +816,7 @@ if __name__ == "__main__":
     # test_declare_fact()
     # test_declare_fact()
     # test_declare_fact_w_conversions()
-    # test_min_stop_depth()
+    test_min_stop_depth()
 
     # test_policy_search()
 # from numba import njit, i8

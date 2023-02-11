@@ -17,6 +17,7 @@ from cre.utils import assign_to_alias_in_parent_frame, encode_idrec, _obj_cast_c
 from cre.subscriber import base_subscriber_fields, BaseSubscriber, BaseSubscriberType, init_base_subscriber, link_downstream
 from cre.vector import VectorType
 from cre.cre_object import cre_obj_field_dict,CREObjType, CREObjTypeClass, CREObjProxy, set_chr_mbrs
+from cre.type_conv import ptr_to_var_name
 # from cre.predicate_node import BasePredicateNode,BasePredicateNodeType, get_alpha_predicate_node_definition, \
 # get_beta_predicate_node_definition, deref_attrs, define_alpha_predicate_node, define_beta_predicate_node, AlphaPredicateNode, BetaPredicateNode
 from numba.core import imputils, cgutils
@@ -625,7 +626,12 @@ def get_deref_attrs_str(self):
 def var_str(self):
     if(not isinstance(self,VarTypeClass)): return
     def impl(self):
-        return f'{self.alias}{get_deref_attrs_str(self)}' 
+        alias = self.alias
+        deref_str = get_deref_attrs_str(self)
+        if(len(alias)==0):
+            return f'{ptr_to_var_name(self.base_ptr)}{deref_str}'
+        else:
+            return f'{self.alias}{deref_str}' 
     return impl
 
 @njit(cache=True)    

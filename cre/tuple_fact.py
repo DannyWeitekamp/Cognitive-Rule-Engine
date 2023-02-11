@@ -81,6 +81,8 @@ class SpecializedTFClass(TupleFactClass):
     def __str__(self):
         return '{specialization_name if specialization_name else "TupleFact"}'
 
+    __repr__ = __str__
+
 SpecializedTF = fact_type = SpecializedTFClass(field_list)
 SpecializedTF_w_mbr_infos = SpecializedTFClass(field_list+
 [("chr_mbrs_infos", UniTuple(member_info_type,{len(member_types)})),

@@ -285,8 +285,56 @@ class Float(AbstractTemplate):
         elif arg in types.real_domain:
             return signature(arg, arg)
 
+base64 = ("_","A","B","C","D","E","F","G","H","I","J","K","L","M","N","O",
+              "P","Q","R","S","T","U","V","W","X","Y","Z","a","b","c","d",
+              "e","f","g","h","i","j","k","l","m","n","o","p","q","r","s",
+              "t","u","v","w","x","y","z","0","1","2","3","4","5","6","7","8","9","_")
+# for i,x in enumerate(base64):
+#     print(i,x)
+base64_ord = tuple([u1(ord(x)) for x in base64])
+@njit(unicode_type(i8),cache=True)
+def ptr_to_var_name(ptr):
+    x = u8(ptr)
 
+    # Ignore first 24 bits, no one has a terabyte of RAM
+    a = np.empty(5,dtype=np.uint8)
+    a[0] = (x>>34) & u8(63)
+    a[1] = (x>>28) & u8(63)
+    a[2] = (x>>22) & u8(63)
+    a[3] = (x>>16) & u8(63)
+    a[4] = (x>>10) & u8(63)
+    # Ignore last 4 bits, probably won't be used because of byte alignment
+    
+    tail = u1(0)
+    # Ignore zeros in highest bits
+    l_ind = 0
+    if(a[0] == 0): l_ind += 1
+    if(a[1] == 0): l_ind += 1
 
+    # If the tailing char would be a number then set 'tail' char to 110000
+    if(a[4] > 52):
+        tail = u1(48)
+        a[4] = a[4] & 15
+
+    # Build the string
+    s = _empty_string(PY_UNICODE_1BYTE_KIND,5-l_ind+1)
+    c = 0
+    for i in range(4,l_ind-1,-1):
+        # Since there are only 63 legal characters to us in var names
+        #   if a[i] is 63 modify the tail char.
+        if(a[i] == 63):
+            tail |= 1<<(c)
+            _set_code_point(s,c,base64_ord[a[i]&31])
+        else:
+            _set_code_point(s,c,base64_ord[a[i]])
+        c += 1
+
+    if(tail != 0):
+        _set_code_point(s,5-l_ind,base64_ord[tail])
+    else:
+        s = s[:-1]
+
+    return s
 
 
 

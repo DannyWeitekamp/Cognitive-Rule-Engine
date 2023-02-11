@@ -59,6 +59,8 @@ class Fact(CREObjTypeClass):
         else:
             return "Fact"
 
+    __repr__ = __str__
+
     def preprocess_fields(self, fields):
         return tuple((name, types.unliteral(typ)) for name, typ in fields)
 
@@ -360,14 +362,15 @@ def _merge_spec_inheritance(spec : dict, context):
     return {**inherit_spec, **spec}, inherit_from
 
 def _standardize_conversions(conversions, attr_type, context):
-    from cre.op import UntypedOp
+    from cre.cre_func import UntypedCREFunc
     assert isinstance(conversions, dict), f"'conversions' expecting dict : type -> conversion_op, not {type(conversions)}."
     stand_conv = {}
     for conv_type, conv_op in conversions.items():
         conv_type = _standardize_type(conv_type, context)
-        if(isinstance(conv_op, UntypedOp)): conv_op = conv_op(attr_type)
-        assert conv_op.signature.return_type == conv_type, f"{conv_op} does not return conversion type {conv_type}."
-        stand_conv[conv_type] = conv_op.__class__
+        print(attr_type)
+        if(isinstance(conv_op, UntypedCREFunc)): conv_op = conv_op(attr_type)
+        assert conv_op.return_type == conv_type, f"{conv_op} does not return conversion type {conv_type}."
+        stand_conv[conv_type] = conv_op
     return stand_conv
 
     # attr_spec['conversions'] = {_standardize_type(k, context):v for }

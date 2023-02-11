@@ -165,6 +165,23 @@ def test_njit_compose():
     assert str(f) == "(x+1)*(y+1)"
 
 
+def test_no_mutate_on_compose():
+    a = Var(f8,'a')
+    b = Var(f8,'b')
+    c = Var(f8,'c')
+
+    c0 = a + b + b
+    s0 = str(c0) 
+    print(c0)
+    c1 = c0(a,c+b)
+    s1 = str(c0)
+    print(c1)
+    print(c0)
+    assert str(c0) == s0
+
+
+
+
 # ---------------------------------------------------
 # : Performance Benchmarks
 
@@ -227,7 +244,8 @@ def test_b_dyn_call(benchmark):
 if __name__ == "__main__":
     import faulthandler; faulthandler.enable()
     import sys
-    test_numerical()
+    test_no_mutate_on_compose()
+    # test_numerical()
     # test_string()
     # test_obj()
     # test_njit_compose()

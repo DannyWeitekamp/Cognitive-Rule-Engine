@@ -497,8 +497,7 @@ class FactProxy(CREObjProxy):
                 # one_lit_conds.append(attr_var==val)
 
     def as_conditions(self, fact_ptr_to_var_map=None, keep_null=True, add_implicit_neighbor_self_refs=True, neigh_count = 0):
-        from cre.default_ops import Equals
-        from cre.conditions import op_to_cond 
+        from cre.builtin_cre_funcs import Equals
         from cre.utils import as_typed_list
         from cre.dynamic_exec import var_eq
         from cre.var import Var

@@ -676,7 +676,7 @@ def cre_obj_set_member_t_id_m_id(x, i, t_id_m_id):
 
 
 
-@njit(cache=True)
+@njit(u2[::1](CREObjType),cache=True)
 def cre_obj_get_member_t_ids(x):
     t_ids = np.empty((x.num_chr_mbrs,),dtype=np.uint16)
     for i, (t_id,_, _) in enumerate(_iter_mbr_infos(x)):

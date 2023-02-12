@@ -151,6 +151,17 @@ define_boxing(SpecializedTFClass,SpecializedTFProxy)
 # f'TupleFact({', '.join([repr_tf_item(self,member_types[i],i) for i in range()])})'
 
 def define_tuple_fact(member_types, context=None, return_proxy=False, return_type_class=False):   
+    from cre.cre_func import CREFuncTypeClass, GenericCREFuncType
+    # print("::", member_types)
+    
+    member_types = list(member_types)
+    for i, x in enumerate(member_types):
+        # Don't specialize CREFunc types 
+        if(isinstance(x, CREFuncTypeClass)):
+            member_types[i] = GenericCREFuncType
+    # print("::>", member_types)
+
+
     if(len(member_types) > 0):
         typ_assigments = ", ".join([str(t) for t in member_types])
         specialization_name = f"TupleFact({typ_assigments})"
@@ -390,18 +401,18 @@ TupleFact = TupleFactClass()
 
 register_global_default("TupleFact", TupleFact)
 
-@generated_jit(cache=True)
-def assert_cre_obj(x):
-    if(isinstance(x, types.Literal)): return
-    if(isinstance(x, CREObjTypeClass)):
-        def impl(x):
-            return _cast_structref(CREObjType, x)
-        return impl
-    else:
-        def impl(x):
-            prim = Primitive(x)
-            return _cast_structref(CREObjType, prim)
-        return impl
+# @generated_jit(cache=True)
+# def assert_cre_obj(x):
+#     if(isinstance(x, types.Literal)): return
+#     if(isinstance(x, CREObjTypeClass)):
+#         def impl(x):
+#             return _cast_structref(CREObjType, x)
+#         return impl
+#     else:
+#         def impl(x):
+#             prim = Primitive(x)
+#             return _cast_structref(CREObjType, prim)
+#         return impl
 
 # USE_TREF_CTOR = False
 

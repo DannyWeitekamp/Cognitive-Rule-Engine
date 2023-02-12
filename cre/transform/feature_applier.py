@@ -9,9 +9,10 @@ from cre.fact import define_fact, UntypedFact, call_untyped_fact, BaseFact
 from cre.fact_intrinsics import fact_lower_getattr, resolve_fact_getattr_type
 from cre.context import cre_context
 from cre.tuple_fact import TupleFact, TF
-from cre.default_ops import Add, Subtract, Divide
+# from cre.builtin_cre_funcs import Add, Subtract, Divide
 from cre.var import Var, GenericVarType
-from cre.op import GenericOpType
+# from cre.op import GenericCREFuncType
+from cre.cre_func import GenericCREFuncType, get_best_call_self, get_return_val_impl, set_base_arg_val_impl, CFSTATUS_TRUTHY
 from cre.utils import _raw_ptr_from_struct, PrintElapse,encode_idrec, _func_from_address, _cast_structref, _obj_cast_codegen, _func_from_address, _incref_structref, _struct_from_ptr, decode_idrec, _ptr_to_data_ptr, _load_ptr, _struct_tuple_from_pointer_arr, _incref_ptr
 from cre.structref import define_structref
 from numba.experimental import structref
@@ -31,7 +32,7 @@ feature_applier_fields = {
     **incr_processor_fields,    
     "out_memset" : MemSetType,
     "idrec_map" : DictType(u8,ListType(u8)),
-    "ops" : ListType(GenericOpType),
+    "ops" : ListType(GenericCREFuncType),
 
     "fact_vecs" : DictType(u2, Tuple((VectorType,VectorType, VectorType))),
 
@@ -63,7 +64,7 @@ u2_arr = u2[::1]
 u8_list = ListType(u8)
 vec_list_type = ListType(VectorType)
 list_vec_list_type = ListType(ListType(VectorType))
-op_list_type = ListType(GenericOpType)
+op_list_type = ListType(GenericCREFuncType)
 
 
 class FeatureApplier(structref.StructRefProxy):
@@ -124,6 +125,7 @@ class FeatureApplier(structref.StructRefProxy):
 
     def add_op(self,op):
         context = cre_context()
+        print("add op:", op, type(op))
         self.ops.append(op)
         gval_t_ids = np.array([context.get_t_id(_type=get_gval_type(x)) for x in op.signature.args],dtype=np.uint16)
         add_op(self, op, gval_t_ids)
@@ -145,7 +147,7 @@ vec_triple_type = Tuple((VectorType,VectorType,VectorType))
 def feature_applier_ctor(in_memset, out_memset, enumerizer):    
     st = new(GenericFeatureApplierType)
     init_incr_processor(st, in_memset)
-    st.ops = List.empty_list(GenericOpType)
+    st.ops = List.empty_list(GenericCREFuncType)
     st.fact_vecs = Dict.empty(u2, vec_triple_type)
     st.idrec_map = Dict.empty(u8, u8_list)
     st.out_memset = out_memset 
@@ -156,13 +158,13 @@ def feature_applier_ctor(in_memset, out_memset, enumerizer):
     return st
 
 
-@njit(types.void(GenericFeatureApplierType, GenericOpType, u2[::1]), cache=True)
+@njit(types.void(GenericFeatureApplierType, GenericCREFuncType, u2[::1]), cache=True)
 def add_op(self, op, gval_t_ids):
     self.ops.append(op)
     self.gval_t_ids.append(gval_t_ids)
     for t_id in gval_t_ids:
         if(t_id not in self.fact_vecs):
-            self.fact_vecs[t_id] = (new_vector(1),new_vector(1), new_vector(1))
+            self.fact_vecs[u2(t_id)] = (new_vector(1),new_vector(1), new_vector(1))
 
 
 
@@ -261,7 +263,7 @@ def update_fact_vecs(self):
             self.idrec_map[change_event.idrec].append(copy_idrec)
 
         if(t_id not in self.fact_vecs): continue
-        new_f_ids, new_fact_ptrs, old_fact_ptrs = self.fact_vecs[t_id]
+        new_f_ids, new_fact_ptrs, old_fact_ptrs = self.fact_vecs[u2(t_id)]
 
         if(change_event.was_retracted):
             old_fact_ptrs[f_id] = 0
@@ -287,7 +289,7 @@ def iter_arg_gval_ptrs(self, arg_gval_t_ids):
     olds_facts_list = List.empty_list(VectorType)
     facts_lists = List.empty_list(VectorType)
     for gval_t_id in arg_gval_t_ids:
-        new_f_ids, new_fact_ptrs, old_fact_ptrs = self.fact_vecs[gval_t_id]
+        new_f_ids, new_fact_ptrs, old_fact_ptrs = self.fact_vecs[u2(gval_t_id)]
         new_fact_ptrs_list.append(new_fact_ptrs)
         olds_facts_list.append(old_fact_ptrs)
         facts_lists.append(old_fact_ptrs)
@@ -322,39 +324,56 @@ def update_op(self, return_type, arg_types, op_ind):
     arg_types = tuple([x.instance_type for x in arg_types])
     n_args = len(arg_types)
         
-    call_head_ptrs_func_type = types.FunctionType(return_type(i8[::1]))
+    # call_head_ptrs_func_type = types.FunctionType(return_type(i8[::1]))
     gval_type = get_gval_type(return_type)
     arg_gval_t_ids = tuple([context.get_t_id(_type=get_gval_type(x)) for x in arg_types])
 
     range_n_args = tuple([x for x in range(n_args)])
     n_var_tup_type = tuple([GenericVarType for x in range(n_args)])
 
+    get_ret = get_return_val_impl(return_type)
+    set_bases = tuple([set_base_arg_val_impl(a) for a in arg_types])
+
+    for i in range(1, len(set_bases)):
+        if(set_bases[i] != set_bases[0]):
+            raise NotImplementedError("Cannot Currently use feature applier with CREFunc with more than unique arg_type.")
+    set_base = set_bases[0]
+    arg_type = arg_types[0]
+
     def impl(self, return_type, arg_types, op_ind):
         op = self.ops[op_ind]
         val_ptrs = np.empty((n_args,),dtype=np.int64)
         var_ptrs = np.empty((n_args,),dtype=np.int64)
-        call_head_ptrs = _func_from_address(call_head_ptrs_func_type, op.call_head_ptrs_addr)
-        enum_d = self.enumerizer.dict_for_type(return_type)
 
+        call_self_func = get_best_call_self(op,True)
+
+        # call_head_ptrs = _func_from_address(call_head_ptrs_func_type, op.call_head_ptrs_addr)
+        enum_d = self.enumerizer.dict_for_type(return_type)
+        # print("A")
         for gval_ptrs in iter_arg_gval_ptrs(self, arg_gval_t_ids):
             # For each gval get the address for 'head' and val' slot
             for i in literal_unroll(range_n_args):
                 var_ptrs[i] = _load_ptr(i8, _ptr_to_data_ptr(gval_ptrs[i])+head_offset) 
-                val_ptrs[i] = _ptr_to_data_ptr(gval_ptrs[i])+val_offset
-
+                set_base(op, u8(i), _load_ptr(arg_type, _ptr_to_data_ptr(gval_ptrs[i])+val_offset))
+                # val_ptrs[i] = _ptr_to_data_ptr(gval_ptrs[i])+val_offset
+            # print("B")
             # Make a gval with head=TupleFact(op,*vars) and val=call(*vals)
             tf = TF(op,*_struct_tuple_from_pointer_arr(n_var_tup_type, var_ptrs))
-            v = call_head_ptrs(val_ptrs)
+            status = call_self_func(op)
+            if(status > CFSTATUS_TRUTHY):
+                continue
+            v = get_ret(op)
+            # print(v)
             nom = self.enumerizer.enumerize(v,enum_d)
             gval = new_gval(head=tf,val=v,nom=nom)
             idrec = self.out_memset.declare(gval)
-
+            # print("C")
             # Map each arg's idrecs in 'in_memset' to the gval's idrec in 'out_memset' 
             for ptr in gval_ptrs:
                 fact = _struct_from_ptr(BaseFact, ptr)
                 if(fact.idrec not in self.idrec_map):
-                    self.idrec_map[fact.idrec] = List.empty_list(u8)
-                self.idrec_map[fact.idrec].append(idrec)
+                    self.idrec_map[u8(fact.idrec)] = List.empty_list(u8)
+                self.idrec_map[u8(fact.idrec)].append(idrec)
 
     return impl
 
@@ -362,12 +381,12 @@ def update_op(self, return_type, arg_types, op_ind):
 @njit(cache=True)
 def assign_new_f_ids(self):
     for t_id in self.fact_vecs:
-        new_f_ids, new_fact_ptrs, old_fact_ptrs = self.fact_vecs[t_id]
+        new_f_ids, new_fact_ptrs, old_fact_ptrs = self.fact_vecs[u2(t_id)]
         for i in range(len(new_f_ids)):
             f_id = new_f_ids[i]
             old_fact_ptrs.set_item_safe(f_id,new_fact_ptrs[i])
 
-        self.fact_vecs[t_id] = (new_vector(1),new_vector(1), old_fact_ptrs)
+        self.fact_vecs[u2(t_id)] = (new_vector(1),new_vector(1), old_fact_ptrs)
 
 
 @njit(types.boolean(GenericFeatureApplierType, MemSetType),cache=True)
@@ -397,7 +416,7 @@ def feature_applier_clear(self):
     self.idrec_map = Dict.empty(u8,u8_list)
     self.change_queue_head = 0
     for t_id in self.fact_vecs:
-        self.fact_vecs[t_id] = (new_vector(1), new_vector(1), new_vector(1))
+        self.fact_vecs[u2(t_id)] = (new_vector(1), new_vector(1), new_vector(1))
 
     # self.out_memset = MemSet(self.out_memset.context_data)
 
@@ -419,7 +438,7 @@ def feature_applier_clear(self):
 # if(__name__ == "__main__"):
 #     import faulthandler; faulthandler.enable()
 #     from cre.flattener import Flattener
-#     from cre.default_ops import Equals
+#     from cre.builtin_cre_funcs import Equals
 #     with cre_context("test_feature_applier") as context:
 #         spec1 = {"A" : {"type" : "string", "visible" : True}, 
 #                  "B" : {"type" : "number", "visible" : False}}

@@ -7,7 +7,7 @@ from cre.memset import MemSet
 from cre.var import Var
 from cre.utils import PrintElapse, deref_info_type, decode_idrec
 from cre.fact import define_fact, FactProxy
-from cre.default_ops import Equals
+from cre.builtin_cre_funcs import Equals
 from cre.context import cre_context
 from pprint import pprint
 from cre.transform.flattener import Flattener
@@ -15,7 +15,7 @@ from cre.transform.feature_applier import FeatureApplier
 from cre.transform.relative_encoder import _check_needs_rebuild, RelativeEncoder, get_relational_fact_attrs, next_adjacent
 from cre.transform.vectorizer import Vectorizer
 from cre.transform.memset_builder import MemSetBuilder
-from cre.default_ops import Equals
+# from cre.default_ops import Equals
 from cre.conditions import Conditions
 import pytest
 
@@ -174,9 +174,10 @@ def setup_pipeline():
         print("\nHAS SPEC")
         print(TextField.__dict__)
 
-    fact_types = [Container, TextField,Component, Button]
+    fact_types = [Container, TextField, Component, Button]
     feat_types = [eq_f8, eq_str]
     val_types = [f8,unicode_type,boolean]
+    print("Feat_types", feat_types)
 
     wm = MemSet()
     conv = MemSetBuilder(wm)

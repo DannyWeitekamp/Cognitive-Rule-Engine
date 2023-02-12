@@ -9,7 +9,8 @@ from cre.core import short_name, T_ID_TUPLE_FACT, T_ID_OP, T_ID_VAR
 from cre.context import cre_context
 from cre.utils import decode_idrec, _cast_structref
 from cre.var import get_deref_attrs_str, GenericVarType
-from cre.op import GenericOpType
+# from cre.op import GenericCREFuncType
+from cre.cre_func import GenericCREFuncType
 
 
 # Define the base_type 'gval' for grounded values
@@ -75,17 +76,19 @@ def gval_str(gval):
     if('gval' not in getattr(gval, '_fact_name','')): return
     def impl(gval):
         head = gval.head
-        head_t_id,_,_ = decode_idrec(head.idrec)
+
+        head_t_id,x0,x1 = decode_idrec(head.idrec)
+        # print("head.idrec", head_t_id,x0,x1,T_ID_TUPLE_FACT)
         if(head_t_id == T_ID_TUPLE_FACT):
             t_ids = cre_obj_get_member_t_ids(head)
             if(t_ids[0] == T_ID_OP and np.all(t_ids[:1]==T_ID_VAR)):
-                op = cre_obj_get_item(head, GenericOpType, 0)
+                op = cre_obj_get_item(head, GenericCREFuncType, 0)
                 v_strs = List.empty_list(unicode_type)
                 for i in range(1,head.num_chr_mbrs):
                     v = cre_obj_get_item(head, GenericVarType, i)
                     s = get_deref_attrs_str(v)
                     v_strs.append(v.alias + get_deref_attrs_str(v))
-                head_str = op.expr_template.format(v_strs)
+                head_str = op.name_data.expr_template.format(v_strs)
             else:
                 with objmode(head_str=unicode_type):
                     head_str = str(head)

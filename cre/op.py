@@ -296,7 +296,7 @@ def op_define_boxing(struct_type, obj_class):
 
 
 GenericOpType = OpTypeClass([(k,v) for k,v in op_fields_dict.items()])
-register_global_default("Op", GenericOpType)
+# register_global_default("Op", GenericOpType)
 
 
 class UntypedOp():

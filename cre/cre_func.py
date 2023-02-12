@@ -134,16 +134,28 @@ instr_type = numba.from_dtype(_instr_type)
 
 # Struct for head_infos 
 _head_info_type = np.dtype([
+    # The pointer to the CREFunc for which this is a head argument.
     ('cf_ptr', np.int64),
+    # Enum for CONST, VAR, OP, OP_UNEXPANDED.
     ('type', np.uint8),
+    # If the Var associated with this has a dereference chain.
     ('has_deref', np.uint8),
+    # How many more head infos within this head_range.
     ('n_more', np.uint16),
+    # The index of the root argument this head corresponds to.
     ('arg_ind', np.uint16),
+    # t_id for the head value's type.
     ('t_id', np.uint16),
+    # The pointer to the Var for this head. Its ref is held in "ref{i}" member.
     ('var_ptr', np.int64),
+    # Data pointer for the a{i} member for the base.
     ('arg_data_ptr', np.int64),
+    # Data pointer for the h{i} member for the resolved head.
     ('head_data_ptr', np.int64),
+    # 1 for unicode_type 2 for other. Needed because unicode_strings 
+    #  don't have meminfo ptrs as first member.
     ('ref_kind', np.uint32),
+    # The byte-width of the head value.
     ('head_size', np.uint32)])
 head_info_type = numba.from_dtype(_head_info_type)
 
@@ -366,10 +378,12 @@ class CREFuncTypeClass(types.Callable, CREObjTypeClass):
         if('call' in d): del d['call']
         if('check' in d): del d['check']
         if('ctor' in d): del d['ctor']
+        if('_code' in d): del d['_code']
         return d
 
 
 GenericCREFuncType = CREFuncTypeClass()
+register_global_default("Op", GenericCREFuncType)
 
 @lower_cast(CREFuncTypeClass, GenericCREFuncType)
 def upcast(context, builder, fromty, toty, val):
@@ -488,11 +502,11 @@ class CREFunc(StructRefProxy):
 
             cre_func_resolve_call_self(self)
             args = None
-            ret_impl = get_return_val_impl(self._return_type)
-            return ret_impl(self)
+            get_ret = get_return_val_impl(self._return_type)
+            return get_ret(self)
         else:
             # print("START COMPOSE OP", args)
-            new_cf = cre_func_copy_generic(self)
+            new_cf = cre_func_deep_copy_generic(self)
             # print(">>", new_cf)
             new_cf._return_type = self.return_type
             # new_cf._arg_types = self.arg_types
@@ -1027,10 +1041,13 @@ def cre_func_ctor(_cf_type, name, expr_template, shorthand_template, is_ptr_op):
         return casted 
     return impl
 
+# --------------------------------------------------------------
+# : Copy
+
 from cre.cre_object import copy_cre_obj
 @njit(cache=True)
 def cre_func_copy(cf):
-    # Make a copy of the CreFunc via a memcpy
+    # Make a copy of the CreFunc via a memcpy (plus incref obj members)
     cpy = copy_cre_obj(cf)
 
     # Find the the byte offset between the op and its copy
@@ -1046,13 +1063,13 @@ def cre_func_copy(cf):
 
     # Nullify these attributes since we don't want the pointers from the 
     #  original to get decref'ed on assignment
-    # _nullify_attr(cpy, 'base_to_head_infos')
     _nullify_attr(cpy, 'head_ranges')
     _nullify_attr(cpy, 'head_infos')
     _nullify_attr(cpy, 'root_arg_infos')
     _nullify_attr(cpy, 'name_data')
     _nullify_attr(cpy, 'prereq_instrs')
 
+    # Rebuild head_ranges, head_infos, prereq_instrs from common buffer
     cpy_generic = _cast_structref(GenericCREFuncType,cpy)
     rebuild_buffer(cpy_generic, old_head_ranges, old_head_infos, old_prereq_instrs)
 
@@ -1081,6 +1098,69 @@ def cre_func_copy(cf):
 @njit(GenericCREFuncType(GenericCREFuncType), cache=True)
 def cre_func_copy_generic(cf):
     return cre_func_copy(_cast_structref(GenericCREFuncType,cf))
+
+
+@njit(GenericCREFuncType(GenericCREFuncType),cache=True)
+def cre_func_deep_copy_generic(cf):
+    '''Makes a deep copy of a CREFunc Object.'''
+
+    # Initialize Data Structures
+    stack = List()
+    i = 0 
+    op_copies = List.empty_list(GenericCREFuncType)
+    remap = Dict.empty(i8,i8)
+
+    keep_looping = True
+    while(keep_looping):
+        arg_info = cf.root_arg_infos[i]
+        if(arg_info.type == ARGINFO_OP):
+            # Push Stack i.e. Recurse Arg
+            stack.append((cf, i+1, op_copies))
+            cf = _struct_from_ptr(GenericCREFuncType, arg_info.ptr)
+            op_copies = List.empty_list(GenericCREFuncType)
+            i = 0 
+        else:
+            # Skip Arg
+            i += 1
+
+        # When past end arg of deepest op, copy it. Then pop prev frame from stack.
+        while(i >= len(cf.root_arg_infos)):
+            cpy = cre_func_copy_generic(cf)
+
+            # Set the "ref{i}" and root_arg_info.ptr to copies of op children 
+            j = 0 
+            for k, inf in enumerate(cpy.root_arg_infos):
+                if(inf.type == ARGINFO_OP):
+                    sub_op = op_copies[j]
+                    inf.ptr = _raw_ptr_from_struct(sub_op)
+                    cre_obj_set_item(cpy, i8(1+cpy.n_root_args*2 + k), sub_op)
+                j += 1
+
+            remap[_raw_ptr_from_struct(cf)] = _raw_ptr_from_struct(cpy)
+            remap[cf.return_data_ptr] = cpy.return_data_ptr
+
+            # Remap pointers in head_infos and prereq_instrs
+            for hi, hi_cpy in zip(cf.head_infos, cpy.head_infos):
+                hi_cpy.cf_ptr = remap.get(hi.cf_ptr, hi_cpy.cf_ptr)
+                hi_cpy.arg_data_ptr = remap.get(hi.arg_data_ptr, hi_cpy.arg_data_ptr)
+                hi_cpy.head_data_ptr = remap.get(hi.head_data_ptr, hi_cpy.head_data_ptr)
+                remap[hi.arg_data_ptr] = hi_cpy.arg_data_ptr
+                remap[hi.head_data_ptr] = hi_cpy.head_data_ptr
+
+            for instr, instr_cpy in zip(cf.prereq_instrs, cpy.prereq_instrs):
+                instr_cpy.cf_ptr = remap.get(instr.cf_ptr, instr_cpy.cf_ptr)
+                instr_cpy.return_data_ptr = remap.get(instr.return_data_ptr, instr_cpy.return_data_ptr)
+
+            # End Case: Stack exhausted
+            if(len(stack) == 0):
+                keep_looping = False
+                break
+
+            # Pop off stack i.e. equivalent to returning recursive call
+            cf, i, op_copies = stack.pop(-1)
+            op_copies.append(cpy)
+    return cpy
+
 
 #--------------------------------------------------------------------
 # Construction Functions
@@ -1419,7 +1499,7 @@ def set_heads_from_data_ptrs(cf, i, data_ptrs):
 
 call_self_f_type = types.FunctionType(u1(GenericCREFuncType))
 # @njit(u1(GenericCREFuncType), locals={"i":u8}, cache=True)
-@CREFunc_method(GenericCREFuncType, u1(GenericCREFuncType),"call_self")
+@CREFunc_method(GenericCREFuncType, u1(GenericCREFuncType), "call_self")
 def cre_func_call_self(self):
     ''' Calls the CREFunc including any dependant CREFuncs in its composition
         Each CREFunc's a{i} and h{i} characteristic members are used as
@@ -1538,7 +1618,7 @@ def overload_compose_codegen(cf_type, arg_types):
     most_precise_cf_type = CREFuncTypeClass(return_type=cf_type.return_type, name="FuncComp")
     ind_kinds = tuple(ind_kinds)
     def impl(cf, *args):
-        _cf = cre_func_copy(cf)
+        _cf = _cast_structref(most_precise_cf_type, cre_func_deep_copy_generic(cf))#cre_func_copy(cf)
         for tup in literal_unroll(ind_kinds):
             i, kind = tup
             arg = args[i]
@@ -1843,7 +1923,6 @@ return_type = cloudpickle.loads({cloudpickle.dumps(return_type)})
 arg_types = cloudpickle.loads({cloudpickle.dumps(arg_types)})
 cf_type = CREFuncTypeClass(return_type, arg_types,is_composed=False, name={name!r}, long_hash={long_hash!r})
 
-print("{name} argtypes:", arg_types)
 
 @lower_cast(cf_type, GenericCREFuncType)
 def upcast(context, builder, fromty, toty, val):

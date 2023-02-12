@@ -1619,7 +1619,7 @@ class ExplTreeGen():
     def __call__(self):
         return gen_op_comps_from_expl_tree(self.child_tree)
         
-from cre.op import OpComp
+# from cre.op import OpComp
 def gen_op_comps_from_expl_tree(tree):
     '''A generator of OpComps from an ExplanationTree'''
     for i in range(expl_tree_num_entries(tree)):

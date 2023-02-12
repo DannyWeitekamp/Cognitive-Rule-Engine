@@ -1,10 +1,11 @@
 from numba import njit, f8, types
 from numba.types import unicode_type
-from cre.utils import decode_idrec, PrintElapse
+from cre.utils import decode_idrec, PrintElapse, _raw_ptr_from_struct
 from cre.context import cre_context 
 from cre.memset import MemSet, MemSetType 
 from cre.fact import define_fact
-from cre.default_ops import Equals
+from cre.var import Var
+from cre.builtin_cre_funcs import Equals
 from cre.transform.flattener import Flattener, flattener_update
 from cre.transform.feature_applier import FeatureApplier
 from numba.core.runtime.nrt import rtsys
@@ -12,8 +13,8 @@ import gc
 from cre.cre_object import copy_cre_obj
 import pytest
 
-
-eq_f8 = Equals(f8, f8)
+var_a, var_b = Var(f8,'a'), Var(f8,'b')
+eq_f8 = Equals(var_a, var_b)
 eq_str = Equals(unicode_type, unicode_type)
 
 
@@ -30,6 +31,10 @@ def count_true_false(flat_mem):
         else:
             f_count += 1
     return (t_count, f_count)
+
+@njit(cache=True)
+def get_ptr(x):
+    return _raw_ptr_from_struct(x)
 
 
 def test_feature_apply():
@@ -69,8 +74,10 @@ def test_feature_apply():
         flat_ms = fl()
 
         fa = FeatureApplier([eq_f8, eq_str],flat_ms)
+        print("::", eq_f8._meminfo.refcount, var_a._meminfo.refcount, var_b._meminfo.refcount)
         feat_ms = fa()
         print(flat_ms)
+        print("::", eq_f8._meminfo.refcount, var_a._meminfo.refcount, var_b._meminfo.refcount)
         print(feat_ms)
         print(len(feat_ms.get_facts()))
         print(count_true_false(feat_ms))
@@ -173,9 +180,9 @@ def test_b_feat_apply_100x100(benchmark):
 
 if(__name__ == "__main__"):
     import faulthandler; faulthandler.enable()
-    test_fa_mem_leaks()
+    # test_fa_mem_leaks()
     # test_product_iter_w_const()
-    # test_feature_apply()
+    test_feature_apply()
     # with PrintElapse("elapse"):
     #     do_feat_apply(*setup_feat_apply_100x100()[0])
     # with PrintElapse("elapse"):

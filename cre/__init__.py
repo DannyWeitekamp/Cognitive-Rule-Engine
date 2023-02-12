@@ -15,10 +15,12 @@ if(not skip.get()):
 
     # Necessary to import these at package level to ensure that they are defined
     #  before a context is created
+    # import cre.cre_object 
     from cre.fact import define_fact, BaseFact, Fact, FactProxy
     from cre.tuple_fact import TupleFact, TF
     from cre.var import Var
-    from cre.op import Op, UntypedOp
+    # from cre.op import Op, UntypedOp
+    from cre.cre_func import CREFunc
     from cre.conditions import Literal, Conditions
 
     # Other helpful things exposed at the package level

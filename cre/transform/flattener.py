@@ -10,9 +10,9 @@ from cre.fact import define_fact, UntypedFact, call_untyped_fact, BaseFact
 from cre.fact_intrinsics import fact_lower_getattr, resolve_fact_getattr_type
 from cre.tuple_fact import TupleFact, TF
 from cre.context import cre_context
-from cre.default_ops import Add, Subtract, Divide
+# from cre.default_ops import Add, Subtract, Divide
 from cre.var import Var, GenericVarType, var_append_deref, get_var_type
-from cre.op import GenericOpType
+# from cre.op import GenericOpType
 from cre.utils import _func_from_address, _raw_ptr_from_struct, _cast_structref, _obj_cast_codegen, _func_from_address, _incref_structref
 from cre.structref import define_structref
 from cre.memset import MemSet, MemSetType

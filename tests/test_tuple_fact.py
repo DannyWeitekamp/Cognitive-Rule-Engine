@@ -140,7 +140,7 @@ def test_hash():
     assert hsh(a1) != hsh(b4)
 
 def test_hash_obj_builtin_members():
-    from cre.default_ops import Equals
+    from cre.builtin_cre_funcs import Equals
     from cre.var import Var
     eq_f8 = Equals(f8,f8)
     eq_str = Equals(unicode_type,unicode_type)
@@ -163,7 +163,7 @@ def test_hash_obj_builtin_members():
     assert hsh(a1) != hsh(b1)
 
 def test_eq_obj_builtin_members():
-    from cre.default_ops import Equals
+    from cre.builtin_cre_funcs import Equals
     from cre.var import Var
     eq_f8 = Equals(f8,f8)
     eq_str = Equals(unicode_type,unicode_type)

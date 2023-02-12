@@ -324,7 +324,7 @@ class Conditions(structref.StructRefProxy):
         auto_alias_unaliased_vars(conds)
         return conds
     def __or__(self, other):
-        if(isinstance(other,CREFunc)): other = op_to_cond(other)
+        if(isinstance(other,CREFunc)): other = cre_func_to_cond(other)
         conds = conditions_or(self, other)
         auto_alias_unaliased_vars(conds)
         return conds

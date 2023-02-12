@@ -164,13 +164,16 @@ def test_njit_compose():
     assert f(1,2) == 6
     assert str(f) == "(x+1)*(y+1)"
 
-
+from cre.cre_func import cre_func_deep_copy_generic
 def test_no_mutate_on_compose():
     a = Var(f8,'a')
     b = Var(f8,'b')
     c = Var(f8,'c')
 
     c0 = a + b + b
+
+    c0_ = cre_func_deep_copy_generic(c0)
+    print("c0_", c0_)
     s0 = str(c0) 
     print(c0)
     c1 = c0(a,c+b)

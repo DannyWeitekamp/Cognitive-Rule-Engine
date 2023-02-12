@@ -10,7 +10,7 @@ from cre.transform.feature_applier import FeatureApplier
 from cre.transform.relative_encoder import _check_needs_rebuild, RelativeEncoder, get_relational_fact_attrs, next_adjacent
 from cre.utils import PrintElapse, deref_info_type
 from cre.fact import define_fact
-from cre.default_ops import Equals
+from cre.builtin_cre_funcs import Equals
 from cre.context import cre_context
 import cre
 from numba.core.runtime.nrt import rtsys
@@ -330,6 +330,7 @@ def test_b_rel_enc_100x100_encode(benchmark):
 
 
 if __name__ == "__main__":
+    import faulthandler; faulthandler.enable()
     test_re_mem_leaks()
 
     # test_downcasted_heads()

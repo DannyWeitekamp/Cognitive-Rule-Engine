@@ -12,7 +12,8 @@ from cre.utils import (_incref_structref, _decref_structref,
          _meminfo_from_struct, _struct_from_meminfo,  _raw_ptr_from_struct,
          _struct_from_ptr, encode_idrec, decode_idrec, _struct_get_attr_offset, 
          _struct_get_data_ptr, _load_ptr, struct_get_attr_offset, 
-         _listtype_sizeof_item, _ptr_from_struct_incref, _list_base_from_ptr)
+         _listtype_sizeof_item, _ptr_from_struct_incref, _list_base_from_ptr,
+         cast)
 from numba.core.runtime.nrt import rtsys
 
 BOOP, BOOPType = define_structref("BOOP", [("A", unicode_type), ("B", i8)])
@@ -154,11 +155,11 @@ def test_direct_member_access():
     load_offset(unicode_type,b2,offset) == "b2"
 
 
-@njit
+@njit(cache=True)
 def listtype_sizeof(lst_typ):
     return _listtype_sizeof_item(lst_typ)
 
-@njit
+@njit(cache=True)
 def get_3(ptr,typ,lst_typ):
     item_size = _listtype_sizeof_item(lst_typ)
     base_ptr = _list_base_from_ptr(ptr)
@@ -168,7 +169,7 @@ def get_3(ptr,typ,lst_typ):
     return a,b,c
 
 unc_lst = ListType(unicode_type)
-@njit
+@njit(cache=True)
 def _test_list_getitem_intrinsic_unicode_type():
     l = List.empty_list(unicode_type)
     l.append("A")
@@ -179,7 +180,7 @@ def _test_list_getitem_intrinsic_unicode_type():
     return a, b, c
 
 f8_lst = ListType(f8)
-@njit
+@njit(cache=True)
 def _test_list_getitem_intrinsic_f8():
     l = List.empty_list(f8)
     l.append(1)
@@ -190,7 +191,7 @@ def _test_list_getitem_intrinsic_f8():
     return a, b, c
 
 BOOP_lst = ListType(BOOPType)
-@njit
+@njit(cache=True)
 def _test_list_getitem_intrinsic_BOOP():
     l = List.empty_list(BOOPType)
     l.append(BOOP("A",1))
@@ -208,6 +209,30 @@ def test_list_intrinsics():
     assert _test_list_getitem_intrinsic_unicode_type() == ("A","B","C")
     assert _test_list_getitem_intrinsic_f8() == (1,2,3)
     assert [x.A for x in _test_list_getitem_intrinsic_BOOP()] == ["A","B","C"]
+
+
+@njit(cache=True)
+def _test_cast_obj():
+    b = BOOP("A",1)
+    ptr = cast(b, i8)
+    c = cast(ptr, BOOPType)
+    d = cast(b, BOOPType)
+    return b.A + d.A
+
+
+@njit(cache=True)
+def _test_cast_list():
+    l = List.empty_list(unicode_type)
+    l.append("A")
+    l.append("B")
+    l.append("C")
+    ptr = cast(l, i8)
+    m = cast(ptr, unc_lst)
+    return m[1]
+
+def test_cast():
+    assert _test_cast_obj() == "AA"
+    assert _test_cast_list() == "B"
 
 
 ###################### BENCHMARKS ########################
@@ -260,10 +285,11 @@ def test_b_decode_idrec(benchmark):
 
 
 if __name__ == "__main__":
+    test_cast()
     # test_structref_to_meminfo()
     # test_structref_to_pointer()
     # test_direct_member_access()
-    test_list_intrinsics()
+    # test_list_intrinsics()
 
 
 

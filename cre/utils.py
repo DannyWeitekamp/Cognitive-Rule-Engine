@@ -320,6 +320,24 @@ def cast_structref(typ,inst):
     return _cast_structref(typ,inst)
 
 
+def _struct_from_ptr_codegen(context, builder, raw_ptr, raw_ptr_ty, inst_type):
+
+    if(not isinstance(raw_ptr_ty, types.MemInfoPointer)):
+        meminfo = builder.inttoptr(raw_ptr, cgutils.voidptr_t)
+    else:
+        meminfo = raw_ptr
+
+    st = cgutils.create_struct_proxy(inst_type)(context, builder)
+    st.meminfo = meminfo
+
+    return impl_ret_borrowed(
+        context,
+        builder,
+        inst_type,
+        st._getvalue()
+    )
+
+
 @intrinsic
 def _struct_from_ptr(typingctx, struct_type, raw_ptr):
     inst_type = struct_type.instance_type
@@ -327,26 +345,30 @@ def _struct_from_ptr(typingctx, struct_type, raw_ptr):
     def codegen(context, builder, sig, args):
         _, raw_ptr = args
         _, raw_ptr_ty = sig.args
-
-        if(not isinstance(raw_ptr_ty, types.MemInfoPointer)):
-            meminfo = builder.inttoptr(raw_ptr, cgutils.voidptr_t)
-        else:
-            meminfo = raw_ptr
-
-        st = cgutils.create_struct_proxy(inst_type)(context, builder)
-        st.meminfo = meminfo
-
-        return impl_ret_borrowed(
-            context,
-            builder,
-            inst_type,
-            st._getvalue()
-        )
+        return _struct_from_ptr_codegen(context, builder, raw_ptr, raw_ptr_ty, inst_type)
 
     sig = inst_type(struct_type, raw_ptr)
     return sig, codegen
 
 
+def _list_from_ptr_codegen(context, builder, raw_ptr, list_type):
+    mi = builder.inttoptr(raw_ptr, cgutils.voidptr_t)
+
+    ctor = cgutils.create_struct_proxy(list_type)
+    dstruct = ctor(context, builder)
+
+    data_pointer = context.nrt.meminfo_data(builder, mi)
+    data_pointer = builder.bitcast(data_pointer, cgutils.voidptr_t.as_pointer())
+
+    dstruct.data = builder.load(data_pointer)
+    dstruct.meminfo = mi
+
+    return impl_ret_borrowed(
+        context,
+        builder,
+        list_type,
+        dstruct._getvalue(),
+    )
 
 
 @intrinsic
@@ -358,24 +380,7 @@ def _list_from_ptr(typingctx, listtyperef, raw_ptr_ty):
     
     def codegen(context, builder, sig, args):
         [_, raw_ptr] = args
-
-        mi = builder.inttoptr(raw_ptr, cgutils.voidptr_t)
-
-        ctor = cgutils.create_struct_proxy(list_type)
-        dstruct = ctor(context, builder)
-
-        data_pointer = context.nrt.meminfo_data(builder, mi)
-        data_pointer = builder.bitcast(data_pointer, cgutils.voidptr_t.as_pointer())
-
-        dstruct.data = builder.load(data_pointer)
-        dstruct.meminfo = mi
-
-        return impl_ret_borrowed(
-            context,
-            builder,
-            list_type,
-            dstruct._getvalue(),
-        )
+        return _list_from_ptr_codegen(context, builder, raw_ptr, list_type)
 
     sig = list_type(listtyperef, raw_ptr_ty)
     return sig, codegen
@@ -450,11 +455,45 @@ def _ptr_to_data_ptr(typingctx, raw_ptr):
 
         return ret
 
-    
-
     sig = i8(raw_ptr, )
     return sig, codegen
 
+@intrinsic
+def cast(typctx, val_typ, _typ):
+    typ = _typ.instance_type
+    codegen = None
+    if(isinstance(val_typ, Ptr) or isinstance(typ, Ptr)):
+        raise ValueError("cast() not intended to be used with ptr_t")
+
+    if(isinstance(val_typ,types.Integer)):
+        if(isinstance(typ, types.StructRef)):
+            def codegen(context, builder, sig, args):
+                return _struct_from_ptr_codegen(context, builder, args[0], sig.args[0], typ)
+
+        elif(isinstance(typ, (types.ListType, types.DictType))):
+            def codegen(context, builder, sig, args):
+                return _list_from_ptr_codegen(context, builder, args[0], typ)
+
+    elif(isinstance(val_typ, types.StructRef)):
+        if(isinstance(typ, types.StructRef)):
+            def codegen(context, builder, sig, args):
+                return _obj_cast_codegen(context, builder, args[0], sig.args[0], typ)
+
+        elif(isinstance(typ, types.Integer)):
+            def codegen(context, builder, sig, args):
+                return _ptr_from_struct_codegen(context, builder, args[0], sig.args[0], False)
+
+    elif(isinstance(val_typ, (types.ListType, types.DictType))):
+        if(isinstance(typ, types.Integer)):        
+            def codegen(context, builder, sig, args):
+                return _ptr_from_struct_codegen(context, builder, args[0], sig.args[0], False)
+
+    if(codegen is None):
+        raise ValueError(f"No cast() from {val_typ} to {typ}.")
+    return typ(val_typ,_typ), codegen
+
+
+#### memcpy ####
 
 def _meminfo_copy_unsafe(builder, nrt, meminfo):
     mod = builder.module
@@ -485,6 +524,9 @@ def _memcpy_structref(typingctx, inst_type):
 
     sig = inst_type(inst_type)
     return sig, codegen
+
+
+#### Dtor ####
 
 def _meminfo_call_dtor(builder, meminfo):
     mod = builder.module

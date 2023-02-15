@@ -995,7 +995,7 @@ class PrintElapse():
         self.t0 = time.time_ns()/float(1e6)
     def __exit__(self,*args):
         self.t1 = time.time_ns()/float(1e6)
-        print(f'{self.name}: {self.t1-self.t0:.2f} ms')
+        print(f'{self.name}: {self.t1-self.t0:.6f} ms')
 
 
 ##### Cacheable Version of Typed List Generation / Iteration ####
@@ -1399,3 +1399,15 @@ def _call_nounwind(typingctx, func, args):
         return ret 
     sig = func.signature.return_type(func, args)
     return sig, codegen
+
+
+@intrinsic
+def _tuple_getitem(typingctx, tup, i):
+    tup_type = tup
+    ind = i.literal_value
+    print(tup, i, tup.types[ind])
+    def codegen(context, builder, sig, args):
+        tup, i = args
+        return builder.extract_value(tup, ind)
+    return tup.types[ind](tup, i), codegen
+        # args = cgutils.unpack_tuple(builder, args, len(inp_types))

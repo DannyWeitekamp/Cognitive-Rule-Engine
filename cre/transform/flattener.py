@@ -226,7 +226,7 @@ def flattener_update_for_attr(self, fact, id_attr, attr):
         ###### Start Var(...).attr #####
         # Get or make a base_var for 'identifier'.'attr'.  
         tup = (u2(t_id), identifier, attr)
-        if(tup not in self.var_map):
+        if(tup not in self.var_map): # 2 ms / 10k whole clause
 
             # Get or make a base_var for 'identifier'.
             btup = (u2(t_id), identifier)
@@ -242,16 +242,16 @@ def flattener_update_for_attr(self, fact, id_attr, attr):
 
         ###### End Var(...).attr #####
 
-        nom = self.enumerizer.enumerize(v)
+        nom = self.enumerizer.enumerize(v) #2.3 ms / 10k 
 
         # Make the gval.
-        g = new_gval(head=self.var_map[tup], val=v, nom=nom)
-        idrec = self.out_memset.declare(g)
+        g = new_gval(head=self.var_map[tup], val=v, nom=nom) #2.6ms / 10k 
+        idrec = self.out_memset.declare(g) #3.1ms / 10k 
 
         # Map the fact's idrec in 'in_memset' to the gval's idrec in 'out_memset' 
         if(fact.idrec not in self.idrec_map):
             self.idrec_map[fact.idrec] = List.empty_list(u8)
-        self.idrec_map[fact.idrec].append(idrec)
+        self.idrec_map[fact.idrec].append(idrec) #3 ms / 10k 
 
     return impl
 

@@ -1019,7 +1019,7 @@ from cre.sc_planner import SC_Record
 
 ''' 
     if(not generic):
-        imp_targets = ['call'] + (['check'] if has_check else [])
+        imp_targets = ['call_heads'] + (['check'] if has_check else [])
         src += f'''{gen_import_str(op.func_name,
                      op.long_hash, imp_targets)}\n\n'''
 
@@ -1096,7 +1096,7 @@ if(status > CFSTATUS_TRUTHY):
     continue
 v = get_ret(op)\n''', prefix=c_ind)
     else:
-        src += indent(f'v = call({_as})\n',prefix=c_ind)
+        src += indent(f'v = call_heads({_as})\n',prefix=c_ind)
 
     src += indent(f'''
 prev_depth, prev_entry = val_map.get(v, val_map_defaults)
@@ -1344,7 +1344,7 @@ def _fill_arg_inds_from_rec_entries(re_ptr, new_arg_inds, expl_tree, retrace_dep
             # print(op, re_ptr, re_next_re_ptr, re_args)
             child_arg_ptrs = List.empty_list(ptr_t, len(re_args))#np.empty(len(re_args), dtype=np.int64)
             for i, (hr, arg_ind) in enumerate(zip(op.head_ranges, re_args)):
-                arg_t_id = u2(op.head_infos[hr.start].t_id)
+                arg_t_id = u2(op.head_infos[hr.start].base_t_id)
                 #Make sure a set of indicies has been instantied for 'arg_t_id'
                 if(u2(arg_t_id) not in new_arg_inds):
                     new_arg_inds[u2(arg_t_id)] = Dict.empty(i8,ExplanationTreeType)

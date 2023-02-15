@@ -497,6 +497,8 @@ def cre_obj_get_item(obj, item_type, index):
 @generated_jit(cache=True,nopython=True)
 def cre_obj_set_item(obj, index, val):
     item_type = val
+    if(isinstance(item_type,types.Literal)):
+        item_type = item_type.literal_type
 
     from cre.context import cre_context
     context = cre_context()

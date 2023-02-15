@@ -45,14 +45,14 @@ def Subtract(a, b):
 def Multiply(a, b):
     return a * b
 
-def denom_not_zero(a,b):
-    return b != 0
+# def denom_not_zero(a,b):
+#     return b != 0
 
-@CREFunc(shorthand = '{0} / {1}', check=denom_not_zero)
+@CREFunc(shorthand = '{0} / {1}')
 def Divide(a, b):
     return a / b
 
-@CREFunc(shorthand = '{0} // {1}', check=denom_not_zero)
+@CREFunc(shorthand = '{0} // {1}')
 def FloorDivide(a, b):
     return a // b
 

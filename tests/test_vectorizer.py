@@ -13,7 +13,6 @@ from cre.transform.vectorizer import Vectorizer
 from pprint import pprint
 
 
-
 eq_f8 = Equals(f8, f8)
 eq_str = Equals(unicode_type, unicode_type)
 

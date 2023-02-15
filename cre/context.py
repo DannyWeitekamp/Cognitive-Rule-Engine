@@ -240,17 +240,11 @@ class CREContext(object):
         self.children_of[fact_type] = self.children_of[name]
 
         
-    def get_type(self, name:str = None, t_id:int = None):
+    def get_type(self, name:str = None, t_id:int = None, ensure_retro=True):
         '''Retrieves the type associated with a user defined fact given a
             name, fact_num, or t_id. '''
-        self._ensure_retro_registers()
-        # If got a name then check the registry for the name 
-        if(name is not None):
-            if(name in self.name_to_type):
-                # print("get_type->", name, self.name_to_type[name], "in", self.name)
-                return self.name_to_type[name]
-            else:
-                raise ValueError(f"No type {name} registered in cre_context {self.name}.")
+        if(ensure_retro): self._ensure_retro_registers()
+        
         # If t_id defined then retrieve the type for t_id
         if(t_id is not None):
             typ = None
@@ -263,6 +257,14 @@ class CREContext(object):
                 raise ValueError(f"No type with t_id={t_id} registered in cre_context {self.name}.")
             return typ
         
+        # If got a name then check the registry for the name 
+        if(name is not None):
+            if(name in self.name_to_type):
+                # print("get_type->", name, self.name_to_type[name], "in", self.name)
+                return self.name_to_type[name]
+            else:
+                raise ValueError(f"No type {name} registered in cre_context {self.name}.")
+                
         raise ValueError("Bad arguments for 'get_type'. Expecting one keyword argument name:str, or t_id:int")
 
     def _retroactive_register(self, t_id):

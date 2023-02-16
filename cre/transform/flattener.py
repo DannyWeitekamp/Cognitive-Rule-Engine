@@ -11,9 +11,9 @@ from cre.fact_intrinsics import fact_lower_getattr, resolve_fact_getattr_type
 from cre.tuple_fact import TupleFact, TF
 from cre.context import cre_context
 # from cre.default_ops import Add, Subtract, Divide
-from cre.var import Var, GenericVarType, var_append_deref, get_var_type
+from cre.var import Var, VarType, var_append_deref, VarTypeClass
 # from cre.op import GenericOpType
-from cre.utils import _func_from_address, _raw_ptr_from_struct, _cast_structref, _obj_cast_codegen, _func_from_address, _incref_structref
+from cre.utils import cast, _func_from_address,  _obj_cast_codegen, _func_from_address, _incref_structref
 from cre.structref import define_structref
 from cre.memset import MemSet, MemSetType
 from cre.structref import CastFriendlyStructref, define_boxing
@@ -29,7 +29,7 @@ from cre.fact import DeferredFactRefType
 
 @njit(cache=True)
 def get_ptr(x):
-    return _raw_ptr_from_struct(x)
+    return cast(x, i8)
 
 def get_visibile_fact_attrs(fact_types):
     ''' Takes in a set of fact types and returns all (fact, attribute) pairs
@@ -57,8 +57,8 @@ flattener_fields = {
     "out_memset" : MemSetType,
     "idrec_map" : DictType(u8,ListType(u8)),
     # "inv_idrec_map" : DictType(u8,ListType(u8)),
-    "base_var_map" : DictType(Tuple((u2,unicode_type)), GenericVarType),
-    "var_map" : DictType(Tuple((u2,unicode_type,unicode_type)), GenericVarType),
+    "base_var_map" : DictType(Tuple((u2,unicode_type)), VarType),
+    "var_map" : DictType(Tuple((u2,unicode_type,unicode_type)), VarType),
     "enumerizer" : EnumerizerType,
     "fact_visible_attr_pairs" : types.Any,
     "id_attr" : types.Any,
@@ -80,7 +80,7 @@ def upcast(context, builder, fromty, toty, val):
 @overload_method(FlattenerTypeClass,'get_changes')
 def self_get_changes(self, end=-1, exhaust_changes=True):
     def impl(self, end=-1, exhaust_changes=True):
-        incr_pr = _cast_structref(IncrProcessorType, self)
+        incr_pr = cast(self, IncrProcessorType)
         return incr_pr.get_changes(end=end, exhaust_changes=exhaust_changes)
     return impl
 
@@ -112,8 +112,8 @@ def flattener_ctor(flattener_type, in_memset, out_memset, enumerizer=None):
         st = new(flattener_type)
         init_incr_processor(st, in_memset)
         st.fact_visible_attr_pairs = fact_visible_attr_pairs
-        st.base_var_map = Dict.empty(t_id_alias_pair_type, GenericVarType)
-        st.var_map = Dict.empty(t_id_identifier_alias_tup_type, GenericVarType)
+        st.base_var_map = Dict.empty(t_id_alias_pair_type, VarType)
+        st.var_map = Dict.empty(t_id_identifier_alias_tup_type, VarType)
         st.idrec_map = Dict.empty(u8,u8_list)
         # st.inv_idrec_map = Dict.empty(u8,u8_list)
         st.out_memset = out_memset 
@@ -193,7 +193,7 @@ def get_in_memset(self):
 
 @njit(types.boolean(GenericFlattenerType, MemSetType),cache=True)
 def check_same_in_memset(self,in_memset):
-    return _raw_ptr_from_struct(self.in_memset) == _raw_ptr_from_struct(in_memset)
+    return cast(self.in_memset, i8) == cast(in_memset, i8)
 
 
 
@@ -213,7 +213,7 @@ def flattener_update_for_attr(self, fact, id_attr, attr):
     attr = attr.literal_value
     fact_type = fact
     t_id = fact_type.t_id
-    base_var_type = get_var_type(fact_type)
+    base_var_type = VarTypeClass(fact_type)
 
 
     def impl(self, fact, id_attr, attr):
@@ -236,9 +236,9 @@ def flattener_update_for_attr(self, fact, id_attr, attr):
                 self.base_var_map[btup] = Var(fact_type, identifier)
 
             # Apply .attr to the base_var and cache it.
-            base_var = _cast_structref(base_var_type, self.base_var_map[btup])
+            base_var = cast(self.base_var_map[btup], base_var_type)
             var = var_append_deref(base_var,attr)
-            self.var_map[tup] = _cast_structref(GenericVarType, var)
+            self.var_map[tup] = cast(var, VarType)
 
         ###### End Var(...).attr #####
 
@@ -261,7 +261,7 @@ def clean_a_id(self, change_idrec, a_id):
     if(change_idrec in self.idrec_map):
         for idrec in self.idrec_map[change_idrec]:
             gval = self.out_memset.get_fact(idrec).asa(gval_type)
-            var = _cast_structref(GenericVarType, gval.head)
+            var = cast(gval.head, VarType)
             if(var.deref_infos[0].a_id == a_id):
                 self.out_memset.retract(idrec)
                 self.idrec_map[change_idrec].remove(idrec)
@@ -306,7 +306,7 @@ def flattener_update(self):
                                 # Skip if MODIFY a_id doesn't match this implementation
                                 continue
 
-                        fact = _cast_structref(typ, self.in_memset.get_fact(change_event.idrec))
+                        fact = cast(self.in_memset.get_fact(change_event.idrec), typ)
                         flattener_update_for_attr(self,fact, id_attr, attr)
 
     return impl

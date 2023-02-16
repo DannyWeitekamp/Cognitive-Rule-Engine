@@ -21,7 +21,7 @@ from numba.core import cgutils, utils as numba_utils
 from numba.experimental.structref import _Utils, imputils
 from numba.typed.typedobjectutils import _nonoptional
 
-from cre.utils import _raw_ptr_from_struct, _struct_from_ptr, _cast_structref, _ptr_from_struct_codegen, _list_from_ptr, _cast_list
+from cre.utils import cast, _ptr_from_struct_codegen, _list_from_ptr, _cast_list
 from cre.cre_object import member_info_type, resolve_member_id
 
 
@@ -116,7 +116,7 @@ def safe_get_fact_ptr(fact):
     if(fact is None):
         return 0
     else:
-        return _raw_ptr_from_struct(_nonoptional(fact))
+        return cast(_nonoptional(fact), i8)
 
 def fact_getattr_codegen(context, builder, sig, args, attr):
     from cre.fact import Fact
@@ -138,8 +138,8 @@ def fact_getattr_codegen(context, builder, sig, args, attr):
     if(isinstance(ret_type, (Fact,))):
         # If a fact member is Null then return None
         def cast_obj(x):
-            if(_raw_ptr_from_struct(x) != 0):
-                return _cast_structref(ret_type, x)
+            if(cast(x, i8) != 0):
+                return cast(x, ret_type)
             return None
         ret = context.compile_internal(builder, cast_obj, option_ret_type(field_type,), (ret,))
         # ret_type = option_ret_type
@@ -237,13 +237,13 @@ def fact_setattr_codegen(context, builder, sig, args, attr, mutability_protected
         if(isinstance(val_type, types.Optional)):
             def cast_obj(x):
                 if(x is None):
-                    return _struct_from_ptr(field_type,0)
-                return _cast_structref(field_type, _nonoptional(x))
+                    return cast(0,field_type)
+                return cast(_nonoptional(x), field_type)
         else:
             def cast_obj(x):
                 if(x is None):
-                    return _struct_from_ptr(field_type,0)
-                return _cast_structref(field_type, x)
+                    return cast(0,field_type,)
+                return cast(x, field_type)
 
         casted = context.compile_internal(builder, cast_obj, field_type(val_type,), (val,))
     else:

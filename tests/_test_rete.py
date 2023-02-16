@@ -4,7 +4,7 @@ from numba.typed import Dict, List
 from numba.types import DictType, ListType
 from cre.memset import Memory
 from cre.fact import define_fact
-from cre.var import Var, GenericVarType
+from cre.var import Var, VarType
 from cre.utils import pointer_from_struct, decode_idrec, encode_idrec, _struct_from_pointer, _pointer_from_struct, _load_pointer
 from cre.rete import (deref_head_and_relevant_idrecs, RETRACT,
      DerefRecord, make_deref_record_parent, invalidate_deref_rec,
@@ -135,7 +135,7 @@ def test_deref_record_parent():
 def _test_validate_deref():
     from cre.conditions import Literal
     from cre.rete import node_ctor
-    from cre.var import GenericVarType
+    from cre.var import VarType
     (mem, BOOP, BOOP), (a1,a2,a3,a4,a5) = setup_deref_tests()
 
 
@@ -178,7 +178,7 @@ def _test_validate_deref():
 
 def _test_validate_head_or_retract():
     from cre.conditions import Literal
-    from cre.var import GenericVarType
+    from cre.var import VarType
     from cre.rete import node_ctor
     (mem, BOOP, BOOP), (a1,a2,a3,a4,a5) = setup_deref_tests()
 
@@ -242,7 +242,7 @@ def list_to_str(x):
 
 def test_distr_dnf_and():
     from cre.rete import node_ctor
-    from cre.var import GenericVarType
+    from cre.var import VarType
     from cre.conditions import as_distr_dnf_list
     with cre_context("test_distr_dnf_and"):
         BOOP = define_fact("BOOP",{"nxt" : "BOOP", "val" : f8})
@@ -338,7 +338,7 @@ def test_build_rete_graph():
     from cre.rete import (node_ctor, build_rete_graph, parse_mem_change_queue,
                             new_match_iter,repr_match_iter_dependencies, copy_match_iter,
                             restitch_match_iter, get_match_iter)
-    from cre.var import GenericVarType
+    from cre.var import VarType
     from cre.conditions import as_distr_dnf_list
     with cre_context("test_distr_dnf_and"):
         BOOP = define_fact("BOOP",{"nxt" : "BOOP", "val" : f8})

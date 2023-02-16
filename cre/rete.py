@@ -6,19 +6,19 @@ from numba.typed import List, Dict
 from numba.types import ListType, DictType, unicode_type, void, Tuple
 from numba.experimental.structref import new, define_boxing, StructRefProxy
 import numba.experimental.structref as structref
-from cre.utils import (wptr_t, ptr_t, _dict_from_ptr, _raw_ptr_from_struct, _get_array_raw_data_ptr,
-         _ptr_from_struct_incref, _struct_from_ptr, decode_idrec, CastFriendlyMixin,
+from cre.utils import (cast, wptr_t, ptr_t, _dict_from_ptr, _get_array_raw_data_ptr,
+         _ptr_from_struct_incref, decode_idrec, CastFriendlyMixin,
         encode_idrec, deref_info_type, DEREF_TYPE_ATTR, DEREF_TYPE_LIST, _obj_cast_codegen,
          _ptr_to_data_ptr, _list_base_from_ptr, _load_ptr, PrintElapse, meminfo_type,
          _decref_structref, _decref_ptr, cast_structref, _struct_tuple_from_pointer_arr, _meminfo_from_struct,
-         lower_getattr, lower_setattr, ptr_to_meminfo, _cast_structref, _memcpy, _incref_ptr, _incref_structref)
+         lower_getattr, lower_setattr, ptr_to_meminfo, _memcpy, _incref_ptr, _incref_structref)
 from cre.structref import define_structref, StructRefType
 from cre.caching import gen_import_str, unique_hash,import_from_cached, source_to_cache, source_in_cache, cache_safe_exec, get_cache_path
 from cre.memset import MemSetType
 from cre.vector import VectorType
-from cre.var import GenericVarType
-# from cre.op import GenericCREFuncType
-from cre.cre_func import GenericCREFuncType, CFSTATUS_TRUTHY, get_best_call_self, set_base_arg_val_impl, REFKIND_UNICODE, REFKIND_STRUCTREF
+from cre.var import VarType
+# from cre.op import CREFuncType
+from cre.cre_func import CREFuncType, CFSTATUS_TRUTHY, get_best_call_self, set_base_arg_val_impl, REFKIND_UNICODE, REFKIND_STRUCTREF
 from cre.conditions import LiteralType, build_distributed_dnf, ConditionsType
 from cre.vector import VectorType, new_vector
 from cre.fact import BaseFact 
@@ -152,7 +152,7 @@ base_rete_node_field_dict = {
     "lit" : types.optional(LiteralType),
 
     # The Op for the node's literal
-    "op" : types.optional(GenericCREFuncType),
+    "op" : types.optional(CREFuncType),
 
     # ???
     "deref_depends" : deref_dep_typ, 
@@ -230,7 +230,7 @@ input_state_arr_type = input_state_type[::1]
 @njit(cache=True)
 def node_ctor(ms, t_ids, var_inds,lit=None):
     st = new(ReteNodeType)
-    st.memset_ptr = _raw_ptr_from_struct(ms)
+    st.memset_ptr = cast(ms, i8)
     st.deref_depends = Dict.empty(u8,dict_i8_u1_type)
     st.modify_idrecs = List.empty_list(VectorType)
     st.var_inds = var_inds
@@ -269,7 +269,7 @@ def node_ctor(ms, t_ids, var_inds,lit=None):
     outputs = List.empty_list(NodeIOType)
     
 
-    self_ptr = _raw_ptr_from_struct(st)
+    self_ptr = cast(st, i8)
     for i in range(n_vars):
         node_out = new_NodeIO()
         node_out.parent_node_ptr = self_ptr
@@ -360,7 +360,7 @@ def rete_graph_ctor(ms, conds, nodes_by_nargs, n_nodes, var_root_nodes, var_end_
 @njit(cache=False)
 def conds_get_rete_graph(self):
     if(self.matcher_inst is not None):
-        return _cast_structref(ReteGraphType,self.matcher_inst)
+        return cast(self.matcher_inst, ReteGraphType)
     return None
 
 
@@ -432,7 +432,7 @@ def _make_rete_nodes(ms, c, index_map):
                 var_inds = np.empty((nargs,),dtype=np.int64)
                 for i, base_var_ptr in enumerate(lit.base_var_ptrs):
                     var_inds[i] = index_map[i8(base_var_ptr)]
-                    base_var = _struct_from_ptr(GenericVarType, base_var_ptr)
+                    base_var = cast(base_var_ptr, VarType)
                     t_id = base_var.base_t_id
                     t_ids[i] = t_id
                 # print("B")
@@ -441,7 +441,7 @@ def _make_rete_nodes(ms, c, index_map):
                 nodes_by_nargs[nargs-1].append(node)
                 # print("<< aft", lit.op.head_var_ptrs)
                 for i, hi, in enumerate(lit.op.head_infos):
-                    head_var = _struct_from_ptr(GenericVarType, hi.var_ptr)
+                    head_var = cast(hi.var_ptr, VarType)
                     arg_ind = np.min(np.nonzero(lit.base_var_ptrs==i8(head_var.base_ptr))[0])
                     t_id = t_ids[arg_ind]
                     # print("START")
@@ -502,7 +502,7 @@ def build_rete_graph(ms, c):
                     e_node = var_end_nodes[var_ind]
                     om = e_node.outputs[np.min(np.nonzero(e_node.var_inds==var_ind)[0])]
                     inputs.append(om)
-                    node.upstream_node_ptr = _raw_ptr_from_struct(e_node)
+                    node.upstream_node_ptr = cast(e_node, i8)
                     # print("wire", var_ind, e_node.lit, '[', np.min(np.nonzero(e_node.var_inds==var_ind)[0]),']', "->",  node.lit, "[", j, "]")
                 else:
 
@@ -523,13 +523,13 @@ def build_rete_graph(ms, c):
                 p1, p2 = inputs[0].parent_node_ptr, inputs[1].parent_node_ptr
                 node.upstream_same_parents = (p1 != 0 and p1 == p2)
                 if(node.upstream_same_parents):
-                    parent = _struct_from_ptr(ReteNodeType, p1)
+                    parent = cast(p1, ReteNodeType)
                     node.upstream_aligned = np.all(node.var_inds==parent.var_inds)   
 
                 # Fill in end joins
                 vi_a, vi_b = node.var_inds[0],node.var_inds[1]
-                var_end_join_ptrs[vi_a, vi_b] = _raw_ptr_from_struct(node)
-                var_end_join_ptrs[vi_b, vi_a] = _raw_ptr_from_struct(node)
+                var_end_join_ptrs[vi_a, vi_b] = cast(node, i8)
+                var_end_join_ptrs[vi_b, vi_a] = cast(node, i8)
 
                 # print("Assign end join:", vi_a if vi_a < vi_b else vi_b,
                 #      vi_b if vi_a < vi_b else vi_a, node.lit)
@@ -675,7 +675,7 @@ DerefRecord, DerefRecordType = define_structref("DerefRecord", deref_record_fiel
 
 @njit(cache=True)
 def invalidate_head_ptr_rec(rec):
-    r_ptr = _raw_ptr_from_struct(rec)
+    r_ptr = cast(rec, i8)
     for ptr in rec.parent_ptrs:
         parent = _dict_from_ptr(dict_i8_u1_type, ptr)
         del parent[r_ptr]
@@ -687,7 +687,7 @@ def make_deref_record_parent(deref_depends, idrec, r_ptr):
     if(p is None): 
         p = deref_depends[idrec] = Dict.empty(ptr_t,u1)
     p[r_ptr] = u1(1)
-    return _raw_ptr_from_struct(p)
+    return cast(p, i8)
 
 @njit(i8(deref_info_type,i8),inline='never',cache=True)
 def deref_once(deref,inst_ptr):
@@ -704,8 +704,8 @@ def resolve_head_ptr(self, arg_ind, base_t_id, f_id, deref_infos):
          regardless of the result Keep in mind that a head_ptr is the pointer
          to the address where the data is stored not the data itself.
     '''
-    memset = _struct_from_ptr(MemSetType, self.memset_ptr)
-    facts = _struct_from_ptr(VectorType, memset.facts[base_t_id])
+    memset = cast(self.memset_ptr, MemSetType)
+    facts = cast(memset.facts[base_t_id], VectorType)
     if(len(deref_infos) > 0):
         inst_ptr = facts.data[f_id]
         if(len(deref_infos) > 1):
@@ -750,7 +750,7 @@ def validate_head_or_retract(self, arg_ind, idrec, head_ptrs, r):
     is_valid = True
     if(a_id != RETRACT):
         for i in range(r.start,r.end):
-            head_var = _struct_from_ptr(GenericVarType, self.op.head_infos[i].var_ptr)
+            head_var = cast(self.op.head_infos[i].var_ptr, VarType)
             deref_infos = head_var.deref_infos
             head_ptr = resolve_head_ptr(self, arg_ind, t_id, f_id, deref_infos)
             if(head_ptr == 0): 
@@ -1010,7 +1010,7 @@ def _update_truth_table(tt, is_match, match_inp_inds, inp_state_i, inp_state_j):
     inp_state_j.true_count += count_diff
 
 
-@njit(types.void(GenericCREFuncType, u8, i8[::1]), cache=True, locals={"i" : u8,"k":u8, "j": u8})
+@njit(types.void(CREFuncType, u8, i8[::1]), cache=True, locals={"i" : u8,"k":u8, "j": u8})
 def set_heads_from_data_ptrs(cf, i, data_ptrs):
     for k, j in enumerate(range(cf.head_ranges[i].start, cf.head_ranges[i].end)):
         hi = cf.head_infos[j]
@@ -1109,7 +1109,7 @@ def update_matches(self):
                 # If there is a beta node upstream of to this one that shares the same
                 #  variables then we'll need to make sure we also check its truth table.
                 if(self.upstream_same_parents):
-                    upstream_node = _struct_from_ptr(ReteNodeType, self.upstream_node_ptr)
+                    upstream_node = cast(self.upstream_node_ptr, ReteNodeType)
                     u_tt = upstream_node.truth_table
 
                     if(j > i):
@@ -1357,13 +1357,13 @@ def gen_match_iter_source(output_types):
     return f'''import cloudpickle
 from numba import njit
 from cre.rete import GenericMatchIteratorType, MatchIteratorType, match_iterator_field_dict
-from cre.utils import _cast_structref
+from cre.utils import cast
 output_types = cloudpickle.loads({cloudpickle.dumps(output_types)})
 m_iter_type = MatchIteratorType([(k,v) for k,v in {{**match_iterator_field_dict ,"output_types": output_types}}.items()])
 
 @njit(m_iter_type(GenericMatchIteratorType),cache=True)
 def specialize_m_iter(self):
-    return _cast_structref(m_iter_type,self)
+    return cast(self, m_iter_type)
     '''
 
 MATCH_ITER_FACT_KIND = 0
@@ -1544,7 +1544,7 @@ def new_match_iter(graph):
                     dep_m_node_inds[c] = dep_m_node.m_node_ind
                     dep_node_ptrs[c] = ptr
 
-                    dep_node = _struct_from_ptr(ReteNodeType, ptr)
+                    dep_node = cast(ptr, ReteNodeType)
                     dep_arg_inds[c] = np.argmax(dep_node.var_inds==j)
                     # print(j, "Make", m_node.node.lit, m_node.associated_arg_ind, "dep on", dep_node.lit, dep_arg_inds[c])
                     c +=1
@@ -1566,9 +1566,9 @@ def new_match_iter(graph):
         m_iter.iter_nodes = m_iter_nodes 
         m_iter.is_empty = False
         m_iter.iter_started = False
-        graph.match_iter_prototype_inst = _cast_structref(StructRefType, m_iter)
+        graph.match_iter_prototype_inst = cast(m_iter, StructRefType)
     # Return a copy of the prototype 
-    prototype = _cast_structref(GenericMatchIteratorType, graph.match_iter_prototype_inst)
+    prototype = cast(graph.match_iter_prototype_inst, GenericMatchIteratorType)
     m_iter = copy_match_iter(prototype,graph)
     return m_iter
 
@@ -1578,12 +1578,12 @@ def repr_match_iter_dependencies(m_iter):
     rep = ""
     for i, m_node in enumerate(m_iter.iter_nodes):
         base_var_ptr_i = m_node.node.lit.base_var_ptrs[m_node.associated_arg_ind]
-        s = f'({str(_struct_from_ptr(GenericVarType, base_var_ptr_i).alias)}'
+        s = f'({str(cast(base_var_ptr_i, VarType).alias)}'
         for j, dep_m_node_ind in enumerate(m_node.dep_m_node_inds):
             dep_m_node = m_iter.iter_nodes[dep_m_node_ind]
             base_var_ptr_j = dep_m_node.node.lit.base_var_ptrs[dep_m_node.associated_arg_ind]
             # s += f",dep={str(dep_m_node.var_ind)}"
-            s += f",dep={str(_struct_from_ptr(GenericVarType, base_var_ptr_j).alias)}"
+            s += f",dep={str(cast(base_var_ptr_j, VarType).alias)}"
         s += f")"
 
         rep += s
@@ -1602,13 +1602,13 @@ def update_from_upstream_match(m_iter, m_node):
     if(multiple_deps):
         idrecs_set = Dict.empty(u8,u1)
     
-    # print("-- UPDATE FROM UPSTREAM:", _struct_from_ptr(GenericVarType, m_node.node.lit.base_var_ptrs[m_node.associated_arg_ind]).alias, "--")
+    # print("-- UPDATE FROM UPSTREAM:", cast(m_node.node.lit.base_var_ptrs[m_node.associated_arg_ind], VarType).alias, "--")
 
     for i, dep_m_node_ind in enumerate(m_node.dep_m_node_inds):
         # Each dep_node is the terminal beta node (i.e. a graph node not an iter node) 
         #  between the vars iterated by m_node and dep_m_node, and might not be the same
         #  as dep_m_node.node.
-        dep_node = _struct_from_ptr(ReteNodeType, m_node.dep_node_ptrs[i])
+        dep_node = cast(m_node.dep_node_ptrs[i], ReteNodeType)
         dep_arg_ind = m_node.dep_arg_inds[i]
         dep_m_node = m_iter.iter_nodes[dep_m_node_ind]
         assoc_arg_ind = 1 if dep_arg_ind == 0 else 0
@@ -1616,7 +1616,7 @@ def update_from_upstream_match(m_iter, m_node):
         # print("\tdep on", dep_node.lit, dep_arg_ind)
         
         # Determine the index of the fixed downstream match within this node
-        if(_raw_ptr_from_struct(m_node.node) == _raw_ptr_from_struct(dep_node)):
+        if(cast(m_node.node, i8) == cast(dep_node, i8)):
 
             # If they happen to represent the same graph node then get from match_inp_inds
             other_output = m_node.node.outputs[dep_arg_ind]
@@ -1648,7 +1648,7 @@ def update_from_upstream_match(m_iter, m_node):
             #     print("-", decode_idrec(sdifojsdf)[1])
             fixed_intern_ind = dn_idrecs_to_inds[dep_idrec]
 
-        fixed_var = _struct_from_ptr(GenericVarType, dep_node.lit.base_var_ptrs[dep_arg_ind])
+        fixed_var = cast(dep_node.lit.base_var_ptrs[dep_arg_ind], VarType)
         fixed_idrec = dep_node.input_state_buffers[dep_arg_ind][fixed_intern_ind].idrec
         # print("\tFixed:",  fixed_var.alias, dep_m_node.curr_ind, "==", decode_idrec(fixed_idrec)[1])#m_iter.graph.memset.get_fact(fixed_idrec))
         
@@ -1813,7 +1813,7 @@ def match_iter_next_ptrs(m_iter):
 
     for i, idrec in enumerate(idrecs):
         t_id, f_id, _  = decode_idrec(idrec)
-        facts = _struct_from_ptr(VectorType, ms.facts[t_id])
+        facts = cast(ms.facts[t_id], VectorType)
         ptrs[i] = facts.data[f_id]
         # print("END")
     # print("SLOOP")
@@ -1844,24 +1844,12 @@ def get_graph(ms, conds):
     if(conds.matcher_inst is None):
         needs_new_graph = True
     else:
-        graph = _cast_structref(ReteGraphType, conds.matcher_inst)
-        if(_raw_ptr_from_struct(ms) != _raw_ptr_from_struct(graph.memset)):
+        graph = cast(conds.matcher_inst, ReteGraphType)
+        if(cast(ms, i8) != cast(graph.memset, i8)):
             needs_new_graph = True
 
-    # if(needs_new_graph):
     graph = build_rete_graph(ms, conds)
-    conds.matcher_inst = _cast_structref(StructRefType, graph)
-    # if(old_graph_ptr != 0):
-    #     _decref_ptr(old_graph_ptr)
-    # else:
-        # raise ValueError("THIS SHOULDN't HAPPEN")
-    # graph = _struct_from_ptr(ReteGraphType, conds.matcher_inst_ptr)
-
-    # if(_raw_ptr_from_struct(ms) != _raw_ptr_from_struct(graph.memset)):
-    #     graph.memset = ms
-    #     for lst in graph.nodes_by_nargs:
-    #         for node in lst:
-    #             node.memset = ms
+    conds.matcher_inst = cast(graph, StructRefType)
     return graph
 
 
@@ -1901,7 +1889,7 @@ def cum_weight_of_matching_nodes(ms, conds, match_idrecs, zero_on_fail=False):
     match_ptrs = np.empty(len(match_idrecs),dtype=np.int64)
     for i, idrec in enumerate(match_idrecs):
         t_id, f_id, _  = decode_idrec(idrec)
-        facts = _struct_from_ptr(VectorType, ms.facts[t_id])
+        facts = cast(ms.facts[t_id], VectorType)
         match_ptrs[i] = facts.data[f_id]
 
     cum_weight = 0.0
@@ -1915,7 +1903,7 @@ def cum_weight_of_matching_nodes(ms, conds, match_idrecs, zero_on_fail=False):
 
             # Set arguments
             for i, var_ind in enumerate(node.var_inds):
-                set_base_fact_arg(node.op, i, _struct_from_ptr(BaseFact, match_ptrs[var_ind]))
+                set_base_fact_arg(node.op, i, cast(match_ptrs[var_ind], BaseFact))
             
             # Call
             call_self = get_best_call_self(node.op, False)
@@ -1933,7 +1921,7 @@ def _ensure_ms(conds, ms):
     if(ms is None):
         if(conds.matcher_inst is None):
             raise ValueError("Cannot check/score matches on Conditions object without assigned MemSet.")
-        rete_graph = _cast_structref(ReteGraphType, conds.matcher_inst)
+        rete_graph = cast(conds.matcher_inst, ReteGraphType)
         return rete_graph.memset
     return ms
 

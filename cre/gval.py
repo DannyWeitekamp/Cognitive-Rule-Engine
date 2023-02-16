@@ -7,10 +7,10 @@ from cre.cre_object import CREObjType, cre_obj_get_item, cre_obj_get_member_t_id
 from cre.fact import define_fact
 from cre.core import short_name, T_ID_TUPLE_FACT, T_ID_OP, T_ID_VAR
 from cre.context import cre_context
-from cre.utils import decode_idrec, _cast_structref
-from cre.var import get_deref_attrs_str, GenericVarType
-# from cre.op import GenericCREFuncType
-from cre.cre_func import GenericCREFuncType
+from cre.utils import cast, decode_idrec
+from cre.var import get_deref_attrs_str, VarType
+# from cre.op import CREFuncType
+from cre.cre_func import CREFuncType
 
 
 # Define the base_type 'gval' for grounded values
@@ -82,10 +82,10 @@ def gval_str(gval):
         if(head_t_id == T_ID_TUPLE_FACT):
             t_ids = cre_obj_get_member_t_ids(head)
             if(t_ids[0] == T_ID_OP and np.all(t_ids[:1]==T_ID_VAR)):
-                op = cre_obj_get_item(head, GenericCREFuncType, 0)
+                op = cre_obj_get_item(head, CREFuncType, 0)
                 v_strs = List.empty_list(unicode_type)
                 for i in range(1,head.num_chr_mbrs):
-                    v = cre_obj_get_item(head, GenericVarType, i)
+                    v = cre_obj_get_item(head, VarType, i)
                     s = get_deref_attrs_str(v)
                     v_strs.append(v.alias + get_deref_attrs_str(v))
                 head_str = op.name_data.expr_template.format(v_strs)
@@ -96,7 +96,7 @@ def gval_str(gval):
                 # Get rid of the TF
                 head_str = head_str[2:]
         else:
-            v = _cast_structref(GenericVarType,head)
+            v = cast(head, VarType)
             head_str = v.alias + get_deref_attrs_str(v)
 
         return f"{head_str} == {_val_to_str(gval.val)}" 

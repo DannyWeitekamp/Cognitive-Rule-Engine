@@ -3,7 +3,7 @@ from numba import f8, u1, u2, i8, u8, types, njit, generated_jit
 from numba.types import FunctionType, unicode_type, ListType, boolean
 from numba.typed import List
 from numba.extending import  overload, overload_method
-from cre.utils import _load_ptr, _struct_from_ptr, _cast_structref, _raw_ptr_from_struct, _raw_ptr_from_struct_incref, CastFriendlyMixin, decode_idrec, _func_from_address, _incref_structref, _struct_get_data_ptr, _sizeof_type, _decref_structref
+from cre.utils import cast, _load_ptr, _raw_ptr_from_struct, _raw_ptr_from_struct_incref, CastFriendlyMixin, decode_idrec, _func_from_address, _incref_structref, _struct_get_data_ptr, _sizeof_type, _decref_structref
 from cre.structref import define_structref
 from cre.cre_object import CREObjTypeClass, CREObjType, member_info_type, _iter_mbr_infos
 from numba.core.datamodel import default_manager, models
@@ -12,15 +12,14 @@ import operator
 from cre.core import T_ID_CONDITIONS, T_ID_LITERAL, T_ID_OP, T_ID_FACT, T_ID_VAR, T_ID_UNDEFINED, T_ID_BOOL, T_ID_INT, T_ID_FLOAT, T_ID_STR, T_ID_TUPLE_FACT
 # from cre.primitive import BooleanPrimitiveType, IntegerPrimitiveType, FloatPrimitiveType, StringPrimitiveType
 from cre.tuple_fact import TupleFact
-from cre.var import GenericVarType
+from cre.var import VarType
 # from cre.op import GenericOpType
-from cre.cre_func import GenericCREFuncType, ARGINFO_VAR, ARGINFO_OP, ARGINFO_CONST
+from cre.cre_func import CREFuncType, ARGINFO_VAR, ARGINFO_OP, ARGINFO_CONST
 from cre.fact import BaseFact
 from cre.conditions import LiteralType, ConditionsType
 from numba.cpython.hashing import _Py_hash_t, _Py_uhash_t, _PyHASH_XXROTATE, _PyHASH_XXPRIME_1, _PyHASH_XXPRIME_2, _PyHASH_XXPRIME_5, process_return
 from cre.hashing import accum_item_hash
 
-cast = _cast_structref
 
 
     
@@ -51,8 +50,8 @@ def var_eq(a, b):
     t_id_b,_, _ = decode_idrec(b.idrec)
     if(t_id_b != T_ID_VAR): return False
 
-    va = _cast_structref(GenericVarType, a)
-    vb = _cast_structref(GenericVarType, b)
+    va = cast(a, VarType)
+    vb = cast(b, VarType)
 
     if(va.base_ptr != vb.base_ptr): return False
 
@@ -68,8 +67,8 @@ def cre_func_eq(a, b):
     t_id_b,_, _ = decode_idrec(b.idrec)
     if(t_id_b != T_ID_OP): return False
 
-    oa = _cast_structref(GenericCREFuncType, a)
-    ob = _cast_structref(GenericCREFuncType, b)
+    oa = cast(a, CREFuncType)
+    ob = cast(b, CREFuncType)
 
     stack = List()
     stack.append((oa,ob))
@@ -88,16 +87,16 @@ def cre_func_eq(a, b):
             if(inf_a.type != inf_b.type): return False
             if(inf_a.t_id != inf_b.t_id): return False
             if(inf_a.type == ARGINFO_VAR):
-                va = _struct_from_ptr(GenericVarType, inf_a.ptr)
-                vb = _struct_from_ptr(GenericVarType, inf_b.ptr)
+                va = cast(inf_a.ptr, VarType)
+                vb = cast(inf_b.ptr, VarType)
                 if(not var_eq(va,vb)): return False
             elif(inf_a.type == ARGINFO_CONST):
                 is_eq = eq_from_t_id_ptr(inf_a.t_id, 
                     inf_a.ptr, inf_b.ptr)
                 if(not is_eq): return False
             elif(inf_a.type == ARGINFO_OP):
-                _oa = _struct_from_ptr(GenericCREFuncType, inf_a.ptr)
-                _ob = _struct_from_ptr(GenericCREFuncType, inf_b.ptr)
+                _oa = cast(inf_a.ptr, CREFuncType)
+                _ob = cast(inf_b.ptr, CREFuncType)
                 stack.append((_oa,_ob))
 
     return True
@@ -107,8 +106,8 @@ def literal_eq(a, b):
     t_id_b,_, _ = decode_idrec(b.idrec)
     if(t_id_b != T_ID_LITERAL): return False
 
-    la = _cast_structref(LiteralType, a)
-    lb = _cast_structref(LiteralType, b)
+    la = cast(a, LiteralType)
+    lb = cast(b, LiteralType)
 
     if(not cre_func_eq(la.op, lb.op)): return False
     if(la.negated != lb.negated): return False
@@ -119,8 +118,8 @@ def literal_eq(a, b):
 def conds_eq(a,b):
     t_id_b,_, _ = decode_idrec(b.idrec)
     if(t_id_b != T_ID_CONDITIONS): return False
-    xa = _cast_structref(ConditionsType, a)
-    xb = _cast_structref(ConditionsType, b)
+    xa = cast(a, ConditionsType)
+    xb = cast(b, ConditionsType)
 
     if(len(xa.dnf) != len(xb.dnf)): return False
 
@@ -137,7 +136,7 @@ def fact_eq(a, b):
     tla = a.num_chr_mbrs
     tlb = b.num_chr_mbrs
 
-    if(_raw_ptr_from_struct(a) == _raw_ptr_from_struct(b)):
+    if(cast(a, i8) == cast(b, i8)):
         return True
 
     if(tla != tlb): return False
@@ -146,9 +145,9 @@ def fact_eq(a, b):
         t_id_a, m_id_a, data_ptr_a = info_a
         t_id_b, m_id_b, data_ptr_b = info_b
         if(t_id_a == T_ID_UNDEFINED): 
-            t_id_a,_, _ = decode_idrec(_struct_from_ptr(CREObjType, _load_ptr(i8, data_ptr_a) ).idrec)
+            t_id_a,_, _ = decode_idrec(cast(_load_ptr(i8, data_ptr_a), CREObjType).idrec)
         if(t_id_b == T_ID_UNDEFINED): 
-            t_id_b,_, _ = decode_idrec(_struct_from_ptr(CREObjType, _load_ptr(i8, data_ptr_b) ).idrec)
+            t_id_b,_, _ = decode_idrec(cast(_load_ptr(i8, data_ptr_b), CREObjType).idrec)
 
         if(t_id_a != t_id_b): return False
 
@@ -170,8 +169,8 @@ def tuple_fact_eq(a, b):
     if(t_id_b != T_ID_TUPLE_FACT): return False
 
     stack_buffer = None
-    tf_a = _cast_structref(TupleFact, a)
-    tf_b = _cast_structref(TupleFact, b)
+    tf_a = cast(a, TupleFact)
+    tf_b = cast(b, TupleFact)
     stack_head = -1
     is_done = False
 
@@ -187,9 +186,9 @@ def tuple_fact_eq(a, b):
             t_id_b, m_id_b, data_ptr_b = info_b
 
             if(t_id_a == T_ID_UNDEFINED): 
-                t_id_a,_, _ = decode_idrec(_struct_from_ptr(CREObjType, _load_ptr(i8, data_ptr_a) ).idrec)
+                t_id_a,_, _ = decode_idrec(cast(_load_ptr(i8, data_ptr_a), CREObjType).idrec)
             if(t_id_b == T_ID_UNDEFINED): 
-                t_id_b,_, _ = decode_idrec(_struct_from_ptr(CREObjType, _load_ptr(i8, data_ptr_b) ).idrec)
+                t_id_b,_, _ = decode_idrec(cast(_load_ptr(i8, data_ptr_b), CREObjType).idrec)
 
 
             if(t_id_a != t_id_b): return False
@@ -212,8 +211,8 @@ def tuple_fact_eq(a, b):
             else:
                 # Kind of a heavy handed way to do this... but lack
                 #  of recrusion makes it the best option                    
-                mbr_a = _struct_from_ptr(CREObjType,_load_ptr(i8,data_ptr_a))
-                mbr_b = _struct_from_ptr(CREObjType,_load_ptr(i8,data_ptr_b))
+                mbr_a = cast(_load_ptr(i8,data_ptr_a), CREObjType)
+                mbr_b = cast(_load_ptr(i8,data_ptr_b), CREObjType)
                 if(t_id_a==T_ID_VAR):
                     if(not var_eq(mbr_a,mbr_b)): return False
                 elif(t_id_a==T_ID_OP):
@@ -228,8 +227,8 @@ def tuple_fact_eq(a, b):
                 
 
         if(stack_head > -1):
-            tf_a = _struct_from_ptr(TupleFact, stack_buffer[stack_head,0]);
-            tf_b = _struct_from_ptr(TupleFact, stack_buffer[stack_head,1]);
+            tf_a = cast(stack_buffer[stack_head,0], TupleFact);
+            tf_b = cast(stack_buffer[stack_head,1], TupleFact);
             stack_head -=1;
         else:
             is_done = True
@@ -298,7 +297,7 @@ def var_hash(x):
     ''' based roughly on _tuple_hash from numba.cpython.hashing'''
     # while(not is_done):
     if(x.hash_val == 0):
-        vx = _cast_structref(GenericVarType, x)
+        vx = cast(x, VarType)
 
         acc = _PyHASH_XXPRIME_5
         acc = accum_item_hash(acc,  vx.base_ptr) 
@@ -315,7 +314,7 @@ def var_hash(x):
 @njit(_Py_hash_t(CREObjType),cache=True)
 def cre_func_hash(x):
     if(x.hash_val == 0):
-        ox = _cast_structref(GenericCREFuncType, x)
+        ox = cast(x, CREFuncType)
         stack = List()
         stack.append(ox)
 
@@ -328,13 +327,13 @@ def cre_func_hash(x):
             
             for inf in ox.root_arg_infos:
                 if(inf.type == ARGINFO_VAR):
-                    _var = _struct_from_ptr(GenericVarType, inf.ptr)
+                    _var = cast(inf.ptr, VarType)
                     acc = accum_item_hash(acc, var_hash(_var)) 
                 elif(inf.type == ARGINFO_CONST):
                     const_hash = hash_from_t_id_ptr(inf.t_id, inf.ptr)
                     acc = accum_item_hash(acc, const_hash) 
                 elif(inf.type == ARGINFO_OP):
-                    _ox = _struct_from_ptr(GenericCREFuncType, inf.ptr)
+                    _ox = cast(inf.ptr, CREFuncType)
                     stack.append(_ox)
         x.hash_val = acc
     return x.hash_val
@@ -344,7 +343,7 @@ def cre_func_hash(x):
 @njit(_Py_hash_t(CREObjType),cache=True)
 def literal_hash(x):
     if(x.hash_val == 0):
-        lx = _cast_structref(LiteralType, x)
+        lx = cast(x, LiteralType)
 
         acc = cre_func_hash(lx.op)
         acc = accum_item_hash(acc, lx.negated) 
@@ -357,7 +356,7 @@ def literal_hash(x):
 @njit(_Py_hash_t(CREObjType),cache=True)
 def conds_hash(x):
     if(x.hash_val == 0):
-        cx = _cast_structref(ConditionsType, x)
+        cx = cast(x, ConditionsType)
 
         acc = _PyHASH_XXPRIME_5
         for conjuct in cx.dnf:
@@ -376,7 +375,7 @@ def fact_hash(x):
         tl = x.num_chr_mbrs
         for t_id, m_id, data_ptr in _iter_mbr_infos(x):
             if(t_id == T_ID_UNDEFINED): 
-                t_id,_, _ = decode_idrec(_struct_from_ptr(CREObjType,_load_ptr(i8, data_ptr)).idrec)
+                t_id,_, _ = decode_idrec(cast(_load_ptr(i8, data_ptr), CREObjType).idrec)
             if(t_id == T_ID_TUPLE_FACT):
                 raise Exception()
                 # acc = accum_item_hash(acc, tuple_fact_hash(x))
@@ -399,7 +398,7 @@ def tuple_fact_hash(x):
     ''' based roughly on _tuple_hash from numba.cpython.hashing'''
     if(x.hash_val == 0):
         stack_buffer = None
-        p = _cast_structref(TupleFact, x)
+        p = cast(x, TupleFact)
         stack_head = -1
         is_done = False
 
@@ -409,7 +408,7 @@ def tuple_fact_hash(x):
             for t_id, m_id, data_ptr in _iter_mbr_infos(p):
                 # print(":: t_id", t_id, data_ptr)
                 if(t_id == T_ID_UNDEFINED): 
-                    t_id,_, _ = decode_idrec(_struct_from_ptr(CREObjType,_load_ptr(i8, data_ptr)).idrec)
+                    t_id,_, _ = decode_idrec(cast(_load_ptr(i8, data_ptr), CREObjType).idrec)
                 if(t_id == T_ID_TUPLE_FACT):
                     # print("IS PRED")
                     # Use an inline stack instead of recrusion because numba can't cache recursion
@@ -428,7 +427,7 @@ def tuple_fact_hash(x):
                 else:
                     # Kind of a heavy handed way to do this... but lack
                     #  of recrusion makes it the best option                    
-                    mbr = _struct_from_ptr(CREObjType,_load_ptr(i8,data_ptr))
+                    mbr = cast(_load_ptr(i8,data_ptr), CREObjType)
                     # print("::  " ,decode_idrec(x.idrec), x)
                     if(t_id==T_ID_VAR):
                         # print("----- VAR -----")
@@ -448,7 +447,7 @@ def tuple_fact_hash(x):
             acc = accum_item_hash(acc,tl)
 
             if(stack_head > -1):
-                p = _struct_from_ptr(TupleFact, stack_buffer[stack_head]);
+                p = cast(stack_buffer[stack_head], TupleFact);
                 stack_head -=1;
             else:
                 is_done = True

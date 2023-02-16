@@ -27,8 +27,8 @@ from cre.gensource import assert_gen_source
 from cre.caching import unique_hash, source_to_cache, import_from_cached, source_in_cache, get_cache_path
 from cre.structref import gen_structref_code, define_structref
 # from cre.context import cre_context
-from cre.utils import (_struct_from_ptr, _cast_structref, struct_get_attr_offset, _obj_cast_codegen,
-                       _ptr_from_struct_codegen, _raw_ptr_from_struct, CastFriendlyMixin, _obj_cast_codegen,
+from cre.utils import (cast, struct_get_attr_offset, _obj_cast_codegen,
+                       _ptr_from_struct_codegen, CastFriendlyMixin, _obj_cast_codegen,
                         PrintElapse, _struct_get_data_ptr, _ptr_from_struct_incref)
 from cre.cre_object import CREObjTypeClass, cre_obj_field_dict, CREObjModel, CREObjType, member_info_type, CREObjProxy
 
@@ -818,7 +818,7 @@ from numba.core.extending import overload, lower_cast, type_callable
 from numba.core.imputils import numba_typeref_ctor
 from cre.fact_intrinsics import define_boxing, get_fact_attr_ptr, _register_fact_structref, fact_mutability_protected_setattr, fact_lower_setattr, _fact_get_chr_mbrs_infos
 from cre.fact import repr_list_attr, repr_fact_attr, FactProxy, Fact, UntypedFact{", BaseFact, base_list_type, fact_to_ptr, get_inheritance_bytes_len_ptr" if typ != "BaseFact" else ""}, uint_to_inheritance_bytes
-from cre.utils import _raw_ptr_from_struct, ptr_t, _get_member_offset, _cast_structref, _load_ptr, _obj_cast_codegen, encode_idrec
+from cre.utils import cast, ptr_t, _get_member_offset,  _load_ptr, _obj_cast_codegen, encode_idrec
 import cloudpickle
 from cre.cre_object import member_info_type, set_chr_mbrs
 {fact_imports}
@@ -898,7 +898,7 @@ def ctor({param_defaults_seq}):
     fact_lower_setattr(st,'num_inh_bytes', num_inh_bytes)
     fact_lower_setattr(st,'inh_bytes', inheritance_bytes)
     {init_fields}
-    return _cast_structref({typ},st)
+    return cast(st, {typ})
 
 # Put in a tuple so it doesn't get wrapped in a method
 {typ}Class._ctor = (ctor,)
@@ -961,8 +961,8 @@ define_boxing({typ}Class,{typ}Proxy)
 
 
 
-{(f"""from cre.var import GenericVarType, var_ctor
-# @njit(GenericVarType(unicode_type), cache=True)
+{(f"""from cre.var import VarType, var_ctor
+# @njit(VarType(unicode_type), cache=True)
 # def as_var(alias):
 #     return var_ctor({typ}, {t_id}, alias)
 # {typ}._as_var = as_var
@@ -1116,25 +1116,15 @@ def upcast(context, builder, fromty, toty, val):
 
 @njit(i8(CREObjType), cache=True)
 def fact_to_ptr(fact):
-    return _raw_ptr_from_struct(fact)
+    return cast(fact, i8)
 
 @njit(cache=True)
 def fact_to_basefact(fact):
-    return _struct_from_ptr(BaseFact,_raw_ptr_from_struct(fact)) 
-    # return _cast_structref(BaseFact, fact)
+    return cast(fact, BaseFact)
 
 @njit(cache=True)
 def fact_to_ptr_incref(fact):
     return _ptr_from_struct_incref(fact)
-
-# def _fact_eq(a,b):
-#     if(isinstance(a,Fact) and isinstance(b,Fact)):
-#         def impl(a,b):
-#             return _raw_ptr_from_struct(a) ==_raw_ptr_from_struct(b)
-#         return impl
-
-# fact_eq = generated_jit(cache=True)(_fact_eq)
-# overload(operator.eq)(_fact_eq)
 
 
 ###### Fact Casting #######
@@ -1158,7 +1148,7 @@ def cast_fact(typ, val):
         return error
     
     def impl(typ,val):
-        return _cast_structref(inst_type,val)
+        return cast(val, inst_type)
 
     return impl
 
@@ -1265,10 +1255,10 @@ def asa(self, typ):
         def impl(self, typ):
             # print(self, _isa(self))
             if(not _isa(self)): raise TypeError(error_message)
-            return _cast_structref(typ, self)
+            return cast(self, typ)
     else:
         def impl(self, typ):
-            return _cast_structref(typ, self)
+            return cast(self, typ)
     return impl
 
 

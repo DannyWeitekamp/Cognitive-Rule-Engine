@@ -9,9 +9,9 @@ from cre.fact import define_fact, UntypedFact, call_untyped_fact, BaseFact
 from cre.fact_intrinsics import fact_lower_getattr, resolve_fact_getattr_type
 from cre.context import cre_context
 from cre.tuple_fact import TupleFact, TF
-from cre.var import Var, GenericVarType
+from cre.var import Var, VarType
 # from cre.op import GenericOpType
-from cre.utils import PrintElapse,encode_idrec, _func_from_address, _cast_structref, _obj_cast_codegen, _func_from_address, _incref_structref, _struct_from_ptr, decode_idrec, _ptr_to_data_ptr, _load_ptr, _struct_tuple_from_pointer_arr, _incref_ptr
+from cre.utils import PrintElapse,encode_idrec, _func_from_address, _obj_cast_codegen, _func_from_address, _incref_structref, decode_idrec, _ptr_to_data_ptr, _load_ptr, _struct_tuple_from_pointer_arr, _incref_ptr
 from cre.structref import define_structref
 from numba.experimental import structref
 from cre.structref import CastFriendlyStructref, define_boxing

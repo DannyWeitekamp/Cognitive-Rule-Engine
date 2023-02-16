@@ -266,7 +266,7 @@ def _obj_cast_codegen(context, builder, val, frmty, toty, incref=True):
 def _cast_structref(typingctx, cast_type_ref, inst_type):
     cast_type = cast_type_ref.instance_type
     if(isinstance(inst_type, types.Optional)):
-            inst_type = inst_type.type
+        inst_type = inst_type.type
     def codegen(context, builder, sig, args):
         _,d = args
 
@@ -461,11 +461,13 @@ def _ptr_to_data_ptr(typingctx, raw_ptr):
 @intrinsic
 def cast(typctx, val_typ, _typ):
     typ = _typ.instance_type
+    if(isinstance(val_typ, types.Optional)):
+        val_typ = val_typ.type
     codegen = None
-    if(isinstance(val_typ, Ptr) or isinstance(typ, Ptr)):
-        raise ValueError("cast() not intended to be used with ptr_t")
+    if(isinstance(typ, Ptr)):
+        raise ValueError("Cannot use cast()to cast to ptr_t")
 
-    if(isinstance(val_typ,types.Integer)):
+    if(isinstance(val_typ, (types.Integer,types.MemInfoPointer))):
         if(isinstance(typ, types.StructRef)):
             def codegen(context, builder, sig, args):
                 return _struct_from_ptr_codegen(context, builder, args[0], sig.args[0], typ)

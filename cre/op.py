@@ -19,7 +19,7 @@ from cre.utils import encode_idrec, assign_to_alias_in_parent_frame, as_typed_li
 from cre.subscriber import base_subscriber_fields, BaseSubscriber, BaseSubscriberType, init_base_subscriber, link_downstream
 from cre.vector import VectorType
 from cre.fact import Fact, gen_fact_import_str, get_offsets_from_member_types
-from cre.var import Var, var_memcopy, GenericVarType
+from cre.var import Var, var_memcopy, VarType
 from cre.cre_object import CREObjType, cre_obj_field_dict, CREObjTypeClass, CREObjProxy
 from cre.core import T_ID_OP, register_global_default
 from cre.make_source import make_source, gen_def_func, gen_assign, gen_if, gen_not, resolve_template, gen_def_class
@@ -166,7 +166,7 @@ field_dict = {{**op_fields_dict,**{{f"arg{{i}}" : t for i,t in enumerate(call_si
     return source
 
 
-from cre.var import GenericVarType
+from cre.var import VarType
 
 _head_range_type = np.dtype([('start', np.uint8), ('length', np.uint8)])
 head_range_type = numba.from_dtype(_head_range_type)
@@ -183,8 +183,8 @@ op_fields_dict = {
     # "inv_base_var_map" : DictType(unicode_type, i8),
     # Pointers of op's head vars (i.e. x.nxt and x.nxt.nxt are both heads of x)
 
-    "base_vars" : ListType(GenericVarType),
-    "head_vars" : ListType(GenericVarType),
+    "base_vars" : ListType(VarType),
+    "head_vars" : ListType(VarType),
     "head_var_ptrs" : i8[::1],
     "head_ranges" : head_range_type[::1],
 
@@ -470,15 +470,15 @@ def new_vars_from_types(types, names):
 
 @njit(cache=True)
 def gen_placeholder_aliases(var_ptrs):
-    _vars = Dict.empty(i8, GenericVarType)
+    _vars = Dict.empty(i8, VarType)
     temp_inv_base_var_map = Dict.empty(unicode_type, i8)
     
     n_auto_gen = 0
     for var_ptr in var_ptrs:
-        head_var = _struct_from_ptr(GenericVarType, var_ptr)
+        head_var = _struct_from_ptr(VarType, var_ptr)
         base_ptr = i8(head_var.base_ptr)
         if(base_ptr not in _vars):
-            base_var = _struct_from_ptr(GenericVarType, base_ptr)
+            base_var = _struct_from_ptr(VarType, base_ptr)
             _vars[i8(base_ptr)] = base_var
             
     for var in _vars.values():
@@ -512,7 +512,7 @@ def make_head_ranges(n_args, head_var_ptrs):
     prev_base_ptr = 0
     k = 0 
     for ptr in head_var_ptrs:
-        head_var = _struct_from_ptr(GenericVarType, ptr)
+        head_var = _struct_from_ptr(VarType, ptr)
         base_ptr = i8(head_var.base_ptr)
         if(prev_base_ptr == 0 or base_ptr == prev_base_ptr):
             length += 1
@@ -553,16 +553,16 @@ def make_head_ranges(n_args, head_var_ptrs):
 
 #     st.base_var_map = Dict.empty(i8, unicode_type)
 #     st.inv_base_var_map = Dict.empty(unicode_type, i8)
-#     st.base_vars = List.empty_list(GenericVarType)
-#     st.head_vars = List.empty_list(GenericVarType)
+#     st.base_vars = List.empty_list(VarType)
+#     st.head_vars = List.empty_list(VarType)
 #     generated_aliases = gen_placeholder_aliases(head_var_ptrs)
 #     j = 0
 #     for head_ptr in head_var_ptrs:
-#         head_var = _struct_from_ptr(GenericVarType, head_ptr)
+#         head_var = _struct_from_ptr(VarType, head_ptr)
 #         st.head_vars.append(head_var)
 #         base_ptr = i8(head_var.base_ptr)
 #         if(base_ptr not in st.base_var_map):
-#             base_var = _struct_from_ptr(GenericVarType, base_ptr)
+#             base_var = _struct_from_ptr(VarType, base_ptr)
 #             st.base_vars.append(base_var)
 #             alias = base_var.alias
 #             if(alias == ""):
@@ -588,17 +588,17 @@ def op_ctor(name, return_type_name, return_t_id, arg_type_names, head_var_ptrs, 
     st.arg_type_names = arg_type_names
     st.base_var_map = Dict.empty(i8, i8)
     # st.inv_base_var_map = Dict.empty(unicode_type, i8)
-    st.base_vars = List.empty_list(GenericVarType)
-    st.head_vars = List.empty_list(GenericVarType)
+    st.base_vars = List.empty_list(VarType)
+    st.head_vars = List.empty_list(VarType)
 
     generated_aliases = gen_placeholder_aliases(head_var_ptrs)
     j = 0
     for head_ptr in head_var_ptrs:
-        head_var = _struct_from_ptr(GenericVarType, head_ptr)
+        head_var = _struct_from_ptr(VarType, head_ptr)
         st.head_vars.append(head_var)
         base_ptr = i8(head_var.base_ptr)
         if(base_ptr not in st.base_var_map):
-            base_var = _struct_from_ptr(GenericVarType, base_ptr)
+            base_var = _struct_from_ptr(VarType, base_ptr)
             st.base_vars.append(base_var)
             alias = base_var.alias
             if(alias == ""):
@@ -680,16 +680,16 @@ def op_copy(op, new_base_vars=None):
         st.head_var_ptrs = np.empty(len(op.head_vars),dtype=np.int64)
         st.base_var_map = Dict.empty(i8, i8)
         # st.inv_base_var_map = Dict.empty(unicode_type, i8)
-        base_var_map = Dict.empty(i8,GenericVarType)
+        base_var_map = Dict.empty(i8,VarType)
         for i, (o_v, n_v) in enumerate(zip(op.base_vars, new_base_vars)):
             st.head_var_ptrs[i] = n_v.base_ptr
             st.base_var_map[n_v.base_ptr] = i#n_v.alias
             # st.inv_base_var_map[n_v.alias] = n_v.base_ptr
             base_var_map[o_v.base_ptr] = n_v
 
-        st.head_vars = List.empty_list(GenericVarType)
+        st.head_vars = List.empty_list(VarType)
         for hv in op.head_vars:
-            new_hv = new(GenericVarType)
+            new_hv = new(VarType)
             var_memcopy(hv, new_hv)
             new_base_var = base_var_map[hv.base_ptr]
             lower_setattr(new_hv, "base_ptr", new_base_var.base_ptr)
@@ -1379,7 +1379,7 @@ class Op(CREObjProxy,metaclass=OpMeta):
 def extract_arg_names(op):
     out = List.empty_list(unicode_type)
     for v_ptr in op.base_var_map:
-        v =_struct_from_ptr(GenericVarType, v_ptr)
+        v =_struct_from_ptr(VarType, v_ptr)
         out.append(v.alias)
     return out
 
@@ -1421,7 +1421,7 @@ def get_head_ranges(self):
 @njit(cache=True)
 def get_var(self,i):
     v_ptr = List(self.base_var_map.keys())[i]
-    return _struct_from_ptr(GenericVarType,v_ptr)
+    return _struct_from_ptr(VarType,v_ptr)
 
 
 @njit(cache=True)
@@ -1471,7 +1471,7 @@ def get_arg_seq(self,type_annotations=False):
     for i,v in enumerate(self.base_vars):
         s += v.alias
         if(type_annotations): 
-            # v = _struct_from_ptr(GenericVarType, self.inv_base_var_map[alias])
+            # v = _struct_from_ptr(VarType, self.inv_base_var_map[alias])
             s += ":" + get_base_type_name(v)#.base_type_name
 
         if(i < len(self.base_vars)-1): 
@@ -1560,7 +1560,7 @@ class DerefInstr():
 
 # @njit(cache=True)
 # def var_from_ptr(ptr):
-#     return _struct_from_ptr(GenericVarType,ptr)
+#     return _struct_from_ptr(VarType,ptr)
 
 # def extract_head_ptr(x):
 #     if(isinstance(x,DerefInstr)):

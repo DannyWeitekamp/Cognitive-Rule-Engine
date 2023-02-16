@@ -10,10 +10,10 @@ from cre.fact_intrinsics import fact_lower_getattr, resolve_fact_getattr_type
 from cre.context import cre_context
 from cre.tuple_fact import TupleFact, TF
 # from cre.builtin_cre_funcs import Add, Subtract, Divide
-from cre.var import Var, GenericVarType
-# from cre.op import GenericCREFuncType
-from cre.cre_func import GenericCREFuncType, get_best_call_self, get_return_val_impl, set_base_arg_val_impl, CFSTATUS_TRUTHY
-from cre.utils import _raw_ptr_from_struct, PrintElapse,encode_idrec, _func_from_address, _cast_structref, _obj_cast_codegen, _func_from_address, _incref_structref, _struct_from_ptr, decode_idrec, _ptr_to_data_ptr, _load_ptr, _struct_tuple_from_pointer_arr, _incref_ptr
+from cre.var import Var, VarType
+# from cre.op import CREFuncType
+from cre.cre_func import CREFuncType, get_best_call_self, get_return_val_impl, set_base_arg_val_impl, CFSTATUS_TRUTHY
+from cre.utils import cast, PrintElapse,encode_idrec, _func_from_address, _obj_cast_codegen, _func_from_address, _incref_structref, decode_idrec, _ptr_to_data_ptr, _load_ptr, _struct_tuple_from_pointer_arr, _incref_ptr
 from cre.structref import define_structref
 from numba.experimental import structref
 from cre.memset import MemSet, MemSetType
@@ -32,7 +32,7 @@ feature_applier_fields = {
     **incr_processor_fields,    
     "out_memset" : MemSetType,
     "idrec_map" : DictType(u8,ListType(u8)),
-    "ops" : ListType(GenericCREFuncType),
+    "ops" : ListType(CREFuncType),
 
     "fact_vecs" : DictType(u2, Tuple((VectorType,VectorType, VectorType))),
 
@@ -56,7 +56,7 @@ def upcast(context, builder, fromty, toty, val):
 @overload_method(FeatureApplierTypeClass,'get_changes')
 def feature_applier_get_changes(self, end=-1, exhaust_changes=True):
     def impl(self, end=-1, exhaust_changes=True):
-        incr_pr = _cast_structref(IncrProcessorType, self)
+        incr_pr = cast(self, IncrProcessorType)
         return incr_pr.get_changes(end=end, exhaust_changes=exhaust_changes)
     return impl
 
@@ -64,7 +64,7 @@ u2_arr = u2[::1]
 u8_list = ListType(u8)
 vec_list_type = ListType(VectorType)
 list_vec_list_type = ListType(ListType(VectorType))
-op_list_type = ListType(GenericCREFuncType)
+op_list_type = ListType(CREFuncType)
 
 
 class FeatureApplier(structref.StructRefProxy):
@@ -147,7 +147,7 @@ vec_triple_type = Tuple((VectorType,VectorType,VectorType))
 def feature_applier_ctor(in_memset, out_memset, enumerizer):    
     st = new(GenericFeatureApplierType)
     init_incr_processor(st, in_memset)
-    st.ops = List.empty_list(GenericCREFuncType)
+    st.ops = List.empty_list(CREFuncType)
     st.fact_vecs = Dict.empty(u2, vec_triple_type)
     st.idrec_map = Dict.empty(u8, u8_list)
     st.out_memset = out_memset 
@@ -158,7 +158,7 @@ def feature_applier_ctor(in_memset, out_memset, enumerizer):
     return st
 
 
-@njit(types.void(GenericFeatureApplierType, GenericCREFuncType, u2[::1]), cache=True)
+@njit(types.void(GenericFeatureApplierType, CREFuncType, u2[::1]), cache=True)
 def add_op(self, op, gval_t_ids):
     self.ops.append(op)
     self.gval_t_ids.append(gval_t_ids)
@@ -270,7 +270,7 @@ def update_fact_vecs(self):
 
         if(change_event.was_declared or change_event.was_modified):
             # Prepare new_f_ids and new_fact_ptrs for update_op.
-            in_memset_facts = _struct_from_ptr(VectorType, self.in_memset.facts[i8(t_id)])
+            in_memset_facts = cast(self.in_memset.facts[i8(t_id)], VectorType)
             new_f_ids.add(f_id)
             new_fact_ptrs.add(in_memset_facts[f_id])
 
@@ -329,7 +329,7 @@ def update_op(self, return_type, arg_types, op_ind):
     arg_gval_t_ids = tuple([context.get_t_id(_type=get_gval_type(x)) for x in arg_types])
 
     range_n_args = tuple([x for x in range(n_args)])
-    n_var_tup_type = tuple([GenericVarType for x in range(n_args)])
+    n_var_tup_type = tuple([VarType for x in range(n_args)])
 
     get_ret = get_return_val_impl(return_type)
     set_bases = tuple([set_base_arg_val_impl(a) for a in arg_types])
@@ -370,7 +370,7 @@ def update_op(self, return_type, arg_types, op_ind):
             # print("C")
             # Map each arg's idrecs in 'in_memset' to the gval's idrec in 'out_memset' 
             for ptr in gval_ptrs:
-                fact = _struct_from_ptr(BaseFact, ptr)
+                fact = cast(ptr, BaseFact)
                 if(fact.idrec not in self.idrec_map):
                     self.idrec_map[u8(fact.idrec)] = List.empty_list(u8)
                 self.idrec_map[u8(fact.idrec)].append(idrec)
@@ -391,7 +391,7 @@ def assign_new_f_ids(self):
 
 @njit(types.boolean(GenericFeatureApplierType, MemSetType),cache=True)
 def check_same_in_memset(self,in_memset):
-    return _raw_ptr_from_struct(self.in_memset) == _raw_ptr_from_struct(in_memset)
+    return cast(self.in_memset, i8) == cast(in_memset, i8)
 
 @njit(types.void(GenericFeatureApplierType, MemSetType), cache=True)
 def set_in_memset(self, in_memset):

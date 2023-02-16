@@ -36,9 +36,9 @@ from cre.structref import define_structref, define_boxing, CastFriendlyStructref
 from cre.fact import Fact, BaseFact, cast_fact, get_inheritance_t_ids
 from cre.tuple_fact import TF, TupleFact
 from cre.fact_intrinsics import fact_lower_setattr
-from cre.utils import CastFriendlyMixin, lower_setattr, _cast_structref, _meminfo_from_struct, decode_idrec, encode_idrec, _call_dtor,\
- _raw_ptr_from_struct, _ptr_from_struct_incref,  _struct_from_ptr, _decref_ptr, _decref_structref, _raw_ptr_from_struct_incref, _raw_ptr_from_struct, _obj_cast_codegen, _incref_structref, \
- _store, _load_ptr, deref_info_type, DEREF_TYPE_ATTR, DEREF_TYPE_LIST, _ptr_to_data_ptr, _list_base_from_ptr, new_w_del
+from cre.utils import (cast, CastFriendlyMixin, lower_setattr, _meminfo_from_struct, decode_idrec, encode_idrec, _call_dtor,
+  _ptr_from_struct_incref,  _decref_ptr, _decref_structref, _raw_ptr_from_struct_incref,  _obj_cast_codegen, _incref_structref, 
+ _store, _load_ptr, deref_info_type, DEREF_TYPE_ATTR, DEREF_TYPE_LIST, _ptr_to_data_ptr, _list_base_from_ptr, new_w_del)
 from cre.vector import new_vector, VectorType
 from cre.caching import import_from_cached, source_in_cache, source_to_cache
 from cre.cre_object import copy_cre_obj, cre_obj_clear_refs
@@ -212,12 +212,12 @@ def memset_clear_refs(ms):
     for i in range(facts.head):
         facts_ptr = facts.data[i]
         if(facts_ptr == 0): continue
-        facts_i = _struct_from_ptr(VectorType, facts_ptr)
+        facts_i = cast(facts_ptr, VectorType)
         for j in range(facts_i.head):
             fact_ptr = facts_i.data[j]
             if(fact_ptr == 0): continue
             # print("ptr", j, fact_ptr)
-            fact = _struct_from_ptr(BaseFact, fact_ptr)
+            fact = cast(fact_ptr, BaseFact)
             cre_obj_clear_refs(fact)
             # _iter_mbr_infos(fact)
 
@@ -237,7 +237,7 @@ def memset_clear_refs(ms):
 SIZEOF_NRT_MEMINFO = 48
 @njit(types.void(i8),cache=True)
 def memset_data_clear_refs(ms_data_ptr):
-    ms = _struct_from_ptr(MemSetType, ms_data_ptr-SIZEOF_NRT_MEMINFO)
+    ms = cast(ms_data_ptr-SIZEOF_NRT_MEMINFO, MemSetType)
     memset_clear_refs(ms)
 
 
@@ -251,15 +251,13 @@ def expand_mem_set_types(ms, n):
         v = new_vector(BASE_F_ID_STACK_SIZE)    
         ms.all_vecs.append(v)
 
-        # v_ptr = _raw_ptr_from_struct_incref(v)
-        v_ptr = _raw_ptr_from_struct(v)
+        v_ptr = cast(v, i8)
         ms.retracted_f_ids.add(v_ptr)
 
         v = new_vector(BASE_FACT_SET_SIZE)    
         ms.all_vecs.append(v)
         
-        # v_ptr = _raw_ptr_from_struct_incref(v)
-        v_ptr = _raw_ptr_from_struct(v)
+        v_ptr = cast(v, i8)
         ms.facts.add(v_ptr)
 
 @njit(MemSetType(CREContextDataType,types.boolean), cache=True)
@@ -303,7 +301,7 @@ def get_change_queue(self):
 
 @njit(cache=True)
 def get_ptr(self):
-    return _raw_ptr_from_struct(self)
+    return cast(self, i8)
 
 @njit(cache=True)
 def facts_for_t_id(ms,t_id):
@@ -311,19 +309,19 @@ def facts_for_t_id(ms,t_id):
     if(t_id >= L):
         expand_mem_set_types(ms, (t_id+1)-L)
     # print("Declare", t_id, mem_data.facts[t_id])
-    return _struct_from_ptr(VectorType, ms.facts[t_id])
+    return cast(ms.facts[t_id], VectorType)
 
 @njit(cache=True)
 def fact_at_f_id(typ, t_id_facts,f_id):
     ptr = t_id_facts.data[f_id]
     if(ptr != 0):
-        return _struct_from_ptr(typ, ptr)
+        return cast(ptr, typ)
     else:
         return None
 
 @njit(cache=True)
 def retracted_f_ids_for_t_id(ms,t_id):
-    return _struct_from_ptr(VectorType, ms.retracted_f_ids[t_id])
+    return cast(ms.retracted_f_ids[t_id], VectorType)
 
 #### Helper Functions ####
 
@@ -397,7 +395,7 @@ def declare_fact(ms, fact):
     # Acquire a reference to the fact and get it's t_id
     # fact_ptr = i8(_raw_ptr_from_struct_incref(fact)) #.4ms / 10000
     ms.all_facts.append(fact)
-    fact_ptr = i8(_raw_ptr_from_struct(fact)) #.4ms / 10000
+    fact_ptr = cast(fact, i8) #.4ms / 10000
     t_id = resolve_t_id(ms, fact)  #.1ms / 10000
     
     # Get the facts Vector for facts with t_id  
@@ -479,7 +477,7 @@ def memset_get_fact(self, identifier, typ=None):
             # if(t_id != typ_t_id): raise ValueError(err_msg)
             facts = facts_for_t_id(self, t_id) #negligible
             fact_ptr = facts.data[f_id]
-            return _struct_from_ptr(return_typ, fact_ptr)
+            return cast(fact_ptr, return_typ)
 
     elif(isinstance(identifier, unicode_type)):
         def impl(self, identifier, typ=None):
@@ -488,7 +486,7 @@ def memset_get_fact(self, identifier, typ=None):
             # if(t_id != typ_t_id): raise ValueError(err_msg)
             facts = facts_for_t_id(self, t_id) #negligible
             fact_ptr = facts.data[f_id]
-            return _struct_from_ptr(return_typ, fact_ptr)
+            return cast(fact_ptr, return_typ)
 
     return impl
 
@@ -562,7 +560,7 @@ def deref_once(deref, inst_ptr):
 def resolve_deref_data_ptr(fact, deref_infos):
     '''
     '''
-    inst_ptr = _raw_ptr_from_struct(fact)
+    inst_ptr = cast(fact, i8)
     if(len(deref_infos) > 1):
         for k in range(len(deref_infos)-1):
             if(inst_ptr == 0): break;
@@ -642,7 +640,7 @@ def gen_fact_iter_source(fact_type):
 from numba import njit, u2, types
 from numba.experimental.structref import new
 from cre.memset import FactIterator, FactIteratorType, fact_iterator_field_dict, fact_iter_next_raw_ptr, GenericFactIteratorType
-from cre.utils import _struct_from_ptr, _cast_structref
+from cre.utils import cast
 fact_type = cloudpickle.loads({cloudpickle.dumps(fact_type)})
 f_iter_type = FactIteratorType([(k,v) for k,v in {{**fact_iterator_field_dict ,"fact_type": types.TypeRef(fact_type)}}.items()])
 f_iter_type._fact_type = fact_type
@@ -650,7 +648,7 @@ f_iter_type._fact_type = fact_type
 
 # @njit(fact_type(GenericFactIteratorType),cache=True)
 # def fact_iterator_next(it):
-#     return _struct_from_ptr(fact_type, fact_iter_next_raw_ptr(it))
+#     return cast(fact_iter_next_raw_ptr(it), fact_type)
 # '''
 
 
@@ -738,7 +736,7 @@ def iter_facts(ms, fact_type, no_subtypes=False):
         else:
             t_ids = cd.child_t_ids[cd.fact_num_to_t_id[fact_num]]
         _it = generic_fact_iterator_ctor(ms,t_ids)
-        return _cast_structref(it_type, _it)
+        return cast(_it, it_type)
     return impl
     # context = mem.context
 
@@ -751,7 +749,7 @@ def fact_iter_next_raw_ptr(it):
         t_id = it.t_ids[it.curr_t_id_ind]
         facts_ptr = it.memset.facts[i8(t_id)]
         if(facts_ptr != 0):
-            facts = _struct_from_ptr(VectorType, facts_ptr)
+            facts = cast(facts_ptr, VectorType)
             if(it.curr_ind < len(facts)):
                 ptr = facts[it.curr_ind]
                 it.curr_ind +=1
@@ -814,13 +812,13 @@ def get_facts(ms, fact_type=None, no_subtypes=False):
                 facts_ptr = ms.facts[i8(t_id)]
                 # print("facts_ptr", facts_ptr)
                 if(facts_ptr != 0):
-                    facts = _struct_from_ptr(VectorType, facts_ptr)
+                    facts = cast(facts_ptr, VectorType)
                     # print("facts", t_id, facts.head, facts.data)
                     if(curr_ind < len(facts)):
                         ptr = facts[curr_ind]
                         curr_ind +=1
                         if(ptr != 0): 
-                            out.append(_struct_from_ptr(_fact_type, ptr))
+                            out.append(cast(ptr, _fact_type))
                     else:
                         curr_ind = 0
                         curr_t_id_ind +=1
@@ -841,7 +839,7 @@ def fact_iter_next(it):
     fact_type = it._fact_type
     def impl(it):
         ptr = fact_iter_next_raw_ptr(it)
-        return _struct_from_ptr(fact_type, ptr)
+        return cast(ptr, fact_type)
     return impl
 
 
@@ -969,7 +967,7 @@ def indexer_update(self, memset):
                 if(change_event.t_id in t_ids):
                     if(change_event.was_declared):
                         facts = facts_for_t_id(memset, change_event.t_id)
-                        fact = _struct_from_ptr(base_type, facts[change_event.f_id])
+                        fact = cast(facts[change_event.f_id], base_type)
                         indexer_update_declare(self, change_event, fact)
 
                     elif(change_event.was_retracted):
@@ -1010,10 +1008,10 @@ def memset_copy(self):
     for i in range(self.facts.head):
         facts_ptr = self.facts.data[i]
         if(facts_ptr != 0):
-            facts = _struct_from_ptr(VectorType, facts_ptr)
+            facts = cast(facts_ptr, VectorType)
             for j in range(facts.head):
                 fact_ptr = facts.data[j]
-                fact = _struct_from_ptr(BaseFact, fact_ptr)
+                fact = cast(fact_ptr, BaseFact)
                 new.declare(copy_cre_obj(fact))
     
     return new

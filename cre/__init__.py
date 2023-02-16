@@ -15,7 +15,7 @@ if(not skip.get()):
 
     # Necessary to import these at package level to ensure that they are defined
     #  before a context is created
-    # import cre.cre_object 
+    import cre.cre_object 
     from cre.fact import define_fact, BaseFact, Fact, FactProxy
     from cre.tuple_fact import TupleFact, TF
     from cre.var import Var

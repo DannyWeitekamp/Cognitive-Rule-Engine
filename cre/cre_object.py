@@ -3,11 +3,11 @@ from numba import i8, i4, u8, u1, u2, u4, types, njit, generated_jit, literal_un
 from numba.types import FunctionType, unicode_type, Tuple
 from numba.extending import  overload, lower_getattr, overload_method
 from cre.core import register_global_default, T_ID_UNDEFINED, T_ID_BOOL, T_ID_INT, T_ID_FLOAT, T_ID_STR, T_ID_TUPLE_FACT 
-from cre.utils import (_memcpy_structref, _obj_cast_codegen, ptr_t,
-    _raw_ptr_from_struct, _raw_ptr_from_struct_incref, _incref_ptr,
+from cre.utils import (cast, _memcpy_structref, _obj_cast_codegen, ptr_t,
+    _raw_ptr_from_struct_incref, _incref_ptr,
     CastFriendlyMixin, decode_idrec, _func_from_address, _incref_structref,
-    _cast_structref, _get_member_offset, _struct_get_data_ptr, _store, _store_safe,
-    _sizeof_type, _load_ptr, _struct_from_ptr, encode_idrec, _decref_ptr, _incref_ptr,
+    _get_member_offset, _struct_get_data_ptr, _store, _store_safe,
+    _sizeof_type, _load_ptr, encode_idrec, _decref_ptr, _incref_ptr,
     _decref_structref, check_issue_6993, incref_meminfo)
 from cre.structref import define_structref
 from numba.core.datamodel import default_manager, models
@@ -158,7 +158,7 @@ define_attributes(CREObjType)
 meminfo_type = types.MemInfoPointer(types.voidptr)
 @njit(u2(meminfo_type),cache=True)
 def get_t_id(ptr):
-    cre_obj =  _struct_from_ptr(CREObjType,ptr)
+    cre_obj = cast(ptr, CREObjType)
     t_id, _, _ = decode_idrec(cre_obj.idrec)
     return t_id
 
@@ -248,96 +248,9 @@ CREObjType._proxy_class = CREObjProxy
 define_boxing(CREObjTypeClass, CREObjProxy)
 
 
-
-
-# @njit(u2(i8),cache=False)
-
-
-
-
-
-# def define_boxing(struct_type, obj_class):
-#     '''
-#     Variation on define_boxing for CREObjects returns the t_id at boxing.
-#     '''
-#     obj_ctor = obj_class._numba_box_
-
-#     @box(struct_type)
-#     def box_struct_ref(typ, val, c):
-#         """
-#         Convert a raw pointer to a Python int.
-#         """
-#         utils = _Utils(c.context, c.builder, typ)
-#         struct_ref = utils.get_struct_ref(val)
-#         meminfo = struct_ref.meminfo
-
-#         # ptr = c.builder.ptrtoint(meminfo, cgutils.intp_t)
-
-#         # print(ptr)
-
-#         def get_t_id(cre_obj):
-#             # cre_obj =  _struct_from_ptr(CREObjType,ptr)
-#             t_id, _, _ = decode_idrec(cre_obj.idrec)
-#             return t_id
-#         t_id = c.context.compile_internal(c.builder, get_t_id, u2(CREObjType,), (val,))
-
-#         mip_type = types.MemInfoPointer(types.voidptr)
-#         boxed_meminfo = c.box(mip_type, meminfo)
-#         boxed_t_id = c.box(i8, t_id)
-#         # t_id = boxed_meminfo
-
-#         ctor_pyfunc = c.pyapi.unserialize(c.pyapi.serialize_object(obj_ctor))
-#         ty_pyobj = c.pyapi.unserialize(c.pyapi.serialize_object(typ))
-
-#         res = c.pyapi.call_function_objargs(
-#             ctor_pyfunc, [ty_pyobj, boxed_meminfo, boxed_t_id],
-#         )
-#         c.pyapi.decref(ctor_pyfunc)
-#         c.pyapi.decref(ty_pyobj)
-#         c.pyapi.decref(boxed_meminfo)
-#         return res
-
-#     @unbox(struct_type)
-#     def unbox_struct_ref(typ, obj, c):
-#         mi_obj = c.pyapi.object_getattr_string(obj, "_meminfo")
-
-#         mip_type = types.MemInfoPointer(types.voidptr)
-
-#         mi = c.unbox(mip_type, mi_obj).value
-
-#         utils = _Utils(c.context, c.builder, typ)
-#         struct_ref = utils.new_struct_ref(mi)
-#         out = struct_ref._getvalue()
-
-#         c.pyapi.decref(mi_obj)
-#         return NativeValue(out)
-
-
-
-
-
-
-# overload(CREObjProxy)(cre_obj_ctor)
-
-
-# def _fact_eq(a,b):
-#     if(isinstance(a,Fact) and isinstance(b,Fact)):
-#         def impl(a,b):
-#             return _raw_ptr_from_struct(a) ==_raw_ptr_from_struct(b)
-#         return impl
-
-# # fact_eq = generated_jit(cache=True)(_fact_eq)
-# overload(operator.eq)(_fact_eq)
-
-
-
-# @njit(types.boolean(CREObjType,CREObjType), cache=True)
-# def cre_obj_eq(self,other):
-#     return _raw_ptr_from_struct(self)==_raw_ptr_from_struct(other)
-
 @njit(i8(CREObjType,), cache=True)
 def get_cre_obj_ptr(self):
-    return _raw_ptr_from_struct(self)
+    return cast(self, i8)
 
 @njit(i8(CREObjType,), cache=True)
 def get_cre_obj_ptr_incref(self):
@@ -346,54 +259,6 @@ def get_cre_obj_ptr_incref(self):
 @njit(u8(CREObjType,), cache=True)
 def get_cre_obj_idrec(self):
     return self.idrec
-
-
-    
-
-# eq_fn_typ = FunctionType(types.boolean(CREObjType,CREObjType))
-# hash_fn_typ = FunctionType(u8(CREObjType))
-# str_fn_typ = FunctionType(unicode_type(CREObjType))
-
-# cre_obj_method_table_field_dict = {
-#     "eq_" : FunctionType(types.boolean(CREObjType,CREObjType)),
-#     "hash_" : FunctionType(u8(CREObjType)),
-#     "str_" : FunctionType(unicode_type(CREObjType)),
-#     "repr_" : FunctionType(unicode_type(CREObjType)),
-# }
-
-# cre_obj_method_table_fields = [(k,v) for k,v in cre_obj_method_table_field_dict.items()]
-
-
-# CREObjMethodTable, CREObjMethodTableType = define_structref("CREObjMethodTable", cre_obj_method_table_field_dict, define_constructor=False)
-
-# @njit(cache=True)
-# def new_cre_obj_method_table(eq,hsh,s,r):
-#     st = new(CREObjMethodTableType)
-#     st.eq_ = _func_from_address(eq_fn_typ, eq)
-#     st.hash_ = _func_from_address(hash_fn_typ, hsh)
-#     st.str_ = _func_from_address(str_fn_typ, s)
-#     st.repr_ = _func_from_address(str_fn_typ, r)
-#     return st
-
-
-
-
-
-
-
-
-
-
-# def _resolve_t_id_helper(x):
-#     if(isinstance(x, types.Boolean)):
-#         return T_ID_BOOL
-#     elif(isinstance(x, types.Integer)):
-#         return T_ID_INT
-#     elif(isinstance(x, types.Float)):
-#         return T_ID_FLOAT
-#     elif(x is types.unicode_type):
-#         return T_ID_STR
-#     return T_ID_UNDEFINED
 
 PRIMITIVE_MBR_ID = 0
 OBJECT_MBR_ID = 1
@@ -690,7 +555,7 @@ def cre_obj_get_member_t_ids(x):
 @overload_method(CREObjType, "asa")
 def asa(self, typ):
     def impl(self, typ):
-        return _cast_structref(typ, self)
+        return cast(self, typ)
     return impl
 
 
@@ -700,7 +565,7 @@ def copy_cre_obj(fact):
     def impl(fact):
         new_fact = _memcpy_structref(fact)
 
-        a,b = _cast_structref(CREObjType, fact), _cast_structref(CREObjType, new_fact)
+        a,b = cast(fact, CREObjType), cast(new_fact, CREObjType)
 
         t_id, _, _ = decode_idrec(a.idrec)
         b.idrec = encode_idrec(t_id,0,u1(-1))

@@ -11,13 +11,13 @@ from cre.caching import gen_import_str, unique_hash,import_from_cached, source_t
 from cre.context import cre_context
 from cre.structref import define_structref, define_structref_template, StructRefType
 from cre.fact import define_fact, BaseFact, cast_fact, FactProxy
-from cre.utils import _incref_structref, _struct_from_meminfo, _meminfo_from_struct, _cast_structref, cast_structref, decode_idrec, lower_getattr, _struct_from_ptr,  lower_setattr, lower_getattr, _raw_ptr_from_struct, _ptr_from_struct_incref, _decref_ptr
+from cre.utils import cast, _incref_structref, decode_idrec, lower_getattr, lower_setattr, lower_getattr,  _ptr_from_struct_incref, _decref_ptr
 from cre.utils import assign_to_alias_in_parent_frame, meminfo_type
 from cre.subscriber import base_subscriber_fields, BaseSubscriber, BaseSubscriberType, init_base_subscriber, link_downstream
 from cre.vector import VectorType
 
-# from cre.op import GenericCREFuncType, op_str, Op
-from cre.cre_func import GenericCREFuncType, CREFunc, cre_func_unique_string
+# from cre.op import CREFuncType, op_str, Op
+from cre.cre_func import CREFuncType, CREFunc, cre_func_unique_string
 
 from cre.cre_object import CREObjType, CREObjTypeClass
 from cre.core import T_ID_CONDITIONS, T_ID_LITERAL, register_global_default
@@ -92,7 +92,7 @@ import sys
 literal_fields_dict = {
     # "str_val" : unicode_type,
     **cre_obj_field_dict,
-    "op" : GenericCREFuncType,
+    "op" : CREFuncType,
     "base_var_ptrs" : i8[:],#UniTuple(i8,2),
     # "cre_ms_ptr" : i8,
     # A weight used for scoring matches and structure remapping  
@@ -170,7 +170,7 @@ define_boxing(LiteralTypeClass, Literal)
 LiteralType = LiteralTypeClass(literal_fields)
 register_global_default("Literal", LiteralType)
 
-@njit(LiteralType(GenericCREFuncType),cache=True)
+@njit(LiteralType(CREFuncType),cache=True)
 # @overload(Literal)
 def literal_ctor(op):
     st = new(LiteralType)
@@ -214,25 +214,12 @@ def literal_not(self):
 
 
 literal_unique_tuple_type = Tuple((i8, unicode_type))
-@njit(literal_unique_tuple_type(LiteralType), cache=True)
+# @njit(literal_unique_tuple_type(LiteralType), cache=True)
+@njit( cache=True)
 def literal_get_unique_tuple(self):
     '''Outputs a tuple that uniquely identifies an instance
          of a literal independant of the base Vars of its underlying op.
     '''
-    # print("THIS IS RUN")
-    # deref_str = ""
-    # for var_ptr in self.op.head_var_ptrs:
-    #     var = _struct_from_ptr(GenericVarType, var_ptr)
-    #     deref_strs = List.empty_list(unicode_type)    
-    #     if(len(var.deref_infos) > 0):
-    #         s = ""
-    #         for i, d in enumerate(var.deref_infos):
-    #             delim = "," if i != len(var.deref_infos)-1 else ""
-    #             s += f'({str(i8(d.type))},{str(i8(d.t_id))},{str(i8(d.a_id))},{str(i8(d.offset))}){delim}'
-    #             deref_strs.append(s)
-        
-    #     deref_str += f"[{','.join(deref_strs)}]"
-
     return (i8(self.negated), cre_func_unique_string(self.op))
 
 
@@ -261,9 +248,9 @@ conditions_fields_dict = {
     **cre_obj_field_dict,
 
     # The variables used by the condition
-    'vars': ListType(GenericVarType),
+    'vars': ListType(VarType),
 
-    # 'not_vars' : ListType(GenericVarType),
+    # 'not_vars' : ListType(VarType),
 
     # The Disjunctive Normal Form of the condition.
     'dnf': dnf_type,
@@ -601,14 +588,14 @@ def new_dnf(n):
 def _conditions_ctor_dnf(dnf):
     st = new(ConditionsType)
     st.idrec = encode_idrec(T_ID_CONDITIONS, 0, 0)
-    st.vars = List.empty_list(GenericVarType)    
+    st.vars = List.empty_list(VarType)    
     st.base_var_map = Dict.empty(i8,i8)
     for conj in dnf: 
         for lit in conj:
             for b_ptr in lit.base_var_ptrs:
                 if(b_ptr not in st.base_var_map):
                    st.base_var_map[b_ptr] = len(st.base_var_map)
-                   st.vars.append(_struct_from_ptr(GenericVarType, b_ptr))
+                   st.vars.append(cast(b_ptr, VarType))
     st.dnf = dnf
     st.has_distr_dnf = False
     # st.matcher_inst_ptr = 0
@@ -621,8 +608,8 @@ def _conditions_ctor_dnf(dnf):
 def _conditions_ctor_single_var(_vars,dnf=None):
     st = new(ConditionsType)
     st.idrec = encode_idrec(T_ID_CONDITIONS, 0, 0)
-    st.vars = List.empty_list(GenericVarType)
-    st.vars.append(_struct_from_ptr(GenericVarType,_vars.base_ptr)) 
+    st.vars = List.empty_list(VarType)
+    st.vars.append(cast(_vars.base_ptr, VarType)) 
     st.base_var_map = build_base_var_map(st.vars)
     # print("A",st.base_var_map)
     st.dnf = dnf if(dnf) else new_dnf(1)
@@ -645,9 +632,9 @@ def _conditions_ctor_base_var_map(_vars,dnf=None):
 def _conditions_ctor_var_list(_vars,dnf=None):
     st = new(ConditionsType)
     st.idrec = encode_idrec(T_ID_CONDITIONS, 0, 0)
-    st.vars = List.empty_list(GenericVarType)
+    st.vars = List.empty_list(VarType)
     for x in _vars:
-        st.vars.append(_struct_from_ptr(GenericVarType,x.base_ptr))
+        st.vars.append(cast(x.base_ptr, VarType))
     # st.vars = List([ for x in _vars])
     st.base_var_map = build_base_var_map(st.vars)
     # print("C",st.base_var_map)
@@ -881,9 +868,9 @@ def build_base_var_map(left_vars,right_vars=None):
 @njit(cache=True)
 def build_var_list(base_var_map):
     '''Makes a Var list from a base_var_map'''
-    var_list = List.empty_list(GenericVarType)
+    var_list = List.empty_list(VarType)
     for ptr in base_var_map:
-        var_list.append(_struct_from_ptr(GenericVarType,ptr))
+        var_list.append(cast(ptr, VarType))
     return var_list
 
 
@@ -893,10 +880,10 @@ def literal_to_cond(lit):
     dnf = new_dnf(1)
     # ind = 0 if (lit.is_alpha) else 1
     dnf[0].append(lit)
-    _vars = List.empty_list(GenericVarType)
+    _vars = List.empty_list(VarType)
 
     for ptr in lit.base_var_ptrs:
-        _vars.append(_struct_from_ptr(GenericVarType, ptr))
+        _vars.append(cast(ptr, VarType))
     # if(right_var is not None):
     #     _vars.append(right_var)
     # pt.negated = negated
@@ -904,7 +891,7 @@ def literal_to_cond(lit):
     # c = Conditions(_vars, dnf)
     return c
 
-@njit(ConditionsType(GenericCREFuncType,), cache=True)
+@njit(ConditionsType(CREFuncType,), cache=True)
 def cre_func_to_cond(op):
     return literal_to_cond(literal_ctor(op))
 
@@ -1066,16 +1053,16 @@ def dnf_not(c_dnf):
     return out_dnf
 
 
-@njit(GenericVarType(GenericVarType,),cache=True)
+@njit(VarType(VarType,),cache=True)
 def _build_var_conjugate(v):
     if(v.conj_ptr == 0):
-        conj = new(GenericVarType)
+        conj = new(VarType)
         var_memcopy(v,conj)
         conj.is_not = u1(0) if v.is_not else u1(1)
         conj.conj_ptr = _ptr_from_struct_incref(v)
         v.conj_ptr = _ptr_from_struct_incref(conj)
     else:
-        conj = _struct_from_ptr(GenericVarType, v.conj_ptr)
+        conj = cast(v.conj_ptr, VarType)
     return conj
 
 
@@ -1088,24 +1075,24 @@ def _var_NOT(c):
         st_typ = c
         def impl(c):
             if(c.conj_ptr == 0):
-                base = _struct_from_ptr(GenericVarType, c.base_ptr)
+                base = cast(c.base_ptr, VarType)
 
                 conj_base = _build_var_conjugate(base)
-                g_conj = _build_var_conjugate(_cast_structref(GenericVarType,c))
+                g_conj = _build_var_conjugate(cast(c, VarType))
 
-                g_conj.base_ptr = _raw_ptr_from_struct(conj_base)
+                g_conj.base_ptr = cast(conj_base, i8)
 
-            st = _struct_from_ptr(st_typ, c.conj_ptr)
+            st = cast(c.conj_ptr, st_typ)
             return st
         return impl
 
 @njit(cache=True)
 def _conditions_NOT(c):
-    new_vars = List.empty_list(GenericVarType)
+    new_vars = List.empty_list(VarType)
     ptr_map = Dict.empty(i8,i8)
     for var in c.vars:
         new_var = _var_NOT(var)
-        ptr_map[_raw_ptr_from_struct(var)]  = _raw_ptr_from_struct(new_var)
+        ptr_map[cast(var, i8)]  = cast(new_var, i8)
         new_vars.append(new_var)
 
     dnf = dnf_copy(c.dnf,shallow=False)
@@ -1226,7 +1213,7 @@ def cond_not(c):
 def link_literal_instance(literal, ms):
     link_data = generate_link_data(literal.pred_node, ms)
     literal.link_data = link_data
-    literal.ms_ptr = _raw_ptr_from_struct(ms)
+    literal.ms_ptr = cast(ms, i8)
     return literal
 
 @njit(cache=True)
@@ -1254,7 +1241,7 @@ def get_linked_conditions_instance(conds, ms, copy=False):
 
     #Note... maybe it's simpler to just make mem an optional(memType)
     old_ptr = conds.ms_ptr
-    conds.ms_ptr = _raw_ptr_from_struct(ms)#_ptr_from_struct_incref(mem)
+    conds.ms_ptr = cast(ms, i8)#_ptr_from_struct_incref(mem)
     if(old_ptr != 0): _decref_ptr(old_ptr)
     return conds
 
@@ -2439,7 +2426,7 @@ for k,remap in enumerate(arr):
 
 #         for term in conjunct:
 #             ptr = term.base_var_ptrs[0]
-#             # ptr = _raw_ptr_from_struct(l_var)
+#             # ptr = cast(l_var, i8)
 #             # print(">>>", ptr, conds.base_var_map)
 #             ind = conds.base_var_map[ptr]
 #             # print(ind, len(a_is_in_this_conj))

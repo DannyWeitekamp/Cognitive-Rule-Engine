@@ -12,9 +12,9 @@ from numba.core.typing.templates import AttributeTemplate
 from cre.caching import gen_import_str, unique_hash,import_from_cached, source_to_cache, source_in_cache, cache_safe_exec, get_cache_path
 from cre.context import cre_context
 from cre.structref import define_structref, define_structref_template
-from cre.var import GenericVarType
-from cre.utils import (ptr_t, _struct_from_meminfo, _meminfo_from_struct, _cast_structref, cast_structref, decode_idrec, lower_getattr, _struct_from_ptr,  lower_setattr, lower_getattr,
-                       _raw_ptr_from_struct, _decref_ptr, _incref_ptr, _incref_structref, _ptr_from_struct_incref,
+from cre.var import VarType
+from cre.utils import (cast, ptr_t,  decode_idrec, lower_getattr, lower_setattr, lower_getattr,
+                        _decref_ptr, _incref_ptr, _incref_structref, _ptr_from_struct_incref,
                        _dict_from_ptr, _list_from_ptr, _load_ptr, _arr_from_data_ptr, _get_array_raw_data_ptr, _get_array_raw_data_ptr_incref)
 from cre.utils import assign_to_alias_in_parent_frame, _raw_ptr_from_struct_incref, _func_from_address, _list_base_from_ptr, _listtype_sizeof_item
 from cre.subscriber import base_subscriber_fields, BaseSubscriber, BaseSubscriberType, init_base_subscriber, link_downstream
@@ -22,8 +22,8 @@ from cre.vector import VectorType
 from cre.fact import Fact, gen_fact_import_str, get_offsets_from_member_types
 from cre.fact_intrinsics import fact_lower_getattr
 from cre.var import Var, VarTypeClass, var_append_deref
-# from cre.op import GenericCREFuncType, CREFuncTypeClass
-from cre.cre_func import GenericCREFuncType, CREFuncTypeClass, CREFunc, cre_func_call_self, set_base_arg_val_impl, get_return_val_impl, CFSTATUS_ERROR, CFSTATUS_TRUTHY
+# from cre.op import CREFuncType, CREFuncTypeClass
+from cre.cre_func import CREFuncType, CREFuncTypeClass, CREFunc, cre_func_call_self, set_base_arg_val_impl, get_return_val_impl, CFSTATUS_ERROR, CFSTATUS_TRUTHY
 from cre.make_source import make_source, gen_def_func, gen_assign, resolve_template, gen_def_class
 from numba.core import imputils, cgutils
 from numba.core.datamodel import default_manager, models
@@ -121,13 +121,13 @@ SC_Record_field_dict = {
     'is_op' : u1,
 
     # If non-terminal then holds the cre.Op
-    'op' : GenericCREFuncType,
+    'op' : CREFuncType,
 
     # The number of input arguments for self.op.
     'n_args' : i8,
 
     # If terminal then holds a cre.Var as a placeholder for the declared value. 
-    'var' : GenericVarType,
+    'var' : VarType,
 
     # The depth at which the op was applied/inserted, or '0' for declared values
     'depth' : i8,
@@ -164,12 +164,12 @@ def overload_SC_Record(op_or_var, depth=0, n_args=0, stride=None, prev_entry_ptr
         def impl(op_or_var, depth=0, n_args=0, stride=None, prev_entry_ptr=0):
             st = new(SC_RecordType)
             st.is_op = False
-            st.var = _cast_structref(GenericVarType, op_or_var) 
+            st.var = cast(op_or_var, VarType) 
             st.depth = depth
             st.n_args = 0
 
             st.data = np.empty((4,),dtype=np.uint32)
-            self_ptr = _raw_ptr_from_struct(st)
+            self_ptr = cast(st, i8)
             st.data[0] = u4(self_ptr) # get low bits
             st.data[1] = u4(self_ptr>>32) # get high bits
             st.data[2] = u4(prev_entry_ptr) # get low bits
@@ -186,7 +186,7 @@ dict_t_id_to_record_list_type = DictType(u2, record_list_type)
 t_id_int_tuple = Tuple((u2,i8))
 
 SetChainingPlanner_field_dict = {
-    'ops': ListType(GenericCREFuncType),
+    'ops': ListType(CREFuncType),
     # List of dictionaries that map:
     #  Tuple(type_t_id,depth[int]) -> ListType[Record])
     'declare_records' : DictType(u2, ListType(SC_RecordType)),
@@ -210,7 +210,7 @@ SetChainingPlanner_field_dict = {
     'semantic_visible_attrs' : types.Any,
 
     # A mapping of strings like "('fact_name', 'attr', 'type')" to op instances used for conversions
-    'conversion_ops' :  DictType(unicode_type, GenericCREFuncType)
+    'conversion_ops' :  DictType(unicode_type, CREFuncType)
 }
 
 @structref.register
@@ -319,7 +319,7 @@ def sc_planner_ctor(sc_planner_type):
     st.val_map_ptr_dict = Dict.empty(u2, ptr_t)
     st.inv_val_map_ptr_dict = Dict.empty(u2, ptr_t)
     st.flat_vals_ptr_dict = Dict.empty(t_id_int_tuple, ptr_t)
-    st.conversion_ops = Dict.empty(unicode_type, GenericCREFuncType)
+    st.conversion_ops = Dict.empty(unicode_type, CREFuncType)
     return st
 
 #------------------------------------------------------------------
@@ -404,7 +404,7 @@ def planner_declare_val(planner, val, op_or_var):
 
         # Make a new Record for this declaration
         rec = SC_Record(op_or_var, prev_entry_ptr=prev_entry_ptr)
-        var_ptr = _raw_ptr_from_struct(op_or_var)
+        var_ptr = cast(op_or_var, i8)
         declare_records.append(rec)
         
         # If the is new add it to 'flat_vals'
@@ -448,7 +448,7 @@ def planner_declare_conversion(planner, val, op_or_var, source_ind=None):
 
         # Make a new Record for this declaration
         rec = SC_Record(op_or_var, n_args=1, stride=stride, prev_entry_ptr=prev_entry_ptr)
-        rec_ptr = _raw_ptr_from_struct(rec)
+        rec_ptr = cast(rec, i8)
         data = rec.data
         data[0] = u4(rec_ptr) # get low bits
         data[1] = u4(rec_ptr>>32) # get high bits
@@ -457,7 +457,7 @@ def planner_declare_conversion(planner, val, op_or_var, source_ind=None):
 
         data[4] = source_ind
 
-        op_ptr = _raw_ptr_from_struct(op_or_var)
+        op_ptr = cast(op_or_var, i8)
         declare_records.append(rec)
         
         # If the is new add it to 'flat_vals'
@@ -536,7 +536,7 @@ def planner_declare_conversions(planner, val, fact_type, attr, source_ind):
                 #         return
 
                 # conv_func = _func_from_address(call_f_type, conv_op.call_addr)
-                conv_op = _cast_structref(cf_type, _conv_op)
+                conv_op = cast(_conv_op, cf_type)
                 set_base(conv_op, 0, val)
                 status = cre_func_call_self(conv_op)
                 if(status > CFSTATUS_TRUTHY):
@@ -945,7 +945,7 @@ def apply_one(op, planner, return_type, arg_types, inds, curr_infer_depth, min_s
             planner.val_map_ptr_dict[ret_type_name])
 
         d_ptr = _get_array_raw_data_ptr(data)
-        rec_ptr = _raw_ptr_from_struct(rec)
+        rec_ptr = cast(rec, i8)
 
         prev_depth, prev_entry = val_map.get(v, (-1,0))
         if(nxt_depth > min_stop_depth and
@@ -1013,7 +1013,7 @@ from numba.typed import Dict
 from numba.types import ListType, DictType, Tuple
 import numpy as np
 import cloudpickle
-from cre.utils import _dict_from_ptr, _list_from_ptr, _raw_ptr_from_struct, _get_array_raw_data_ptr
+from cre.utils import cast, _dict_from_ptr, _list_from_ptr, _get_array_raw_data_ptr
 from cre.cre_func import CFSTATUS_TRUTHY, get_return_val_impl, set_base_arg_val_impl, cre_func_resolve_call_self
 from cre.sc_planner import SC_Record
 
@@ -1065,7 +1065,7 @@ val_map =  _dict_from_ptr(ret_d_typ, planner.val_map_ptr_dict[u2({op.return_t_id
 rec = SC_Record(op, nxt_depth, N_ARGS, stride)
 data = rec.data
 d_ptr = _get_array_raw_data_ptr(data)
-rec_ptr = _raw_ptr_from_struct(rec)
+rec_ptr = cast(rec, i8)
 
 d_offset=0
 val_map_defaults = (-1,0)
@@ -1178,10 +1178,10 @@ ExplanationTreeEntry_field_dict = {
     "is_op" : u1,
 
     # If non-terminal the cre.Op applied
-    "op" : GenericCREFuncType,
+    "op" : CREFuncType,
 
     # If terminal the cre.Var instance
-    "var" : GenericVarType,
+    "var" : VarType,
 
     # A List of refcounted pointers to child explanation trees for each argument
     "child_arg_ptrs" : ListType(ptr_t)#i8[::1]
@@ -1203,7 +1203,7 @@ def expl_tree_entry_ctor(op_or_var, child_arg_ptrs=None):
         def impl(op_or_var, child_arg_ptrs=None):
             st = new(ExplanationTreeEntryType)
             st.is_op = False
-            st.var = _cast_structref(GenericVarType, op_or_var) 
+            st.var = cast(op_or_var, VarType) 
             return st
     return impl
 
@@ -1308,7 +1308,7 @@ def extract_rec_entry(d_ptr):
     # print("R", rec_ptr, next_entry_ptr)
     # print(rec_ptr, next_entry_ptr)
     # if(next_entry_ptr <= 4): raise ValueError()
-    rec = _struct_from_ptr(SC_RecordType, rec_ptr)
+    rec = cast(rec_ptr, SC_RecordType)
     # print("S", rec_ptr, d_ptr, rec.n_args)
     args = _arr_from_data_ptr(d_ptr+16,(rec.n_args,),dtype=np.uint32)
     # print("T")
@@ -1559,18 +1559,17 @@ def expl_tree_entry_num_args(tree_entry):
 def expl_tree_entry_is_op(tree_entry):
     return tree_entry.is_op
 
-@njit(GenericCREFuncType(ExplanationTreeEntryType),cache=True)
+@njit(CREFuncType(ExplanationTreeEntryType),cache=True)
 def expl_tree_entry_get_op(tree_entry):
     return tree_entry.op
 
-@njit(GenericVarType(ExplanationTreeEntryType),cache=True)
+@njit(VarType(ExplanationTreeEntryType),cache=True)
 def expl_tree_entry_get_var(tree_entry):
     return tree_entry.var
 
 @njit(ExplanationTreeType(ExplanationTreeEntryType,i8),cache=True)
 def expl_tree_entry_jth_arg(tree_entry, j):
-    return _struct_from_ptr(ExplanationTreeType,
-        tree_entry.child_arg_ptrs[j])
+    return cast(tree_entry.child_arg_ptrs[j], ExplanationTreeType)
 
 
 def product_of_generators(generators):
@@ -1677,7 +1676,7 @@ def gen_op_comps_from_expl_tree(tree):
     # head_data = st.iter_data_map[st.heads]
     
     # inds = head_data.inds
-    # istructions = List.empty_list(GenericCREFuncType)
+    # istructions = List.empty_list(CREFuncType)
     # if(len(inds) > 0):
     #     options = head_data.expl_tree.children
     #     ind = inds[0]
@@ -1888,8 +1887,8 @@ be freed even if the Explanation tree sticks around for a long time.
 
 So we have TreeEntry:
 -is_op : u1
--op : GenericCREFuncType
--var : GenericVarType
+-op : CREFuncType
+-var : VarType
 
 '''
 

@@ -1,7 +1,8 @@
 import numpy as np
 from cre.fact import (_fact_from_spec, _standardize_spec, _merge_spec_inheritance, 
-     define_fact, cast_fact, _cast_structref, BaseFact, DeferredFactRefType, isa,
+     define_fact, cast_fact, BaseFact, DeferredFactRefType, isa,
       uint_to_inheritance_bytes, get_inheritance_bytes_len_ptr, get_inheritance_t_ids)
+from cre.utils import cast
 from cre.context import cre_context
 from cre.memset import MemSet
 from cre.cre_object import CREObjType, copy_cre_obj
@@ -685,7 +686,7 @@ def _test_reference_type():
 
 @njit(cache=True)
 def as_cre_obj(x):
-    return _cast_structref(CREObjType,x)
+    return cast(x, CREObjType)
 
 
 @njit(cache=True)

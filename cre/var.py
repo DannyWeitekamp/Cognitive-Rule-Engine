@@ -12,7 +12,7 @@ from cre.caching import gen_import_str, unique_hash,import_from_cached, source_t
 from cre.context import cre_context
 from cre.structref import define_structref, define_boxing, define_structref_template, CastFriendlyStructref
 from cre.fact import define_fact, BaseFact, cast_fact, DeferredFactRefType, Fact, _standardize_type
-from cre.utils import PrintElapse, ptr_t, _struct_from_meminfo, _meminfo_from_struct, _cast_structref, cast_structref, decode_idrec, lower_getattr, _struct_from_ptr,  lower_setattr, lower_getattr, _raw_ptr_from_struct, _decref_ptr, _incref_ptr, _incref_structref, _ptr_from_struct_incref
+from cre.utils import cast, PrintElapse, ptr_t, decode_idrec, lower_getattr,  lower_setattr, lower_getattr, _decref_ptr, _incref_ptr, _incref_structref, _ptr_from_struct_incref
 from cre.utils import assign_to_alias_in_parent_frame, encode_idrec, _obj_cast_codegen
 from cre.subscriber import base_subscriber_fields, BaseSubscriber, BaseSubscriberType, init_base_subscriber, link_downstream
 from cre.vector import VectorType
@@ -22,6 +22,7 @@ from cre.type_conv import ptr_to_var_name
 # get_beta_predicate_node_definition, deref_attrs, define_alpha_predicate_node, define_beta_predicate_node, AlphaPredicateNode, BetaPredicateNode
 from numba.core import imputils, cgutils
 from numba.core.datamodel import default_manager, models
+from numba.experimental.structref import StructRefProxy
 
 
 from operator import itemgetter
@@ -71,24 +72,46 @@ var_fields_dict = {
     # 'literal_head_hash' : types.Any,
 }
 
-var_fields =  [(k,v) for k,v, in var_fields_dict.items()]
-
 class VarTypeClass(CREObjTypeClass):
     t_id = T_ID_VAR
-    def preprocess_fields(self, fields):
-        f_dict = {k:v for k,v in fields}
-        if(f_dict["head_type"] != types.Any):
-            self._head_type = f_dict.get("head_type",None)
-            self._base_type = f_dict.get("base_type",None)
+    type_cache = {}
 
-        return fields
-    def __str__(self):
-        base_type = getattr(self,"_base_type",None)
-        head_type = getattr(self,"_head_type",None)
-        if(base_type is None and head_type is None):
-            return f"GenericVarType"
+    def __new__(cls, base_type=None, head_type=None):
+        if(head_type is None): head_type = base_type
+        
+        unq_tup = (base_type, head_type)
+        self = cls.type_cache.get(unq_tup, None)
+        if(self is not None):
+            return self
+
+        self = super().__new__(cls)
+        self.base_type = base_type        
+        self.head_type = head_type
+        cls.type_cache[unq_tup] = self
+
+        if(base_type is None or head_type is None):
+            field_dict = {**var_fields_dict}
         else:
-            return f"Var[base_type={base_type.instance_type}, head_type={head_type.instance_type}])"
+            field_dict = {**var_fields_dict,
+                "base_type" : types.TypeRef(base_type),
+                "head_type" : types.TypeRef(head_type)
+            }
+        types.StructRef.__init__(self,[(k,v) for k,v in field_dict.items()])
+        
+        # print(self.field_dict)
+        self.name = repr(self)
+        return self
+
+    def __init__(self,*args,**kwargs):
+        pass
+
+    def __str__(self):
+        if(self.base_type is None and self.head_type is None):
+            return f"VarType"
+        elif(self.base_type == self.head_type):
+            return f"VarType[{self.base_type}]"
+        else:
+            return f"VarType[{self.base_type}->{self.head_type}]"
     __repr__ = __str__
 
 # @lower_cast(VarTypeClass, CREObjType)
@@ -100,27 +123,28 @@ class VarTypeClass(CREObjTypeClass):
 # Manually register the type to avoid automatic getattr overloading 
 default_manager.register(VarTypeClass, models.StructRefModel)
 
-GenericVarType = VarTypeClass([(k,v) for k,v in var_fields_dict.items()])
-register_global_default("Var", GenericVarType)
+VarType = VarTypeClass()
+register_global_default("Var", VarType)
 
-# Allow typed Var instances to be upcast to GenericVarType
-@lower_cast(VarTypeClass, GenericVarType)
+# Allow typed Var instances to be upcast to VarType
+@lower_cast(VarTypeClass, VarType)
 def upcast(context, builder, fromty, toty, val):
     return _obj_cast_codegen(context, builder, val, fromty, toty,incref=False)
 
-class Var(CREObjProxy):
+class Var(StructRefProxy):
     t_id = T_ID_VAR
     def __new__(cls, typ, alias="", skip_assign_alias=False):
         # if(not isinstance(typ, types.StructRef)): typ = typ.fact_type
         typ = _standardize_type(typ, cre_context())
-        base_type_name = str(typ)
+        # base_type_name = str(typ)
+        # print(base_type_name)
                 
         base_t_id = cre_context().get_t_id(_type=typ)
 
         if(getenv("CRE_SPECIALIZE_VAR_TYPE",default=False)):
             raise ValueError("THIS SHOULDN'T HAPPEN")
             typ_ref = types.TypeRef(typ)
-            struct_type = get_var_type(typ_ref,typ_ref)
+            struct_type = VarTypeClass(typ_ref,typ_ref)
             st = var_ctor(struct_type, base_t_id, alias)
         else:
             st = var_ctor_generic(base_t_id, alias)
@@ -192,7 +216,7 @@ class Var(CREObjProxy):
         if(getenv("CRE_SPECIALIZE_VAR_TYPE",default=False)):
 
             if(deref_info_type == DEREF_TYPE_ATTR):
-                struct_type = get_var_type(base_type, head_type)
+                struct_type = VarTypeClass(base_type, head_type)
             else:
                 raise NotImplemented("Haven't implemented getitem() when CRE_SPECIALIZE_VAR_TYPE=true.")
             new_var = var_append_deref(self, attr_or_ind)#self, attr, a_id, offset, head_type_name, t_id, deref_info_type)
@@ -202,7 +226,7 @@ class Var(CREObjProxy):
             # print("type, a_id, offset, head_t_id", deref_info_type, a_id, offset, head_t_id)
             new_var = generic_var_append_deref(self, a_id, offset, head_t_id, typ=deref_info_type)
             # new = generic_var_append_deref(self, attr, a_id, offset, head_type_name, t_id, deref_info_type)
-            # struct_type = GenericVarType
+            # struct_type = VarType
         #CHECK THAT PTRS ARE SAME HERE
             
 
@@ -456,27 +480,31 @@ class StructAttribute(AttributeTemplate):
         from numba.cpython.hashing import _Py_hash_t
         if(attr == "__hash__"): return types.FunctionType(_Py_hash_t(CREObjType,))
         
-
+        
         if attr in typ.field_dict:
 
             attrty = typ.field_dict[attr]
             # print("is attr", attrty)
             return attrty
         # print("AAAAA", typ.field_dict)
-        head_type = typ.field_dict['head_type'].instance_type 
+
+        # print("<<", attr, typ.field_dict)
+        head_type = typ.head_type
         #TODO Should check that alld subtype references are valid
         if(not hasattr(head_type,'field_dict')):
             raise AttributeError(f"Cannot dereference attribute '{attr}' of {typ}.")
 
-        base_type = typ.field_dict['base_type']
+        # base_type = typ.field_dict['base_type']
         if(attr in head_type.field_dict):
-            head_type = types.TypeRef(head_type.field_dict[attr])
-            field_dict = {
-                **var_fields_dict,
-                **{"base_type" : base_type,
-                 "head_type" : head_type}
-            }
-            attrty = VarTypeClass([(k,v) for k,v, in field_dict.items()])
+            # head_type = types.TypeRef(head_type.field_dict[attr])
+            # field_dict = {
+            #     **var_fields_dict,
+            #     **{"base_type" : base_type,
+            #      "head_type" : head_type}
+            # }
+            attrty = VarTypeClass(typ.base_type, head_type.field_dict[attr])
+            print("NEW", attrty)
+            # attrty = VarTypeClass([(k,v) for k,v, in field_dict.items()])
             return attrty
         else:
             raise AttributeError(f"Var[{base_type}] has no attribute '{attr}'")
@@ -489,10 +517,10 @@ def var_getattr_impl(context, builder, typ, val, attr):
         st = cgutils.create_struct_proxy(typ)(context, builder, value=val)._getvalue()
 
         def get_alias(self):
-            if(self.base_ptr != _raw_ptr_from_struct(self)):
-                base = _struct_from_ptr(GenericVarType, self.base_ptr)
+            if(self.base_ptr != cast(self, i8)):
+                base = cast(self.base_ptr, VarType)
             else:
-                base = _cast_structref(GenericVarType, self)
+                base = cast(self, VarType)
             return base.alias_
 
         ret = context.compile_internal(builder, get_alias, unicode_type(typ,), (st,))
@@ -524,7 +552,7 @@ def var_getattr_impl(context, builder, typ, val, attr):
         st = ctor(context, builder, value=val)._getvalue()
         t_id = getattr(head_type, "t_id", -1)
 
-        new_var_type = get_var_type(base_type,head_type)
+        new_var_type = VarTypeClass(base_type,head_type)
 
         def new_var_and_append(self):
             return var_append_deref(self, attr)
@@ -636,7 +664,7 @@ def var_str(self):
 
 @njit(cache=True)    
 def get_var_ptr(self):
-    return _raw_ptr_from_struct(self)
+    return cast(self, i8)
 
 
 @njit(cache=True)    
@@ -654,7 +682,7 @@ def get_var_ptr_incref(self):
 #     right_var_type = types.unliteral(types.literal(right_var)) #if (isinstance(right_var, types.NoneType)) else types.int64
 #     ctor = gen_pterm_ctor_alpha(left_var, op_str, right_var_type)
 #     pt = ctor(left_var, op_str, right_var)
-#     lbv = cast_structref(GenericVarType,left_var)
+#     lbv = cast_structref(VarType,left_var)
 #     return pt_to_cond(pt, lbv, None, negated)
     
 
@@ -662,8 +690,8 @@ def get_var_ptr_incref(self):
 #     from cre.conditions import pt_to_cond, gen_pterm_ctor_alpha, gen_pterm_ctor_beta
 #     ctor = gen_pterm_ctor_beta(left_var, op_str, right_var)
 #     pt = ctor(left_var, op_str, right_var)
-#     lbv = cast_structref(GenericVarType,left_var)
-#     rbv = cast_structref(GenericVarType,right_var)
+#     lbv = cast_structref(VarType,left_var)
+#     rbv = cast_structref(VarType,right_var)
 #     return pt_to_cond(pt, lbv, rbv, negated)
 
 
@@ -709,26 +737,26 @@ def var_get_base_t_id(self):
     return self.base_t_id
 
 # Manually define the boxing to avoid constructor overloading
-define_boxing(VarTypeClass,Var)
+define_boxing(VarTypeClass, Var)
 
 
-var_type_cache = {}
-def get_var_type(base_type, head_type=None):
-    if(head_type is None): head_type = base_type
-    t = (base_type, head_type)
-    if(t not in var_type_cache):
-        # print((str(t[0]),str(t[1])), t[0].t_id)
-        d = {**var_fields_dict,**{
-            'base_type': types.TypeRef(base_type),
-            'head_type': types.TypeRef(head_type),
-            }}
+# var_type_cache = {}
+# def VarTypeClass(base_type, head_type=None):
+#     if(head_type is None): head_type = base_type
+#     t = (base_type, head_type)
+#     if(t not in var_type_cache):
+#         # print((str(t[0]),str(t[1])), t[0].t_id)
+#         # d = {**var_fields_dict,**{
+#         #     'base_type': types.TypeRef(base_type),
+#         #     'head_type': types.TypeRef(head_type),
+#         #     }}
 
-        struct_type = VarTypeClass([(k,v) for k,v, in d.items()])
-        var_type_cache[t] = struct_type
-        return struct_type
-    else:
-        # print("RETREIVED", (str(t[0]),str(t[1])),t[0].t_id)
-        return var_type_cache[t]
+#         struct_type = VarTypeClass(base_type, head_type)
+#         var_type_cache[t] = struct_type
+#         return struct_type
+#     else:
+#         # print("RETREIVED", (str(t[0]),str(t[1])),t[0].t_id)
+#         return var_type_cache[t]
 
 @njit(cache=True)
 def var_ctor(var_struct_type, base_t_id, alias=""):
@@ -738,7 +766,7 @@ def var_ctor(var_struct_type, base_t_id, alias=""):
     lower_setattr(st,'conj_ptr', i8(0))
     lower_setattr(st,'base_t_id', base_t_id)
     lower_setattr(st,'head_t_id', base_t_id)
-    lower_setattr(st,'base_ptr', i8(_raw_ptr_from_struct(st)))
+    lower_setattr(st,'base_ptr', cast(st, i8))
     lower_setattr(st,'base_ptr_ref', ptr_t(0))
     lower_setattr(st,'alias_', alias)
     lower_setattr(st,'deref_attrs_str', None)
@@ -751,7 +779,7 @@ def var_ctor(var_struct_type, base_t_id, alias=""):
     # st.conj_ptr = i8(0)
     # st.base_t_id = base_t_id
     # st.head_t_id = base_t_id
-    # st.base_ptr = i8(_raw_ptr_from_struct(st))
+    # st.base_ptr = i8(cast(st,i8))
     # st.base_ptr_ref = ptr_t(0)
     # st.alias =  "" if(alias is  None) else alias
     # st.deref_attrs_str = None
@@ -760,15 +788,15 @@ def var_ctor(var_struct_type, base_t_id, alias=""):
     return st
 
 
-@njit(GenericVarType(u2, unicode_type), cache=True)
+@njit(VarType(u2, unicode_type), cache=True)
 def var_ctor_generic(base_t_id, alias):
-    return var_ctor(GenericVarType, base_t_id, alias)
+    return var_ctor(VarType, base_t_id, alias)
 
 
 @overload(Var)
 def overload_Var(typ,alias=""):
     _typ = typ.instance_type
-    struct_type = get_var_type(_typ,_typ)
+    struct_type = VarTypeClass(_typ,_typ)
     base_t_id = cre_context().get_t_id(_type=_typ)
     # print("@@ IMPL VAR :: ", _typ, base_t_id)
     def impl(typ, alias=""):
@@ -776,62 +804,10 @@ def overload_Var(typ,alias=""):
 
     return impl
 
-# @njit(cache=True)
-# def repr_var(self):
-#     alias_part = ", '" + self.alias + "'" if len(self.alias) > 0 else ""
-#     s = "Var(" + self.base_type_name + "Type" + alias_part + ")"
-#     return s + str_var_derefs(self)
-
-
-# @overload(repr)
-# def overload_repr_var(self):
-#     if(not isinstance(self, VarTypeClass)): return
-#     return lambda self: repr_var(self)
-    
-
-# @njit(cache=True)
-# def str_var_derefs(self):
-#     s = ""
-#     for i in range(len(self.deref_infos)):
-#         attr = self.deref_attrs[i]
-#         deref = self.deref_infos[i]
-#         if(deref.type == DEREF_TYPE_ATTR):
-#             s += f".{attr}"
-#         else:
-#             s += f"[{attr}]"
-    # return s
-
-
-
-# @njit(cache=True)
-# def str_var(self):
-#     s = self.alias
-#     if (len(s) > 0):
-#         return s + str_var_derefs(self)
-#     else:
-#         return repr(self)
-
-# @njit(cache=True)
-# def str_var_ptr(ptr):
-#     return str_var(_struct_from_ptr(GenericVarType,ptr))
-
-# @njit(cache=True)
-# def str_var_ptr_derefs(ptr):
-#     return str_var_derefs(_struct_from_ptr(GenericVarType,ptr))
-
-
-# @overload(str)
-# def overload_str_var(self):
-#     if(not isinstance(self, VarTypeClass)): return
-#     return lambda self: str_var(self)
-
-
-
-
 
 #### getattr and dereferencing ####
 
-@njit(types.void(GenericVarType, GenericVarType),cache=True)
+@njit(types.void(VarType, VarType),cache=True)
 def var_memcopy(self,st):
     # new_deref_attrs = List.empty_list(unicode_type)
     # new_deref_infos = np.empty(len(),dtype=deref_info_type)
@@ -857,7 +833,7 @@ def var_memcopy(self,st):
     
 
 
-@njit(types.void(GenericVarType, u4, i4, u2, u1), cache=True)
+@njit(types.void(VarType, u4, i4, u2, u1), cache=True)
 def _var_append_deref(self, a_id, offset, head_t_id, typ):
     # lower_getattr(self,"deref_attrs").append(attr)
     old_deref_infos = lower_getattr(self,"deref_infos")
@@ -881,8 +857,8 @@ def _var_append_deref(self, a_id, offset, head_t_id, typ):
 @generated_jit(cache=True)
 def var_append_deref(self, attr):
     SentryLiteralArgs(['attr']).for_function(var_append_deref).bind(self,attr)
-    if(self is GenericVarType):
-        raise ValueError("var_append_deref() doesn't work on GenericVarType. Use generic_var_append_deref()")
+    if(self is VarType):
+        raise ValueError("var_append_deref() doesn't work on VarType. Use generic_var_append_deref()")
 
     old_var_type = self
     old_head_type = self.field_dict['head_type'].instance_type
@@ -894,7 +870,7 @@ def var_append_deref(self, attr):
     base_type = old_var_type.field_dict['base_type'].instance_type
     head_t_id = cre_context().get_t_id(_type=head_type)
     
-    var_struct_type = get_var_type(base_type, head_type)
+    var_struct_type = VarTypeClass(base_type, head_type)
 
     # print("CONSTR VAR", base_type, head_type, self.name)
     # print("<<", var_struct_type)
@@ -906,7 +882,7 @@ def var_append_deref(self, attr):
     # print("AFT")
     def impl(self, attr):
         st = new(var_struct_type)
-        var_memcopy(_cast_structref(GenericVarType, self),st)
+        var_memcopy(cast(self, VarType),st)
         _var_append_deref(st, a_id, offset, head_t_id, typ=DEREF_TYPE_ATTR)
         lower_setattr(st, 'base_ptr_ref', _ptr_from_struct_incref(self))
         return st
@@ -921,10 +897,10 @@ def var_append_deref(self, attr):
 #     lower_setattr(st, 'base_ptr_ref', _ptr_from_struct_incref(base_var))
 #     return st
 
-@njit(GenericVarType(GenericVarType, u4, i8, i8, i8), cache=True)
+@njit(VarType(VarType, u4, i8, i8, i8), cache=True)
 def generic_var_append_deref(self, a_id, offset, head_t_id, typ=DEREF_TYPE_ATTR):
     # _incref_structref(base_var)
-    st = new(GenericVarType)
+    st = new(VarType)
     var_memcopy(self, st)
     _var_append_deref(st, a_id, offset, head_t_id, typ=typ)
     lower_setattr(st, 'base_ptr_ref', _ptr_from_struct_incref(self))
@@ -961,9 +937,9 @@ def struct_setattr_impl(context, builder, sig, args, attr):
     setattr(dataval, attr, casted)
 
 
-@njit(types.void(GenericVarType, unicode_type), cache=True)
+@njit(types.void(VarType, unicode_type), cache=True)
 def var_assign_alias(var, alias):
-    base = _struct_from_ptr(GenericVarType, var.base_ptr)
+    base = cast(var.base_ptr, VarType)
     base.alias_ = alias
 
 #### dereferencing for py_funcs ####

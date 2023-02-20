@@ -17,7 +17,6 @@ from cre.utils import (cast, ptr_t,  decode_idrec, lower_getattr, lower_setattr,
                         _decref_ptr, _incref_ptr, _incref_structref, _ptr_from_struct_incref,
                        _dict_from_ptr, _list_from_ptr, _load_ptr, _arr_from_data_ptr, _get_array_raw_data_ptr, _get_array_raw_data_ptr_incref)
 from cre.utils import assign_to_alias_in_parent_frame, _raw_ptr_from_struct_incref, _func_from_address, _list_base_from_ptr, _listtype_sizeof_item
-from cre.subscriber import base_subscriber_fields, BaseSubscriber, BaseSubscriberType, init_base_subscriber, link_downstream
 from cre.vector import VectorType
 from cre.fact import Fact, gen_fact_import_str, get_offsets_from_member_types
 from cre.fact_intrinsics import fact_lower_getattr
@@ -41,7 +40,7 @@ import time
 import cre.dynamic_exec
 import warnings
 import itertools
-from cre.default_ops import Identity
+from cre.builtin_cre_funcs import Identity
 
 
 '''

@@ -23,7 +23,6 @@ from numba.core.typing import signature
 # from numba.core.extending import overload
 
 from cre.core import TYPE_ALIASES, JITSTRUCTS, py_type_map, numba_type_map, numpy_type_map, register_global_default, lines_in_type_registry, add_to_type_registry, add_type_pickle
-from cre.gensource import assert_gen_source
 from cre.caching import unique_hash, source_to_cache, import_from_cached, source_in_cache, get_cache_path
 from cre.structref import gen_structref_code, define_structref
 # from cre.context import cre_context

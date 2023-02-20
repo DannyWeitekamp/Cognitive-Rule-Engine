@@ -19,14 +19,12 @@ if(not skip.get()):
     from cre.fact import define_fact, BaseFact, Fact, FactProxy
     from cre.tuple_fact import TupleFact, TF
     from cre.var import Var
-    # from cre.op import Op, UntypedOp
     from cre.cre_func import CREFunc
     from cre.conditions import Literal, Conditions
 
     # Other helpful things exposed at the package level
     from cre.context import cre_context
     from cre.memset import MemSet
-    from cre.ptrop import PtrOp
 
     import cre.dynamic_exec
 

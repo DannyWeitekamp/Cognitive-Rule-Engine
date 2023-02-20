@@ -17,7 +17,6 @@ from cre.utils import (cast, _nullify_attr, new_w_del, _memcpy, _func_from_addre
                        _decref_ptr, _incref_ptr, _incref_structref, _decref_structref, _ptr_from_struct_incref, ptr_t, _load_ptr,
                        _obj_cast_codegen)
 from cre.utils import PrintElapse, encode_idrec, assign_to_alias_in_parent_frame, as_typed_list, lower_setattr, _store, _store_safe, _tuple_getitem
-from cre.subscriber import base_subscriber_fields, BaseSubscriber, BaseSubscriberType, init_base_subscriber, link_downstream
 from cre.vector import VectorType
 from cre.fact import Fact, gen_fact_import_str, get_offsets_from_member_types
 from cre.var import Var, var_memcopy, VarType, VarTypeClass

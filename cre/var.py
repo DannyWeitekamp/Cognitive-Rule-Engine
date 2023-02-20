@@ -14,7 +14,6 @@ from cre.structref import define_structref, define_boxing, define_structref_temp
 from cre.fact import define_fact, BaseFact, cast_fact, DeferredFactRefType, Fact, _standardize_type
 from cre.utils import cast, PrintElapse, ptr_t, decode_idrec, lower_getattr,  lower_setattr, lower_getattr, _decref_ptr, _incref_ptr, _incref_structref, _ptr_from_struct_incref
 from cre.utils import assign_to_alias_in_parent_frame, encode_idrec, _obj_cast_codegen
-from cre.subscriber import base_subscriber_fields, BaseSubscriber, BaseSubscriberType, init_base_subscriber, link_downstream
 from cre.vector import VectorType
 from cre.cre_object import cre_obj_field_dict,CREObjType, CREObjTypeClass, CREObjProxy, set_chr_mbrs
 from cre.type_conv import ptr_to_var_name

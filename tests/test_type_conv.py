@@ -3,7 +3,6 @@ from numba import types, jit,njit
 from numba import void,b1,u1,u2,u4,u8,i1,i2,i4,i8,f4,f8,c8,c16
 from numba.types import ListType, unicode_type
 from cre.type_conv import str_to_float, str_to_int, int_to_str, float_to_str
-from cre.op import Op
 from cre.var import Var
 
 
@@ -82,22 +81,6 @@ def test_str_float_overloaded():
     assert _str_test() == '1.2'
 
 
-def test_ops():
-    class StrToFloat(Op):
-        signature = f8(unicode_type,)
-        def call(x):
-            return float(x)
-
-    class Add3(Op):
-        signature = f8(f8,f8,f8)        
-        commutes = True
-        def call(a, b, c):
-            return a + b + c
-
-    x,y,z = Var(unicode_type,'x'), Var(unicode_type,'y'), Var(unicode_type,'z')
-    op = Add3(StrToFloat(x),StrToFloat(y),StrToFloat(z))
-    assert str(op) == 'Add3(StrToFloat(x), StrToFloat(y), StrToFloat(z))'
-    assert op('1','2','3') == 6.0
 
 if __name__ == "__main__":
     print(str_to_float("0"))

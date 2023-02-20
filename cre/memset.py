@@ -17,7 +17,6 @@ from numba.core.errors import TypingError
 from numba.experimental.function_type import _get_wrapper_address
 from llvmlite import binding as ll
 
-from cre.gensource import assert_gen_source
 from cre.caching import unique_hash, source_to_cache, import_from_cached, source_in_cache
 from collections import namedtuple
 import numpy as np

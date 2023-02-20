@@ -11,7 +11,6 @@ import logging
 import numpy as np
 import pytest
 from collections import namedtuple
-from cre.subscriber import BaseSubscriberType, init_base_subscriber
 from cre.utils import _struct_from_meminfo, PrintElapse
 import gc
 from numba.core.runtime.nrt import rtsys
@@ -334,50 +333,6 @@ def _test_iter_facts():
             assert isinstance(all_tf[0], BOOP1)
             assert len(all_tf) == 9
 
-        # for i in range(2):
-        #     all_tf = iter_b1(ms)
-        #     print(all_tf)
-        #     assert isinstance(all_tf[0], BOOP1)
-        #     assert len(all_tf) == 3
-
-        # all_tf = list(ms.get_facts(BOOP1))
-        # assert isinstance(all_tf[0], BOOP1)
-        # assert len(all_tf) == 3
-
-
-##### test_subscriber #####
-
-# @njit(cache=True)
-# def dummy_subscriber_ctor():
-#     st = new(BaseSubscriberType)
-#     init_base_subscriber(st)
-
-#     return st
-
-# def test_grow_change_queues():
-#     with cre_context("test_grow_change_queues"):
-#         TextField = define_fact("TextField",tf_spec)
-#         #NRT version
-#         ms = MemSet()
-#         dummy_subscriber = dummy_subscriber_ctor() 
-#         ms.add_subscriber(dummy_subscriber)
-
-#         idrec = ms.declare(TextField("A","B","C","D","E"))
-
-#         ch_q = ms.change_queue
-#         assert ch_q.data[ch_q.head-1] == idrec
-
-#         t_id, f_id, _ = decode_idrec(idrec)
-
-#         # assert ms.subscribers[0].grow_queue.data[0] == idrec
-#         # gr_q = ms.grow_queue
-#         # assert gr_q.data[gr_q.head-1] == idrec
-
-#         ms.retract(idrec)
-
-#         # assert ms.subscribers[0].change_queue.data[0] == idrec
-#         # ch_q = ms.change_queue
-#         assert ch_q.data[ch_q.head-1] == encode_idrec(t_id, f_id, 0xFF)
 
 with cre_context("test_mem_leaks"):
     TextField = define_fact("TextField",tf_spec)

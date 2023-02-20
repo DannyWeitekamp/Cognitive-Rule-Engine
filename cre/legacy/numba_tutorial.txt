@@ -1,0 +1,129 @@
+import numpy as np
+from numba import njit, f8, i8, u8, i2, generated_jit, types
+from numba.types import unicode_type, DictType, ListType
+from numba.typed import Dict, List
+import time
+
+from cre.structref import define_structref
+from cre.fact import define_fact
+
+
+class PrintElapse():
+    def __init__(self, name):
+        self.name = name
+    def __enter__(self):
+        self.t0 = time.time_ns()/float(1e6)
+    def __exit__(self,*args):
+        self.t1 = time.time_ns()/float(1e6)
+        print(f'{self.name}: {self.t1-self.t0:.2f} ms')
+
+
+exec("print('HI')")
+
+
+
+# FOO, FOOType = define_structref("FOO", {"A" : i8, "B": unicode_type})
+
+FOO, FOOType = define_fact("FOO", {"A" : float, "B": str})
+
+@njit(cache=True)
+def foo():
+    f = FOO(1,"2")
+    print(f.A)
+    print(f.B)
+    return f
+
+f = foo()
+
+
+
+@njit(cache=True)
+def bar(f):
+    # f = FOO(1,"2")
+    print(f.A)
+    print(f.B)
+    return f
+
+print(bar(FOO(2,"B")))
+
+# @njit(cache=True)
+# def foo(n, c):
+#     a = np.arange(n) * c
+#     m = np.empty((n,n),dtype=np.float64)
+#     for i in range(n):
+#         for j in range(n):
+#             m[i,j] = a[i] + a[j]
+#     return m
+
+# N = 1000
+
+# # print(list(foo.__dict__.keys()))
+# with PrintElapse("FOO"):
+#     print(foo.py_func(N,7))
+
+
+# with PrintElapse("FOO"):
+#     print(foo(N,7))
+
+# with PrintElapse("FOO"):
+#     print(foo(N,7))
+
+
+
+# @njit(DictType(types.optional()) cache=True)
+# def bar(s, x):
+#     d = {} #Dict.empty(unicode_type, i8)
+#     if(x > 2):
+#         d[s] = None
+#     else:
+#         d[s] = 1
+#     # d[x] = 1
+#     return d
+#     # return len(s) + x
+
+
+#
+
+# print(bar("AAAA", 2))
+
+
+# @generated_jit(cache=True)
+# def foo_gen(a, b):
+#     print(a,b)
+#     if(a == unicode_type and b == unicode_type):
+#         def impl(a, b):
+#             return "STRING:" + a + b
+#     else:
+#         def impl(a, b):
+#             return a + b
+#     return impl
+
+
+
+# print(foo_gen(1,2))
+# print(foo_gen("1","2"))
+
+
+# print(types.literal("2"))
+# print(types.TypeRef(unicode_type))
+
+
+
+
+# @overload_method(SetChainingPlannerTypeTemplate, "declare")
+# # def 
+
+
+# class MYCLASS():
+
+#     def foo():
+
+
+
+# @njit
+# def foo(planner):
+#     planner.declare(...)
+
+
+# def foo():
+#     planner.declare()

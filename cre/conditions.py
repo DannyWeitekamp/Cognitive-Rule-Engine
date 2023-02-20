@@ -13,7 +13,6 @@ from cre.structref import define_structref, define_structref_template, StructRef
 from cre.fact import define_fact, BaseFact, cast_fact, FactProxy
 from cre.utils import cast, _incref_structref, decode_idrec, lower_getattr, lower_setattr, lower_getattr,  _ptr_from_struct_incref, _decref_ptr
 from cre.utils import assign_to_alias_in_parent_frame, meminfo_type
-from cre.subscriber import base_subscriber_fields, BaseSubscriber, BaseSubscriberType, init_base_subscriber, link_downstream
 from cre.vector import VectorType
 
 # from cre.op import CREFuncType, op_str, Op

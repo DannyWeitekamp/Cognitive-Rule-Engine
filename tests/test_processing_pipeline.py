@@ -245,7 +245,7 @@ def test_pipeline():
 
 from operator import itemgetter
 def test_condition_generalizing():
-    from cre.rete import repr_match_iter_dependencies
+    from cre.matching import repr_match_iter_dependencies
 
     with cre_context("test_condition_generalizing"):
         (Container, TextField,Component, Button) = setup_fact_types()

@@ -10,7 +10,7 @@ from numba.experimental.structref import new, define_boxing, define_attributes, 
 from numba.extending import lower_cast, NativeValue, box, unbox, overload_method, intrinsic, overload_attribute, intrinsic, lower_getattr_generic, overload, SentryLiteralArgs
 from numba.core.typing.templates import AttributeTemplate
 from numba.core.errors import NumbaError, NumbaPerformanceWarning
-from cre.caching import gen_import_str, unique_hash,import_from_cached, source_to_cache, source_in_cache, cache_safe_exec, get_cache_path
+from cre.caching import gen_import_str, unique_hash_v, import_from_cached, source_to_cache, source_in_cache, cache_safe_exec, get_cache_path
 from cre.context import cre_context
 from cre.structref import define_structref, define_structref_template, StructRefType
 from cre.utils import (cast, _nullify_attr, new_w_del, _memcpy, _func_from_address, decode_idrec, lower_getattr,  
@@ -1771,7 +1771,7 @@ def define_CREFunc(name, members):
     # Regenerate the source for this type if wasn't cached or if 'cache=False' 
     unq_args = [name, return_type, arg_types, nopy_call, nopy_check, call_unq, check_unq, no_raise, ptr_args]
     gen_src_args = [name, return_type, arg_types, nopy_call, nopy_check, call_bytes, check_bytes, no_raise, ptr_args]
-    long_hash = unique_hash(unq_args)
+    long_hash = unique_hash_v(unq_args)
 
     if(not source_in_cache(name, long_hash)): #or members.get('cache',True) == False):
         source = gen_cre_func_source(*gen_src_args, long_hash)

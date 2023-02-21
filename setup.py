@@ -1,7 +1,19 @@
 from setuptools import setup, find_packages, Extension
 import os, sys, sysconfig
+import re
 
-  
+# Try to get the version from 
+VERSIONFILE="cre/_version.py"
+verstrline = open(VERSIONFILE, "rt").read()
+VSRE = r"^__version__ = ['\"]([^'\"]*)['\"]"
+mo = re.search(VSRE, verstrline, re.M)
+if mo:
+    __version__ = mo.group(1)
+else:
+    raise RuntimeError("Unable to find version string in %s." % (VERSIONFILE,))
+
+
+# Read requirements.txt for requirements
 with open('requirements.txt') as f: 
     requirements = f.readlines() 
 
@@ -13,13 +25,6 @@ dev_requirements = [
     "pytest-benchmark"
 ]
 
-
-
-
-# if sys.platform.startswith('linux'):
-#     # Patch for #2555 to make wheels without libpython
-#     sysconfig.get_config_vars()['Py_ENABLE_SHARED'] = 0
-# print("<<", sysconfig.get_path('include'))
 
 def ensure_numba():
     from importlib import import_module
@@ -71,7 +76,7 @@ def get_ext_modules():
   
 setup( 
         name ='cre', 
-        version ='0.3.0', 
+        version = __version__, 
         author ='Daniel Weitekamp', 
         author_email ='weitekamp@cmu.edu', 
         url ='https://github.com/DannyWeitekamp/Cognitive-Rule-Engine', 
@@ -80,10 +85,7 @@ setup(
         long_description_content_type ="text/markdown", 
         license ='MIT', 
         packages = find_packages(include=['cre','cre_caching']), 
-        # scripts=['bin/altrain'],
-        # entry_points ={ 
-            
-        # }, 
+        
         entry_points={
             "console_scripts": [
                 "cre = console.cre_exec:main"

@@ -78,16 +78,30 @@ def update_unique_hash(m,obj):
 		m.update(str(obj).encode('utf-8'))
 
 
-def unique_hash(stuff,hash_func='sha256'):
+def unique_hash(stuff, hash_func='sha256'):
+	'''Returns a 64-bit encoded hashstring of some 'stuff' '''
 	m = hashlib.new(hash_func)
 	update_unique_hash(m,stuff)	
-	# return m.hexdigest()
 
 	# Encode in base64 map the usual altchars '/' and "+' to 'A' and 'B".
 	s = b64encode(m.digest(),altchars=b'AB').decode('utf-8')
 	# Strip the trailing '='.
 	s = s[:-1]
 	return s
+
+def unique_hash_v(stuff, hash_func='sha256'):
+	'''Same as unique_hash but adds in cre.__version__'''
+	from cre import __version__
+	m = hashlib.new(hash_func)
+	update_unique_hash(m,__version__)	
+	update_unique_hash(m,stuff)	
+
+	# Encode in base64 map the usual altchars '/' and "+' to 'A' and 'B".
+	s = b64encode(m.digest(),altchars=b'AB').decode('utf-8')
+	# Strip the trailing '='.
+	s = s[:-1]
+	return s
+
 
 def get_cache_path(name,hsh=None,suffix=".py"):
 	if(hsh is None):

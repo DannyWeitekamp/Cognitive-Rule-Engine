@@ -4,7 +4,6 @@ from numba.types import unicode_type,  intp, Tuple,  Tuple, DictType, ListType
 from numba.typed import Dict, List
 from numba.experimental.structref import new
 from cre.core import short_name
-from cre.caching import unique_hash, source_to_cache, import_from_cached, source_in_cache, get_cache_path
 from cre.cre_object import CREObjType
 from cre.fact import define_fact, UntypedFact, call_untyped_fact, BaseFact
 from cre.fact_intrinsics import fact_lower_getattr, resolve_fact_getattr_type

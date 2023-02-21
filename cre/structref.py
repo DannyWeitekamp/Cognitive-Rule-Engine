@@ -1,7 +1,7 @@
 from numba.typed import Dict, List
 from numba.types import DictType, ListType
 from numba import i8, types
-from cre.caching import unique_hash, source_in_cache, import_from_cached, source_to_cache
+from cre.caching import unique_hash_v, source_in_cache, import_from_cached, source_to_cache
 from numba.experimental import structref
 from numba.core.typeconv import Conversion
 from numba.extending import intrinsic
@@ -67,7 +67,7 @@ class {typ}(structref.StructRefProxy):
 
 def define_structref_template(name, fields, define_constructor=True,define_boxing=True):
     if(isinstance(fields,dict)): fields = [(k,v) for k,v in fields.items()]
-    hash_code = unique_hash([name,fields, define_constructor, define_boxing])
+    hash_code = unique_hash_v([name,fields, define_constructor, define_boxing])
     # if(name == "ExplanationTreeEntry"): print(name, fields, hash_code)
     
     if(not source_in_cache(name,hash_code)):

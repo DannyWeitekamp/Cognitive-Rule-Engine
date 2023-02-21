@@ -7,6 +7,7 @@ if(not skip.get()):
     import cre.cfuncs
 
     # Instantiate the default context at the package level
+    from cre._version import __version__
     import cre.context as context_module
 
     cre_context_ctxvar = contextvars.ContextVar("cre_context",

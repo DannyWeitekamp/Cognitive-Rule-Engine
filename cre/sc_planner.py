@@ -9,7 +9,7 @@ from numba.experimental import structref
 from numba.experimental.structref import new, define_boxing, define_attributes, _Utils
 from numba.extending import overload_method, intrinsic, overload_attribute, intrinsic, lower_getattr_generic, overload, infer_getattr, lower_setattr_generic
 from numba.core.typing.templates import AttributeTemplate
-from cre.caching import gen_import_str, unique_hash,import_from_cached, source_to_cache, source_in_cache, cache_safe_exec, get_cache_path
+from cre.caching import gen_import_str, unique_hash_v, import_from_cached, source_to_cache, source_in_cache, cache_safe_exec, get_cache_path
 from cre.context import cre_context
 from cre.structref import define_structref, define_structref_template
 from cre.var import VarType
@@ -1148,9 +1148,9 @@ def apply_multi(op, planner, depth, min_stop_depth=-1):
         generic = op.long_hash is None or op.is_composed or op.func_name == "GenericCREFunc"
 
         if(generic):
-            hash_code = unique_hash([op.return_type, op.arg_types])
+            hash_code = unique_hash_v([op.return_type, op.arg_types])
         else:
-            hash_code = unique_hash([op.long_hash])
+            hash_code = unique_hash_v([op.long_hash])
         # print(get_cache_path('apply_multi',hash_code))
         if(not source_in_cache('apply_multi',hash_code)):
             src = gen_apply_multi_source(op, generic)

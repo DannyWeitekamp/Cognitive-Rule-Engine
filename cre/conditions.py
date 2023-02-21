@@ -7,7 +7,6 @@ from numba.experimental import structref
 from numba.experimental.structref import new, define_boxing, define_attributes, _Utils
 from numba.extending import lower_cast, overload_method, intrinsic, overload_attribute, intrinsic, lower_getattr_generic, overload, infer_getattr, lower_setattr_generic, SentryLiteralArgs
 from numba.core.typing.templates import AttributeTemplate
-from cre.caching import gen_import_str, unique_hash,import_from_cached, source_to_cache, source_in_cache
 from cre.context import cre_context
 from cre.structref import define_structref, define_structref_template, StructRefType
 from cre.fact import define_fact, BaseFact, cast_fact, FactProxy
@@ -29,64 +28,7 @@ from copy import copy
 import inspect
 import sys
 
-#### Literal Link Data ####
-
-# literal_link_data_field_dict = {
-#     "left_t_id" : u8,
-#     "right_t_id" : u8,
-#     "left_facts" : VectorType, #Vector<*Fact>
-#     "right_facts" : VectorType, #Vector<*Fact>
-    
-#     "change_head": i8,
-#     "grow_head": i8,
-#     "change_queue": VectorType,
-#     # "grow_queue": VectorType,
-#     # "ms_grow_queue" : VectorType,
-#     "ms_change_queue" : VectorType,
-
-
-
-#     "truth_values" : u1[:,:],
-#     "left_consistency" : u1[:],
-#     "right_consistency" : u1[:],
-# }
-
-# literal_link_data_fields = [(k,v) for k,v, in literal_link_data_field_dict.items()]
-# LiteralLinkData, LiteralLinkDataType = define_structref("LiteralLinkData", 
-#                 literal_link_data_fields, define_constructor=False)
-
-
-# @njit(cache=True)
-# def generate_link_data(pn, ms):
-#     '''Takes a prototype predicate node and a knowledge base and returns
-#         a link_data instance for that predicate node.
-#     '''
-#     link_data = new(LiteralLinkDataType)
-#     link_data.left_t_id = ms.context_data.fact_to_t_id[pn.left_fact_type_name]
-#     link_data.left_facts = facts_for_t_id(ms,i8(link_data.left_t_id)) 
-#     if(not pn.is_alpha):
-#         link_data.right_t_id = ms.context_data.fact_to_t_id[pn.right_fact_type_name]
-#         link_data.right_facts = facts_for_t_id(ms,i8(link_data.right_t_id)) 
-#         link_data.left_consistency = np.empty((0,),dtype=np.uint8)
-#         link_data.right_consistency = np.empty((0,),dtype=np.uint8)
-#     else:
-#         link_data.right_t_id = -1
-
-
-#     link_data.change_head = 0
-#     link_data.grow_head = 0
-#     link_data.change_queue = new_vector(8)
-#     # link_data.grow_queue = new_vector(8)
-
-#     # link_data.ms_grow_queue = ms.grow_queue
-#     link_data.ms_change_queue = ms.change_queue
-#     link_data.truth_values = np.empty((0,0),dtype=np.uint8)
-        
-    
-#     return link_data
-
 #### Literal ####
-
 
 literal_fields_dict = {
     # "str_val" : unicode_type,

@@ -1,7 +1,7 @@
 from numba import njit, u1,u2, i4, i8, u8, types, literal_unroll, generated_jit
 from numba.typed import List
 from numba.types import ListType, unicode_type
-from cre.caching import unique_hash, source_to_cache, import_from_cached, source_in_cache, get_cache_path
+from cre.caching import unique_hash_v, source_to_cache, import_from_cached, source_in_cache, get_cache_path
 from cre.fact import base_fact_field_dict, BaseFact, FactProxy, Fact, lines_in_type_registry, add_to_type_registry, add_type_pickle
 from cre.fact_intrinsics import fact_lower_setattr, _register_fact_structref
 from cre.cre_object import cre_obj_get_item, CREObjType, CREObjProxy, CREObjTypeClass, member_info_type
@@ -168,7 +168,7 @@ def define_tuple_fact(member_types, context=None, return_proxy=False, return_typ
     else:
         specialization_name = None
 
-    TF_hash_code = unique_hash(["TupleFact",member_types])
+    TF_hash_code = unique_hash_v(["TupleFact",member_types])
     if(not source_in_cache("TupleFact",TF_hash_code)):
         # Possible for other types to be defined while running the Fact source
         #  so preregister the t_id then add the pickle later.

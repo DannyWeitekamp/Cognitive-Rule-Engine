@@ -13,7 +13,7 @@ from cre.utils import (cast, wptr_t, ptr_t, _dict_from_ptr, _get_array_raw_data_
          _decref_structref, _decref_ptr, cast_structref, _struct_tuple_from_pointer_arr, _meminfo_from_struct,
          lower_getattr, lower_setattr, ptr_to_meminfo, _memcpy, _incref_ptr, _incref_structref)
 from cre.structref import define_structref, StructRefType
-from cre.caching import gen_import_str, unique_hash,import_from_cached, source_to_cache, source_in_cache, cache_safe_exec, get_cache_path
+from cre.caching import gen_import_str, unique_hash_v, import_from_cached, source_to_cache, source_in_cache, cache_safe_exec, get_cache_path
 from cre.memset import MemSetType
 from cre.vector import VectorType
 from cre.var import VarType
@@ -1390,7 +1390,7 @@ class MatchIterator(structref.StructRefProxy):
             #Cache 'output_types' and 'specialized_m_iter_type'
             
             if(var_base_types not in cls.m_iter_type_cache):
-                hash_code = unique_hash([var_base_types])
+                hash_code = unique_hash_v([var_base_types])
                 if(not source_in_cache('MatchIterator', hash_code)):
                     output_types = types.TypeRef(types.Tuple([types.TypeRef(x) for x in conds.var_base_types]))
                     source = gen_match_iter_source(output_types)

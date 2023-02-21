@@ -3,7 +3,7 @@ from numba import njit, generated_jit, types, literal_unroll, u8, i8, f8, u1, u2
 from numba.types import unicode_type,  intp, Tuple,  Tuple, DictType, ListType
 from numba.typed import Dict, List
 from numba.experimental.structref import new
-from cre.cre_object import CREObjType
+from cre.obj import CREObjType
 from cre.fact import define_fact, UntypedFact, call_untyped_fact, BaseFact
 from cre.fact_intrinsics import fact_lower_getattr, resolve_fact_getattr_type
 from cre.context import cre_context

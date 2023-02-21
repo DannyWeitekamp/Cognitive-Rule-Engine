@@ -5,7 +5,7 @@ from numba.typed import List
 from numba.extending import  overload, overload_method
 from cre.utils import cast, _load_ptr, _raw_ptr_from_struct, _raw_ptr_from_struct_incref, CastFriendlyMixin, decode_idrec, _func_from_address, _incref_structref, _struct_get_data_ptr, _sizeof_type, _decref_structref
 from cre.structref import define_structref
-from cre.cre_object import CREObjTypeClass, CREObjType, member_info_type, _iter_mbr_infos
+from cre.obj import CREObjTypeClass, CREObjType, member_info_type, _iter_mbr_infos
 from numba.core.datamodel import default_manager, models
 from numba.experimental.structref import define_attributes, StructRefProxy, new, define_boxing
 import operator
@@ -14,7 +14,7 @@ from cre.core import T_ID_CONDITIONS, T_ID_LITERAL, T_ID_OP, T_ID_FACT, T_ID_VAR
 from cre.tuple_fact import TupleFact
 from cre.var import VarType
 # from cre.op import GenericOpType
-from cre.cre_func import CREFuncType, ARGINFO_VAR, ARGINFO_OP, ARGINFO_CONST
+from cre.func import CREFuncType, ARGINFO_VAR, ARGINFO_OP, ARGINFO_CONST
 from cre.fact import BaseFact
 from cre.conditions import LiteralType, ConditionsType
 from numba.cpython.hashing import _Py_hash_t, _Py_uhash_t, _PyHASH_XXROTATE, _PyHASH_XXPRIME_1, _PyHASH_XXPRIME_2, _PyHASH_XXPRIME_5, process_return

@@ -22,7 +22,7 @@ from cre.fact import Fact, gen_fact_import_str, get_offsets_from_member_types
 from cre.fact_intrinsics import fact_lower_getattr
 from cre.var import Var, VarTypeClass, var_append_deref
 # from cre.op import CREFuncType, CREFuncTypeClass
-from cre.cre_func import CREFuncType, CREFuncTypeClass, CREFunc, cre_func_call_self, set_base_arg_val_impl, get_return_val_impl, CFSTATUS_ERROR, CFSTATUS_TRUTHY
+from cre.func import CREFuncType, CREFuncTypeClass, CREFunc, cre_func_call_self, set_base_arg_val_impl, get_return_val_impl, CFSTATUS_ERROR, CFSTATUS_TRUTHY
 from cre.make_source import make_source, gen_def_func, gen_assign, resolve_template, gen_def_class
 from numba.core import imputils, cgutils
 from numba.core.datamodel import default_manager, models
@@ -40,7 +40,7 @@ import time
 import cre.dynamic_exec
 import warnings
 import itertools
-from cre.builtin_cre_funcs import Identity
+from cre.default_funcs import Identity
 
 
 '''
@@ -1013,7 +1013,7 @@ from numba.types import ListType, DictType, Tuple
 import numpy as np
 import cloudpickle
 from cre.utils import cast, _dict_from_ptr, _list_from_ptr, _get_array_raw_data_ptr
-from cre.cre_func import CFSTATUS_TRUTHY, get_return_val_impl, set_base_arg_val_impl, cre_func_resolve_call_self
+from cre.func import CFSTATUS_TRUTHY, get_return_val_impl, set_base_arg_val_impl, cre_func_resolve_call_self
 from cre.sc_planner import SC_Record
 
 ''' 

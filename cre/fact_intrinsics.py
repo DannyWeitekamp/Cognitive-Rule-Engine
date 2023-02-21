@@ -22,7 +22,7 @@ from numba.experimental.structref import _Utils, imputils
 from numba.typed.typedobjectutils import _nonoptional
 
 from cre.utils import cast, _ptr_from_struct_codegen, _list_from_ptr, _cast_list
-from cre.cre_object import member_info_type, resolve_member_id
+from cre.obj import member_info_type, resolve_member_id
 
 
 
@@ -362,7 +362,7 @@ def define_attributes(struct_typeclass):
 
 
 def _register_fact_structref(fact_type):
-    from cre.cre_object import CREObjModel
+    from cre.obj import CREObjModel
     if fact_type is types.StructRef:
         raise ValueError(f"cannot register {types.StructRef}")
     default_manager.register(fact_type, CREObjModel)

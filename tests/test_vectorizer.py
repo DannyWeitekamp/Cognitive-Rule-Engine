@@ -7,7 +7,7 @@ from cre.memset import MemSet
 from cre.transform.flattener import Flattener, flattener_update
 from cre.fact import define_fact
 import pytest_benchmark
-from cre.builtin_cre_funcs import Equals
+from cre.default_funcs import Equals
 from cre.transform.feature_applier import FeatureApplier
 from cre.transform.vectorizer import Vectorizer
 from pprint import pprint

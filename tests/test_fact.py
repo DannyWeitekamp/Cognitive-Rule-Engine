@@ -5,7 +5,7 @@ from cre.fact import (_fact_from_spec, _standardize_spec, _merge_spec_inheritanc
 from cre.utils import cast
 from cre.context import cre_context
 from cre.memset import MemSet
-from cre.cre_object import CREObjType, copy_cre_obj
+from cre.obj import CREObjType, copy_cre_obj
 from numba import njit, u8, u1, generated_jit
 from numba.typed import List
 from numba.types import ListType

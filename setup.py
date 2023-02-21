@@ -3,7 +3,7 @@ import os, sys, sysconfig
 import re
 
 # Try to get the version from 
-VERSIONFILE="cre/_version.py"
+VERSIONFILE="cre/version.py"
 verstrline = open(VERSIONFILE, "rt").read()
 VSRE = r"^__version__ = ['\"]([^'\"]*)['\"]"
 mo = re.search(VSRE, verstrline, re.M)

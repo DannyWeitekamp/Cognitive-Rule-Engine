@@ -34,7 +34,7 @@ from textwrap import dedent, indent
 from collections.abc import Iterable
 from cre.op import Op, OpMeta, UntypedOp, resolve_return_type, new_vars_from_types, op_ctor
 from cre.utils import PrintElapse
-from cre.cre_object import CREObjType
+from cre.obj import CREObjType
 import warnings
 
 

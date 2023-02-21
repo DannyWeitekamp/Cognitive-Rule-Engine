@@ -4,7 +4,7 @@ from numba.typed import List
 from cre.conditions import OR, AND, literal_ctor, literal_not
 from cre.memset import MemSet
 from cre.context import cre_context
-from cre.cre_object import CREObjType
+from cre.obj import CREObjType
 from cre.fact import define_fact
 from cre.var import Var
 from time import time_ns
@@ -519,7 +519,7 @@ def test_anti_unify():
 
 if(__name__ == "__main__"):
     import faulthandler; faulthandler.enable()
-    from cre.cre_func import cre_func_unique_string
+    from cre.func import cre_func_unique_string
     x, y, z = Var(f8,'x'), Var(f8,'y'), Var(f8,'z')
 
     print(cre_func_unique_string((x + z) + (y + z)))

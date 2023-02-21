@@ -8,7 +8,7 @@ from cre.default_ops import Add
 from cre.var import Var
 from cre.utils import _func_from_address, _cast_structref
 from cre.context import cre_context
-from cre.cre_object import CREObjType
+from cre.obj import CREObjType
 from cre.fact import define_fact
 import cre.dynamic_exec 
 import re

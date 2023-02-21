@@ -4,7 +4,7 @@ from numba.types import ListType, unicode_type
 from cre.caching import unique_hash_v, source_to_cache, import_from_cached, source_in_cache, get_cache_path
 from cre.fact import base_fact_field_dict, BaseFact, FactProxy, Fact, lines_in_type_registry, add_to_type_registry, add_type_pickle
 from cre.fact_intrinsics import fact_lower_setattr, _register_fact_structref
-from cre.cre_object import cre_obj_get_item, CREObjType, CREObjProxy, CREObjTypeClass, member_info_type
+from cre.obj import cre_obj_get_item, CREObjType, CREObjProxy, CREObjTypeClass, member_info_type
 from cre.utils import _struct_get_attr_offset, _sizeof_type, _struct_get_data_ptr, _load_ptr, _struct_get_attr_offset, _obj_cast_codegen, encode_idrec, decode_idrec, _incref_structref, _get_member_offset
 # from cre.primitive import Primitive
 from cre.context import cre_context
@@ -65,7 +65,7 @@ from cre.fact import uint_to_inheritance_bytes
 from cre.fact_intrinsics import define_boxing, get_fact_attr_ptr, _register_fact_structref, fact_mutability_protected_setattr, fact_lower_setattr, _fact_get_chr_mbrs_infos
 from cre.tuple_fact import TupleFactClass, TupleFactProxy, tf_field_dict_from_types, tf_get_item, T_ID_TUPLE_FACT{", TupleFact" if specialization_name else ""}
 from cre.utils import cast, encode_idrec, _get_member_offset
-from cre.cre_object import member_info_type, set_chr_mbrs
+from cre.obj import member_info_type, set_chr_mbrs
 import cloudpickle
 TF_T_ID = T_ID_TUPLE_FACT#{TF_T_ID}
 member_types = cloudpickle.loads({cloudpickle.dumps(member_types)})
@@ -151,7 +151,7 @@ define_boxing(SpecializedTFClass,SpecializedTFProxy)
 # f'TupleFact({', '.join([repr_tf_item(self,member_types[i],i) for i in range()])})'
 
 def define_tuple_fact(member_types, context=None, return_proxy=False, return_type_class=False):   
-    from cre.cre_func import CREFuncTypeClass, CREFuncType
+    from cre.func import CREFuncTypeClass, CREFuncType
     # print("::", member_types)
     
     member_types = list(member_types)

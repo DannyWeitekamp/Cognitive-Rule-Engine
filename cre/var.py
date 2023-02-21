@@ -14,7 +14,7 @@ from cre.fact import define_fact, BaseFact, cast_fact, DeferredFactRefType, Fact
 from cre.utils import cast, PrintElapse, ptr_t, decode_idrec, lower_getattr,  lower_setattr, lower_getattr, _decref_ptr, _incref_ptr, _incref_structref, _ptr_from_struct_incref
 from cre.utils import assign_to_alias_in_parent_frame, encode_idrec, _obj_cast_codegen
 from cre.vector import VectorType
-from cre.cre_object import cre_obj_field_dict,CREObjType, CREObjTypeClass, CREObjProxy, set_chr_mbrs
+from cre.obj import cre_obj_field_dict,CREObjType, CREObjTypeClass, CREObjProxy, set_chr_mbrs
 from cre.type_conv import ptr_to_var_name
 # from cre.predicate_node import BasePredicateNode,BasePredicateNodeType, get_alpha_predicate_node_definition, \
 # get_beta_predicate_node_definition, deref_attrs, define_alpha_predicate_node, define_beta_predicate_node, AlphaPredicateNode, BetaPredicateNode
@@ -326,27 +326,27 @@ class Var(StructRefProxy):
     
 
     def __lt__(self, other): 
-        from cre.builtin_cre_funcs import LessThan, FactIdrecsLessThan
+        from cre.default_funcs import LessThan, FactIdrecsLessThan
         if(isinstance(other,Var) and isinstance(other.head_type,Fact)):
             return FactIdrecsLessThan(self,other)
         else:
             return LessThan(self, other)
     def __le__(self, other): 
-        from cre.builtin_cre_funcs import LessThanEq
+        from cre.default_funcs import LessThanEq
         return LessThanEq(self, other)
             
     def __gt__(self, other): 
-        from cre.builtin_cre_funcs import GreaterThan, FactIdrecsLessThan
+        from cre.default_funcs import GreaterThan, FactIdrecsLessThan
         if(isinstance(other,Var) and isinstance(other.head_type,Fact)):
             return FactIdrecsLessThan(other,self)
         else:
             return GreaterThan(self, other)
 
     def __ge__(self, other):
-        from cre.builtin_cre_funcs import GreaterThanEq
+        from cre.default_funcs import GreaterThanEq
         return GreaterThanEq(self, other)
     def __eq__(self, other): 
-        from cre.builtin_cre_funcs import Equals, ObjEquals, ObjIsNone
+        from cre.default_funcs import Equals, ObjEquals, ObjIsNone
         from cre.conditions import cre_func_to_cond
 
         # with PrintElapse("new_ptr_op"):
@@ -366,7 +366,7 @@ class Var(StructRefProxy):
         return Equals(self, other)
     def __ne__(self, other): 
         return ~(self == other)
-        # from cre.builtin_cre_funcs import Equals, ObjEquals, ObjIsNone
+        # from cre.default_funcs import Equals, ObjEquals, ObjIsNone
         # if(other is None):
         #     return ~ObjIsNone(other)
         # if(isinstance(other,Var) and isinstance(other.head_type,Fact)):
@@ -374,60 +374,60 @@ class Var(StructRefProxy):
         # return ~Equals(self, other)
 
     def __add__(self, other):
-        from cre.builtin_cre_funcs import Add
+        from cre.default_funcs import Add
         return Add(self, other)
 
     def __radd__(self, other):
-        from cre.builtin_cre_funcs import Add
+        from cre.default_funcs import Add
         return Add(other, self)
 
     def __sub__(self, other):
-        from cre.builtin_cre_funcs import Subtract
+        from cre.default_funcs import Subtract
         return Subtract(self, other)
 
     def __rsub__(self, other):
-        from cre.builtin_cre_funcs import Subtract
+        from cre.default_funcs import Subtract
         return Subtract(other, self)
 
     def __mul__(self, other):
-        from cre.builtin_cre_funcs import Multiply
+        from cre.default_funcs import Multiply
         return Multiply(self, other)
 
     def __rmul__(self, other):
-        from cre.builtin_cre_funcs import Multiply
+        from cre.default_funcs import Multiply
         return Multiply(other, self)
 
     def __truediv__(self, other):
-        from cre.builtin_cre_funcs import Divide
+        from cre.default_funcs import Divide
         return Divide(self, other)
 
     def __rtruediv__(self, other):
-        from cre.builtin_cre_funcs import Divide
+        from cre.default_funcs import Divide
         return Divide(other, self)
 
     def __floordiv__(self, other):
-        from cre.builtin_cre_funcs import FloorDivide
+        from cre.default_funcs import FloorDivide
         return FloorDivide(self, other)
 
     def __rfloordiv__(self, other):
-        from cre.builtin_cre_funcs import FloorDivide
+        from cre.default_funcs import FloorDivide
         return FloorDivide(other, self)
 
     def __pow__(self, other):
-        from cre.builtin_cre_funcs import Power
+        from cre.default_funcs import Power
         return Power(self, other)
 
     def __rpow__(self, other):
-        from cre.builtin_cre_funcs import Power
+        from cre.default_funcs import Power
         return Power(other, self)
 
     def __mod__(self, other):
-        from cre.builtin_cre_funcs import Modulus
+        from cre.default_funcs import Modulus
         return Modulus(other, self)
 
     def __and__(self, other):
         from cre.conditions import conditions_and, cre_func_to_cond
-        from cre.cre_func import CREFunc
+        from cre.func import CREFunc
         if(isinstance(other,CREFunc)):
             other = cre_func_to_cond(other)
         out = conditions_and(self, other)
@@ -435,7 +435,7 @@ class Var(StructRefProxy):
 
     def __or__(self, other):
         from cre.conditions import conditions_or, cre_func_to_cond
-        from cre.cre_func import CREFunc
+        from cre.func import CREFunc
         if(isinstance(other,CREFunc)): other = cre_func_to_cond(other)
         return conditions_or(self, other)
 

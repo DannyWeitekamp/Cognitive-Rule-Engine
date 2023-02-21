@@ -18,7 +18,7 @@ from cre.memset import MemSetType
 from cre.vector import VectorType
 from cre.var import VarType
 # from cre.op import CREFuncType
-from cre.cre_func import CREFuncType, CFSTATUS_TRUTHY, get_best_call_self, set_base_arg_val_impl, REFKIND_UNICODE, REFKIND_STRUCTREF
+from cre.func import CREFuncType, CFSTATUS_TRUTHY, get_best_call_self, set_base_arg_val_impl, REFKIND_UNICODE, REFKIND_STRUCTREF
 from cre.conditions import LiteralType, build_distributed_dnf, ConditionsType
 from cre.vector import VectorType, new_vector
 from cre.fact import BaseFact 

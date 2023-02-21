@@ -15,9 +15,9 @@ from cre.utils import assign_to_alias_in_parent_frame, meminfo_type
 from cre.vector import VectorType
 
 # from cre.op import CREFuncType, op_str, Op
-from cre.cre_func import CREFuncType, CREFunc, cre_func_unique_string
+from cre.func import CREFuncType, CREFunc, cre_func_unique_string
 
-from cre.cre_object import CREObjType, CREObjTypeClass
+from cre.obj import CREObjType, CREObjTypeClass
 from cre.core import T_ID_CONDITIONS, T_ID_LITERAL, register_global_default
 from numba.core import imputils, cgutils
 from numba.core.datamodel import default_manager, models

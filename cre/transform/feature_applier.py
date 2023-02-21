@@ -3,15 +3,15 @@ from numba import njit, generated_jit, types, literal_unroll, u8, i8, f8, u1, u2
 from numba.types import unicode_type,  intp, Tuple,  Tuple, DictType, ListType
 from numba.typed import Dict, List
 from numba.experimental.structref import new
-from cre.cre_object import copy_cre_obj, CREObjType
+from cre.obj import copy_cre_obj, CREObjType
 from cre.fact import define_fact, UntypedFact, call_untyped_fact, BaseFact
 from cre.fact_intrinsics import fact_lower_getattr, resolve_fact_getattr_type
 from cre.context import cre_context
 from cre.tuple_fact import TupleFact, TF
-# from cre.builtin_cre_funcs import Add, Subtract, Divide
+# from cre.default_funcs import Add, Subtract, Divide
 from cre.var import Var, VarType
 # from cre.op import CREFuncType
-from cre.cre_func import CREFuncType, get_best_call_self, get_return_val_impl, set_base_arg_val_impl, CFSTATUS_TRUTHY
+from cre.func import CREFuncType, get_best_call_self, get_return_val_impl, set_base_arg_val_impl, CFSTATUS_TRUTHY
 from cre.utils import cast, PrintElapse,encode_idrec, _func_from_address, _obj_cast_codegen, _func_from_address, _incref_structref, decode_idrec, _ptr_to_data_ptr, _load_ptr, _struct_tuple_from_pointer_arr, _incref_ptr
 from cre.structref import define_structref
 from numba.experimental import structref
@@ -437,7 +437,7 @@ def feature_applier_clear(self):
 # if(__name__ == "__main__"):
 #     import faulthandler; faulthandler.enable()
 #     from cre.flattener import Flattener
-#     from cre.builtin_cre_funcs import Equals
+#     from cre.default_funcs import Equals
 #     with cre_context("test_feature_applier") as context:
 #         spec1 = {"A" : {"type" : "string", "visible" : True}, 
 #                  "B" : {"type" : "number", "visible" : False}}

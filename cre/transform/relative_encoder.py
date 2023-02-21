@@ -694,7 +694,7 @@ def get_rel_var(self, f_ind, source_vars, s_inds, extra_derefs=None):
 
     # return _make_rel_var(self, f_ind, s_ind, source_vars[s_i])
 from cre.core import T_ID_TUPLE_FACT, T_ID_VAR
-from cre.cre_object import copy_cre_obj, _iter_mbr_infos, cre_obj_set_item, CREObjType, PRIMITIVE_MBR_ID, OBJECT_MBR_ID
+from cre.obj import copy_cre_obj, _iter_mbr_infos, cre_obj_set_item, CREObjType, PRIMITIVE_MBR_ID, OBJECT_MBR_ID
 from cre.tuple_fact import TupleFact
 
 

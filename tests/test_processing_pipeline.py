@@ -7,7 +7,7 @@ from cre.memset import MemSet
 from cre.var import Var
 from cre.utils import PrintElapse, deref_info_type, decode_idrec
 from cre.fact import define_fact, FactProxy
-from cre.builtin_cre_funcs import Equals
+from cre.default_funcs import Equals
 from cre.context import cre_context
 from pprint import pprint
 from cre.transform.flattener import Flattener

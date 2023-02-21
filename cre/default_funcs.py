@@ -1,6 +1,6 @@
 from numba import i8, njit
 from numba.types import unicode_type
-from cre.cre_func import CREFunc
+from cre.func import CREFunc
 from cre.utils import _load_ptr
 
 

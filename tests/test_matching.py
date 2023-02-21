@@ -428,7 +428,7 @@ with cre_context("test_matching_benchmarks"):
 
 
 from weakref import WeakValueDictionary
-from cre.builtin_cre_funcs import LessThan, ObjEquals
+from cre.default_funcs import LessThan, ObjEquals
 from cre.var import var_assign_alias
 def test_mem_leaks():
     # with cre_context("test_matching_benchmarks"):

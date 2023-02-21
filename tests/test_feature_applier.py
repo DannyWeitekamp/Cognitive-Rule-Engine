@@ -5,12 +5,12 @@ from cre.context import cre_context
 from cre.memset import MemSet, MemSetType 
 from cre.fact import define_fact
 from cre.var import Var
-from cre.builtin_cre_funcs import Equals
+from cre.default_funcs import Equals
 from cre.transform.flattener import Flattener, flattener_update
 from cre.transform.feature_applier import FeatureApplier
 from numba.core.runtime.nrt import rtsys
 import gc
-from cre.cre_object import copy_cre_obj
+from cre.obj import copy_cre_obj
 import pytest
 
 var_a, var_b = Var(f8,'a'), Var(f8,'b')

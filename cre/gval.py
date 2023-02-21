@@ -3,14 +3,14 @@ from numba import types, f8, i8, u8, boolean, generated_jit, objmode
 from numba.extending import overload
 from numba.typed import List
 from numba.types import ListType, unicode_type
-from cre.cre_object import CREObjType, cre_obj_get_item, cre_obj_get_member_t_ids
+from cre.obj import CREObjType, cre_obj_get_item, cre_obj_get_member_t_ids
 from cre.fact import define_fact
 from cre.core import short_name, T_ID_TUPLE_FACT, T_ID_OP, T_ID_VAR
 from cre.context import cre_context
 from cre.utils import cast, decode_idrec
 from cre.var import get_deref_attrs_str, VarType
 # from cre.op import CREFuncType
-from cre.cre_func import CREFuncType
+from cre.func import CREFuncType
 
 
 # Define the base_type 'gval' for grounded values

@@ -5,7 +5,7 @@ from cre.context import cre_context
 from cre.tuple_fact import TupleFact, TF#TupleFact, assert_cre_obj, TupleFact
 from cre.fact import define_fact#TupleFact, assert_cre_obj, TupleFact
 # from cre.primitive import Primitive, StringPrimitiveType
-from cre.cre_object import CREObjType
+from cre.obj import CREObjType
 from cre.utils import PrintElapse, decode_idrec
 
 from numba import njit, f8, u8, i8, bool_
@@ -140,7 +140,7 @@ def test_hash():
     assert hsh(a1) != hsh(b4)
 
 def test_hash_obj_builtin_members():
-    from cre.builtin_cre_funcs import Equals
+    from cre.default_funcs import Equals
     from cre.var import Var
     eq_f8 = Equals(f8,f8)
     eq_str = Equals(unicode_type,unicode_type)
@@ -163,7 +163,7 @@ def test_hash_obj_builtin_members():
     assert hsh(a1) != hsh(b1)
 
 def test_eq_obj_builtin_members():
-    from cre.builtin_cre_funcs import Equals
+    from cre.default_funcs import Equals
     from cre.var import Var
     eq_f8 = Equals(f8,f8)
     eq_str = Equals(unicode_type,unicode_type)

@@ -7,7 +7,7 @@ if(not skip.get()):
     import cre.cfuncs
 
     # Instantiate the default context at the package level
-    from cre._version import __version__
+    from cre.version import __version__
     import cre.context as context_module
 
     cre_context_ctxvar = contextvars.ContextVar("cre_context",
@@ -16,11 +16,11 @@ if(not skip.get()):
 
     # Necessary to import these at package level to ensure that they are defined
     #  before a context is created
-    import cre.cre_object 
+    import cre.obj
     from cre.fact import define_fact, BaseFact, Fact, FactProxy
     from cre.tuple_fact import TupleFact, TF
     from cre.var import Var
-    from cre.cre_func import CREFunc
+    from cre.func import CREFunc
     from cre.conditions import Literal, Conditions
 
     # Other helpful things exposed at the package level

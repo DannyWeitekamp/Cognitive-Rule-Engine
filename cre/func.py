@@ -20,7 +20,7 @@ from cre.utils import PrintElapse, encode_idrec, assign_to_alias_in_parent_frame
 from cre.vector import VectorType
 from cre.fact import Fact, gen_fact_import_str, get_offsets_from_member_types
 from cre.var import Var, var_memcopy, VarType, VarTypeClass
-from cre.cre_object import CREObjType, cre_obj_field_dict, CREObjTypeClass, CREObjProxy, member_info_type, set_chr_mbrs, cre_obj_get_item_t_id_ptr, cre_obj_set_item, cre_obj_get_item, PRIMITIVE_MBR_ID
+from cre.obj import CREObjType, cre_obj_field_dict, CREObjTypeClass, CREObjProxy, member_info_type, set_chr_mbrs, cre_obj_get_item_t_id_ptr, cre_obj_set_item, cre_obj_get_item, PRIMITIVE_MBR_ID
 from cre.core import T_ID_OP, T_ID_STR, register_global_default
 from cre.make_source import make_source, gen_def_func, gen_assign, gen_if, gen_not, resolve_template, gen_def_class
 from numba.core import imputils, cgutils
@@ -664,74 +664,74 @@ class CREFunc(StructRefProxy):
         return get_head_var_ptrs(self)    
 
     def __lt__(self, other): 
-        from cre.builtin_cre_funcs import LessThan
+        from cre.default_funcs import LessThan
         return LessThan(self, other)
     def __le__(self, other): 
-        from cre.builtin_cre_funcs import LessThanEq
+        from cre.default_funcs import LessThanEq
         return LessThanEq(self, other)
     def __gt__(self, other): 
-        from cre.builtin_cre_funcs import GreaterThan
+        from cre.default_funcs import GreaterThan
         return GreaterThan(self, other)
     def __ge__(self, other):
-        from cre.builtin_cre_funcs import GreaterThanEq
+        from cre.default_funcs import GreaterThanEq
         return GreaterThanEq(self, other)
     def __eq__(self, other): 
-        from cre.builtin_cre_funcs import Equals
+        from cre.default_funcs import Equals
         return Equals(self, other)
     def __ne__(self, other): 
-        from cre.builtin_cre_funcs import Equals
+        from cre.default_funcs import Equals
         return ~Equals(self, other)
 
     def __add__(self, other):
-        from cre.builtin_cre_funcs import Add
+        from cre.default_funcs import Add
         return Add(self, other)
 
     def __radd__(self, other):
-        from cre.builtin_cre_funcs import Add
+        from cre.default_funcs import Add
         return Add(other, self)
 
     def __sub__(self, other):
-        from cre.builtin_cre_funcs import Subtract
+        from cre.default_funcs import Subtract
         return Subtract(self, other)
 
     def __rsub__(self, other):
-        from cre.builtin_cre_funcs import Subtract
+        from cre.default_funcs import Subtract
         return Subtract(other, self)
 
     def __mul__(self, other):
-        from cre.builtin_cre_funcs import Multiply
+        from cre.default_funcs import Multiply
         return Multiply(self, other)
 
     def __rmul__(self, other):
-        from cre.builtin_cre_funcs import Multiply
+        from cre.default_funcs import Multiply
         return Multiply(other, self)
 
     def __truediv__(self, other):
-        from cre.builtin_cre_funcs import Divide
+        from cre.default_funcs import Divide
         return Divide(self, other)
 
     def __rtruediv__(self, other):
-        from cre.builtin_cre_funcs import Divide
+        from cre.default_funcs import Divide
         return Divide(other, self)
 
     def __floordiv__(self, other):
-        from cre.builtin_cre_funcs import FloorDivide
+        from cre.default_funcs import FloorDivide
         return FloorDivide(self, other)
 
     def __rfloordiv__(self, other):
-        from cre.builtin_cre_funcs import FloorDivide
+        from cre.default_funcs import FloorDivide
         return FloorDivide(other, self)
 
     def __pow__(self, other):
-        from cre.builtin_cre_funcs import Power
+        from cre.default_funcs import Power
         return Power(self, other)
 
     def __rpow__(self, other):
-        from cre.builtin_cre_funcs import Power
+        from cre.default_funcs import Power
         return Power(other, self)
 
     def __mod__(self, other):
-        from cre.builtin_cre_funcs import Modulus
+        from cre.default_funcs import Modulus
         return Modulus(other, self)
 
     def __and__(self,other):
@@ -991,7 +991,7 @@ def cre_func_ctor(_cf_type, name, expr_template, shorthand_template, is_ptr_op):
 # --------------------------------------------------------------
 # : Copy
 
-from cre.cre_object import copy_cre_obj
+from cre.obj import copy_cre_obj
 @njit(cache=True)
 def cre_func_copy(cf):
     # Make a copy of the CreFunc via a memcpy (plus incref obj members)
@@ -1812,7 +1812,7 @@ from numba.types import unicode_type
 from numba.extending import lower_cast
 from numba.core.errors import NumbaError, NumbaPerformanceWarning
 from cre.utils import cast, PrintElapse, _load_ptr, _obj_cast_codegen, _store_safe, _struct_get_attr_ptr
-from cre.cre_func import (ensure_repr_const, cre_func_ctor, CREFunc_method, CREFunc_assign_method_addr,
+from cre.func import (ensure_repr_const, cre_func_ctor, CREFunc_method, CREFunc_assign_method_addr,
     CREFuncTypeClass, CREFuncType, VarType, CFSTATUS_TRUTHY, CFSTATUS_FALSEY, CFSTATUS_NULL_DEREF, CFSTATUS_ERROR)
 from cre.memset import resolve_deref_data_ptr
 from cre.fact import BaseFact
@@ -2165,7 +2165,7 @@ class UntypedCREFunc():
 # from numba.extending import lower_cast
 # from numba.core.errors import NumbaError, NumbaPerformanceWarning
 # from cre.utils import PrintElapse, _struct_from_ptr, _load_ptr, _obj_cast_codegen, _store_safe, 
-# from cre.cre_func import ensure_repr_const, cre_func_ctor, CREFunc_method, CREFunc_assign_method_addr, CREFuncTypeClass, CREFuncType, VarType
+# from cre.func import ensure_repr_const, cre_func_ctor, CREFunc_method, CREFunc_assign_method_addr, CREFuncTypeClass, CREFuncType, VarType
 # import cloudpickle
 
 # return_type = cloudpickle.loads({cloudpickle.dumps(return_type)})

@@ -1,8 +1,8 @@
 from numba import generated_jit, njit, i8, f8
 from numba.types import unicode_type, FunctionType
 from numba.core.errors import NumbaError, NumbaPerformanceWarning
-from cre.cre_func import CREFunc, set_op_arg, set_var_arg, reinitialize, CREFuncTypeClass, cre_func_copy
-from cre.cre_object import _get_chr_mbrs_infos_from_attrs, _iter_mbr_infos
+from cre.func import CREFunc, set_op_arg, set_var_arg, reinitialize, CREFuncTypeClass, cre_func_copy
+from cre.obj import _get_chr_mbrs_infos_from_attrs, _iter_mbr_infos
 from cre.fact import define_fact
 from cre.var import Var
 from cre.utils import PrintElapse, _func_from_address, _cast_structref
@@ -170,7 +170,7 @@ def test_njit_compose():
     assert f(1,2) == 6
     assert str(f) == "(x+1)*(y+1)"
 
-from cre.cre_func import cre_func_deep_copy_generic
+from cre.func import cre_func_deep_copy_generic
 def test_no_mutate_on_compose():
     a,b,c = Var(f8,'a'), Var(f8,'b'), Var(f8,'c')
     c0 = a + b + b
@@ -204,7 +204,7 @@ def test_commutes():
             return a + b
 
 def test_not_jittable():
-    from cre.builtin_cre_funcs import Add
+    from cre.default_funcs import Add
 
     with pytest.warns(NumbaPerformanceWarning):
         @CREFunc(signature=f8(f8))
@@ -424,7 +424,7 @@ def test_op_arith_overloads ():
     assert str(op) == "(x + z) ** 1"
 
 def test_ptr_ops():
-    from cre.builtin_cre_funcs import ObjIsNone, ObjEquals
+    from cre.default_funcs import ObjIsNone, ObjEquals
     with cre_context("test_ptr_ops"):
         BOOP = define_fact("BOOP", {"val" : f8,"nxt" : "BOOP"})
 

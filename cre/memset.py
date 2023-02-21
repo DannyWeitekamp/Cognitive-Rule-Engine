@@ -40,7 +40,7 @@ from cre.utils import (cast, CastFriendlyMixin, lower_setattr, _meminfo_from_str
  _store, _load_ptr, deref_info_type, DEREF_TYPE_ATTR, DEREF_TYPE_LIST, _ptr_to_data_ptr, _list_base_from_ptr, new_w_del)
 from cre.vector import new_vector, VectorType
 from cre.caching import import_from_cached, source_in_cache, source_to_cache
-from cre.cre_object import copy_cre_obj, cre_obj_clear_refs
+from cre.obj import copy_cre_obj, cre_obj_clear_refs
 
 BASE_T_ID_STACK_SIZE = 16
 BASE_F_ID_STACK_SIZE = 64

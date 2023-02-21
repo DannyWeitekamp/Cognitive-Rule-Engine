@@ -29,7 +29,7 @@ from cre.structref import gen_structref_code, define_structref
 from cre.utils import (cast, struct_get_attr_offset, _obj_cast_codegen,
                        _ptr_from_struct_codegen, CastFriendlyMixin, _obj_cast_codegen,
                         PrintElapse, _struct_get_data_ptr, _ptr_from_struct_incref)
-from cre.cre_object import CREObjTypeClass, cre_obj_field_dict, CREObjModel, CREObjType, member_info_type, CREObjProxy
+from cre.obj import CREObjTypeClass, cre_obj_field_dict, CREObjModel, CREObjType, member_info_type, CREObjProxy
 
 from numba.core.typeconv import Conversion
 import operator
@@ -361,7 +361,7 @@ def _merge_spec_inheritance(spec : dict, context):
     return {**inherit_spec, **spec}, inherit_from
 
 def _standardize_conversions(conversions, attr_type, context):
-    from cre.cre_func import UntypedCREFunc
+    from cre.func import UntypedCREFunc
     assert isinstance(conversions, dict), f"'conversions' expecting dict : type -> conversion_op, not {type(conversions)}."
     stand_conv = {}
     for conv_type, conv_op in conversions.items():
@@ -496,7 +496,7 @@ class FactProxy(CREObjProxy):
                 # one_lit_conds.append(attr_var==val)
 
     def as_conditions(self, fact_ptr_to_var_map=None, keep_null=True, add_implicit_neighbor_self_refs=True, neigh_count = 0):
-        from cre.builtin_cre_funcs import Equals
+        from cre.default_funcs import Equals
         from cre.utils import as_typed_list
         from cre.dynamic_exec import var_eq
         from cre.var import Var
@@ -732,7 +732,7 @@ def uint_to_inheritance_bytes(n):
         n = n >> 8
     return buffer[-i:]
 
-from cre.cre_object import member_info_type
+from cre.obj import member_info_type
 from cre.utils import _sizeof_type, _load_ptr
 
 
@@ -819,7 +819,7 @@ from cre.fact_intrinsics import define_boxing, get_fact_attr_ptr, _register_fact
 from cre.fact import repr_list_attr, repr_fact_attr, FactProxy, Fact, UntypedFact{", BaseFact, base_list_type, fact_to_ptr, get_inheritance_bytes_len_ptr" if typ != "BaseFact" else ""}, uint_to_inheritance_bytes
 from cre.utils import cast, ptr_t, _get_member_offset,  _load_ptr, _obj_cast_codegen, encode_idrec
 import cloudpickle
-from cre.cre_object import member_info_type, set_chr_mbrs
+from cre.obj import member_info_type, set_chr_mbrs
 {fact_imports}
 
 

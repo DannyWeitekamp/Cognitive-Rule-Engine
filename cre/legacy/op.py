@@ -20,7 +20,7 @@ from cre.subscriber import base_subscriber_fields, BaseSubscriber, BaseSubscribe
 from cre.vector import VectorType
 from cre.fact import Fact, gen_fact_import_str, get_offsets_from_member_types
 from cre.var import Var, var_memcopy, VarType
-from cre.cre_object import CREObjType, cre_obj_field_dict, CREObjTypeClass, CREObjProxy
+from cre.obj import CREObjType, cre_obj_field_dict, CREObjTypeClass, CREObjProxy
 from cre.core import T_ID_OP, register_global_default
 from cre.make_source import make_source, gen_def_func, gen_assign, gen_if, gen_not, resolve_template, gen_def_class
 from numba.core import imputils, cgutils

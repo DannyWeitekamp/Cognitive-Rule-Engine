@@ -14,8 +14,8 @@ from cre.var import Var
 from cre.context import cre_context
 from cre.fact import define_fact
 from cre.core import T_ID_FLOAT
-# from cre.builtin_cre_funcs import CastFloat, CastStr
-from cre.builtin_cre_funcs import CastFloat, CastStr
+# from cre.default_funcs import CastFloat, CastStr
+from cre.default_funcs import CastFloat, CastStr
 from numba.core.runtime.nrt import rtsys
 import gc
 
@@ -31,7 +31,7 @@ class PrintElapse():
 
 
 def get_base_ops():
-    from cre.builtin_cre_funcs import Add, Multiply, Concatenate
+    from cre.default_funcs import Add, Multiply, Concatenate
     Add_f8 = Add(Var(f8),Var(f8))
     Multiply_f8 = Multiply(Var(f8),Var(f8))
     print(Add_f8, Multiply_f8)
@@ -516,7 +516,7 @@ def test_declare_fact_w_conversions():
 
         print("---------------------------------------------------------")
         # Check for key error bug when don't have Ops for all decalared types.
-        from cre.builtin_cre_funcs import Add, Multiply
+        from cre.default_funcs import Add, Multiply
         Add_f8 = Add(f8, f8)
         Multiply_f8 = Multiply(f8, f8)
         ops = [Add_f8, Multiply_f8]
@@ -547,7 +547,7 @@ def test_min_stop_depth():
             "B" : {"type": str, "visible":  True,
                  "semantic" : True, 'conversions' : {float : CastFloat}}
         })
-        from cre.builtin_cre_funcs import Add, Multiply
+        from cre.default_funcs import Add, Multiply
         Add_f8 = Add(f8, f8)
         Multiply_f8 = Multiply(f8, f8)
 
@@ -634,7 +634,7 @@ def test_non_numerical_vals():
             "B" : {"type": str, "visible":  True,
                  "semantic" : True, 'conversions' : {float : CastFloat}}
         })
-        from cre.builtin_cre_funcs import Add, Multiply
+        from cre.default_funcs import Add, Multiply
         Add_f8 = Add(f8, f8)
 
         planner = SetChainingPlanner([BOOP])

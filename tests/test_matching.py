@@ -8,7 +8,7 @@ from cre.context import cre_context
 from cre.utils import PrintElapse, _struct_from_ptr, _list_base,_list_base_from_ptr,_load_ptr, _incref_structref, _raw_ptr_from_struct
 from numba.core.runtime.nrt import rtsys
 import gc
-from cre.rete import repr_match_iter_dependencies
+from cre.matching import repr_match_iter_dependencies
 import pytest
 
 # with cre_context("test_matching"):
@@ -163,7 +163,7 @@ def test_ref_matching():
         # cl = get_linked_conditions_instance(c, ms)
         # print(get_ptr_matches(cl))
 
-from cre.rete import check_match, score_match
+from cre.matching import check_match, score_match
 def test_check_and_score_match():
     with cre_context("test_check_match"):
         BOOP = define_fact("BOOP",{"name": str, "val" : float})    
@@ -505,18 +505,18 @@ def test_mem_leaks():
     (c,ms),_ = matching_alphas_setup()
     print("c", c._meminfo.refcount)
 
-    # from cre.rete import update_graph, build_rete_graph
-    # rete_graph = build_rete_graph(ms, c)
-    # update_graph(rete_graph)
+    # from cre.matching import update_graph, build_corgi_graph
+    # corgi_graph = build_corgi_graph(ms, c)
+    # update_graph(corgi_graph)
     with cre_context("test_matching_benchmarks") as ctxt:
         matches = c.get_matches(ms)
 
     # distr_dnf = c.distr_dnf
-    # rete_graph = c.rete_graph
-    # print("c", c._meminfo.refcount, 'rete_graph', rete_graph._meminfo.refcount, "matches", matches._meminfo.refcount)
+    # corgi_graph = c.corgi_graph
+    # print("c", c._meminfo.refcount, 'corgi_graph', corgi_graph._meminfo.refcount, "matches", matches._meminfo.refcount)
     c,matches,ms,ctxt = None,None,None,None; gc.collect()
 
-    # print('rete_graph', rete_graph._meminfo.refcount)
+    # print('corgi_graph', corgi_graph._meminfo.refcount)
 
 
     # print(used_bytes(),init_used)
@@ -536,7 +536,7 @@ def foo(x):
     return y
 
 
-from cre.rete import get_graph, match_iter_next_ptrs
+from cre.matching import get_graph, match_iter_next_ptrs
 
 def test_swap_memset():
     
@@ -654,15 +654,15 @@ def matching_betas_setup():
 
         return (c,ms), {}
 
-from cre.rete import get_match_iter, update_graph, ReteGraphType, update_node, build_rete_graph, new_match_iter#, restitch_match_iter
+from cre.matching import get_match_iter, update_graph, CorgiGraphType, update_node, build_corgi_graph, new_match_iter#, restitch_match_iter
 def apply_get_matches(c,ms):
-    # rete_graph = build_rete_graph(ms, c)
-    # update_graph(rete_graph)
-    # m_iter = new_match_iter(rete_graph)
+    # corgi_graph = build_corgi_graph(ms, c)
+    # update_graph(corgi_graph)
+    # m_iter = new_match_iter(corgi_graph)
     # restitch_match_iter(m_iter, -1)
     with cre_context("test_matching_benchmarks") as ctxt:
         c.get_matches(ms)
-    # graph = _struct_from_ptr(ReteGraphType, c.matcher_inst_ptr)
+    # graph = _struct_from_ptr(CorgiGraphType, c.matcher_inst_ptr)
     # parse_ms_change_queue(graph)
 
     # for lst in graph.nodes_by_nargs:
@@ -679,11 +679,11 @@ def apply_get_matches(c,ms):
 @njit(cache=True)
 def do_update_graph(c,ms):
     # print("BUILD")
-    rete_graph = build_rete_graph(ms, c)
+    corgi_graph = build_corgi_graph(ms, c)
     # print("UDPATE")
-    update_graph(rete_graph)
+    update_graph(corgi_graph)
     # print("new iter")
-    m_iter = new_match_iter(rete_graph)
+    m_iter = new_match_iter(corgi_graph)
 
 
 @pytest.mark.benchmark(group="matching")

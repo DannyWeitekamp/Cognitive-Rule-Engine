@@ -32,7 +32,7 @@ DECLARE = u1(0)
 
 
 # -----------------------------------------------------------------------
-# : ReteNode
+# : CorgiNode
 
 
 # -----------------------------------------------------------------------
@@ -143,7 +143,7 @@ input_state_type = numba.from_dtype(_input_state_type)
 dict_i8_u1_type = DictType(i8,u1)
 deref_dep_typ = DictType(u8,DictType(ptr_t,u1))
 
-base_rete_node_field_dict = {
+base_corgi_node_field_dict = {
     
     # A weak ptr to the working memory for this graph 
     "memset_ptr" : i8, 
@@ -219,7 +219,7 @@ base_rete_node_field_dict = {
 
 }
 
-ReteNode, ReteNodeType = define_structref("ReteNode", base_rete_node_field_dict, define_constructor=False)
+CorgiNode, CorgiNodeType = define_structref("CorgiNode", base_corgi_node_field_dict, define_constructor=False)
 
 
 u8_arr_typ = u8[::1]
@@ -229,7 +229,7 @@ input_state_arr_type = input_state_type[::1]
 
 @njit(cache=True)
 def node_ctor(ms, t_ids, var_inds,lit=None):
-    st = new(ReteNodeType)
+    st = new(CorgiNodeType)
     st.memset_ptr = cast(ms, i8)
     st.deref_depends = Dict.empty(u8,dict_i8_u1_type)
     st.modify_idrecs = List.empty_list(VectorType)
@@ -289,12 +289,12 @@ def node_ctor(ms, t_ids, var_inds,lit=None):
 
 
 # -----------------------------------------------------------------------
-# : ReteGraph
+# : CorgiGraph
 
-node_arg_pair_type = Tuple((ReteNodeType,i8))
+node_arg_pair_type = Tuple((CorgiNodeType,i8))
 node_arg_list_type = ListType(node_arg_pair_type)
 node_io_list_type = ListType(NodeIOType)
-rete_graph_field_dict = {
+corgi_graph_field_dict = {
     # The change_head of the working memory at the last graph update.
     "change_head" : i8,
 
@@ -302,18 +302,18 @@ rete_graph_field_dict = {
     "memset" : MemSetType,
 
     # All graph nodes organized by [[...alphas],[...betas],[...etc]]
-    "nodes_by_nargs" : ListType(ListType(ReteNodeType)),
+    "nodes_by_nargs" : ListType(ListType(CorgiNodeType)),
 
     # The number of nodes in the graph
     "n_nodes" : i8,
 
     # Maps a var_ind to its associated root node (i.e. the node that 
     #  holds all match candidates for a fact_type before filtering).
-    "var_root_nodes" : DictType(i8,ReteNodeType),
+    "var_root_nodes" : DictType(i8,CorgiNodeType),
 
     # TODO: Replace with list/array for speed?
     # The map a var_ind to the most downstream node that constrains that var.
-    "var_end_nodes" : DictType(i8,ReteNodeType),
+    "var_end_nodes" : DictType(i8,CorgiNodeType),
 
     # A matrix of size (n_var, n_var) with weak pointers to the most 
     #  downstream beta nodes connecting each pair of vars. 
@@ -334,14 +334,14 @@ rete_graph_field_dict = {
 }
 
 
-ReteGraph, ReteGraphType = define_structref("ReteGraph", rete_graph_field_dict, define_constructor=False)
+CorgiGraph, CorgiGraphType = define_structref("CorgiGraph", corgi_graph_field_dict, define_constructor=False)
 
 
 
 @njit(cache=True)
-def rete_graph_ctor(ms, conds, nodes_by_nargs, n_nodes, var_root_nodes, var_end_nodes,
+def corgi_graph_ctor(ms, conds, nodes_by_nargs, n_nodes, var_root_nodes, var_end_nodes,
                 var_end_join_ptrs, global_modify_map, global_t_id_root_map, total_weight):
-    st = new(ReteGraphType)
+    st = new(CorgiGraphType)
     st.change_head = 0
     st.memset = ms
     st.nodes_by_nargs = nodes_by_nargs
@@ -358,14 +358,14 @@ def rete_graph_ctor(ms, conds, nodes_by_nargs, n_nodes, var_root_nodes, var_end_
 
 
 @njit(cache=False)
-def conds_get_rete_graph(self):
+def conds_get_corgi_graph(self):
     if(self.matcher_inst is not None):
-        return cast(self.matcher_inst, ReteGraphType)
+        return cast(self.matcher_inst, CorgiGraphType)
     return None
 
 
 # --------------------------------------
-# : build_rete_graph()
+# : build_corgi_graph()
 
 @njit(cache=True)
 def _get_degree_order(c, index_map):
@@ -391,7 +391,7 @@ def _get_degree_order(c, index_map):
 @njit(cache=True)
 def _ensure_long_enough(nodes_by_nargs, nargs):
     while(len(nodes_by_nargs) <= nargs-1):
-        nodes_by_nargs.append(List.empty_list(ReteNodeType))
+        nodes_by_nargs.append(List.empty_list(CorgiNodeType))
 
 @njit(cache=True)
 def _mod_map_insert(idrec, mod_map, node, arg_ind):
@@ -399,12 +399,12 @@ def _mod_map_insert(idrec, mod_map, node, arg_ind):
         mod_map[idrec] = List.empty_list(node_arg_pair_type)
     mod_map[idrec].append((node, arg_ind))
 
-ReteNode_List_type = ListType(ReteNodeType)
+CorgiNode_List_type = ListType(CorgiNodeType)
 
 @njit(cache=True,locals={})
-def _make_rete_nodes(ms, c, index_map):
-    nodes_by_nargs = List.empty_list(ReteNode_List_type)
-    nodes_by_nargs.append(List.empty_list(ReteNodeType))
+def _make_corgi_nodes(ms, c, index_map):
+    nodes_by_nargs = List.empty_list(CorgiNode_List_type)
+    nodes_by_nargs.append(List.empty_list(CorgiNodeType))
     global_modify_map = Dict.empty(u8, node_arg_list_type)
 
     # Make an identity node (i.e. lit,op=None) so there are always alphas
@@ -467,7 +467,7 @@ def arr_is_unique(arr):
 
 
 @njit(cache=True)
-def build_rete_graph(ms, c):
+def build_corgi_graph(ms, c):
     # Build a map from base var ptrs to indicies
     index_map = Dict.empty(i8, i8)
     for i, v in enumerate(c.vars):
@@ -477,14 +477,14 @@ def build_rete_graph(ms, c):
     if(not c.has_distr_dnf):
         build_distributed_dnf(c,index_map)
     
-    # Make all of the RETE nodes
+    # Make all of the CORGI nodes
     nodes_by_nargs, global_modify_map = \
-         _make_rete_nodes(ms, c, index_map)
+         _make_corgi_nodes(ms, c, index_map)
 
     global_t_id_root_map = Dict.empty(u2, NodeIOType)
     var_end_join_ptrs = np.zeros((len(c.vars),len(c.vars)),dtype=np.int64)
-    var_end_nodes = Dict.empty(i8,ReteNodeType)
-    var_root_nodes = Dict.empty(i8,ReteNodeType)
+    var_end_nodes = Dict.empty(i8,CorgiNodeType)
+    var_root_nodes = Dict.empty(i8,CorgiNodeType)
     n_nodes = 0
     total_weight = 0
 
@@ -523,7 +523,7 @@ def build_rete_graph(ms, c):
                 p1, p2 = inputs[0].parent_node_ptr, inputs[1].parent_node_ptr
                 node.upstream_same_parents = (p1 != 0 and p1 == p2)
                 if(node.upstream_same_parents):
-                    parent = cast(p1, ReteNodeType)
+                    parent = cast(p1, CorgiNodeType)
                     node.upstream_aligned = np.all(node.var_inds==parent.var_inds)   
 
                 # Fill in end joins
@@ -550,7 +550,7 @@ def build_rete_graph(ms, c):
             for var_ind in node.var_inds:
                 var_end_nodes[var_ind] = node
             
-    return rete_graph_ctor(ms, c, nodes_by_nargs, n_nodes, var_root_nodes, var_end_nodes,
+    return corgi_graph_ctor(ms, c, nodes_by_nargs, n_nodes, var_root_nodes, var_end_nodes,
               var_end_join_ptrs, global_modify_map, global_t_id_root_map, total_weight)
 
 
@@ -697,7 +697,7 @@ def deref_once(deref,inst_ptr):
         return _list_base_from_ptr(inst_ptr)
 
 
-# @njit(i8(ReteNodeType, u2, u8, deref_info_type[::1]),cache=True)
+# @njit(i8(CorgiNodeType, u2, u8, deref_info_type[::1]),cache=True)
 @njit(cache=True)
 def resolve_head_ptr(self, arg_ind, base_t_id, f_id, deref_infos):
     '''Try to get the head_ptr of 'f_id' in input 'arg_ind'. Inject a DerefRecord 
@@ -739,7 +739,7 @@ def resolve_head_ptr(self, arg_ind, base_t_id, f_id, deref_infos):
     else:
         return _get_array_raw_data_ptr(facts.data) + (f_id * 8) #assuming 8 byte ptrs
 
-# @njit(void(ReteNodeType, i8,u8,u1),locals={"f_id" : u8}, cache=True)
+# @njit(void(CorgiNodeType, i8,u8,u1),locals={"f_id" : u8}, cache=True)
 @njit(locals={"f_id" : u8, "a_id" : u8}, cache=True)
 def validate_head_or_retract(self, arg_ind, idrec, head_ptrs, r):
     '''Update the head_ptr dictionaries by following the deref
@@ -1109,7 +1109,7 @@ def update_matches(self):
                 # If there is a beta node upstream of to this one that shares the same
                 #  variables then we'll need to make sure we also check its truth table.
                 if(self.upstream_same_parents):
-                    upstream_node = cast(self.upstream_node_ptr, ReteNodeType)
+                    upstream_node = cast(self.upstream_node_ptr, CorgiNodeType)
                     u_tt = upstream_node.truth_table
 
                     if(j > i):
@@ -1322,8 +1322,8 @@ def update_graph(graph):
 # : MatchIterator
 
 match_iterator_node_field_dict = {
-    # "graph" : ReteGraphType,
-    "node" : ReteNodeType,
+    # "graph" : CorgiGraphType,
+    "node" : CorgiNodeType,
     "associated_arg_ind" : i8,
     "var_ind" : i8,
     "m_node_ind" : i8,
@@ -1341,7 +1341,7 @@ match_iterator_node_field_dict = {
 MatchIterNode, MatchIterNodeType = define_structref("MatchIterNode", match_iterator_node_field_dict, define_constructor=False)
 
 match_iterator_field_dict = {
-    "graph" : ReteGraphType,
+    "graph" : CorgiGraphType,
     "iter_nodes" : ListType(MatchIterNodeType),
     "is_empty" : types.boolean,
     "iter_started" : types.boolean,
@@ -1356,7 +1356,7 @@ def gen_match_iter_source(output_types):
     ''' Generates source code for '''
     return f'''import cloudpickle
 from numba import njit
-from cre.rete import GenericMatchIteratorType, MatchIteratorType, match_iterator_field_dict
+from cre.matching import GenericMatchIteratorType, MatchIteratorType, match_iterator_field_dict
 from cre.utils import cast
 output_types = cloudpickle.loads({cloudpickle.dumps(output_types)})
 m_iter_type = MatchIteratorType([(k,v) for k,v in {{**match_iterator_field_dict ,"output_types": output_types}}.items()])
@@ -1466,7 +1466,7 @@ def upcast(context, builder, fromty, toty, val):
     return _obj_cast_codegen(context, builder, val, fromty, toty)
 
 
-@njit(GenericMatchIteratorType(GenericMatchIteratorType, ReteGraphType),cache=True)
+@njit(GenericMatchIteratorType(GenericMatchIteratorType, CorgiGraphType),cache=True)
 def copy_match_iter(m_iter, graph):
     '''Makes a copy a prototype match iterator'''
     m_iter_nodes = List.empty_list(MatchIterNodeType)
@@ -1493,7 +1493,7 @@ def copy_match_iter(m_iter, graph):
 
     return new_m_iter
 
-@njit(GenericMatchIteratorType(ReteGraphType), cache=True)
+@njit(GenericMatchIteratorType(CorgiGraphType), cache=True)
 def new_match_iter(graph):
     '''Produces a new MatchIterator for a graph.'''
 
@@ -1544,7 +1544,7 @@ def new_match_iter(graph):
                     dep_m_node_inds[c] = dep_m_node.m_node_ind
                     dep_node_ptrs[c] = ptr
 
-                    dep_node = cast(ptr, ReteNodeType)
+                    dep_node = cast(ptr, CorgiNodeType)
                     dep_arg_inds[c] = np.argmax(dep_node.var_inds==j)
                     # print(j, "Make", m_node.node.lit, m_node.associated_arg_ind, "dep on", dep_node.lit, dep_arg_inds[c])
                     c +=1
@@ -1608,7 +1608,7 @@ def update_from_upstream_match(m_iter, m_node):
         # Each dep_node is the terminal beta node (i.e. a graph node not an iter node) 
         #  between the vars iterated by m_node and dep_m_node, and might not be the same
         #  as dep_m_node.node.
-        dep_node = cast(m_node.dep_node_ptrs[i], ReteNodeType)
+        dep_node = cast(m_node.dep_node_ptrs[i], CorgiNodeType)
         dep_arg_ind = m_node.dep_arg_inds[i]
         dep_m_node = m_iter.iter_nodes[dep_m_node_ind]
         assoc_arg_ind = 1 if dep_arg_ind == 0 else 0
@@ -1844,21 +1844,21 @@ def get_graph(ms, conds):
     if(conds.matcher_inst is None):
         needs_new_graph = True
     else:
-        graph = cast(conds.matcher_inst, ReteGraphType)
+        graph = cast(conds.matcher_inst, CorgiGraphType)
         if(cast(ms, i8) != cast(graph.memset, i8)):
             needs_new_graph = True
 
-    graph = build_rete_graph(ms, conds)
+    graph = build_corgi_graph(ms, conds)
     conds.matcher_inst = cast(graph, StructRefType)
     return graph
 
 
 @njit(GenericMatchIteratorType(MemSetType, ConditionsType), cache=True)
 def get_match_iter(ms, conds):
-    rete_graph = get_graph(ms, conds)
+    corgi_graph = get_graph(ms, conds)
 
-    update_graph(rete_graph)
-    m_iter = new_match_iter(rete_graph)
+    update_graph(corgi_graph)
+    m_iter = new_match_iter(corgi_graph)
     # print("DEPS:", repr_match_iter_dependencies(m_iter))
     if(len(m_iter.iter_nodes) == 0):
         m_iter.is_empty = True
@@ -1883,7 +1883,7 @@ set_base_fact_arg = set_base_arg_val_impl(BaseFact)
 
 @njit(cache=True)
 def cum_weight_of_matching_nodes(ms, conds, match_idrecs, zero_on_fail=False):
-    rete_graph = get_graph(ms, conds)
+    corgi_graph = get_graph(ms, conds)
 
     # Get the instance pointers from match_idrecs
     match_ptrs = np.empty(len(match_idrecs),dtype=np.int64)
@@ -1893,7 +1893,7 @@ def cum_weight_of_matching_nodes(ms, conds, match_idrecs, zero_on_fail=False):
         match_ptrs[i] = facts.data[f_id]
 
     cum_weight = 0.0
-    for lst in rete_graph.nodes_by_nargs:
+    for lst in corgi_graph.nodes_by_nargs:
         for node in lst:
             # TODO: Handle cases of Exists() and truncated match lists
             # If is an identiy node then give weight automatically
@@ -1921,22 +1921,22 @@ def _ensure_ms(conds, ms):
     if(ms is None):
         if(conds.matcher_inst is None):
             raise ValueError("Cannot check/score matches on Conditions object without assigned MemSet.")
-        rete_graph = cast(conds.matcher_inst, ReteGraphType)
-        return rete_graph.memset
+        corgi_graph = cast(conds.matcher_inst, CorgiGraphType)
+        return corgi_graph.memset
     return ms
 
 
 @njit(cache=True)
 def score_match(conds, match_idrecs, ms=None):
     ms = _ensure_ms(conds, ms)
-    rete_graph = get_graph(ms, conds)
+    corgi_graph = get_graph(ms, conds)
     cum_weight = cum_weight_of_matching_nodes(ms, conds, match_idrecs, False)
-    return cum_weight / rete_graph.total_weight
+    return cum_weight / corgi_graph.total_weight
 
 @njit(cache=True)
 def check_match(conds, match_idrecs, ms=None):
     ms = _ensure_ms(conds, ms)
-    rete_graph = get_graph(ms, conds)
+    corgi_graph = get_graph(ms, conds)
     #TODO to make sure checking types
     return cum_weight_of_matching_nodes(ms, conds, match_idrecs, True) != 0.0
 

@@ -266,11 +266,11 @@ class Conditions(structref.StructRefProxy):
         return get_ptr_matches(self,ms)
 
     def get_matches(self, ms=None):
-        from cre.rete import MatchIterator
+        from cre.matching import MatchIterator
         return MatchIterator(ms, self)
 
     def check_match(self, match, ms=None):
-        from cre.rete import check_match
+        from cre.matching import check_match
         idrecs = np.array([x.idrec for x in match],dtype=np.uint64)
         return check_match(self, idrecs, ms)
 
@@ -278,7 +278,7 @@ class Conditions(structref.StructRefProxy):
         conds_set_weight(self, weight)
 
     def score_match(self, match, ms=None):
-        from cre.rete import score_match
+        from cre.matching import score_match
         idrecs = np.array([x.idrec for x in match],dtype=np.uint64)
         return score_match(self, idrecs, ms)
 
@@ -329,7 +329,7 @@ class Conditions(structref.StructRefProxy):
 
     @property
     def rete_graph(self):
-        from cre.rete import conds_get_rete_graph
+        from cre.matching import conds_get_rete_graph
         return conds_get_rete_graph(self)
 
     def as_dnf_list(self):

@@ -18,7 +18,7 @@ with open('requirements.txt') as f:
     requirements = f.readlines() 
 
   
-long_description = '...need to add description' 
+long_description = 'CRE is a high-performance forward-chaining rule engine for Python built with the numba just-in-time compiler toolset.' 
 
 dev_requirements = [
     "pytest",
@@ -78,14 +78,14 @@ setup(
         name ='cre', 
         version = __version__, 
         author ='Daniel Weitekamp', 
-        author_email ='weitekamp@cmu.edu', 
+        author_email ='dannyweitekamp@gmail.com', 
         url ='https://github.com/DannyWeitekamp/Cognitive-Rule-Engine', 
         description ='A rule engine for Python powered by numba.', 
         long_description = long_description, 
         long_description_content_type ="text/markdown", 
         license ='MIT', 
         packages = find_packages(include=['cre','cre_caching']), 
-        
+
         entry_points={
             "console_scripts": [
                 "cre = console.cre_exec:main"
@@ -98,8 +98,9 @@ setup(
             "Programming Language :: Python :: 3", 
             "License :: OSI Approved :: MIT License", 
             "Operating System :: OS Independent", 
+            "Development Status :: 2 - Pre-Alpha"
         ], 
-        keywords ='expert system production rules', 
+        keywords = ['rule engine', 'expert system', 'production rules'], 
         install_requires = requirements, 
         setup_requires = ['numba'],
         extras_require={

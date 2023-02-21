@@ -1,7 +1,8 @@
 # The Cognitive Rule Engine (CRE)
 
-## A high performance rule engine for python. 
-Is a forward-chaining (i.e. RETE-like) rule engine for Python. CRE utilizes [numba](https://numba.pydata.org/) a JIT compiler for Python to translate rules into optimized machine code at runtime. CRE rules can be written in Python and run with the performance of C code. 
+## A high performance rule engine for Python. 
+
+CRE is a high-performance forward-chaining rule engine for Python built with the [numba](https://numba.pydata.org/) just-in-time compiler toolset. CRE rules are written in Python but run with C-like performance. 
 
 **NOTE: CRE is a work in progress and currently only implements only a subset of its planned capabilities.**
 - [x] C-like Data-Structures for Facts + Working Memory

@@ -1356,12 +1356,12 @@ def gen_match_iter_source(output_types):
     ''' Generates source code for '''
     return f'''import cloudpickle
 from numba import njit
-from cre.matching import GenericMatchIteratorType, MatchIteratorType, match_iterator_field_dict
+from cre.matching import MatchIteratorType, MatchIteratorTypeClass
 from cre.utils import cast
 output_types = cloudpickle.loads({cloudpickle.dumps(output_types)})
-m_iter_type = MatchIteratorType([(k,v) for k,v in {{**match_iterator_field_dict ,"output_types": output_types}}.items()])
+m_iter_type = MatchIteratorTypeClass(output_types)
 
-@njit(m_iter_type(GenericMatchIteratorType),cache=True)
+@njit(m_iter_type(MatchIteratorType),cache=True)
 def specialize_m_iter(self):
     return cast(self, m_iter_type)
     '''
@@ -1450,23 +1450,48 @@ class MatchIterator(structref.StructRefProxy):
 
 
 @structref.register
-class MatchIteratorType(CastFriendlyMixin, types.StructRef):
+class MatchIteratorTypeClass(CastFriendlyMixin, types.StructRef):
+
+    def __new__(cls, output_types=None):
+        self = super().__new__(cls)
+        self.output_types = output_types
+        if(output_types is None):
+            field_dict = match_iterator_field_dict
+        else:
+            field_dict= {**match_iterator_field_dict,
+                "output_types": types.LiteralType(output_types)
+            }
+        types.StructRef.__init__(self,[(k,v) for k,v in field_dict.items()])
+        self.name = repr(self)
+        return self
+
+    def __init__(self,*args,**kwargs):
+        pass
+
     def __str__(self):
-        return "cre.MatchIterator"
-    def preprocess_fields(self, fields):
-        return tuple((name, types.unliteral(typ)) for name, typ in fields)
+        if(self.output_types is None):
+            return "MatchIteratorType"
+        else:
+            return f"MatchIteratorType[{self.output_types}]"
+
+    __repr__ = __str__
+        
 
 
-define_boxing(MatchIteratorType, MatchIterator)
-GenericMatchIteratorType = MatchIteratorType(match_iterator_fields)
+    # def preprocess_fields(self, fields):
+    #     return tuple((name, types.unliteral(typ)) for name, typ in fields)
 
-# Allow any specialization of MatchIteratorType to be upcast to GenericMatchIteratorType
-@lower_cast(MatchIteratorType, GenericMatchIteratorType)
+
+define_boxing(MatchIteratorTypeClass, MatchIterator)
+MatchIteratorType = MatchIteratorTypeClass()
+
+# Allow any specialization of MatchIteratorTypeClass to be upcast to MatchIteratorType
+@lower_cast(MatchIteratorTypeClass, MatchIteratorType)
 def upcast(context, builder, fromty, toty, val):
     return _obj_cast_codegen(context, builder, val, fromty, toty)
 
 
-@njit(GenericMatchIteratorType(GenericMatchIteratorType, CorgiGraphType),cache=True)
+@njit(MatchIteratorType(MatchIteratorType, CorgiGraphType),cache=True)
 def copy_match_iter(m_iter, graph):
     '''Makes a copy a prototype match iterator'''
     m_iter_nodes = List.empty_list(MatchIterNodeType)
@@ -1485,7 +1510,7 @@ def copy_match_iter(m_iter, graph):
             new_m_node.idrecs = m_node.idrecs
         m_iter_nodes.append(new_m_node)
 
-    new_m_iter = new(GenericMatchIteratorType)
+    new_m_iter = new(MatchIteratorType)
     new_m_iter.graph = graph 
     new_m_iter.iter_nodes = m_iter_nodes 
     new_m_iter.is_empty = m_iter.is_empty
@@ -1493,7 +1518,7 @@ def copy_match_iter(m_iter, graph):
 
     return new_m_iter
 
-@njit(GenericMatchIteratorType(CorgiGraphType), cache=True)
+@njit(MatchIteratorType(CorgiGraphType), cache=True)
 def new_match_iter(graph):
     '''Produces a new MatchIterator for a graph.'''
 
@@ -1562,18 +1587,18 @@ def new_match_iter(graph):
             m_iter_nodes.append(m_node)
 
         # Instantiate the prototype and link it to the graph
-        m_iter = new(GenericMatchIteratorType)
+        m_iter = new(MatchIteratorType)
         m_iter.iter_nodes = m_iter_nodes 
         m_iter.is_empty = False
         m_iter.iter_started = False
         graph.match_iter_prototype_inst = cast(m_iter, StructRefType)
     # Return a copy of the prototype 
-    prototype = cast(graph.match_iter_prototype_inst, GenericMatchIteratorType)
+    prototype = cast(graph.match_iter_prototype_inst, MatchIteratorType)
     m_iter = copy_match_iter(prototype,graph)
     return m_iter
 
 
-@njit(unicode_type(GenericMatchIteratorType),cache=True)
+@njit(unicode_type(MatchIteratorType),cache=True)
 def repr_match_iter_dependencies(m_iter):
     rep = ""
     for i, m_node in enumerate(m_iter.iter_nodes):
@@ -1591,7 +1616,7 @@ def repr_match_iter_dependencies(m_iter):
 
     return rep
 
-@njit(types.void(GenericMatchIteratorType, MatchIterNodeType),cache=True)
+@njit(types.void(MatchIteratorType, MatchIterNodeType),cache=True)
 def update_from_upstream_match(m_iter, m_node):
     ''' Updates the list of `other_idrecs` for a beta m_node. If an 
           m_node's 'curr_ind' would have it yield a next match `A` for its 
@@ -1730,12 +1755,12 @@ def update_no_depends(m_node):
     # print("END UPDA TERMINAL")
     return True
 
-@njit(types.boolean(GenericMatchIteratorType),cache=True)
+@njit(types.boolean(MatchIteratorType),cache=True)
 def match_iter_is_empty(m_iter):
     return m_iter.is_empty
 
 
-@njit(Tuple((types.boolean,u8[::1]))(GenericMatchIteratorType),cache=True)
+@njit(Tuple((types.boolean,u8[::1]))(MatchIteratorType),cache=True)
 def match_iter_next_idrecs(m_iter):
     n_vars = len(m_iter.iter_nodes)
     # Increment the m_iter nodes until satisfying all upstream
@@ -1802,7 +1827,7 @@ def match_iter_next_idrecs(m_iter):
         idrecs[m_node.var_ind] = m_node.idrecs[m_node.curr_ind]
     return False, idrecs
 
-@njit(Tuple((types.boolean, i8[::1]))(GenericMatchIteratorType), cache=True)
+@njit(Tuple((types.boolean, i8[::1]))(MatchIteratorType), cache=True)
 def match_iter_next_ptrs(m_iter):
     ms, graph = m_iter.graph.memset, m_iter.graph
     empty, idrecs = match_iter_next_idrecs(m_iter)
@@ -1853,7 +1878,7 @@ def get_graph(ms, conds):
     return graph
 
 
-@njit(GenericMatchIteratorType(MemSetType, ConditionsType), cache=True)
+@njit(MatchIteratorType(MemSetType, ConditionsType), cache=True)
 def get_match_iter(ms, conds):
     corgi_graph = get_graph(ms, conds)
 

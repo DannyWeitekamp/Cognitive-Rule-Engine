@@ -20,7 +20,7 @@ if(not skip.get()):
     from cre.fact import define_fact, BaseFact, Fact, FactProxy
     from cre.tuple_fact import TupleFact, TF
     from cre.var import Var
-    from cre.func import CREFunc
+    from cre.func import CREFunc, UntypedCREFunc
     from cre.conditions import Literal, Conditions
 
     # Other helpful things exposed at the package level

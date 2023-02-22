@@ -91,14 +91,6 @@ def ObjIsNone(a):
     return a == 0
 
 
-def check_cast_float(a):
-    if(a == ""): return False
-    try:
-        float(a)
-    except:
-        return False
-    return True
-
 # @CREFunc(shorthand = 'float({0}', check=check_cast_float)
 @CREFunc(shorthand = 'float({0})')
 def CastFloat(a):
@@ -107,12 +99,6 @@ def CastFloat(a):
 # print(CastFloat(unicode_type).check('0'))
 # print(CastFloat(unicode_type).check('A'))
 
-def check_cast_str(a):
-    try:
-        str(a)
-    except:
-        return False
-    return True
 
 # @CREFunc(shorthand = 'str({0}', check=check_cast_str)
 @CREFunc(shorthand = 'str({0})')

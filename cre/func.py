@@ -205,7 +205,7 @@ NameData, NameDataType = define_structref("NameData", {
     "name" : unicode_type,
     "expr_template" : unicode_type,
     "shorthand_template" : unicode_type,
-    "repr_const_addrs" : i8[::1]
+    "repr_const_addrs" : i8[::1],
 })
 
 cre_func_fields_dict = {
@@ -258,11 +258,14 @@ cre_func_fields_dict = {
 
     # NOTE: Not Used 
     # True if dereferencing the head args succeeded  
-    "heads_derefs_succeeded" : types.boolean,
+    # "heads_derefs_succeeded" : types.boolean,
+
+    # The composition depth
+    "depth" : types.uint16,
 
     # NOTE: Not Used 
     # True if check in this and all children suceeded
-    "exec_passed_checks" : types.boolean,
+    # "exec_passed_checks" : types.boolean,
     
     "return_t_id" : u2,
 
@@ -512,7 +515,14 @@ class CREFunc(StructRefProxy):
                     impl = set_base_arg_val_impl(self._arg_types[i])
                 impl(self, i, arg)
 
-            cre_func_resolve_call_self(self)
+            
+            status = cre_func_resolve_call_self(self)
+
+            if(status == CFSTATUS_NULL_DEREF):
+                raise Exception(f"{str(self)} failed to execute because of a dereferencing error.")
+            elif(status == CFSTATUS_ERROR):
+                raise Exception(f"{str(self)} failed to execute because of an internal error.")
+
             args = None
             get_ret = get_return_val_impl(self._return_type)
             return get_ret(self)
@@ -520,6 +530,7 @@ class CREFunc(StructRefProxy):
         # Compose Case, will return a new CREFunc
         else:
             new_cf = cf_deep_copy_ep(self)
+            # new_cf = self
             new_cf._return_type = self.return_type
             for i, arg in enumerate(args):
                 # Optmization: Assign arguments via entry_points
@@ -625,6 +636,11 @@ class CREFunc(StructRefProxy):
         return self.n_args
 
     @property
+    @njit(i8(CREFuncType), cache=True)
+    def n_funcs(self):
+        return len(self.prereq_instrs)+1
+
+    @property
     @njit(head_range_type[::1](CREFuncType), cache=True)
     def head_ranges(self):
         return self.head_ranges
@@ -638,6 +654,11 @@ class CREFunc(StructRefProxy):
     @njit(u1(CREFuncType), cache=True)
     def is_composed(self):
         return self.is_composed
+
+    @property
+    @njit(i8(CREFuncType), cache=True)
+    def depth(self):
+        return i8(self.depth)
 
 
     def recover_return_type(self):
@@ -936,6 +957,11 @@ def cre_func_ctor(_cf_type, name, expr_template, shorthand_template, is_ptr_op):
 
         # Point the return_data_ptr to 'return_val'
         ret_t_id,_,return_data_ptr = cre_obj_get_item_t_id_ptr(cf, 0)
+
+        if(ret_t_id == T_ID_STR):
+            #Note: Bad things happen if unicode string slots left NULL
+            cre_obj_set_item(cf,0,"")
+
         cf.return_data_ptr = return_data_ptr
         cf.return_t_id = ret_t_id
 
@@ -964,6 +990,8 @@ def cre_func_ctor(_cf_type, name, expr_template, shorthand_template, is_ptr_op):
 
             if(t_id == T_ID_STR):
                 hi.ref_kind = REFKIND_UNICODE
+                #Note: Bad things happen if unicode string slots left NULL
+                cre_obj_set_item(cf,1+(i<<1)+1,"")
             elif(m_id != PRIMITIVE_MBR_ID):
                 hi.ref_kind = REFKIND_STRUCTREF
             else:
@@ -983,6 +1011,8 @@ def cre_func_ctor(_cf_type, name, expr_template, shorthand_template, is_ptr_op):
             repr_const_addrs[i] = _get_global_fn_addr(repr_const_symbols[i])
 
         cf.name_data = NameData(name, expr_template, shorthand_template, repr_const_addrs)        
+        cf.is_composed = False
+        cf.depth = 1
         
         casted = cast(cf, CREFuncType)
         return casted 
@@ -992,7 +1022,7 @@ def cre_func_ctor(_cf_type, name, expr_template, shorthand_template, is_ptr_op):
 # : Copy
 
 from cre.obj import copy_cre_obj
-@njit(cache=True)
+@njit(cache=False)
 def cre_func_copy(cf):
     # Make a copy of the CreFunc via a memcpy (plus incref obj members)
     cpy = copy_cre_obj(cf)
@@ -1231,23 +1261,26 @@ def build_instr_set(self):
         arg_info = cf.root_arg_infos[i]
         assert arg_info.ptr != cast(cf, i8), "CREFunc has self reference"
         if(arg_info.type == ARGINFO_OP):
-            _, _, head_data_ptr = cre_obj_get_item_t_id_ptr(cf,(1+(i<<1)+1))
+            t_id, m_id, head_data_ptr = cre_obj_get_item_t_id_ptr(cf,(1+(i<<1)+1))
             instr = np.zeros(1,dtype=instr_type)[0]
             instr.cf_ptr = arg_info.ptr
             instr.return_data_ptr = head_data_ptr
 
-            # Set the size to be the difference between the data_ptrs for 
-            #  the return value and the a0 member 
-            t_id, m_id, ret_data_ptr = cre_obj_get_item_t_id_ptr(cf,0)
-            _, _, first_data_ptr = cre_obj_get_item_t_id_ptr(cf,1)
-            instr.size = u4(first_data_ptr-ret_data_ptr)
-
             if(t_id == T_ID_STR):
+                instr.size = 48 #Hard-coded ... see commented out part below
                 instr.ref_kind = REFKIND_UNICODE
             elif(m_id != PRIMITIVE_MBR_ID):
+                instr.size = 8
                 instr.ref_kind = REFKIND_STRUCTREF
             else:
+                instr.size = 8
                 instr.ref_kind = REFKIND_PRIMATIVE
+
+            # Set the size to be the difference between the data_ptrs for 
+            #  the return value and the a0 member 
+            # _, _, ret_data_ptr = cre_obj_get_item_t_id_ptr(cf,0)
+            # _, _, first_data_ptr = cre_obj_get_item_t_id_ptr(cf,1)
+            # instr.size = u4(first_data_ptr-ret_data_ptr)
 
             instrs.append(instr)
             stack.append((cf, i+1))
@@ -1286,6 +1319,8 @@ def reinitialize(self):
     '''
     if(self.is_initialized): return
 
+    max_arg_depth = 0
+
     base_var_map = Dict.empty(i8, head_info_lst)
     # Go through the current HEAD_INFOS looking for entries with 
     #  kind ARGINFO_VAR or ARGINFO_OP_UNEXPANDED 
@@ -1313,6 +1348,7 @@ def reinitialize(self):
                         if(base_ptr not in base_var_map):
                             base_var_map[base_ptr] = List.empty_list(head_info_type)
                         base_var_map[base_ptr].append(head_info_n)
+                max_arg_depth = max(cf.depth, max_arg_depth)
 
     # Make new head_ranges according to base_var_map
     n_bases = len(base_var_map)
@@ -1348,6 +1384,7 @@ def reinitialize(self):
             is_composed = True
     self.has_any_derefs = any_hd
     self.is_composed = is_composed
+    self.depth = self.depth + max_arg_depth
   
 
 #--------------------------------------------------------------------
@@ -1442,12 +1479,12 @@ def cre_func_resolve_call_self(self):
         head variables. For instance like my_cf(a.nxt.B, b.nxt.A).
     '''
     for i in range(len(self.prereq_instrs)):
+        
         instr = self.prereq_instrs[i]
         cf = cast(instr.cf_ptr, CREFuncType)
         if(cf.has_any_derefs):
             status = _func_from_address(call_self_f_type, cf.resolve_heads_addr)(cf)
             if(status): return status
-
         status = _func_from_address(call_self_f_type, cf.call_self_addr)(cf)
         if(status > 1): return status
 
@@ -1457,13 +1494,13 @@ def cre_func_resolve_call_self(self):
         elif(instr.ref_kind==REFKIND_STRUCTREF):
             new_obj_ptr = _load_ptr(i8, cf.return_data_ptr)   
             _incref_ptr(new_obj_ptr)
-        
+    
         _memcpy(instr.return_data_ptr, cf.return_data_ptr, instr.size)
 
     if(self.has_any_derefs):
         status = _func_from_address(call_self_f_type, self.resolve_heads_addr)(self)
         if(status): return status
-            
+
     status = _func_from_address(call_self_f_type, self.call_self_addr)(self)
     if(status > 1): return status
     return status
@@ -1496,13 +1533,18 @@ def get_best_call_self(self, ignore_derefs=False):
     
 from numba.core.typing.typeof import typeof
 get_return_val_overloads = {}
+# i8_x6 = UniTuple(i8,6)
 def get_return_val_impl(val_type):
     ''' Implementation for extracting return value of 'val_type' from CREFunc '''
     nb_val_type = typeof(val_type) if not isinstance(val_type, types.Type) else val_type
     if(nb_val_type not in get_return_val_overloads):
         @njit(nb_val_type(CREFuncType),cache=True, inline='always')
         def _get_return_val(self):
-            return _load_ptr(nb_val_type, self.return_data_ptr)
+            val = _load_ptr(nb_val_type, self.return_data_ptr)
+            # _incref_structref(val)
+            # _store(i8_x6, self.return_data_ptr, (0,0,0,0,0,0))
+            # print(_load_ptr(nb_val_type, self.return_data_ptr))
+            return val
         get_return_val_overloads[nb_val_type] = _get_return_val
     return get_return_val_overloads[nb_val_type]
 
@@ -1639,7 +1681,11 @@ def cre_func_str(self, use_shorthand):
             if(len(stack) == 0):
                 keep_looping = False
                 break
-            if(use_shorthand): s = f"({s})"
+            if(use_shorthand):
+                parent_nd = stack[-1][0].name_data
+                parent_tmp = parent_nd.shorthand_template if use_shorthand else parent_nd.expr_template
+                if(tmp[-1] != ")" and parent_tmp[-1] != ")"):
+                    s = f"({s})"
 
             cf, i, arg_strs = stack.pop(-1)
             arg_strs.append(s)
@@ -1769,9 +1815,11 @@ def define_CREFunc(name, members):
     check_bytes, check_unq = _standardize_method(members, 'check')
 
     # Regenerate the source for this type if wasn't cached or if 'cache=False' 
-    unq_args = [name, return_type, arg_types, nopy_call, nopy_check, call_unq, check_unq, no_raise, ptr_args]
+
+    unq_args = [name, return_type, arg_types, call_unq, check_unq, no_raise, ptr_args]
     gen_src_args = [name, return_type, arg_types, nopy_call, nopy_check, call_bytes, check_bytes, no_raise, ptr_args]
     long_hash = unique_hash_v(unq_args)
+    print(name, long_hash)
 
     if(not source_in_cache(name, long_hash)): #or members.get('cache',True) == False):
         source = gen_cre_func_source(*gen_src_args, long_hash)
@@ -1811,7 +1859,7 @@ from numba import njit, void, i8, u1, boolean, objmode
 from numba.types import unicode_type
 from numba.extending import lower_cast
 from numba.core.errors import NumbaError, NumbaPerformanceWarning
-from cre.utils import cast, PrintElapse, _load_ptr, _obj_cast_codegen, _store_safe, _struct_get_attr_ptr
+from cre.utils import _incref_structref, cast, PrintElapse, _load_ptr, _obj_cast_codegen, _store_safe, _struct_get_attr_ptr
 from cre.func import (ensure_repr_const, cre_func_ctor, CREFunc_method, CREFunc_assign_method_addr,
     CREFuncTypeClass, CREFuncType, VarType, CFSTATUS_TRUTHY, CFSTATUS_FALSEY, CFSTATUS_NULL_DEREF, CFSTATUS_ERROR)
 from cre.memset import resolve_deref_data_ptr

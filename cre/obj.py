@@ -589,6 +589,7 @@ def copy_cre_obj(fact):
         return new_fact
     return impl
 
+
 @njit(types.void(CREObjType), cache=True)
 def cre_obj_clear_refs(fact):
     for info_a in _iter_mbr_infos(fact):

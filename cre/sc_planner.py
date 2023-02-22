@@ -267,9 +267,7 @@ def register_conversions(planner, typ):
 
         if('conversions' in attr_spec):
             for conv_type, conv_op in attr_spec['conversions'].items(): 
-                print("<<", conv_type, conv_op)
                 tup = (str(fact_type.instance_type), attr.literal_value, repr(conv_type))
-                print(">>", tup, conv_op._type)
                 add_conversion_op(planner,str(tup),conv_op)
                 # planner.conversion_ops[str(tup)] = conv_op
 
@@ -723,16 +721,18 @@ def search_for_explanations(self, goal, ops=None, policy=None,
 
             # Apply policy
             forward_chain_one(self, depth_policy, min_stop_depth)
-            
-        if(depth >= min_stop_depth):
-            found_at_depth = query_goal(self, g_typ, goal, min_stop_depth)
+        
+        with PrintElapse("query_goal"):
+            if(depth >= min_stop_depth):
+                found_at_depth = query_goal(self, g_typ, goal, min_stop_depth)
         
         # if(depth >= search_depth): break
     # print(found_at_depth)
     if(found_at_depth is None):
         return None
     else:
-        return build_explanation_tree(self, g_typ, goal)
+        with PrintElapse("build_explanation_tree"):
+            return build_explanation_tree(self, g_typ, goal)
 
 
 
@@ -1145,7 +1145,10 @@ def apply_multi(op, planner, depth, min_stop_depth=-1):
     # If it doesn't already exist generate and inject '_apply_multi' into 'op'
     # print("apply_multi", type(op))
     if(not hasattr(op,'_apply_multi')):
-        generic = op.long_hash is None or op.is_composed or op.func_name == "GenericCREFunc"
+        # Run a generic implementation if we cannot safely inline call_heads
+        #  i.e. if can raise an error,  is composed, or otherwise untyped
+        generic = (not getattr(op._type,'no_raise',False) or op.long_hash is None or 
+                   op.is_composed or op.func_name == "GenericCREFunc")
 
         if(generic):
             hash_code = unique_hash_v([op.return_type, op.arg_types])
@@ -1624,7 +1627,7 @@ def gen_op_comps_from_expl_tree(tree):
         tree_entry = expl_tree_ith_entry(tree, i)
         
         if(expl_tree_entry_is_op(tree_entry)):
-            op = expl_tree_entry_get_op(tree_entry)
+            func = expl_tree_entry_get_op(tree_entry)
             # print(op)
             # op = op.recover_singleton_inst()
             # print(op)
@@ -1636,11 +1639,10 @@ def gen_op_comps_from_expl_tree(tree):
 
             for args in product_of_generators(child_generators): 
                 # print("<<", op, [(str(x.base_type), str(x.head_type)) if(isinstance(x,Var)) else x for x in args])
-                print("::", repr(op), args, [x._meminfo.refcount if isinstance(x,Var) else "" for x in args])
-                yield op(*args)
-                # raise ValueError()
-                # op_comp = OpComp(op, *args)
-                # yield op_comp
+                
+                func_comp = func(*args)
+                # print("::", func_comp, args, [x._meminfo.refcount if isinstance(x,Var) else "" for x in args])
+                yield func_comp
         else:
             v = expl_tree_entry_get_var(tree_entry)
             yield v

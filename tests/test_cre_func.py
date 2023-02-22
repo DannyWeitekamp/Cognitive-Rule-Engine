@@ -7,6 +7,7 @@ from cre.fact import define_fact
 from cre.var import Var
 from cre.utils import PrintElapse, _func_from_address, _cast_structref
 from cre.context import cre_context
+import cre.type_conv
 import pytest
 
 from numba.core.runtime.nrt import rtsys
@@ -25,6 +26,7 @@ def test_numerical():
     c = Var(i8,'c')
 
     z = Add(a,b,c,c)
+    assert z.depth == 1
 
     # print("<<", str(z))
     assert z(1,2,3) == 9
@@ -37,7 +39,8 @@ def test_numerical():
     assert Add(a,Add(a,b,c,a),c,c)(1,2,3) == 14
     assert Add(Add(Add(2,1,1,a),2,1,Add(2,1,1,b)),1,1,c)(1,2,3) == 19
     z = Add(Add(Add(2,1,1,a),2,1,Add(2,1,1,b)),1,1,c)
-    assert str(z) == "Add((Add((Add(2, 1, 1, a)), 2, 1, (Add(2, 1, 1, b)))), 1, 1, c)"
+    assert str(z) == "Add(Add(Add(2, 1, 1, a), 2, 1, Add(2, 1, 1, b)), 1, 1, c)"
+    assert z.depth == 3
 
     @CREFunc(signature=f8(f8,f8),
             shorthand='{0}+{1}')
@@ -74,6 +77,7 @@ def test_string():
 
         assert z("X","Y") == "|XY|"
         assert str(z) == "'|'+((b+c)+'|')"
+        assert z.depth == 3
 
         if(i == 0):
             init_bytes = used_bytes()
@@ -102,15 +106,19 @@ def test_obj():
         for i in range(2):
             ba, bb = BOOP("A",1), BOOP("B",2)
 
+            z = Concat(a.A, a.A)
+
+            assert z(ba) == "AA"
+            assert str(z) == "a.A+a.A"
+
             z = Concat(a.A, b.A)
 
             assert z(ba,bb) == "AB"
             assert str(z) == "a.A+b.A"
 
-            z = Concat(a.A, a.A)
-
-            assert z(ba) == "AA"
-            assert str(z) == "a.A+a.A"
+            z = Concat(Concat("|", Concat(a.A, b.A)),"|")
+            assert z(ba,bb) == "|AB|"
+            
 
             zboop = CatBOOPs(a,b)
 
@@ -127,6 +135,42 @@ def test_obj():
             else:
                 assert used_bytes() == init_bytes
                 # print(used_bytes(), init_bytes)
+
+def test_mixed_types():
+    from cre.default_funcs import Identity
+    @CREFunc(signature=i8(i8,i8),
+            shorthand='{0}+{1}')
+    def Add(a, b):
+        return a + b
+
+    @CREFunc(signature=unicode_type(unicode_type,unicode_type),
+                shorthand='{0}+{1}')
+    def Concat(a, b):
+        return a + b
+
+    @CREFunc(signature=unicode_type(i8),
+            shorthand='str({0})')
+    def ToStr(a):
+        return str(a)
+
+    @CREFunc(signature=i8(unicode_type),
+            shorthand='int({0})')
+    def ToInt(a):
+        return float(a)
+
+    a, b, c = Var(i8,'a'), Var(i8,'b'), Var(i8,'c')
+
+    z = Concat(Concat(ToStr(a),ToStr(b)),ToStr(c))
+    assert z(1,2,3) == "123"
+    # print("ret_val:", ret_val)
+    q = ToInt(z)
+    assert q(1,2,3) == 123    
+
+    z = ToStr(Add(Add(a,b),c))
+    assert z(1,2,3) == "6"
+    
+
+
 
 
 new_f_type = CREFuncTypeClass(f8,(f8,f8),is_composed=True,name="Composed")
@@ -538,9 +582,9 @@ if __name__ == "__main__":
     import faulthandler; faulthandler.enable()
     import sys
 
-    @CREFunc(signature=i8(i8,i8,i8))
-    def Add3(a, b, c):
-        return a + b + c
+    # @CREFunc(signature=i8(i8,i8,i8))
+    # def Add3(a, b, c):
+    #     return a + b + c
 
     # from cre.utils import _tuple_getitem
     # @njit
@@ -555,20 +599,21 @@ if __name__ == "__main__":
     # def foo(f,a,b):
     #     f(7, a, b)
 
-    a = Var(i8,'a')
-    b = Var(i8,'b')
-    # foo(Add3,a,b)
-    with PrintElapse("Compose 100"):
-        for i in range(100):
-            Add3(i,a,b)
+    # a = Var(i8,'a')
+    # b = Var(i8,'b')
+    # # foo(Add3,a,b)
+    # with PrintElapse("Compose 100"):
+    #     for i in range(100):
+    #         Add3(i,a,b)
 
-    sys.exit()
+    
 
     # test_commutes()
     # test_no_mutate_on_compose()
     # test_numerical()
     # test_string()
     # test_obj()
+    test_mixed_types()
     # test_njit_compose()
     # test_not_jittable()
     # test_returns_object()
@@ -577,7 +622,7 @@ if __name__ == "__main__":
     # test_op_cmp_overloads()
     # test_op_arith_overloads()
     # test_ptr_ops()
-    
+    sys.exit()
     # @njit(f8(f8,f8),cache=True)
     with PrintElapse("DEFINE DIVIDE"):
         @CREFunc(signature=f8(f8,f8),

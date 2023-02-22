@@ -25,7 +25,7 @@ context_data_fields = [
 CREContextData, CREContextDataType, CREContextDataTypeClass  = define_structref("CREContextData",context_data_fields, define_constructor=False, return_type_class=True)
 
 i8_arr_type = i8[::1]
-@njit(cache=True)
+@njit(CREContextDataType(unicode_type), cache=True)
 def new_cre_context(name):
     st = new(CREContextDataType)
     st.name = name

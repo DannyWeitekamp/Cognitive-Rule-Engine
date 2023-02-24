@@ -620,8 +620,9 @@ def test_min_stop_depth():
 
         # raise ValueError()
 
-        for i, (op, binding) in enumerate(expls):
-            print(op)
+        for i, (op, match) in enumerate(expls):
+            print(op, match)
+            print(op(*match))
 
         print("END")
 

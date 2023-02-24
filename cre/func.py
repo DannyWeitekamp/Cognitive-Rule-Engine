@@ -13,7 +13,7 @@ from numba.core.errors import NumbaError, NumbaPerformanceWarning
 from cre.caching import gen_import_str, unique_hash_v, import_from_cached, source_to_cache, source_in_cache, cache_safe_exec, get_cache_path
 from cre.context import cre_context
 from cre.structref import define_structref, define_structref_template, StructRefType
-from cre.utils import (cast, _nullify_attr, new_w_del, _memcpy, _func_from_address, decode_idrec, lower_getattr,  
+from cre.utils import (cast, _sizeof_type, _nullify_attr, new_w_del, _memcpy, _func_from_address, decode_idrec, lower_getattr,  
                        _decref_ptr, _incref_ptr, _incref_structref, _decref_structref, _ptr_from_struct_incref, ptr_t, _load_ptr,
                        _obj_cast_codegen)
 from cre.utils import PrintElapse, encode_idrec, assign_to_alias_in_parent_frame, as_typed_list, lower_setattr, _store, _store_safe, _tuple_getitem
@@ -1267,13 +1267,13 @@ def build_instr_set(self):
             instr.return_data_ptr = head_data_ptr
 
             if(t_id == T_ID_STR):
-                instr.size = 48 #Hard-coded ... see commented out part below
+                instr.size = _sizeof_type(unicode_type) #Hard-coded ... see commented out part below
                 instr.ref_kind = REFKIND_UNICODE
             elif(m_id != PRIMITIVE_MBR_ID):
-                instr.size = 8
+                instr.size = _sizeof_type(CREFuncType)
                 instr.ref_kind = REFKIND_STRUCTREF
             else:
-                instr.size = 8
+                instr.size = _sizeof_type(i8)
                 instr.ref_kind = REFKIND_PRIMATIVE
 
             # Set the size to be the difference between the data_ptrs for 
@@ -1507,6 +1507,25 @@ def cre_func_resolve_call_self(self):
 
 CREFunc_method(CREFuncType, u1(CREFuncType), "resolve_call_self")(cre_func_resolve_call_self)
 
+
+# TODO: Make this
+# def identity_call_self():
+#     if(self.has_any_derefs):
+#         status = _func_from_address(call_self_f_type, self.resolve_heads_addr)(self)
+#         if(status): return status
+
+#     if(instr.ref_kind==REFKIND_UNICODE):
+#         new_obj = _load_ptr(unicode_type, cf.return_data_ptr)   
+#         _incref_structref(new_obj)
+#     elif(instr.ref_kind==REFKIND_STRUCTREF):
+#         new_obj_ptr = _load_ptr(i8, cf.return_data_ptr)   
+#         _incref_ptr(new_obj_ptr)
+
+#     _memcpy(cf.return_data_ptr, cf.head_infos[0].head_data_ptr return_data_ptr, instr.size)
+#     _store_safe(return_type, self.return_data_ptr, return_val)
+
+
+
 cs_gbl_name = 'CREFuncType_call_self'
 res_cs_gbl_name = 'CREFuncType_resolve_call_self'
 
@@ -1626,16 +1645,19 @@ def overload_call_codegen(cf_type, arg_types):
 def overload_call(cf, *args):
     ''' Allows for CREFuncs to be called and composed from jitted code.'''
     cf_type = cf
-    if(not getattr(cf_type, 'return_type',None)):
-        raise ValueError("Cannot call CREFunc without return_type")
-
     if(len(args) > 0 and isinstance(args[0], types.BaseTuple)):
         args = tuple(*args)
 
     all_const = all_args_are_const(args)
     if(all_const):
+        if(not getattr(cf_type, 'return_type',None)):
+            raise ValueError("Cannot call CREFunc without return_type")
+
         return overload_call_codegen(cf, args)
     else:
+        if(not getattr(cf_type, 'return_type',None)):
+            raise ValueError("Cannot compose CREFunc without return_type")
+
         return overload_compose_codegen(cf, args)
             
     return impl
@@ -1815,11 +1837,9 @@ def define_CREFunc(name, members):
     check_bytes, check_unq = _standardize_method(members, 'check')
 
     # Regenerate the source for this type if wasn't cached or if 'cache=False' 
-
-    unq_args = [name, return_type, arg_types, call_unq, check_unq, no_raise, ptr_args]
+    unq_args = [name, return_type, arg_types, call_bytes, check_bytes, no_raise, ptr_args]
     gen_src_args = [name, return_type, arg_types, nopy_call, nopy_check, call_bytes, check_bytes, no_raise, ptr_args]
     long_hash = unique_hash_v(unq_args)
-    print(name, long_hash)
 
     if(not source_in_cache(name, long_hash)): #or members.get('cache',True) == False):
         source = gen_cre_func_source(*gen_src_args, long_hash)

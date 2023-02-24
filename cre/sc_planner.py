@@ -24,6 +24,8 @@ from cre.var import Var, VarTypeClass, var_append_deref
 # from cre.op import CREFuncType, CREFuncTypeClass
 from cre.func import CREFuncType, CREFuncTypeClass, CREFunc, cre_func_call_self, set_base_arg_val_impl, get_return_val_impl, CFSTATUS_ERROR, CFSTATUS_TRUTHY
 from cre.make_source import make_source, gen_def_func, gen_assign, resolve_template, gen_def_class
+from cre.obj import CREObjType
+from cre.core import T_ID_OP, T_ID_VAR
 from numba.core import imputils, cgutils
 from numba.core.datamodel import default_manager, models
 from numba.experimental.function_type import _get_wrapper_address
@@ -722,9 +724,9 @@ def search_for_explanations(self, goal, ops=None, policy=None,
             # Apply policy
             forward_chain_one(self, depth_policy, min_stop_depth)
         
-        with PrintElapse("query_goal"):
-            if(depth >= min_stop_depth):
-                found_at_depth = query_goal(self, g_typ, goal, min_stop_depth)
+        # with PrintElapse("query_goal"):
+        if(depth >= min_stop_depth):
+            found_at_depth = query_goal(self, g_typ, goal, min_stop_depth)
         
         # if(depth >= search_depth): break
     # print(found_at_depth)
@@ -1220,7 +1222,9 @@ ExplanationTree_field_dict = {
 
 @structref.register
 class ExplanationTreeTypeClass(types.StructRef):
-    pass
+    def __str__(self):
+        return "ExplanationTreeType"
+    
 
 ExplanationTreeType = ExplanationTreeTypeClass([(k,v) for k,v in ExplanationTree_field_dict.items()])
 
@@ -1232,18 +1236,30 @@ class ExplanationTree(structref.StructRefProxy):
     def __iter__(self):
         return ExplanationTreeIter(self)
 
-@generated_jit(cache=True)
-def read_inv_val_map(expl_tree, var_ptr, typ):
-    _typ = typ.instance_type
-    # typ_name = str(_typ)
-    ivm_typ = DictType(i8, _typ)
-    t_id = cre_context().get_t_id(_typ)
-    def impl(expl_tree, var_ptr, typ):
-        inv_val_map_ptr_dict = expl_tree.inv_val_map_ptr_dict
-        inv_val_map = _dict_from_ptr(ivm_typ, inv_val_map_ptr_dict[u2(t_id)])
-        out = inv_val_map[var_ptr]
-        return out#inv_val_map[var_ptr]
+read_inv_val_map_impls = {} 
+# @generated_jit(cache=True)
+def get_read_inv_val_map_impl(t_id):
+    impl = read_inv_val_map_impls.get(t_id, None)
+    if(impl is None):
+        typ = cre_context().get_type(t_id=t_id)
+        ivm_typ = DictType(i8, typ)
+        @njit(typ(ExplanationTreeType,i8),cache=True)
+        def impl(expl_tree, var_ptr):
+            inv_val_map_ptr_dict = expl_tree.inv_val_map_ptr_dict
+            inv_val_map = _dict_from_ptr(ivm_typ, inv_val_map_ptr_dict[u2(t_id)])
+            out = inv_val_map[var_ptr]
+            return out#inv_val_map[var_ptr]
+
+        impl_ep = impl.overloads[(ExplanationTreeType,i8)].entry_point
+        impl = read_inv_val_map_impls[t_id] = impl_ep
     return impl
+
+def read_inv_val_map(expl_tree, var_ptr, t_id):
+    # Shortcut numba's multi-dispatch type checking and just 
+    #  get cached entry_point for reading inv_val_map for arg_t_id
+    # read_inv_val_map = get_read_inv_val_map_impl(arg_t_id)
+    impl = get_read_inv_val_map_impl(t_id)
+    return impl(expl_tree, var_ptr)
 
 define_boxing(ExplanationTreeTypeClass,ExplanationTree)
 
@@ -1269,26 +1285,30 @@ def expl_tree_ctor(entries=None, planner=None):
 class ExplanationTreeIter():
     def __init__(self, expl_tree):
         self.expl_tree = expl_tree
-        self.gen = gen_op_comps_from_expl_tree(expl_tree)
-
+        self.iter  = new_expl_tree_iterator(expl_tree)
+        # self.gen = gen_op_comps_from_expl_tree(expl_tree)
     def __iter__(self):
         return self
+
     def __next__(self):
-        op = next(self.gen)
+        var, op = expl_tree_iter_next(self.iter)
+        # print("<<", op)
+        if(op is None):
+            if(var is not None):
+                print("VAR", var)
+                op = Identity(var)
+            else:
+                raise StopIteration()
         vals = []
-        # print(op_comp)
-        if(isinstance(op, CREFunc)):
-            # print("::", op, op.arg_types, op.arg_types[0], op._type)
-            head_infos = op.head_infos
-            for base_ptr, val_typ in zip(op.base_var_ptrs, op.arg_types):
+        for base_ptr, arg_t_id in zip(op.base_var_ptrs, op.base_t_ids):
+            vals.append(read_inv_val_map(self.expl_tree, base_ptr, arg_t_id))
                 # var_ptr = head_infos[hr['start']]['var_ptr']
-                vals.append(read_inv_val_map(self.expl_tree, base_ptr, val_typ))
-        else:
-            var = op
-            # print(var)
-            vals.append(read_inv_val_map(self.expl_tree, var.base_ptr, var.base_type))
-            # op_comp = OpComp(Identity(var.head_type), var)
-            op = Identity(var)
+                # vals.append(read_inv_val_map(self.expl_tree, base_ptr, val_typ))
+        # else:
+        #     var = op            
+        #     vals.append(read_inv_val_map(self.expl_tree, var.base_ptr, var.base_t_id))
+        #     # op_comp = OpComp(Identity(var.head_type), var)
+        #     op = Identity(var)
             # print(op_comp)
             # raise ValueError()
         # print(op, op.arg_types)
@@ -1647,53 +1667,224 @@ def gen_op_comps_from_expl_tree(tree):
             v = expl_tree_entry_get_var(tree_entry)
             yield v
 
-# def assert_visible_attrs(fact_def, visible_attrs=[],
-#          include_vis_at_def=True):
-#     spec = fact_def.spec
-#     # fact_type = fact_def._fact_type if not isinstance(fact_def,numba.types.Type) else fact_def
-#     if(include_vis_at_def):
-#         for attr, attr_spec in spec.items():
-#             if(attr_spec.get("visible_to_planner",False)):
-#                 visible_attrs.append(attr)
-#     # visible_fields = []
-#     for attr in visible_attrs:
-#         assert attr in spec, f"Attribute {attr} not an attribute of {fact_def}." 
-#     return visible_attrs
+expl_tree_iterator_field_dict = {
+    "tree" : ExplanationTreeType,
+    # "func_or_var" : CREObjType,
+    "entry_ind" : i8,
+    "n_entries" : i8,
+    # "arg_inds" : i8[::1],
+    "arg_iters" : ListType(CREObjType), # Note: Ought to be defered type,
+    # "args" : ListType(CREObjType),
+
+    # The last function generated by the iterator or NULL ptr, used 
+    #  to cache functions that remain unchanged between iterations
+    "cached_func" : CREFuncType,
+
+    # A singleton reference to the Identity builtin CREFunc used in
+    #  cases where the composition is just a Var to make it callable.
+    # "identity_func" : CREFuncType
+}
+
+ExplanationTreeIterator, ExplanationTreeIteratorType = define_structref("ExplanationTreeIterator", expl_tree_iterator_field_dict)
 
 
+@njit(ExplanationTreeIteratorType(ExplanationTreeType), cache=True)
+def new_expl_tree_iterator(tree):
+    st = new(ExplanationTreeIteratorType)
+    st.tree = tree
+    st.entry_ind = 0
+    st.n_entries = len(tree.entries)
+    st.arg_iters = List.empty_list(CREObjType)
+    st.cached_func = cast(0,CREFuncType)
+    # if(identity_func is not None):
+    #     st.identity_func = identity_func
+    # st.args = List.empty_list(CREObjType)
+    return st
+    # st.arg_inds = np.zeros(len(tree.child_arg_ptrs),dtype=np.uint64)
 
 
+from cre.func import cre_func_deep_copy_generic, set_var_arg, set_op_arg, reinitialize
 
+@njit(Tuple((types.optional(VarType),types.Optional(CREFuncType)))(ExplanationTreeIteratorType), cache=True)
+def expl_tree_iter_next(t_iter):
+    if(t_iter.entry_ind == -1):
+        return None, None
+    # Whether frame is terminal: CREFunc w/ Var args and no CREFunc args.
+    #  Start as True at each recusion and set false if any func args
+    # t_frame = True
 
-    # typ = op.signature.return_type
-    # typ_name = str(typ)
-    # _assert_prepared(planner, typ, typ_name, depth)
+    # Whether to increment the t_iter. Remains true as long as attempts
+    #  to increment overflow.
+    keep_incrementing = True
 
-    # am = getattr(op,'_apply_multi')
-    # return am(op,planner,depth)
+    stack = List()
+    i = 0 
+    args = List.empty_list(CREObjType)
+    while(True):
+        
+        entry = t_iter.tree.entries[t_iter.entry_ind]
+        # ------
+        #  : Depth first traversal 
 
+        # Op Case
+        if(entry.is_op):
 
-    # while()
-    # head_data = st.iter_data_map[st.heads]
+            if(keep_incrementing):
+                # Don't use cached func until hits an unchanged iter
+                t_iter.cached_func = cast(0,CREFuncType)
+
+            # If incrementation has been resolved use the cached func if available
+            if(not keep_incrementing and cast(t_iter.cached_func,i8) != 0):
+                # print(f"Skip ({t_iter.entry_ind}/{t_iter.n_entries})", entry.op.name_data.name)
+                f_obj = cast(t_iter.cached_func, CREObjType)
+                # print("BEF1", t_iter.cached_func.name_data.name)
+                # if(len(stack) == 0):
+                #     return t_iter.func
+                t_iter, i, args = stack.pop(-1)
+                # print("AFT1")
+                args.append(f_obj)
+            else:
+                if(i < len(entry.child_arg_ptrs)):
+                    # print(f"Iter ({t_iter.entry_ind}/{t_iter.n_entries})", f"i:{i}/{len(entry.child_arg_ptrs)}", entry.op)
+
+                    # Push this frame to stack
+                    stack.append((t_iter, i+1, args))
+
+                    # Recurse into argument's frame
+                    if(i < len(t_iter.arg_iters)):
+                        t_iter = cast(t_iter.arg_iters[i], ExplanationTreeIteratorType)
+                    else:
+                        # Make fresh t_iter if it is missing
+                        tree = cast(entry.child_arg_ptrs[i], ExplanationTreeType)
+                        _t_iter = new_expl_tree_iterator(tree)
+                        t_iter.arg_iters.append(cast(_t_iter,CREObjType))
+                        t_iter = _t_iter
+
+                    args = List.empty_list(CREObjType)
+                    i = 0
+                else:
+                    # print(f"Term ({t_iter.entry_ind}/{t_iter.n_entries})", entry.op)
+                    # ------
+                    #  : Reached the last entry in breadth 
+                    #     i.e. all args have been resolved so need to pop back w/ CREFunc
+
+                    # Make the cre_func from the collected args
+                    cf = cre_func_deep_copy_generic(entry.op)
+                    for j, arg in enumerate(args):
+                        t_id, _, _ = decode_idrec(arg.idrec)
+                        if(t_id == T_ID_VAR):
+                            # print(f"  {j}:", cast(arg, VarType))
+                            set_var_arg(cf, j, cast(arg, VarType))
+                        else:
+                            # print(f"  {j}:", cast(arg, CREFuncType))
+                            set_op_arg(cf, j, cast(arg, CREFuncType))
+                    reinitialize(cf)
+
+                    # Increment any t_iters in this frame if appropriate 
+                    if(keep_incrementing):
+                        t_iter.entry_ind += 1
+                        if(t_iter.entry_ind >= t_iter.n_entries):
+                            if(len(stack) == 0):
+                                # Indicate that the iterator is exhausted
+                                t_iter.entry_ind = -1
+                            else:
+                                t_iter.entry_ind = 0
+                        else:
+                            keep_incrementing = False
+
+                        t_iter.arg_iters = List.empty_list(CREObjType)
+                        t_iter.cached_func = cast(0,CREFuncType)
+                    else:
+                        t_iter.cached_func = cf
+                    # args = List.empty_list(CREObjType)
+
+                    # Return when hit initial frame.
+                    if(len(stack) == 0):
+                        return None, cf
+
+                    # print("I")
+                    
+                   
+                    
+                    # print("J")
+                    # Pop back frame from stack.
+                    # print("BEF2")
+                    t_iter, i, args = stack.pop(-1)
+                    args.append(cast(cf, CREObjType))
+            # t_frame = True
+        # Var Case
+        else:
+            # print("Var:", str(entry.var), i)
+            
+
+            # Increment if appropriate
+            if(keep_incrementing):
+                # print("INCR", str(entry.var))
+                t_iter.entry_ind += 1
+                if(t_iter.entry_ind >= t_iter.n_entries):
+                    t_iter.entry_ind = 0
+                else:
+                    keep_incrementing = False
+            # print("F")
+            # i += 1
+            # print("BEF3")
+            if(len(stack) == 0):
+                # Indicate that the iterator is exhausted
+                t_iter.entry_ind = -1
+                return entry.var, None
+                # return None
+            t_iter, i, args = stack.pop(-1)
+            args.append(cast(entry.var, CREObjType))
+        
     
-    # inds = head_data.inds
-    # istructions = List.empty_list(CREFuncType)
-    # if(len(inds) > 0):
-    #     options = head_data.expl_tree.children
-    #     ind = inds[0]
-    #     head_data.inds = inds[1:]
-
-    #     L = len(st.heads)
-    #     new_heads = np.empty((L+1,), dtype=np.int64)
-    #     new_heads[:L] = st.heads
-    #     new_heads[L] = ind
-
-    #     st.heads = new_heads
-    #     st.iter_data_map[st.heads] = IterData()
+    # Should never reach here
+    return None, None
 
 
-         
-    # else:
+# def expl_tree_inter_next_func_comp(t_iter):
+#     stack = List()
+
+#     # while(t_iter.entry_ind < len(t_iter.tree.entries)):
+#     while(len(stack) > 0):
+#         if(t_iter.entry_ind >= len(t_iter.tree.entries)):
+#             t_iter = stack.pop(-1)
+
+#         tree = t_iter.tree
+
+#         if(tree.is_op):
+#             for j, arg_ind in tree.arg_inds:
+#                 if()
+#             if(tree.arg_inds )
+#             for child_iter in t_iter.child_iters:
+
+#             stack.append()
+#         else:
+#             args.append()
+
+#         else:
+#             entry = t_iter.tree.entries[t_iter.entry_ind]
+#             t_iter.arg_ind += 1
+#             if(t_iter.arg_ind > len(entry.child_arg_ptrs)):
+#                 t_iter.arg_ind = 0
+#                 t_iter.entry_ind += 1
+#             else:
+#                 arg =
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 ### THinking Thinking 
 '''

@@ -465,7 +465,7 @@ def cast(typctx, val_typ, _typ):
         val_typ = val_typ.type
     codegen = None
     if(isinstance(typ, Ptr)):
-        raise ValueError("Cannot use cast()to cast to ptr_t")
+        raise ValueError("Cannot use cast() to cast to ptr_t")
 
     if(isinstance(val_typ, (types.Integer,types.MemInfoPointer))):
         if(isinstance(typ, types.StructRef)):
@@ -475,6 +475,10 @@ def cast(typctx, val_typ, _typ):
         elif(isinstance(typ, (types.ListType, types.DictType))):
             def codegen(context, builder, sig, args):
                 return _list_from_ptr_codegen(context, builder, args[0], typ)
+
+        elif(isinstance(typ, types.Integer)): # Allows ptr_t -> i8
+            def codegen(context, builder, sig, args):
+                return args[0]
 
     elif(isinstance(val_typ, types.StructRef)):
         if(isinstance(typ, types.StructRef)):
@@ -489,6 +493,8 @@ def cast(typctx, val_typ, _typ):
         if(isinstance(typ, types.Integer)):        
             def codegen(context, builder, sig, args):
                 return _ptr_from_struct_codegen(context, builder, args[0], sig.args[0], False)
+
+
 
     if(codegen is None):
         raise ValueError(f"No cast() from {val_typ} to {typ}.")

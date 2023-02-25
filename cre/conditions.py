@@ -280,6 +280,7 @@ class Conditions(structref.StructRefProxy):
     def score_match(self, match, ms=None):
         from cre.matching import score_match
         idrecs = np.array([x.idrec for x in match],dtype=np.uint64)
+        print(self)
         return score_match(self, idrecs, ms)
 
     def antiunify(self, other, return_score=False, normalize='left',

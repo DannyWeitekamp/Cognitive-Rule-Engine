@@ -49,7 +49,7 @@ def all_args_are_const(arg_types):
     '''Helper function for checking if a set of arg_types are all primative types'''
     all_const = True
     for at in arg_types:
-        if(isinstance(at, VarTypeClass) or isinstance(at, CREObjTypeClass)):
+        if(isinstance(at, VarTypeClass) or isinstance(at, CREFuncTypeClass)):
             all_const = False
             break
     return all_const
@@ -337,6 +337,11 @@ class CREFuncTypeClass(types.Callable, CREObjTypeClass):
     def __init__(self,*args,**kwargs):
         pass
 
+    # def is_precise(self):
+    #     return (self.return_type is not None and 
+    #             self.arg_types is not None and
+    #             self.is_composed is not None)
+
     # -------------------------------------------
     # Impl these 3 funcs to subclass types.Callable so can @overload_method('__call__')
     def get_call_type(self, context, args, kws):
@@ -587,6 +592,16 @@ class CREFunc(StructRefProxy):
     def signature(self):
         self._ensure_has_types()        
         return self._return_type(*self._arg_types)
+
+    @property
+    def precise_type(self):
+        if(self._type.return_type is not None and
+           self._type.arg_types is not None):
+            return self._type
+        else:
+            return CREFuncTypeClass(
+            self.return_type, self.arg_types,
+            is_composed=self.is_composed)
 
     @property
     def func_name(self):

@@ -1908,6 +1908,9 @@ set_base_fact_arg = set_base_arg_val_impl(BaseFact)
 
 @njit(cache=True)
 def cum_weight_of_matching_nodes(ms, conds, match_idrecs, zero_on_fail=False):
+    # if(len(match_idrecs) != len(conds.vars)):
+    #     raise ValueError("Match does not have same number of items as pattern.")
+
     corgi_graph = get_graph(ms, conds)
 
     # Get the instance pointers from match_idrecs
@@ -1927,9 +1930,15 @@ def cum_weight_of_matching_nodes(ms, conds, match_idrecs, zero_on_fail=False):
                 continue
 
             # Set arguments
+            skip = False
             for i, var_ind in enumerate(node.var_inds):
+                if(var_ind >= len(match_idrecs) or match_idrecs[var_ind] == 0):
+                    skip = True
+                    continue
                 set_base_fact_arg(node.op, i, cast(match_ptrs[var_ind], BaseFact))
             
+            if(skip):
+                continue
             # Call
             call_self = get_best_call_self(node.op, False)
             status = call_self(node.op)

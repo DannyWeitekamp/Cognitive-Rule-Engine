@@ -228,6 +228,28 @@ def test_no_mutate_on_compose():
     print(c0)
     assert str(c0) == s0
 
+def _test_compose_deref_bases():
+    with cre_context("test_compose_deref_bases"):
+        BOOP = define_fact("BOOP", {"A" :unicode_type, "B" :i8})
+
+        @CREFunc(signature=f8(f8,f8), shorthand="{0}*{1}")
+        def Multiply(a, b):
+            return a * b
+
+        a,b = Var(BOOP,'a'), Var(BOOP,'b')
+
+        c0 = Multiply(a.B, Multiply(a.B, b.B))
+
+        print(c0)
+
+        x,y = Var(BOOP,'x'), Var(BOOP,'y')
+
+        c1 = c0(x,y)
+
+        print(c1)
+
+
+
 
 def test_commutes():
     @CREFunc(signature=f8(f8,f8,f8),
@@ -295,6 +317,13 @@ def test_returns_object():
                 return BOOP("A", d[l[-1]])
 
         assert BOOPMap(BOOP("A",1.0)).B == 10.0
+
+def test_constant():
+    @CREFunc(signature=unicode_type(), shorthand="'X'")
+    def X():
+        return "X"
+    assert str(X) == "'X'"
+    assert X() == "X"
 
 
 def test_var_cmp_overloads():
@@ -494,6 +523,7 @@ def test_ptr_ops():
         
 
 
+
 # ---------------------------------------------------
 # : Performance Benchmarks
 
@@ -615,13 +645,16 @@ if __name__ == "__main__":
     # test_obj()
     # test_mixed_types()
     # test_njit_compose()
+    _test_compose_deref_bases()
     # test_not_jittable()
     # test_returns_object()
-    test_var_cmp_overloads()
-    test_var_arith_overloads()
+    # test_var_cmp_overloads()
+    # test_var_arith_overloads()
     # test_op_cmp_overloads()
     # test_op_arith_overloads()
     # test_ptr_ops()
+    # test_constant()
+
     sys.exit()
     # @njit(f8(f8,f8),cache=True)
     with PrintElapse("DEFINE DIVIDE"):

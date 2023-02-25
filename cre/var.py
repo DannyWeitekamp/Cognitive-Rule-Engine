@@ -906,7 +906,15 @@ def generic_var_append_deref(self, a_id, offset, head_t_id, typ=DEREF_TYPE_ATTR)
 
 
     
-    
+# -------------------------------------------------------------
+# : copy
+# @njit(VarType(VarType), cache=True)
+# def var_deep_copy(v):
+#     new_v = new(VarType)
+#     var_memcopy(new_v, v)
+#     if()
+#     return 
+
 
 
 

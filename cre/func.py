@@ -2,7 +2,7 @@ import operator
 import numpy as np
 import numba
 from numba.core.dispatcher import Dispatcher
-from numba import types, njit, i8, u8, i4, u1, u2, u4, literally, generated_jit, boolean, literal_unroll
+from numba import types, njit, f8, i8, u8, i4, u1, u2, u4, literally, generated_jit, boolean, literal_unroll
 from numba.typed import List, Dict
 from numba.types import ListType, DictType, unicode_type, void, Tuple, UniTuple, StructRef
 from numba.experimental import structref
@@ -920,6 +920,24 @@ def ensure_repr_const(typ):
 head_info_arr_type = head_info_type[::1]
 
 @generated_jit(nopython=True)
+def make_repr_const_addrs(cf, arg_types):
+    n_args = len(arg_types)
+    print("<<", arg_types, n_args)
+    repr_const_symbols = tuple(ensure_repr_const(at) for  at in arg_types)    
+    unroll_inds = tuple(range(n_args))
+    if(n_args == 0):
+        def impl(cf, arg_types):
+            return np.zeros(0, dtype=np.int64)
+    else:
+        def impl(cf, arg_types):
+            repr_const_addrs = np.zeros(n_args, dtype=np.int64)
+            for i in literal_unroll(unroll_inds):
+                repr_const_addrs[i] = _get_global_fn_addr(repr_const_symbols[i])
+            return repr_const_addrs
+    return impl
+
+
+@generated_jit(nopython=True)
 def cre_func_ctor(_cf_type, name, expr_template, shorthand_template, is_ptr_op):
     cf_type = _cf_type.instance_type
     fd = cf_type._field_dict
@@ -934,8 +952,10 @@ def cre_func_ctor(_cf_type, name, expr_template, shorthand_template, is_ptr_op):
         chr_mbr_attrs.append(f'ref{i}')
     chr_mbr_attrs = tuple(chr_mbr_attrs)
     
-    repr_const_symbols = tuple(ensure_repr_const(at) for  at in arg_types)    
-    unroll_inds = tuple(range(len(arg_types)))
+    # Note: beginning is padded with "" because cannot literal_unroll empty Tuple()
+    #  i.e. this allows for the case of a CREFunc with no arguments
+    repr_const_symbols = tuple([ensure_repr_const(f8)]+[ensure_repr_const(at) for  at in arg_types])    
+    unroll_inds = tuple(range(n_args+1))
 
     prefix = cf_type.symbol_prefix
     method_names = (
@@ -1008,12 +1028,15 @@ def cre_func_ctor(_cf_type, name, expr_template, shorthand_template, is_ptr_op):
 
         repr_const_addrs = np.zeros(n_args, dtype=np.int64)
         for i in literal_unroll(unroll_inds):
-            repr_const_addrs[i] = _get_global_fn_addr(repr_const_symbols[i])
-
+            # Note unroll inds loops one past N_
+            if(i != 0):
+                repr_const_addrs[i-1] = _get_global_fn_addr(repr_const_symbols[i])
+        # return repr_const_addrs
+        # repr_const_addrs = make_repr_const_addrs(cf, arg_types)
         cf.name_data = NameData(name, expr_template, shorthand_template, repr_const_addrs)        
         cf.is_composed = False
         cf.depth = 1
-        
+
         casted = cast(cf, CREFuncType)
         return casted 
     return impl
@@ -1679,23 +1702,24 @@ def cre_func_str(self, use_shorthand):
     s = ""
     keep_looping = True
     while(keep_looping):
-        arg_info = cf.root_arg_infos[i]
-        if(arg_info.type == ARGINFO_OP):
-            stack.append((cf, i+1,arg_strs))
-            cf = cast(arg_info.ptr, CREFuncType)
-            arg_strs = List.empty_list(unicode_type)
-            i = 0 
-        else:
-            if(arg_info.type == ARGINFO_VAR):
-                var = cast(arg_info.ptr, VarType)
-                arg_strs.append(str(var)) 
-            elif(arg_info.type == ARGINFO_CONST):
-                addr = cf.name_data.repr_const_addrs[i]
-                fn = _func_from_address(rc_fn_typ, addr)
-                arg_strs.append(fn(cf,i))
+        if(i < len(cf.root_arg_infos)):
+            arg_info = cf.root_arg_infos[i]
+            if(arg_info.type == ARGINFO_OP):
+                stack.append((cf, i+1,arg_strs))
+                cf = cast(arg_info.ptr, CREFuncType)
+                arg_strs = List.empty_list(unicode_type)
+                i = 0 
             else:
-                raise ValueError("Bad arginfo type.")
-            i += 1
+                if(arg_info.type == ARGINFO_VAR):
+                    var = cast(arg_info.ptr, VarType)
+                    arg_strs.append(str(var)) 
+                elif(arg_info.type == ARGINFO_CONST):
+                    addr = cf.name_data.repr_const_addrs[i]
+                    fn = _func_from_address(rc_fn_typ, addr)
+                    arg_strs.append(fn(cf,i))
+                else:
+                    raise ValueError("Bad arginfo type.")
+                i += 1
         while(i >= len(cf.root_arg_infos)):
             nd = cf.name_data
             tmp = nd.shorthand_template if use_shorthand else nd.expr_template
@@ -1899,7 +1923,7 @@ def upcast(context, builder, fromty, toty, val):
 {"call_sig = return_type(*arg_types)" if not ptr_args else
  "call_sig = return_type(*([i8]*len(arg_types)))"}
 call_pyfunc = cloudpickle.loads({call_bytes})
-{"".join([f'h{i}_type, ' for i in range(len(arg_types))])} = arg_types
+{"".join([f'h{i}_type, ' for i in range(len(arg_types))]) + " = arg_types" if(len(arg_types)) else ""}
 
 call_heads = CREFunc_method(cf_type, call_sig, 'call_heads', on_error={on_error_call!r})(call_pyfunc)
 if(call_heads is None):

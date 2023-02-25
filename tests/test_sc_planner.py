@@ -14,6 +14,7 @@ from cre.var import Var
 from cre.context import cre_context
 from cre.fact import define_fact
 from cre.core import T_ID_FLOAT
+from cre.func import CREFunc
 # from cre.default_funcs import CastFloat, CastStr
 from cre.default_funcs import CastFloat, CastStr
 from numba.core.runtime.nrt import rtsys
@@ -653,6 +654,36 @@ def test_non_numerical_vals():
         for i, (op, binding) in enumerate(expls):
             print(op, binding)
 
+def test_const_funcs():
+    with cre_context("test_const_funcs"):
+        BOOP = define_fact("BOOP", {
+            "A" : str,
+            "B" : {"type": str, "visible":  True,
+                 "semantic" : True, 'conversions' : {float : CastFloat}}
+        })
+        from cre.default_funcs import Add, Multiply
+        Add_f8 = Add(f8, f8)
+
+        planner = SetChainingPlanner([BOOP])
+        planner.declare(BOOP("A",'1'))
+        planner.declare(BOOP("B",'+'))
+        planner.declare(BOOP("C",'1'))
+
+        @CREFunc(signature=f8(), no_raise=True, shorthand='10')
+        def Ten():
+            return 10
+
+        print(summarize_depth_vals(planner,BOOP, 0))
+        print(summarize_depth_vals(planner,unicode_type, 0))
+        print(summarize_depth_vals(planner,f8, 0))
+
+        expls = planner.search_for_explanations(11.0, ops=[Add_f8, Ten], 
+            search_depth=1)
+
+        for i, (op, binding) in enumerate(expls):
+            print(op, binding)
+
+
 def test_policy_search(n=5):
     [Add_f8, Multiply_f8, Concatenate] = ops = get_base_ops()
         
@@ -669,6 +700,9 @@ def test_policy_search(n=5):
 
     for expl in no_policy_expls:
         print(expl)
+    print("----------------", len(no_policy_expls))
+    for i, expl in enumerate(set([str(x) for x in no_policy_expls])):
+        print(i, expl)        
     print("----------------")
     for expl in policy_expls:
         print(expl)
@@ -817,7 +851,8 @@ if __name__ == "__main__":
     # test_declare_fact()
     # test_declare_fact()
     # test_declare_fact_w_conversions()
-    test_min_stop_depth()
+    # test_min_stop_depth()
+    test_const_funcs()
 
     # test_policy_search()
 # from numba import njit, i8

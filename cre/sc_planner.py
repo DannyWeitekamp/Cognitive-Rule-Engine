@@ -150,13 +150,14 @@ def overload_SC_Record(op_or_var, depth=0, n_args=0, stride=None, prev_entry_ptr
             st.depth = depth
             st.n_args = n_args
 
-            if(stride is not None): st.stride = stride
-
             ENTRY_WIDTH = 4 + n_args
             n_items = 1
-            for s_i in stride:
-                s_len = s_i[1]-s_i[0]
-                n_items *= s_len
+            if(stride is not None): 
+                st.stride = stride
+                for s_i in stride:
+                    s_len = s_i[1]-s_i[0]
+                    n_items *= s_len
+
             data_len = n_items*ENTRY_WIDTH
             st.data = np.empty(data_len,dtype=np.uint32)
             
@@ -435,10 +436,13 @@ def planner_declare_conversion(planner, val, op_or_var, source_ind=None):
             ensure_ptr_dicts(planner, val_typ)
 
         _, prev_entry_ptr = val_map.get(val,(0,0))
-        is_prev = prev_entry_ptr != 0
-
+        is_prev = prev_entry_ptr != 0            
 
         if(source_ind is not None):
+            # If has 'source_ind' then conversion is part of declaration, 
+            #  in which case only one record is needed per unique input val.
+            if(is_prev):
+                return len(flat_vals)-1
             stride = np.empty((1,2),dtype=np.int64)
             stride[0][0] = source_ind
             stride[0][1] = source_ind+1
@@ -454,7 +458,9 @@ def planner_declare_conversion(planner, val, op_or_var, source_ind=None):
         data[2] = u4(prev_entry_ptr) # get low bits
         data[3] = u4(prev_entry_ptr>>32)# get high bits
 
-        data[4] = source_ind
+
+        if(source_ind is not None):
+            data[4] = source_ind
 
         op_ptr = cast(op_or_var, i8)
         declare_records.append(rec)
@@ -513,14 +519,10 @@ def planner_declare_conversions(planner, val, fact_type, attr, source_ind):
             conversion_strs.append(str((str(fact_type), attr.literal_value, repr(conv_type))))
         conversion_strs = tuple(conversion_strs)
 
-        # print("BEF", (val,), conv_type)
         cf_type = CREFuncTypeClass(conv_type, (val,))
 
         get_ret = get_return_val_impl(conv_type)
         set_base = set_base_arg_val_impl(val)
-        # print(cf_type)
-        # call_f_type = types.FunctionType(conv_type(val))
-        # check_f_type = types.FunctionType(types.boolean(val))
         def impl(planner, val, fact_type, attr, source_ind):
             for conv_str in literal_unroll(conversion_strs):
                 if(conv_str in planner.conversion_ops):
@@ -528,20 +530,12 @@ def planner_declare_conversions(planner, val, fact_type, attr, source_ind):
                 else:
                     raise ValueError("Planner not instantiated with fact_type, that defines a conversion.")
                 
-                # If there is a check function then try that first
-                # if(conv_op.check_addr != -1 and conv_op.check_addr != 0):
-                #     check_func = _func_from_address(check_f_type, conv_op.check_addr)
-                #     if(not check_func(val)):
-                #         return
-
-                # conv_func = _func_from_address(call_f_type, conv_op.call_addr)
                 conv_op = cast(_conv_op, cf_type)
                 set_base(conv_op, 0, val)
                 status = cre_func_call_self(conv_op)
                 if(status > CFSTATUS_TRUTHY):
                     return 
                 conv_val = get_ret(conv_op)
-                # conv_val = conv_op(val)
                 planner_declare_conversion(planner, conv_val, conv_op, source_ind)                    
                     
     else:
@@ -557,13 +551,10 @@ def planner_declare(planner, val, var=None):
     '''Declares a primative value or fact (and its visible attributes)
         into the 0th depth of a planner instance.'''
 
-    val_typ = val    
-    # print(">>", val_typ)
-    # if(hasattr(val_typ, 'spec')): 
-    #     print(">>", val_typ.spec)
+    val_typ = val
+
     if(isinstance(val_typ, Fact)):
         semantic_visible_attrs = get_semantic_visible_attrs(val_typ)
-        # print(semantic_visible_attrs)
         if(len(semantic_visible_attrs) > 0):
             # Case 1: Declare the fact and its visible-semantic attributes
             def impl(planner, val, var=None):
@@ -582,13 +573,11 @@ def planner_declare(planner, val, var=None):
                     # Declare any conversion on the value
                     planner_declare_conversions(planner, attr_val, fact_type, attr, ind)
         else:
-            # print("declare: fact only")
             # Case 2: Should declare just the fact
             def impl(planner, val, var=None):
                 _var = Var(val_typ) if var is None else var
                 planner_declare_val(planner, val, _var)
     else:
-        # print("declare: primitive")
         # Case 3: Declare a plain primative (e.g. a float, int, str ect.)
         def impl(planner, val, var=None):
             _var = Var(val_typ) if var is None else var
@@ -662,6 +651,13 @@ def search_for_explanations(self, goal, ops=None, policy=None,
             min_stop_depth = -1
         else:
             min_stop_depth = len(policy)
+
+    # Declare any constant ops
+    if(ops is not None):
+        for op in ops:
+            if(op.n_args == 0):
+                planner_declare_conversion(self, op(), op, None)
+
 
     context = cre_context(context)
     g_typ = standardize_type(type(goal), context)
@@ -846,13 +842,16 @@ def forward_chain_one(self, depth_policy=None, min_stop_depth=-1):
 
         # If no arg_inds are provided then apply all permutations 
         #  of arguments to the op.
-        else:
+        elif(op.n_args > 0):
             rec = apply_multi(op, self,
                 self.curr_infer_depth, min_stop_depth)
 
             # Insert records
             if(rec is not None):
                 insert_record(self, rec, op.return_t_id, nxt_depth)
+        else:
+            # Constant CREFunc case ignore at forward step
+            continue
 
         
         ops.append(op)
@@ -1239,27 +1238,25 @@ class ExplanationTree(structref.StructRefProxy):
 read_inv_val_map_impls = {} 
 # @generated_jit(cache=True)
 def get_read_inv_val_map_impl(t_id):
+    ''' Generates the entry_point for an implementation of 
+        'read_inv_val_map' which extracts a value from an ExplanationTree
+        using a var pointer as the key. Returning an entry_point instead of 
+        a dispatcher ignores numba's multi-dispatch type checking.
+    '''
     impl = read_inv_val_map_impls.get(t_id, None)
     if(impl is None):
         typ = cre_context().get_type(t_id=t_id)
         ivm_typ = DictType(i8, typ)
         @njit(typ(ExplanationTreeType,i8),cache=True)
-        def impl(expl_tree, var_ptr):
+        def read_inv_val_map(expl_tree, var_ptr):
             inv_val_map_ptr_dict = expl_tree.inv_val_map_ptr_dict
             inv_val_map = _dict_from_ptr(ivm_typ, inv_val_map_ptr_dict[u2(t_id)])
             out = inv_val_map[var_ptr]
             return out#inv_val_map[var_ptr]
 
-        impl_ep = impl.overloads[(ExplanationTreeType,i8)].entry_point
+        impl_ep = read_inv_val_map.overloads[(ExplanationTreeType,i8)].entry_point
         impl = read_inv_val_map_impls[t_id] = impl_ep
     return impl
-
-def read_inv_val_map(expl_tree, var_ptr, t_id):
-    # Shortcut numba's multi-dispatch type checking and just 
-    #  get cached entry_point for reading inv_val_map for arg_t_id
-    # read_inv_val_map = get_read_inv_val_map_impl(arg_t_id)
-    impl = get_read_inv_val_map_impl(t_id)
-    return impl(expl_tree, var_ptr)
 
 define_boxing(ExplanationTreeTypeClass,ExplanationTree)
 
@@ -1292,26 +1289,19 @@ class ExplanationTreeIter():
 
     def __next__(self):
         var, op = expl_tree_iter_next(self.iter)
-        # print("<<", op)
         if(op is None):
             if(var is not None):
-                print("VAR", var)
+                # If iteration returns a Var then convert it to
+                #  an Identity CREFunc so that it is callable
                 op = Identity(var)
             else:
                 raise StopIteration()
+
+        # Get the match values from their associated base var ptrs
         vals = []
         for base_ptr, arg_t_id in zip(op.base_var_ptrs, op.base_t_ids):
-            vals.append(read_inv_val_map(self.expl_tree, base_ptr, arg_t_id))
-                # var_ptr = head_infos[hr['start']]['var_ptr']
-                # vals.append(read_inv_val_map(self.expl_tree, base_ptr, val_typ))
-        # else:
-        #     var = op            
-        #     vals.append(read_inv_val_map(self.expl_tree, var.base_ptr, var.base_t_id))
-        #     # op_comp = OpComp(Identity(var.head_type), var)
-        #     op = Identity(var)
-            # print(op_comp)
-            # raise ValueError()
-        # print(op, op.arg_types)
+            val = get_read_inv_val_map_impl(arg_t_id)(self.expl_tree, base_ptr)
+            vals.append(val)
 
         return op, vals
 
@@ -1709,12 +1699,9 @@ from cre.func import cre_func_deep_copy_generic, set_var_arg, set_op_arg, reinit
 def expl_tree_iter_next(t_iter):
     if(t_iter.entry_ind == -1):
         return None, None
-    # Whether frame is terminal: CREFunc w/ Var args and no CREFunc args.
-    #  Start as True at each recusion and set false if any func args
-    # t_frame = True
 
-    # Whether to increment the t_iter. Remains true as long as attempts
-    #  to increment overflow.
+    # Whether to increment the t_iter. Remains true until an
+    #  incrementation suceeds without overflow.
     keep_incrementing = True
 
     stack = List()
@@ -1733,15 +1720,11 @@ def expl_tree_iter_next(t_iter):
                 # Don't use cached func until hits an unchanged iter
                 t_iter.cached_func = cast(0,CREFuncType)
 
-            # If incrementation has been resolved use the cached func if available
+            # If no more incrementation use the cached func if not NULL
             if(not keep_incrementing and cast(t_iter.cached_func,i8) != 0):
                 # print(f"Skip ({t_iter.entry_ind}/{t_iter.n_entries})", entry.op.name_data.name)
                 f_obj = cast(t_iter.cached_func, CREObjType)
-                # print("BEF1", t_iter.cached_func.name_data.name)
-                # if(len(stack) == 0):
-                #     return t_iter.func
                 t_iter, i, args = stack.pop(-1)
-                # print("AFT1")
                 args.append(f_obj)
             else:
                 if(i < len(entry.child_arg_ptrs)):
@@ -1796,46 +1779,34 @@ def expl_tree_iter_next(t_iter):
                         t_iter.cached_func = cast(0,CREFuncType)
                     else:
                         t_iter.cached_func = cf
-                    # args = List.empty_list(CREObjType)
 
                     # Return when hit initial frame.
                     if(len(stack) == 0):
                         return None, cf
 
-                    # print("I")
-                    
-                   
-                    
-                    # print("J")
                     # Pop back frame from stack.
-                    # print("BEF2")
                     t_iter, i, args = stack.pop(-1)
                     args.append(cast(cf, CREObjType))
-            # t_frame = True
         # Var Case
         else:
-            # print("Var:", str(entry.var), i)
+            # print(f"Var:({t_iter.entry_ind}/{t_iter.n_entries})",  str(entry.var))
             
-
             # Increment if appropriate
             if(keep_incrementing):
-                # print("INCR", str(entry.var))
                 t_iter.entry_ind += 1
                 if(t_iter.entry_ind >= t_iter.n_entries):
                     t_iter.entry_ind = 0
                 else:
                     keep_incrementing = False
-            # print("F")
-            # i += 1
-            # print("BEF3")
+
             if(len(stack) == 0):
                 # Indicate that the iterator is exhausted
                 t_iter.entry_ind = -1
                 return entry.var, None
-                # return None
+
+            # Pop back frame from stack.
             t_iter, i, args = stack.pop(-1)
             args.append(cast(entry.var, CREObjType))
-        
     
     # Should never reach here
     return None, None

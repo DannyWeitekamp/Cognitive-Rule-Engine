@@ -19,7 +19,7 @@ from cre.utils import (cast, _sizeof_type, _nullify_attr, new_w_del, _memcpy, _f
 from cre.utils import PrintElapse, encode_idrec, assign_to_alias_in_parent_frame, as_typed_list, lower_setattr, _store, _store_safe, _tuple_getitem
 from cre.vector import VectorType
 from cre.fact import Fact, gen_fact_import_str, get_offsets_from_member_types
-from cre.var import Var, var_memcopy, VarType, VarTypeClass
+from cre.var import Var, var_extend, var_memcopy, VarType, VarTypeClass
 from cre.obj import CREObjType, cre_obj_field_dict, CREObjTypeClass, CREObjProxy, member_info_type, set_chr_mbrs, cre_obj_get_item_t_id_ptr, cre_obj_set_item, cre_obj_get_item, PRIMITIVE_MBR_ID
 from cre.core import T_ID_OP, T_ID_STR, register_global_default
 from cre.make_source import make_source, gen_def_func, gen_assign, gen_if, gen_not, resolve_template, gen_def_class
@@ -668,7 +668,7 @@ class CREFunc(StructRefProxy):
         context = cre_context()
         arg_types = []
         for t_id in get_base_t_ids_ep(self):
-            arg_types.append(context.t_id_to_type[t_id])
+            arg_types.append(context.get_type(t_id=t_id))
 
         self._arg_types = arg_types
 
@@ -1134,7 +1134,7 @@ def cre_func_deep_copy_generic(cf):
                     sub_op = op_copies[j]
                     inf.ptr = cast(sub_op, i8)
                     cre_obj_set_item(cpy, i8(1+cpy.n_root_args*2 + k), sub_op)
-                j += 1
+                    j += 1
 
             remap[cast(cf, i8)] = cast(cpy, i8)
             remap[cf.return_data_ptr] = cpy.return_data_ptr
@@ -1217,22 +1217,29 @@ def set_var_arg(self, i, var):
     head_infos = self.head_infos
     start = self.head_ranges[i].start
     end = self.head_ranges[i].end
-
-    var_ptr = cast(var, i8)
+    
     hd = u1(len(var.deref_infos) > 0)
     for j in range(start,end):
         cf = cast(head_infos[j].cf_ptr, CREFuncType)
         arg_ind = head_infos[j].arg_ind
-        head_infos[j].var_ptr = var_ptr
-        head_infos[j].has_deref = u1(hd)
+
+        if(head_infos[j].has_deref):
+            old_head_var = cast(head_infos[j].var_ptr, VarType)
+            head_var = var_extend(var, old_head_var.deref_infos)
+            head_infos[j].has_deref = u1(1)
+        else:
+            head_var = var
+            head_infos[j].has_deref = u1(hd)
+
+        head_infos[j].var_ptr = cast(head_var, i8)
         head_infos[j].type = ARGINFO_VAR
 
         # set 'ref{i}' to var
-        cre_obj_set_item(cf, i8(1+cf.n_root_args*2 + arg_ind), var)
+        cre_obj_set_item(cf, i8(1+cf.n_root_args*2 + arg_ind), head_var)
 
         cf.root_arg_infos[arg_ind].type = ARGINFO_VAR
-        cf.root_arg_infos[arg_ind].has_deref = hd
-        cf.root_arg_infos[arg_ind].ptr = cast(var, i8)
+        cf.root_arg_infos[arg_ind].has_deref = head_infos[j].has_deref
+        cf.root_arg_infos[arg_ind].ptr = cast(head_var, i8)
         cf.root_arg_infos[arg_ind].t_id = head_infos[j].head_t_id
 
 set_var_arg_ep = set_var_arg.overloads[(CREFuncType,i8,VarType)].entry_point

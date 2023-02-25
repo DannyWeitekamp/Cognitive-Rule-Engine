@@ -12,7 +12,7 @@ from numba.core.typing.templates import AttributeTemplate
 from cre.caching import gen_import_str, unique_hash_v, import_from_cached, source_to_cache, source_in_cache, cache_safe_exec, get_cache_path
 from cre.context import cre_context
 from cre.structref import define_structref, define_structref_template
-from cre.var import VarType
+from cre.var import VarType, var_ctor_generic
 from cre.utils import (cast, ptr_t,  decode_idrec, lower_getattr, lower_setattr, lower_getattr,
                         _decref_ptr, _incref_ptr, _incref_structref, _ptr_from_struct_incref,
                        _dict_from_ptr, _list_from_ptr, _load_ptr, _arr_from_data_ptr, _get_array_raw_data_ptr, _get_array_raw_data_ptr_incref)
@@ -20,7 +20,7 @@ from cre.utils import assign_to_alias_in_parent_frame, _raw_ptr_from_struct_incr
 from cre.vector import VectorType
 from cre.fact import Fact, gen_fact_import_str, get_offsets_from_member_types
 from cre.fact_intrinsics import fact_lower_getattr
-from cre.var import Var, VarTypeClass, var_append_deref
+from cre.var import Var, VarTypeClass, var_append_deref, var_extend
 # from cre.op import CREFuncType, CREFuncTypeClass
 from cre.func import CREFuncType, CREFuncTypeClass, CREFunc, cre_func_call_self, set_base_arg_val_impl, get_return_val_impl, CFSTATUS_ERROR, CFSTATUS_TRUTHY
 from cre.make_source import make_source, gen_def_func, gen_assign, resolve_template, gen_def_class
@@ -29,6 +29,8 @@ from cre.core import T_ID_OP, T_ID_VAR
 from numba.core import imputils, cgutils
 from numba.core.datamodel import default_manager, models
 from numba.experimental.function_type import _get_wrapper_address
+
+from cre.func import cre_func_deep_copy_generic, set_var_arg, set_op_arg, reinitialize
 
 
 from operator import itemgetter
@@ -479,12 +481,12 @@ def planner_declare_conversion(planner, val, op_or_var, source_ind=None):
     return impl 
 
 
-def try_conv(conv_op, val):    
-    try: 
-        conv_val = float(val)    
-    except Exception:
-        return False, 0.0
-    return True, conv_val
+# def try_conv(conv_op, val):    
+#     try: 
+#         conv_val = float(val)    
+#     except Exception:
+#         return False, 0.0
+#     return True, conv_val
 
 # @njit(cache=True)
 # def planner_try_delcare_converison(planner, call_f_type, conv_type, val, conv_op, source_ind):
@@ -1276,34 +1278,7 @@ def expl_tree_ctor(entries=None, planner=None):
     return st
 
 
-#-----------------------------
-# : Explanation Tree Iterator
 
-class ExplanationTreeIter():
-    def __init__(self, expl_tree):
-        self.expl_tree = expl_tree
-        self.iter  = new_expl_tree_iterator(expl_tree)
-        # self.gen = gen_op_comps_from_expl_tree(expl_tree)
-    def __iter__(self):
-        return self
-
-    def __next__(self):
-        var, op = expl_tree_iter_next(self.iter)
-        if(op is None):
-            if(var is not None):
-                # If iteration returns a Var then convert it to
-                #  an Identity CREFunc so that it is callable
-                op = Identity(var)
-            else:
-                raise StopIteration()
-
-        # Get the match values from their associated base var ptrs
-        vals = []
-        for base_ptr, arg_t_id in zip(op.base_var_ptrs, op.base_t_ids):
-            val = get_read_inv_val_map_impl(arg_t_id)(self.expl_tree, base_ptr)
-            vals.append(val)
-
-        return op, vals
 
 #----------------------------
 # : build_explanation_tree()
@@ -1555,120 +1530,153 @@ def build_explanation_tree(planner, g_typ, goal):
 #     pass
 
 
-@njit(i8(ExplanationTreeType,),cache=True)
-def expl_tree_num_entries(tree):
-    return len(tree.entries)
+# @njit(i8(ExplanationTreeType,),cache=True)
+# def expl_tree_num_entries(tree):
+#     return len(tree.entries)
 
-@njit(ExplanationTreeEntryType(ExplanationTreeType,i8),cache=True)
-def expl_tree_ith_entry(tree, i):
-    return tree.entries[i]
+# @njit(ExplanationTreeEntryType(ExplanationTreeType,i8),cache=True)
+# def expl_tree_ith_entry(tree, i):
+#     return tree.entries[i]
 
-@njit(i8(ExplanationTreeEntryType),cache=True)
-def expl_tree_entry_num_args(tree_entry):
-    return len(tree_entry.child_arg_ptrs)
+# @njit(i8(ExplanationTreeEntryType),cache=True)
+# def expl_tree_entry_num_args(tree_entry):
+#     return len(tree_entry.child_arg_ptrs)
 
-@njit(u1(ExplanationTreeEntryType),cache=True)
-def expl_tree_entry_is_op(tree_entry):
-    return tree_entry.is_op
+# @njit(u1(ExplanationTreeEntryType),cache=True)
+# def expl_tree_entry_is_op(tree_entry):
+#     return tree_entry.is_op
 
-@njit(CREFuncType(ExplanationTreeEntryType),cache=True)
-def expl_tree_entry_get_op(tree_entry):
-    return tree_entry.op
+# @njit(CREFuncType(ExplanationTreeEntryType),cache=True)
+# def expl_tree_entry_get_op(tree_entry):
+#     return tree_entry.op
 
-@njit(VarType(ExplanationTreeEntryType),cache=True)
-def expl_tree_entry_get_var(tree_entry):
-    return tree_entry.var
+# @njit(VarType(ExplanationTreeEntryType),cache=True)
+# def expl_tree_entry_get_var(tree_entry):
+#     return tree_entry.var
 
-@njit(ExplanationTreeType(ExplanationTreeEntryType,i8),cache=True)
-def expl_tree_entry_jth_arg(tree_entry, j):
-    return cast(tree_entry.child_arg_ptrs[j], ExplanationTreeType)
+# @njit(ExplanationTreeType(ExplanationTreeEntryType,i8),cache=True)
+# def expl_tree_entry_jth_arg(tree_entry, j):
+#     return cast(tree_entry.child_arg_ptrs[j], ExplanationTreeType)
 
 
-def product_of_generators(generators):
-    '''Takes a list of generators and applies the equivalent of
-        itertools.product() on them. Has significantly less memory
-        overhead in cases when you only need a subset of the full product.
-    '''
-    iters = []
-    out = []
+# def product_of_generators(generators):
+#     '''Takes a list of generators and applies the equivalent of
+#         itertools.product() on them. Has significantly less memory
+#         overhead in cases when you only need a subset of the full product.
+#     '''
+#     iters = []
+#     out = []
     
-    while(True):
-        # Create any missing iterators from generators
-        while(len(iters) < len(generators)):
-            it = generators[len(iters)]()
-            iters.append(it)
+#     while(True):
+#         # Create any missing iterators from generators
+#         while(len(iters) < len(generators)):
+#             it = generators[len(iters)]()
+#             iters.append(it)
         
-        iter_did_end = False
-        while(len(out) < len(iters)):
-            # Try to fill in any missing part of out
-            try:
-                nxt = next(iters[len(out)])
-                out.append(nxt)
-            # If any of the iterators failed pop up an iterator
-            except StopIteration as e:
-                # Stop yielding when 0th iter reaches end
-                if(len(iters) == 1):
-                    return
-                out = out[:-1]
-                iters = iters[:-1]
-                iter_did_end = True
+#         iter_did_end = False
+#         while(len(out) < len(iters)):
+#             # Try to fill in any missing part of out
+#             try:
+#                 nxt = next(iters[len(out)])
+#                 out.append(nxt)
+#             # If any of the iterators failed pop up an iterator
+#             except StopIteration as e:
+#                 # Stop yielding when 0th iter reaches end
+#                 if(len(iters) == 1):
+#                     return
+#                 out = out[:-1]
+#                 iters = iters[:-1]
+#                 iter_did_end = True
         
-        # If any of the iterators reached their end then 
-        #  we'll need to generate one or more new ones.
-        if(iter_did_end): continue
+#         # If any of the iterators reached their end then 
+#         #  we'll need to generate one or more new ones.
+#         if(iter_did_end): continue
 
-        yield out
-        out = out[:-1]
+#         yield out
+#         out = out[:-1]
 
 
-class ExplTreeGen():
-    '''Helper object that is essentially a lambda that applies
-        gen_op_comps_from_expl_tree() on a particular ExplanationTree
-    '''
-    def __init__(self,child_tree):
-        self.child_tree = child_tree
-    def __call__(self):
-        return gen_op_comps_from_expl_tree(self.child_tree)
+# class ExplTreeGen():
+#     '''Helper object that is essentially a lambda that applies
+#         gen_op_comps_from_expl_tree() on a particular ExplanationTree
+#     '''
+#     def __init__(self,child_tree):
+#         self.child_tree = child_tree
+#     def __call__(self):
+#         return gen_op_comps_from_expl_tree(self.child_tree)
         
-# from cre.op import OpComp
-def gen_op_comps_from_expl_tree(tree):
-    '''A generator of OpComps from an ExplanationTree'''
-    for i in range(expl_tree_num_entries(tree)):
-        tree_entry = expl_tree_ith_entry(tree, i)
+# # from cre.op import OpComp
+# def gen_op_comps_from_expl_tree(tree):
+#     '''A generator of OpComps from an ExplanationTree'''
+#     for i in range(expl_tree_num_entries(tree)):
+#         tree_entry = expl_tree_ith_entry(tree, i)
         
-        if(expl_tree_entry_is_op(tree_entry)):
-            func = expl_tree_entry_get_op(tree_entry)
-            # print(op)
-            # op = op.recover_singleton_inst()
-            # print(op)
-            child_generators = []
-            for j in range(expl_tree_entry_num_args(tree_entry)):
-                child_tree = expl_tree_entry_jth_arg(tree_entry,j)
-                child_gen = ExplTreeGen(child_tree)
-                child_generators.append(child_gen)
+#         if(expl_tree_entry_is_op(tree_entry)):
+#             func = expl_tree_entry_get_op(tree_entry)
+#             # print(op)
+#             # op = op.recover_singleton_inst()
+#             # print(op)
+#             child_generators = []
+#             for j in range(expl_tree_entry_num_args(tree_entry)):
+#                 child_tree = expl_tree_entry_jth_arg(tree_entry,j)
+#                 child_gen = ExplTreeGen(child_tree)
+#                 child_generators.append(child_gen)
 
-            for args in product_of_generators(child_generators): 
-                # print("<<", op, [(str(x.base_type), str(x.head_type)) if(isinstance(x,Var)) else x for x in args])
+#             for args in product_of_generators(child_generators): 
+#                 # print("<<", op, [(str(x.base_type), str(x.head_type)) if(isinstance(x,Var)) else x for x in args])
                 
-                func_comp = func(*args)
-                # print("::", func_comp, args, [x._meminfo.refcount if isinstance(x,Var) else "" for x in args])
-                yield func_comp
-        else:
-            v = expl_tree_entry_get_var(tree_entry)
-            yield v
+#                 func_comp = func(*args)
+#                 # print("::", func_comp, args, [x._meminfo.refcount if isinstance(x,Var) else "" for x in args])
+#                 yield func_comp
+#         else:
+#             v = expl_tree_entry_get_var(tree_entry)
+#             yield v
+
+#-----------------------------
+# : Explanation Tree Iterator
+
+# skip "g" to reserve for goals, i->o because those are often used for iterators 
+default_param_names = ("a","b","c","d","e","f",  "h",  "p","q",
+                       "r","s","t","u","v","w","x","y","z")
+@njit(CREFuncType(CREFuncType), cache=True)
+def default_reparam(cf):
+    if(cf.n_args > len(default_param_names)):
+        raise ValueError("Too many arguments to reparametrize.")
+
+    cf = cre_func_deep_copy_generic(cf)
+    for i in range(cf.n_args):
+        hi = cf.head_infos[cf.head_ranges[i].start]
+        v = cast(hi.var_ptr, VarType)
+        new_base = var_ctor_generic(v.base_t_id, default_param_names[i])
+        set_var_arg(cf, i, new_base)
+    reinitialize(cf)
+    return cf
+
+# reparam_func_type = types.FunctionType(CREFuncType(CREFuncType))
+# default_reparam_addr = _get_wrapper_address(default_reparam, CREFuncType(CREFuncType))
+
 
 expl_tree_iterator_field_dict = {
+    # A reference to the ExplanationTree being iterated over
     "tree" : ExplanationTreeType,
-    # "func_or_var" : CREObjType,
+    
+    # The current entry index, exactly one instance of ExplanationTreeIterator
+    #  will be incremented on each iteration. Several may overflow back to 0. 
     "entry_ind" : i8,
+
+    # The number of entries in tree.entries
     "n_entries" : i8,
-    # "arg_inds" : i8[::1],
+    
+    # Iterators for child arguments
     "arg_iters" : ListType(CREObjType), # Note: Ought to be defered type,
-    # "args" : ListType(CREObjType),
 
     # The last function generated by the iterator or NULL ptr, used 
     #  to cache functions that remain unchanged between iterations
     "cached_func" : CREFuncType,
+
+    # Address of a function that reparametrizes the output of the iterator
+    #  to give it more conventional base var names (i.e. zDb.B*qBH.B -> a.B*b.B)
+    # "reparam_func_addr" : i8 
 
     # A singleton reference to the Identity builtin CREFunc used in
     #  cases where the composition is just a Var to make it callable.
@@ -1686,14 +1694,13 @@ def new_expl_tree_iterator(tree):
     st.n_entries = len(tree.entries)
     st.arg_iters = List.empty_list(CREObjType)
     st.cached_func = cast(0,CREFuncType)
+    # st.reparam_func_addr = reparam_func_addr
     # if(identity_func is not None):
     #     st.identity_func = identity_func
     # st.args = List.empty_list(CREObjType)
     return st
     # st.arg_inds = np.zeros(len(tree.child_arg_ptrs),dtype=np.uint64)
 
-
-from cre.func import cre_func_deep_copy_generic, set_var_arg, set_op_arg, reinitialize
 
 @njit(Tuple((types.optional(VarType),types.Optional(CREFuncType)))(ExplanationTreeIteratorType), cache=True)
 def expl_tree_iter_next(t_iter):
@@ -1763,6 +1770,11 @@ def expl_tree_iter_next(t_iter):
                             set_op_arg(cf, j, cast(arg, CREFuncType))
                     reinitialize(cf)
 
+                    # if(t_iter.reparam_func_addr != 0):
+                    #     reparam_func = _func_from_address(reparam_func_type, t_iter.reparam_func_addr)
+                    #     cf = reparam_func(cf)
+
+
                     # Increment any t_iters in this frame if appropriate 
                     if(keep_incrementing):
                         t_iter.entry_ind += 1
@@ -1810,6 +1822,41 @@ def expl_tree_iter_next(t_iter):
     
     # Should never reach here
     return None, None
+
+class ExplanationTreeIter():
+    def __init__(self, expl_tree, reparam_func=None):
+        self.expl_tree = expl_tree
+        self.iter = new_expl_tree_iterator(expl_tree)
+        
+        if(reparam_func is None):
+            reparam_func = default_reparam
+
+        # Get entry point to avoid numba type checking pass
+        self.reparam_func = reparam_func
+        self.reparam_func_ep = self.reparam_func.overloads[(CREFuncType,)].entry_point
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        var, op = expl_tree_iter_next(self.iter)
+        if(op is None):
+            if(var is not None):
+                # If iteration returns a Var then convert it to
+                #  an Identity CREFunc so that it is callable
+                op = Identity(var)
+            else:
+                raise StopIteration()
+
+        # Get the match values from their associated base var ptrs
+        vals = []
+        for base_ptr, arg_t_id in zip(op.base_var_ptrs, op.base_t_ids):
+            val = get_read_inv_val_map_impl(arg_t_id)(self.expl_tree, base_ptr)
+            vals.append(val)
+
+        op = self.reparam_func_ep(op)
+
+        return op, vals
 
 
 # def expl_tree_inter_next_func_comp(t_iter):

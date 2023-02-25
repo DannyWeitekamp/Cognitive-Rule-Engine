@@ -899,15 +899,34 @@ def var_append_deref(self, attr):
 def generic_var_append_deref(self, a_id, offset, head_t_id, typ=DEREF_TYPE_ATTR):
     # _incref_structref(base_var)
     st = new(VarType)
+    was_base = len(self.deref_infos) == 0
     var_memcopy(self, st)
     _var_append_deref(st, a_id, offset, head_t_id, typ=typ)
-    lower_setattr(st, 'base_ptr_ref', _ptr_from_struct_incref(self))
+    if(was_base):
+        # If was a base var then borrow its pointer
+        lower_setattr(st, 'base_ptr_ref', _ptr_from_struct_incref(self))
+    return st
+
+@njit(VarType(VarType, deref_info_type[::1]), cache=True)
+def var_extend(self, deref_infos):
+    st = new(VarType)
+    was_base = len(self.deref_infos) == 0
+    var_memcopy(self, st)
+    new_deref_infos = np.empty(len(self.deref_infos) + len(deref_infos), dtype=deref_info_type)
+    new_deref_infos[:len(self.deref_infos)] = self.deref_infos
+    new_deref_infos[len(self.deref_infos):] = deref_infos
+    lower_setattr(st, 'deref_infos', new_deref_infos)
+    lower_setattr(st, 'head_t_id', new_deref_infos[-1].t_id)
+    if(was_base):
+        # If was a base var then borrow its pointer
+        lower_setattr(st, 'base_ptr_ref', _ptr_from_struct_incref(self))
     return st
 
 
     
 # -------------------------------------------------------------
 # : copy
+
 # @njit(VarType(VarType), cache=True)
 # def var_deep_copy(v):
 #     new_v = new(VarType)

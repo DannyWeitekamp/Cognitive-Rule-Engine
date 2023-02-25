@@ -228,9 +228,9 @@ def test_no_mutate_on_compose():
     print(c0)
     assert str(c0) == s0
 
-def _test_compose_deref_bases():
+def test_compose_deref_bases():
     with cre_context("test_compose_deref_bases"):
-        BOOP = define_fact("BOOP", {"A" :unicode_type, "B" :i8})
+        BOOP = define_fact("BOOP", {"A" :unicode_type, "B" : f8})
 
         @CREFunc(signature=f8(f8,f8), shorthand="{0}*{1}")
         def Multiply(a, b):
@@ -240,11 +240,17 @@ def _test_compose_deref_bases():
 
         c0 = Multiply(a.B, Multiply(a.B, b.B))
 
+        a0, a1 =BOOP("A",7),BOOP("B",2) 
+        print(c0(a0,a1))
+        assert c0(BOOP("A",7),BOOP("B",2)) == 98
+
         print(c0)
 
         x,y = Var(BOOP,'x'), Var(BOOP,'y')
 
         c1 = c0(x,y)
+
+        assert c1(BOOP("A",7),BOOP("B",2)) == 98
 
         print(c1)
 
@@ -645,7 +651,7 @@ if __name__ == "__main__":
     # test_obj()
     # test_mixed_types()
     # test_njit_compose()
-    _test_compose_deref_bases()
+    test_compose_deref_bases()
     # test_not_jittable()
     # test_returns_object()
     # test_var_cmp_overloads()

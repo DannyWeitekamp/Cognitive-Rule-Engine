@@ -7,8 +7,7 @@ from cre.sc_planner import (gen_apply_multi_source, search_for_explanations,
                      apply_multi, SetChainingPlanner, insert_record,
                      join_records_of_type, forward_chain_one, extract_rec_entry,
                      retrace_goals_back_one, expl_tree_ctor, planner_declare,
-                    build_explanation_tree, ExplanationTreeType, SC_Record, SC_RecordType,
-                    gen_op_comps_from_expl_tree)
+                    build_explanation_tree, ExplanationTreeType, SC_Record, SC_RecordType)
 from cre.utils import _ptr_from_struct_incref, _list_from_ptr, _dict_from_ptr, _struct_from_ptr
 from cre.var import Var
 from cre.context import cre_context
@@ -680,8 +679,11 @@ def test_const_funcs():
         expls = planner.search_for_explanations(11.0, ops=[Add_f8, Ten], 
             search_depth=1)
 
-        for i, (op, binding) in enumerate(expls):
-            print(op, binding)
+        for i, (op, match) in enumerate(expls):
+            print(op, match)
+            print(op(*match))
+            assert op(*match) == 11.0
+            
 
 
 def test_policy_search(n=5):
@@ -840,7 +842,7 @@ if __name__ == "__main__":
     # test_forward_chain_one()
     # test_build_explanation_tree()
     # test_search_for_explanations()
-    # test_declare_fact()
+    test_declare_fact()
     # test_mem_leaks(n=10)
     # benchmark_apply_multi()
     # benchmark_retrace_back_one()
@@ -852,7 +854,7 @@ if __name__ == "__main__":
     # test_declare_fact()
     # test_declare_fact_w_conversions()
     # test_min_stop_depth()
-    test_const_funcs()
+    # test_const_funcs()
 
     # test_policy_search()
 # from numba import njit, i8

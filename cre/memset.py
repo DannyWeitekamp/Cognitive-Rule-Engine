@@ -159,18 +159,18 @@ class MemSet(structref.StructRefProxy):
     def _repr_helper(self,rfunc,ind="    ",sep="\n",pad='\n'):
         strs = []
         for fact in self.get_facts():
-            strs.append(str(fact))
+            strs.append(rfunc(fact))
         nl = "\n"
         return f'''MemSet(facts=({pad}{ind}{f"{sep}{ind}".join(strs)}{pad})'''
 
     def __str__(self,**kwargs):
-        from cre.utils import PrintElapse
+        # from cre.utils import PrintElapse
         # with PrintElapse("__STR__"):
         return self._repr_helper(str,**kwargs)
 
 
     def __repr__(self,**kwargs):
-        from cre.utils import PrintElapse
+        # from cre.utils import PrintElapse
         # with PrintElapse("__REPR__"):
         return self._repr_helper(repr,**kwargs)
 
@@ -888,39 +888,47 @@ def get_base_types_with_attr(attr):
 
 vec2_type = Tuple((VectorType,VectorType))
 
+# TODO: Should probably see if there is a way to make more generic 
+#  version of Indexer
 def new_indexer(attr):
     base_types = get_base_types_with_attr(attr)
-    return indexer_ctor(base_types, attr)
+    return indexer_ctor_impl(base_types, attr)()
 
-@generated_jit(cache=True)
-def indexer_ctor(base_types, attr):
-    SentryLiteralArgs(['attr']).for_function(indexer_ctor).bind(base_types, attr)
-    _base_types = base_types.instance_type
-    if(len(_base_types) == 0):
-        context = cre_context()
-        raise ValueError(f"No fact_types with attribute {attr!r} defined in context {context.name!r}.")
-    val_type = None
-    for _,_val_type in _base_types:    
-        if(val_type is not None and _val_type != val_type):
-            raise ValueError("Cannot use indexer on attribute that differs in type across two fact types.")
-        val_type = _val_type
+_indexer_ctor_impls = {}
+def indexer_ctor_impl(base_types, attr):
+    # SentryLiteralArgs(['attr']).for_function(indexer_ctor).bind(base_types, attr)
+    # _base_types = base_types.instance_type
+    tup = (base_types, attr)
+    if(tup not in _indexer_ctor_impls):
+        if(len(base_types) == 0):
+            context = cre_context()
+            raise ValueError(f"No fact_types with attribute {attr!r} defined in context {context.name!r}.")
+        val_type = None
+        for _,_val_type in base_types:    
+            if(val_type is not None and _val_type != val_type):
+                raise ValueError("Cannot use indexer on attribute that differs in type across two fact types.")
+            val_type = _val_type
 
-    indexer_fields = {
-        **base_indexer_fields, 
-        "mapping" : DictType(val_type, vec2_type),
-        "inv_mapping" : DictType(u8, val_type),
-        "attr" : attr,
-        "base_types" : base_types,
-    }
-    indexer_type = IndexerTypeClass([(k,v) for k,v in indexer_fields.items()])
-    indexer_type._base_types = base_types
-    def impl(base_types, attr):
-        st = new(indexer_type)
-        st.head = 0
-        st.mapping = Dict.empty(val_type, vec2_type)
-        st.inv_mapping = Dict.empty(u8, val_type)
-        return st
-    return impl
+        indexer_fields = {
+            **base_indexer_fields, 
+            "mapping" : DictType(val_type, vec2_type),
+            "inv_mapping" : DictType(u8, val_type),
+            "attr" : types.literal(attr),
+            "base_types" : types.TypeRef(base_types),
+        }
+        print(base_types)
+        indexer_type = IndexerTypeClass([(k,v) for k,v in indexer_fields.items()])
+        print(indexer_type)        
+        indexer_type._base_types = base_types
+        @njit(cache=True)
+        def impl():
+            st = new(indexer_type)
+            st.head = 0
+            st.mapping = Dict.empty(val_type, vec2_type)
+            st.inv_mapping = Dict.empty(u8, val_type)
+            return st
+        _indexer_ctor_impls[tup] = impl
+    return _indexer_ctor_impls[tup]
 
 from cre.fact_intrinsics import fact_lower_getattr
 @njit(cache=True)
@@ -955,7 +963,7 @@ from cre.change_event import accumulate_change_events
 def indexer_update(self, memset):
     context_data = cre_context().context_data
     base_types_t_ids = []
-    for bt,vt in self._base_types.instance_type:
+    for bt,vt in self._base_types:
         base_types_t_ids.append((bt,tuple(context_data.child_t_ids[bt.t_id])))
     base_types_t_ids = tuple(base_types_t_ids)
     def impl(self, memset):

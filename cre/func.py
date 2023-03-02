@@ -545,6 +545,7 @@ class CREFunc(StructRefProxy):
                 elif(isinstance(arg, CREFunc)):
                     set_op_arg_ep(new_cf, i, arg)
                 else:
+                    # print(arg, self.arg_types[i])
                     impl = set_const_arg_impl(arg, use_ep=True)
                     impl(new_cf, i, arg)
 
@@ -937,7 +938,7 @@ head_info_arr_type = head_info_type[::1]
 @generated_jit(nopython=True)
 def make_repr_const_addrs(cf, arg_types):
     n_args = len(arg_types)
-    print("<<", arg_types, n_args)
+    # print("<<", arg_types, n_args)
     repr_const_symbols = tuple(ensure_repr_const(at) for  at in arg_types)    
     unroll_inds = tuple(range(n_args))
     if(n_args == 0):
@@ -1036,10 +1037,10 @@ def cre_func_ctor(_cf_type, name, expr_template, shorthand_template, is_ptr_op):
             cf.head_ranges[i].end = i+1
 
         # Load addresses of methods from globals 
-        if(not is_ptr_op):
-            cf.call_heads_addr = _get_global_fn_addr(method_names[0])
-            cf.call_self_addr = _get_global_fn_addr(method_names[1])
-            cf.resolve_heads_addr = _get_global_fn_addr(method_names[2])        
+        # if(not is_ptr_op):
+        cf.call_heads_addr = _get_global_fn_addr(method_names[0])
+        cf.call_self_addr = _get_global_fn_addr(method_names[1])
+        cf.resolve_heads_addr = _get_global_fn_addr(method_names[2])        
 
         repr_const_addrs = np.zeros(n_args, dtype=np.int64)
         for i in literal_unroll(unroll_inds):
@@ -1188,7 +1189,7 @@ set_const_arg_overloads = {}
 def set_const_arg_impl(_val, use_ep=False):
     nb_val_type = typeof(_val) if not isinstance(_val, types.Type) else _val
     if(nb_val_type not in set_const_arg_overloads):
-        
+        val_t_id = cre_context().get_t_id(nb_val_type)
         sig = types.void(CREFuncType, i8, nb_val_type)
         @njit(sig,cache=True)
         def _set_const_arg(self, i, val):
@@ -1200,6 +1201,11 @@ def set_const_arg_impl(_val, use_ep=False):
             for j in range(start,end):
                 cf = cast(head_infos[j].cf_ptr, CREFuncType)
                 arg_ind = head_infos[j].arg_ind
+
+                # NOTE: Don't need to bother checking here because if it will fail it 
+                #  will fail at compile time
+                # if(head_infos[j].base_t_id != val_t_id and not self.is_ptr_op):
+                #     raise TypeError("Constant's type doesn't match composing CREFunc's argument type.")
 
                 head_infos[j].type = ARGINFO_CONST
                 head_infos[j].has_deref = 0
@@ -1238,6 +1244,9 @@ def set_var_arg(self, i, var):
         cf = cast(head_infos[j].cf_ptr, CREFuncType)
         arg_ind = head_infos[j].arg_ind
 
+        if(head_infos[j].base_t_id != var.head_t_id and not self.is_ptr_op):
+            raise TypeError("Var's head_type doesn't match composing CREFunc's argument type.")
+
         if(head_infos[j].has_deref):
             old_head_var = cast(head_infos[j].var_ptr, VarType)
             head_var = var_extend(var, old_head_var.deref_infos)
@@ -1270,8 +1279,10 @@ def set_op_arg(self, i, op):
     op_ptr = cast(op, i8)
     for j in range(start,end):
         cf = cast(head_infos[j].cf_ptr, CREFuncType)
-
         arg_ind = head_infos[j].arg_ind
+
+        if(head_infos[j].base_t_id != op.return_t_id and not self.is_ptr_op):
+            raise TypeError("Argument CREFunc's head_type doesn't match composing CREFunc's argument type.")
 
         head_infos[j].cf_ptr = op_ptr
         head_infos[j].has_deref = 0
@@ -1668,7 +1679,11 @@ def overload_call_codegen(cf_type, arg_types):
         def impl(cf,*args):
             for i in literal_unroll(range_inds):
                 set_base(cf, i, args[i])
-            status = cre_func_call_self(cf)
+            status = cre_func_resolve_call_self(cf)
+            if(status == CFSTATUS_NULL_DEREF):
+                raise ValueError("CREFunc failed to execute because of a dereferencing error.")
+            elif(status == CFSTATUS_ERROR):
+                raise ValueError("CREFunc failed to execute because of an internal error.")
             return ret_impl(cf)
 
     elif(hasattr(cf_type,'dispatchers') and 'call' in cf_type.dispatchers):
@@ -2043,7 +2058,7 @@ def call_self(_self):
 
 '''
 
-    source +='''
+    source +=f'''
 
 # Make sure that constant members can be repr'ed
 for at in arg_types:
@@ -2053,7 +2068,7 @@ for at in arg_types:
 
 @njit(CREFuncType(unicode_type, unicode_type, unicode_type), cache=True)
 def ctor(name, expr_template, shorthand_template):
-    return cre_func_ctor(cf_type, name, expr_template, shorthand_template, False)
+    return cre_func_ctor(cf_type, name, expr_template, shorthand_template, {"True" if ptr_args else "False"})
 cf_type.ctor = ctor
 '''
 

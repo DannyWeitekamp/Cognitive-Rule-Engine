@@ -1920,6 +1920,8 @@ def cum_weight_of_matching_nodes(ms, conds, match_idrecs, zero_on_fail=False):
         facts = cast(ms.facts[t_id], VectorType)
         match_ptrs[i] = facts.data[f_id]
 
+    # print(conds)
+
     cum_weight = 0.0
     for lst in corgi_graph.nodes_by_nargs:
         for node in lst:
@@ -1938,6 +1940,7 @@ def cum_weight_of_matching_nodes(ms, conds, match_idrecs, zero_on_fail=False):
                 set_base_fact_arg(node.op, i, cast(match_ptrs[var_ind], BaseFact))
             
             if(skip):
+                # print("SKIP", node.op, node.lit.weight)
                 continue
             # Call
             call_self = get_best_call_self(node.op, False)
@@ -1945,9 +1948,12 @@ def cum_weight_of_matching_nodes(ms, conds, match_idrecs, zero_on_fail=False):
 
             # Add weight if match
             if((status == CFSTATUS_TRUTHY) ^ node.lit.negated):
+                # print("PASS", node.op, node.lit.weight)
                 cum_weight += node.lit.weight
             elif(zero_on_fail):
                 return 0.0
+            # else:
+                # print("FAIL", node.op, node.lit.weight)
     return cum_weight
 
 @njit(MemSetType(ConditionsType, types.optional(MemSetType)), cache=True)

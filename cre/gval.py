@@ -77,7 +77,7 @@ def gval_str(gval):
     def impl(gval):
         head = gval.head
 
-        head_t_id,x0,x1 = decode_idrec(head.idrec)
+        head_t_id, _, _ = decode_idrec(head.idrec)
         # print("head.idrec", head_t_id,x0,x1,T_ID_TUPLE_FACT)
         if(head_t_id == T_ID_TUPLE_FACT):
             t_ids = cre_obj_get_member_t_ids(head)

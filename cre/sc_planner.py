@@ -236,7 +236,7 @@ def get_semantic_visible_attrs(fact_types):
     for ft in fact_types:
         ft = ft.instance_type if (isinstance(ft, (types.TypeRef,))) else ft
         parents = context.parents_of.get(ft._fact_name,[])
-        for attr, attr_spec in ft.filter_spec("visible","semantic").items():
+        for attr, attr_spec in ft.filter_spec(["visible","semantic"]).items():
             is_new = True
             for p in parents:
                 if((p,attr) in sem_vis_fact_attrs):
@@ -731,8 +731,8 @@ def search_for_explanations(self, goal, ops=None, policy=None,
     if(found_at_depth is None):
         return None
     else:
-        with PrintElapse("build_explanation_tree"):
-            return build_explanation_tree(self, g_typ, goal)
+        # with PrintElapse("build_explanation_tree"):
+        return build_explanation_tree(self, g_typ, goal)
 
 
 
@@ -1827,7 +1827,7 @@ class ExplanationTreeIter():
     def __init__(self, expl_tree, reparam_func=None):
         self.expl_tree = expl_tree
         self.iter = new_expl_tree_iterator(expl_tree)
-        
+
         if(reparam_func is None):
             reparam_func = default_reparam
 

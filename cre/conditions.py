@@ -280,13 +280,18 @@ class Conditions(structref.StructRefProxy):
     def score_match(self, match, ms=None):
         from cre.matching import score_match
         idrecs = np.array([x.idrec for x in match],dtype=np.uint64)
-        print(self)
+        # print(self)
         return score_match(self, idrecs, ms)
 
     def antiunify(self, other, return_score=False, normalize='left',
          fix_same_var=False, fix_same_alias=False):
-        return conds_antiunify(self, other, return_score, normalize,
-                    fix_same_var, fix_same_alias) 
+        norm_enum = resolve_normalize_enum(normalize)
+        new_conds, score = conds_antiunify(self, other, norm_enum,
+                                    fix_same_var, fix_same_alias) 
+        if(return_score):
+            return new_conds, score
+        else:
+            return new_conds
     
     @property
     def var_base_types(self):
@@ -1631,8 +1636,9 @@ def _conj_from_litset_and_remap(ls_a,ls_b, remap, keys, bpti_a, bpti_b):
         # print(lit_set_a, lit_set_b, matched_mask)
         for keep_it, lit in zip(matched_mask, lit_set_a):
             if(keep_it):
-                new_lit = literal_ctor(lit.op)
-                new_lit.negated = lit.negated
+                new_lit = literal_copy(lit)
+                # new_lit = literal_ctor(lit.op)
+                # new_lit.negated = lit.negated
                 conj.append(new_lit)
     return conj
 
@@ -1680,9 +1686,6 @@ def _conds_antiunify(c_a, c_b, fix_same_var, fix_same_alias):
 
 
     a_fixed_inds = get_fixed_inds(c_a, c_b, fix_same_var, fix_same_alias)
-    # a_fixed_inds = np.arange(len(c_a.base_var_map),dtype=np.int16)
-    # a_fixed_inds[-2] = -1
-    # a_fixed_inds = -np.ones(len(c_a.base_var_map), dtype=np.int16)
     
     # Case 1: c_a and c_b are both single conjunctions like (lit1 & lit2 & lit3)
     if(len(ls_as) == 1 and len(ls_bs) == 1):
@@ -1753,35 +1756,60 @@ def _conds_antiunify(c_a, c_b, fix_same_var, fix_same_alias):
     return conds, best_score
 
 
+AU_NORMALIZE_NONE = u1(0)
+AU_NORMALIZE_LEFT = u1(1)
+AU_NORMALIZE_RIGHT = u1(2)
+AU_NORMALIZE_MAX = u1(3)
 
-@generated_jit(cache=True)
+def resolve_normalize_enum(option):
+    if(option == "" or option == "none"):
+        norm_enum = AU_NORMALIZE_NONE
+    elif(option == "left"):
+        norm_enum = AU_NORMALIZE_LEFT
+    elif(option == "right"):
+        norm_enum = AU_NORMALIZE_RIGHT
+    elif(option == "max"):
+        norm_enum = AU_NORMALIZE_MAX
+    else:
+        raise ValueError(f"Unknown Normalization option {option}")
+    return norm_enum
+
+
+
+@njit(cache=True)
+def conds_antiunify(c_a, c_b, normalize=1,
+         fix_same_var=False, fix_same_alias=False):
+    c, score = _conds_antiunify(c_a, c_b, fix_same_var, fix_same_alias)
+    if(normalize == AU_NORMALIZE_LEFT):
+        n_literals_a = count_literals(c_a)
+        return c, score / n_literals_a
+    elif(normalize == AU_NORMALIZE_RIGHT):
+        n_literals_b = count_literals(c_b)
+        return c, score / n_literals_b
+    elif(normalize == AU_NORMALIZE_MAX):
+        n_literals_a = count_literals(c_a)
+        n_literals_b = count_literals(c_b)
+        return c, score / max(n_literals_a, n_literals_b)
+    else:
+        return c, score
+
 @overload_method(ConditionsTypeClass, 'antiunify')
-def conds_antiunify(c_a, c_b, return_score=False,
+def overload_conds_antiunify(c_a, c_b, return_score=False,
             normalize='left', fix_same_var=False, fix_same_alias=False):
     SentryLiteralArgs(['return_score','normalize']).for_function(
                     conds_antiunify).bind(c_a, c_b, return_score, normalize)
-    normalize = normalize.literal_value
-    if(return_score.literal_value):
+
+    if(not return_score.literal_value):
         def impl(c_a, c_b, return_score=False,
                 normalize='left', fix_same_var=False, fix_same_alias=False):
-            c, score = _conds_antiunify(c_a, c_b, fix_same_var, fix_same_alias)
-            if(normalize == 'left'):
-                n_literals_a = count_literals(c_a)
-                return c, score / n_literals_a
-            elif(normalize == 'right'):
-                n_literals_b = count_literals(c_b)
-                return c, score / n_literals_b
-            elif(normalize == 'max'):
-                n_literals_a = count_literals(c_a)
-                n_literals_b = count_literals(c_b)
-                return c, score / max(n_literals_a, n_literals_b)
-            else:
-                return c, score
-    else:
-        def impl(c_a, c_b, return_score=False,
-                normalize='left', fix_same_var=False, fix_same_alias=False):
-            c, score = _conds_antiunify(c_a, c_b, fix_same_var, fix_same_alias)
+            c, score = conds_antiunify(c_a, c_b, AU_NORMALIZE_NONE, fix_same_var, fix_same_alias)
             return c
+    else:
+        norm_enum = resolve_normalize_enum(normalize.literal_value)
+        def impl(c_a, c_b, return_score=False,
+                normalize='left', fix_same_var=False, fix_same_alias=False):
+            c, score = conds_antiunify(c_a, c_b, norm_enum, fix_same_var, fix_same_alias)
+            return c, score
     return impl
 
         
@@ -1805,7 +1833,7 @@ def _add_adjacent(src_fact, _, fact, src_attr_var, conds,
     _conds = conds.get(fact_ptr, [])
     
     if(add_back_relation):
-        for attr, config in fact._fact_type.filter_spec(*attr_flags).items():
+        for attr, config in fact._fact_type.filter_spec(attr_flags).items():
             attr_val = getattr(fact, attr)
             if(not isinstance(attr_val, FactProxy) or
                 attr_val.get_ptr() != src_ptr):
@@ -1825,10 +1853,38 @@ def _add_adjacent(src_fact, _, fact, src_attr_var, conds,
 
 from itertools import chain
 
+def flags_and(l_flags, r_flags):
+    dnf = [[] for i in range(len(l_flags)*len(r_flags))]
+    for i, l_conjunct in enumerate(l_flags):
+        for j, r_conjunct in enumerate(r_flags):
+            k = i*len(r_flags) + j
+            for x in l_conjunct: dnf[k].append(x)
+            for x in r_conjunct: dnf[k].append(x)
+    return dnf
+
+def flags_not(flags):
+    dnfs = []
+    for i, conjunct in enumerate(flags):
+        dnf = [[] for i in range(len(conjunct))]
+        for j, flag in enumerate(conjunct):
+            if(flag[0] == "~"):
+                flag = flag[1:]
+            else:
+                flag = f"~{flag}"
+            dnf[j].append(flag)
+        dnfs.append(dnf)
+
+    out_dnf = dnfs[0]
+    for i in range(1,len(dnfs)):
+        out_dnf = flags_and(out_dnf,dnfs[i])
+    return out_dnf
+
+
+
 def conditions_from_facts(facts, _vars=None, add_neighbors=True,
      add_neighbor_holes=False, neighbor_back_relation=False, neighbor_req_n_adj=1, 
      alpha_weight=1.0, beta_weight = 1.0, neighbor_alpha_weight = 1.0, neighbor_beta_weight = 1.0, 
-     alpha_flags=('visible',), parent_flags=('parent',), beta_flags=('relational',)):
+     alpha_flags=[('visible',)], parent_flags=[('parent',)], beta_flags=[('relational',)]):
     
     
     if(_vars is None):
@@ -1838,10 +1894,12 @@ def conditions_from_facts(facts, _vars=None, add_neighbors=True,
     inp_fact_ptrs = set(fact_ptr_map.keys())
     
     # Make flag sets based on 
-    beta_not_parent_flags = [*beta_flags,*[f"~{f}" for f in parent_flags]]
+    beta_not_parent_flags =  flags_and(beta_flags, flags_not(parent_flags))
     alpha_candidate_flags = alpha_flags
+    # print("::", alpha_candidate_flags)
     if(add_neighbor_holes):
-        alpha_candidate_flags = [*alpha_flags, *parent_flags, *beta_flags]
+        alpha_candidate_flags = flags_and(alpha_flags, flags_and(parent_flags, beta_flags))
+        # alpha_candidate_flags = [*alpha_flags, *parent_flags, *beta_flags]
     
     
     cond_set = []
@@ -1850,7 +1908,8 @@ def conditions_from_facts(facts, _vars=None, add_neighbors=True,
     beta_conds = {}
     for fact, var in zip(facts,_vars):
         # Make Alphas (i.e. nvar = 1)
-        for attr, config in fact._fact_type.filter_spec(*alpha_candidate_flags).items():
+        for attr, config in fact._fact_type.filter_spec(alpha_candidate_flags).items():
+            # print("attr", attr)
             val = getattr(fact, attr)
             if(isinstance(val, FactProxy)): continue
             attr_var = getattr(var, attr)
@@ -1863,13 +1922,13 @@ def conditions_from_facts(facts, _vars=None, add_neighbors=True,
         nxt_parents = [fact]
         while(len(nxt_parents) > 0):
             for nxt_parent in nxt_parents:
-                spec = nxt_parent._fact_type.filter_spec(*parent_flags)
+                spec = nxt_parent._fact_type.filter_spec(parent_flags)
                 for attr, config in spec.items():
                     pass
             nxt_parents = []
 
         # Make Betas (i.e. n_var=2) + Neighbors
-        for attr, config in fact._fact_type.filter_spec(*beta_not_parent_flags).items():
+        for attr, config in fact._fact_type.filter_spec(beta_not_parent_flags).items():
             attr_val =  getattr(fact, attr)
             if(not isinstance(attr_val, FactProxy)): continue
             attr_var = getattr(var, attr)
@@ -1912,7 +1971,9 @@ def conditions_from_facts(facts, _vars=None, add_neighbors=True,
     for c in cond_set:
         conds = conds & c
 
+    # print("----------------------")
     # print(conds)
+    # print("----------------------")
     return conds
 
 

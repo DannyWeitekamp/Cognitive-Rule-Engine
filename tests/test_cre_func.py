@@ -526,6 +526,25 @@ def test_ptr_ops():
         assert not ObjEquals(x0,y0)
         assert not ObjEquals(x0,x1)
         assert ObjEquals(a, b.nxt)(x0, y0)
+
+def test_bad_compose():
+    a, b = Var(f8,'a'), Var(f8,'b')
+    x, y = Var(unicode_type,'x'), Var(unicode_type,'y')
+
+    # Var case
+    q = a + b
+    with pytest.raises(TypeError):
+        q(x,y)
+
+    # CREFunc case
+    q_s = x + y
+    with pytest.raises(TypeError):
+        q_s(q,q)
+
+    # Constant case
+    with pytest.raises(TypeError):
+        q("A","B")
+
         
 
 
@@ -651,7 +670,7 @@ if __name__ == "__main__":
     # test_obj()
     # test_mixed_types()
     # test_njit_compose()
-    test_compose_deref_bases()
+    # test_compose_deref_bases()
     # test_not_jittable()
     # test_returns_object()
     # test_var_cmp_overloads()
@@ -660,6 +679,7 @@ if __name__ == "__main__":
     # test_op_arith_overloads()
     # test_ptr_ops()
     # test_constant()
+    test_bad_compose()
 
     sys.exit()
     # @njit(f8(f8,f8),cache=True)

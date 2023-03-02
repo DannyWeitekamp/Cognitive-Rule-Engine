@@ -120,36 +120,38 @@ class Fact(CREObjTypeClass):
         kwargs = {k: (List(v) if(isinstance(v,list)) else v) for k,v in kwargs.items()}
         return self._ctor[0](*args, **kwargs)
 
-    def filter_spec(self, *flags, and_or="and"):
-        # if(isinstance(flags[0],(tuple,list))):
-        #     print("TRUE")
-        #     print(flags)
-        #     flags = flags[0]
-        #     print(flags)
+    def filter_spec(self, flags):
+        ''' Returns a filtered version of this Fact's spec which picks
+            out only the subset of attributes in the spec that satisfy
+            a set of flags like [('visible', 'few_valued'), ('unique_id')]
+            where the list of lists or tuples of flags represents a disjunctive 
+            normal statement i.e. ('visible' and 'few_valued') or 'unique_id'.
+        '''
+
+        # Ensure that flags is list of lists
+        if(not isinstance(flags,(list,tuple))): flags = [flags]
         if(len(flags) == 0): return self.clean_spec
         flags = list(flags)
-
-        negated = np.empty(len(flags),dtype=np.bool_)
-        for i, flag in enumerate(flags):
-            if(flag[0] == "~"):
-                flags[i] = flag[1:]
-                negated[i] = True
-            else:
-                negated[i] = False
+        if(not isinstance(flags[0], (list, tuple))): flags = [flags]
 
         from cre.attr_filter import attr_filter_registry
-        for flag in flags:
-            if(flag not in attr_filter_registry):
-                raise ValueError(f"No filter registered under flag {flag!r}")
-
-        filtered_spec = {k:v for k,v in attr_filter_registry[flags[0]].get(self, negated[0])}
-        for i in range(1,len(flags)):
-            _fs = attr_filter_registry[flags[i]].get(self,negated[i])
-            if(and_or.lower() == "or"):
-                filtered_spec = {**_fs, **filtered_spec}
-            else:
-                filtered_spec = {k : v for k,v in _fs if k in filtered_spec}
-
+        filtered_spec = {}
+        for and_flags in flags:
+            flag_0 = and_flags[0]
+            negated_0 = flag_0[0] == "~"
+            flag_0 = flag_0[1:] if(negated_0) else flag_0
+            if(flag_0 not in attr_filter_registry):
+                raise ValueError(f"No filter registered under flag {flag_0!r}")
+            conj_filtered_spec = {k:v for k,v in attr_filter_registry[flag_0].get_attrs(self, negated_0)}
+            for i in range(1,len(and_flags)):
+                flag = and_flags[i]
+                negated = flag[0] == "~"
+                flag = flag[1:] if negated else flag
+                if(flag not in attr_filter_registry):
+                    raise ValueError(f"No filter registered under flag {flag!r}")
+                _fs = attr_filter_registry[flag].get_attrs(self, negated)
+                conj_filtered_spec = {k : v for k,v in _fs if k in conj_filtered_spec}
+            filtered_spec = {**filtered_spec, **conj_filtered_spec}
         return filtered_spec
 
     @property

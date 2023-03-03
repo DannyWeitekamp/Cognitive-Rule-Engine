@@ -17,7 +17,6 @@ def Equals(a, b):
 
 @CREFunc(shorthand = '{0} < {1}', no_raise=True)
 def LessThan(a, b):
-    print("LT", a,"<",b)
     return a < b
 
 @CREFunc(shorthand = '{0} <= {1}', no_raise=True)

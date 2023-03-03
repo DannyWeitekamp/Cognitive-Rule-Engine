@@ -14,7 +14,7 @@ from cre.utils import (cast, wptr_t, ptr_t, _dict_from_ptr, _get_array_raw_data_
          lower_getattr, lower_setattr, ptr_to_meminfo, _memcpy, _incref_ptr, _incref_structref)
 from cre.structref import define_structref, StructRefType
 from cre.caching import gen_import_str, unique_hash_v, import_from_cached, source_to_cache, source_in_cache, cache_safe_exec, get_cache_path
-from cre.memset import MemSetType
+from cre.memset import MemSetType, resolve_deref_data_ptr
 from cre.vector import VectorType
 from cre.var import VarType
 # from cre.op import CREFuncType
@@ -690,7 +690,7 @@ def make_deref_record_parent(deref_depends, idrec, r_ptr):
     return cast(p, i8)
 
 @njit(i8(deref_info_type,i8),inline='never',cache=True)
-def deref_once(deref,inst_ptr):
+def deref_once(deref, inst_ptr):
     if(deref.type == u1(DEREF_TYPE_ATTR)):
         return _ptr_to_data_ptr(inst_ptr)
     else:
@@ -1331,9 +1331,19 @@ match_iterator_node_field_dict = {
     "curr_ind": i8,
     "idrecs" : u8[::1],
     "other_idrecs" : u8[::1],
+
+    # Indicies of downstream m_nodes on which this m_node depends.
     "dep_m_node_inds" : i8[::1],
-    "dep_arg_inds" : i8[::1],
+
+    # Pointers to downstream nodes on which this m_node depends
+    #  NOTE: the dependant node might not be the .node of the
+    #  corresponding dependant m_node. This points to the most
+    #  downstream join for a particular var pair. 
     "dep_node_ptrs" : i8[::1],
+
+    # The arg_ind in each node in dep_node_ptrs for the var this
+    #  m_node is associated with. 
+    "dep_arg_inds" : i8[::1],
 }
 
 
@@ -1538,9 +1548,9 @@ def new_match_iter(graph):
         # for var_ind in range(len(graph.var_end_nodes)-1,-1,-1):
         m_node_ind = 0;
         while(len(var_inds) > 0):
-            print_ind = np.empty(len(handled_vars))
-            for q, k in enumerate(handled_vars):
-                print_ind[q] = k
+            # print_ind = np.empty(len(handled_vars))
+            # for q, k in enumerate(handled_vars):
+            #     print_ind[q] = k
 
             var_ind = var_inds.pop()
             node = graph.var_end_nodes[var_ind]
@@ -1592,6 +1602,7 @@ def new_match_iter(graph):
         m_iter.is_empty = False
         m_iter.iter_started = False
         graph.match_iter_prototype_inst = cast(m_iter, StructRefType)
+
     # Return a copy of the prototype 
     prototype = cast(graph.match_iter_prototype_inst, MatchIteratorType)
     m_iter = copy_match_iter(prototype,graph)
@@ -1627,7 +1638,7 @@ def update_from_upstream_match(m_iter, m_node):
     if(multiple_deps):
         idrecs_set = Dict.empty(u8,u1)
     
-    # print("-- UPDATE FROM UPSTREAM:", cast(m_node.node.lit.base_var_ptrs[m_node.associated_arg_ind], VarType).alias, "--")
+    # print("--", cast(m_node.node.lit.base_var_ptrs[m_node.associated_arg_ind], VarType).alias, "-UPDATE FROM UPSTREAM:--")
 
     for i, dep_m_node_ind in enumerate(m_node.dep_m_node_inds):
         # Each dep_node is the terminal beta node (i.e. a graph node not an iter node) 
@@ -1640,42 +1651,46 @@ def update_from_upstream_match(m_iter, m_node):
 
         # print("\tdep on", dep_node.lit, dep_arg_ind)
         
-        # Determine the index of the fixed downstream match within this node
-        if(cast(m_node.node, i8) == cast(dep_node, i8)):
+        # NOTE: Below is a potential optimization where instead of using a
+        #  hash-table lookup for idec->internal_ind we instead get the information
+        #  directly. Didn't work because curr_ind indexes .idrecs of an m_node which
+        #  is only a subset of the matches for the corresponding graph node.
+        
+        # if(cast(m_node.node, i8) == cast(dep_node, i8)):
+        #     dep_output = dep_node.outputs[dep_arg_ind]
+        #     if(dep_m_node.curr_ind >= len(dep_output.match_inp_inds)):
+        #         m_node.idrecs = np.empty((0,), dtype=np.uint64)
+        #         return
 
-            # If they happen to represent the same graph node then get from match_inp_inds
-            other_output = m_node.node.outputs[dep_arg_ind]
-            # print("Z",other_output.match_inp_inds, dep_m_node.curr_ind)
-            if(dep_m_node.curr_ind >= len(other_output.match_inp_inds)):
-                # print("BAIL L")
-                m_node.idrecs = np.empty((0,), dtype=np.uint64)
-                return
+        #     print("D0 f_id:", decode_idrec(dep_m_node.idrecs[dep_m_node.curr_ind])[1])
+        #     print(dep_output.match_inp_inds, dep_m_node.curr_ind)
+        #     fixed_intern_ind = dep_output.match_inp_inds[dep_m_node.curr_ind]
 
-            fixed_intern_ind = other_output.match_inp_inds[dep_m_node.curr_ind]
+        # TODO: Potentially still a way to add bookeeping that enables a more
+        #  direct method than hash-table lookup
 
-        # Otherwise we need to use the 'idrecs_to_inds' map
-        else:
-            # Extract the idrec for the current fixed dependency value in dep_m_node
-            # print("&&", dep_m_node.var_ind, dep_m_node.m_node_ind, dep_m_node.node.lit, np.array([decode_idrec(x)[1] for x in dep_m_node.idrecs]))
-            dep_idrec = dep_m_node.idrecs[dep_m_node.curr_ind]
+        # -----
+        # : Getting fixed_intern_ind
+        # Determine the index of the fixed downstream match within this node.
+        
+        # Extract the idrec for the current fixed dependency value in dep_m_node
+        dep_idrec = dep_m_node.idrecs[dep_m_node.curr_ind]
 
-            # Use idrecs_to_inds to find the index of the fixed value in dep_node.
-            dn_idrecs_to_inds = dep_node.inputs[dep_arg_ind].idrecs_to_inds
+        # Use idrecs_to_inds to find the index of the fixed value in dep_node.
+        dn_idrecs_to_inds = dep_node.inputs[dep_arg_ind].idrecs_to_inds
 
-            # If failed to retrieve then idrecs for this node should be empty
-            if(dep_idrec not in dn_idrecs_to_inds):
-                m_node.idrecs = np.empty((0,), dtype=np.uint64)
-                # print("BAIL D")
-                return
-            
-            # print("BEF", decode_idrec(dep_idrec)[1], dep_arg_ind)
-            # for sdifojsdf in dep_node.inputs[dep_arg_ind].idrecs_to_inds:
-            #     print("-", decode_idrec(sdifojsdf)[1])
-            fixed_intern_ind = dn_idrecs_to_inds[dep_idrec]
+        # If failed to retrieve then idrecs for this node should be empty
+        if(dep_idrec not in dn_idrecs_to_inds):
+            m_node.idrecs = np.empty((0,), dtype=np.uint64)
+            return
+        
+        fixed_intern_ind = dn_idrecs_to_inds[dep_idrec]
+        # -----
 
+        # Note: Debug Print Statement
         fixed_var = cast(dep_node.lit.base_var_ptrs[dep_arg_ind], VarType)
         fixed_idrec = dep_node.input_state_buffers[dep_arg_ind][fixed_intern_ind].idrec
-        # print("\tFixed:",  fixed_var.alias, dep_m_node.curr_ind, "==", decode_idrec(fixed_idrec)[1])#m_iter.graph.memset.get_fact(fixed_idrec))
+        # print("\tFixed:",  f"{fixed_var.alias}:{dep_m_node.curr_ind}", f"f_id:{decode_idrec(fixed_idrec)[1]}")#m_iter.graph.memset.get_fact(fixed_idrec))
         
         # Consult the dep_node's truth_table to fill 'idrecs'.
         inp_states = dep_node.input_state_buffers[assoc_arg_ind]        
@@ -1706,15 +1721,14 @@ def update_from_upstream_match(m_iter, m_node):
                         new_idrecs_set[idrec] = u1(1)
                 idrecs_set = new_idrecs_set
 
+            # Only for print Statement
             set_f_ids = np.empty(len(idrecs_set),dtype=np.int64)
-            for i, x in enumerate(idrecs_set):
-                set_f_ids[i] = decode_idrec(x)[1]
-
-            # print("i", i, "set", set_f_ids, 'new', np.array([decode_idrec(x)[1] for x in idrecs]))
+            for j, x in enumerate(idrecs_set):
+                set_f_ids[j] = decode_idrec(x)[1]
+            # print(":", i, 'f_ids:', np.array([decode_idrec(x)[1] for x in idrecs]), "f_ids:", set_f_ids)
         else:
             m_node.idrecs = idrecs
-
-
+            # print(":", "-", 'node:', np.array([decode_idrec(x)[1] for x in idrecs]))
 
     
     # If multiple dependencies copy remaining contents of idrecs_set into an array.
@@ -1724,13 +1738,6 @@ def update_from_upstream_match(m_iter, m_node):
             idrecs[i] = idrec
         m_node.idrecs = idrecs
 
-    # print("!!", m_node.var_ind, m_node.m_node_ind, m_node.node.lit, ".idrecs ->", np.array([decode_idrec(x)[1] for x in m_node.idrecs]))
-    # return idrecs
-
-        # print("Update", m_node.node.lit, m_node.node.var_inds[assoc_arg_ind],
-        #       "from", dep_m_node.node.lit, dep_m_node.node.var_inds[m_node.dep_arg_ind],
-        #       ":", np.array([decode_idrec(x)[1] for x in m_node.idrecs]))
-    # print("END DOWNSTREAM")
 
 
 @njit(types.boolean(MatchIterNodeType))
@@ -1762,6 +1769,7 @@ def match_iter_is_empty(m_iter):
 
 @njit(Tuple((types.boolean,u8[::1]))(MatchIteratorType),cache=True)
 def match_iter_next_idrecs(m_iter):
+    # print()
     n_vars = len(m_iter.iter_nodes)
     # Increment the m_iter nodes until satisfying all upstream
     while(not m_iter.is_empty):
@@ -1794,10 +1802,6 @@ def match_iter_next_idrecs(m_iter):
             if(most_upstream_overflow == 0):
                 m_iter.is_empty = True
 
-        # Note: Keep these prints for debugging
-        # print("<< it: ", np.array([y.curr_ind for y in m_iter.iter_nodes]))        
-        # print("<< lens", np.array([len(m_iter.iter_nodes[i].idrecs) for i in range(n_vars)]))    
-
         # Starting with the most upstream overflow and moving downstream set m_node.idrecs
         #  to be the set of idrecs consistent with its upstream dependencies.
         idrec_sets_are_nonzero = True
@@ -1809,10 +1813,16 @@ def match_iter_next_idrecs(m_iter):
             if(len(m_node.dep_m_node_inds)):
                 update_from_upstream_match(m_iter, m_node)
 
-            if(len(m_node.idrecs) == 0): idrec_sets_are_nonzero = False;        
+            if(len(m_node.idrecs) == 0): idrec_sets_are_nonzero = False;
+
+        # Note: Keep print for debugging
+        # print("<< it: ", np.array([y.curr_ind for y in m_iter.iter_nodes]) , "/", np.array([len(m_iter.iter_nodes[i].idrecs) for i in range(n_vars)]))
+
         # If each m_node has a non-zero idrec set we can yield a match
         #  otherwise we need to keep iterating
         if(idrec_sets_are_nonzero): break
+
+
 
     
 
@@ -1903,41 +1913,77 @@ def get_match_iter(ms, conds):
 # ----------------------------------------------------------------------
 # : score_match, check_match
 
+@njit(cache=True)
+def match_ptrs_from_idrecs(ms, match_idrecs, length):
+    match_ptrs = np.zeros(length,dtype=np.int64)
+    for i, idrec in enumerate(match_idrecs):
+        if(idrec != 0):
+            t_id, f_id, _  = decode_idrec(idrec)
+            facts = cast(ms.facts[t_id], VectorType)
+            match_ptrs[i] = facts.data[f_id]
+    return match_ptrs
+
+@njit(cache=True)
+def _infer_unprovided(known_ptr, op, arg_ind):
+    ''' Take a known pointer to fact and an "ObjEquals" CREFunc in a beta 
+        literal and the base variable index that the fact is supposed to be a 
+        match for and return the pointer to the other fact in the Equals relation.
+    '''
+    # Only bother for beta-like Equals 
+    if(known_ptr == 0 or 
+       op.name_data.name != "ObjEquals" or op.n_args != 2):
+        return 0
+
+    # Only bother if there is only one head associated with var_ind.
+    hr = op.head_ranges[arg_ind]
+    if(hr.end-hr.start == 1):
+        v = cast(op.head_infos[hr.start].var_ptr, VarType)
+        other_data_ptr = resolve_deref_data_ptr(cast(known_ptr,BaseFact), v.deref_infos)
+        other_ptr = _load_ptr(i8, other_data_ptr)
+        return other_ptr
+
+    # print("OTHER FAIL")
+    return 0
+
 # Compile implementation of set_base_arg for BaseFact type
 set_base_fact_arg = set_base_arg_val_impl(BaseFact)
 
 @njit(cache=True)
 def cum_weight_of_matching_nodes(ms, conds, match_idrecs, zero_on_fail=False):
-    # if(len(match_idrecs) != len(conds.vars)):
-    #     raise ValueError("Match does not have same number of items as pattern.")
-
+    # Get the instance pointers from match_idrecs
+    match_ptrs = match_ptrs_from_idrecs(ms, match_idrecs, len(conds.vars))
     corgi_graph = get_graph(ms, conds)
 
-    # Get the instance pointers from match_idrecs
-    match_ptrs = np.empty(len(match_idrecs),dtype=np.int64)
-    for i, idrec in enumerate(match_idrecs):
-        t_id, f_id, _  = decode_idrec(idrec)
-        facts = cast(ms.facts[t_id], VectorType)
-        match_ptrs[i] = facts.data[f_id]
-
-    # print(conds)
-
-    cum_weight = 0.0
+    cum_weight, total_weight = 0.0, 0.0
     for lst in corgi_graph.nodes_by_nargs:
         for node in lst:
             # TODO: Handle cases of Exists() and truncated match lists
             # If is an identiy node then give weight automatically
             if(node.op is None):
                 cum_weight += 1.0
+                total_weight += 1.0
                 continue
+
+            total_weight += node.lit.weight
 
             # Set arguments
             skip = False
             for i, var_ind in enumerate(node.var_inds):
-                if(var_ind >= len(match_idrecs) or match_idrecs[var_ind] == 0):
+                ptr_i = match_ptrs[var_ind]
+
+                # If a match candidate wasn't provided in match_idrecs
+                #  then try to resolve it.
+                if(ptr_i == 0 and node.op.n_args == 2):
+                    j = 1 if i == 0 else 0
+                    known_ptr = match_ptrs[node.var_inds[j]]
+                    ptr_i = _infer_unprovided(known_ptr, node.op, j)
+                    match_ptrs[var_ind] = ptr_i
+
+                if(ptr_i == 0):
                     skip = True
                     continue
-                set_base_fact_arg(node.op, i, cast(match_ptrs[var_ind], BaseFact))
+                        
+                set_base_fact_arg(node.op, i, cast(ptr_i, BaseFact))
             
             if(skip):
                 # print("SKIP", node.op, node.lit.weight)
@@ -1948,13 +1994,13 @@ def cum_weight_of_matching_nodes(ms, conds, match_idrecs, zero_on_fail=False):
 
             # Add weight if match
             if((status == CFSTATUS_TRUTHY) ^ node.lit.negated):
-                # print("PASS", node.op, node.lit.weight)
+                # print("OKAY", node.op, node.lit.weight)
                 cum_weight += node.lit.weight
             elif(zero_on_fail):
-                return 0.0
+                return 0.0, 0.0
             # else:
                 # print("FAIL", node.op, node.lit.weight)
-    return cum_weight
+    return cum_weight, total_weight
 
 @njit(MemSetType(ConditionsType, types.optional(MemSetType)), cache=True)
 def _ensure_ms(conds, ms):
@@ -1970,15 +2016,20 @@ def _ensure_ms(conds, ms):
 def score_match(conds, match_idrecs, ms=None):
     ms = _ensure_ms(conds, ms)
     corgi_graph = get_graph(ms, conds)
-    cum_weight = cum_weight_of_matching_nodes(ms, conds, match_idrecs, False)
-    return cum_weight / corgi_graph.total_weight
+    cum_weight, total_weight = cum_weight_of_matching_nodes(ms, conds, match_idrecs, False)
+    return cum_weight / total_weight
 
 @njit(cache=True)
 def check_match(conds, match_idrecs, ms=None):
     ms = _ensure_ms(conds, ms)
     corgi_graph = get_graph(ms, conds)
     #TODO to make sure checking types
-    return cum_weight_of_matching_nodes(ms, conds, match_idrecs, True) != 0.0
+    w, _ = cum_weight_of_matching_nodes(ms, conds, match_idrecs, True)
+    return w != 0.0
+
+
+        # known = cast(known_ptr, BaseFact)
+        # print(known)
 
 
 

@@ -546,7 +546,7 @@ def test_b_get_facts_10000(benchmark):
 
 if __name__ == "__main__":
     import faulthandler; faulthandler.enable()
-    # test_indexer()
+    test_indexer()
     # test_declare_retract()
     # test_retroactive_register()
     # test_declare_retract_tuple_fact()

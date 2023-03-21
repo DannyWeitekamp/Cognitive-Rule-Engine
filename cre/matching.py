@@ -1887,10 +1887,13 @@ def get_graph(ms, conds):
     conds.matcher_inst = cast(graph, StructRefType)
     return graph
 
-
+from cre.utils import timenow
 @njit(MatchIteratorType(MemSetType, ConditionsType), cache=True)
 def get_match_iter(ms, conds):
-    corgi_graph = get_graph(ms, conds)
+
+    # Performance Note: In integration benchmarks w/ AL get_graph  
+    #  takes up about half of the time for a cold match.  
+    corgi_graph = get_graph(ms, conds) 
 
     update_graph(corgi_graph)
     m_iter = new_match_iter(corgi_graph)

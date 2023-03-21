@@ -1,6 +1,6 @@
 
 import numba
-from numba import types, njit, u1,u2,u4,u8, i8,i2, literally
+from numba import types, njit, u1,u2,u4,u8, i8,i2,f8, literally
 from numba.core.imputils import impl_ret_borrowed
 from numba.types import Tuple, void, ListType
 from numba.typed import List
@@ -1461,3 +1461,26 @@ def _tuple_getitem(typingctx, tup, i):
         return builder.extract_value(tup, ind)
     return tup.types[ind](tup, i), codegen
         # args = cgutils.unpack_tuple(builder, args, len(inp_types))
+
+
+### Timing --- Only works for Linux ###
+
+import numpy as np
+import ctypes
+import time
+
+CLOCK_MONOTONIC = 0x1
+clock_gettime_proto = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_int,
+                                       ctypes.POINTER(ctypes.c_long))
+pybind = ctypes.CDLL(None)
+clock_gettime_addr = pybind.clock_gettime
+clock_gettime_fn_ptr = clock_gettime_proto(clock_gettime_addr)
+
+
+@njit(cache=True)
+def timenow():
+    timespec = np.zeros(2, dtype=np.int64)
+    clock_gettime_fn_ptr(CLOCK_MONOTONIC, timespec.ctypes)
+    ts = timespec[0]
+    tns = timespec[1]
+    return np.float64(ts) + 1e-9 * np.float64(tns)

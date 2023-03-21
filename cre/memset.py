@@ -884,7 +884,11 @@ def get_base_types_with_attr(attr):
                 # child_t_ids = context.context_data.child_t_ids[base_type.t_id]
                 # child_t_ids = types.literal(tuple([t_id for t_id in child_t_ids]))
                 base_types[base_type] = val_type
-    return Tuple(tuple([(bt, vt) for bt,vt in base_types.items()]))
+
+    out = Tuple(tuple([Tuple((bt, vt)) for bt,vt in base_types.items()]))
+    print(tuple([(bt, vt) for bt,vt in base_types.items()]))
+    print(">>", out)
+    return out
 
 vec2_type = Tuple((VectorType,VectorType))
 
@@ -916,19 +920,39 @@ def indexer_ctor_impl(base_types, attr):
             "attr" : types.literal(attr),
             "base_types" : types.TypeRef(base_types),
         }
-        print(base_types)
+        # print(base_types)
         indexer_type = IndexerTypeClass([(k,v) for k,v in indexer_fields.items()])
-        print(indexer_type)        
+        # print(indexer_type)        
         indexer_type._base_types = base_types
-        @njit(cache=True)
-        def impl():
-            st = new(indexer_type)
-            st.head = 0
-            st.mapping = Dict.empty(val_type, vec2_type)
-            st.inv_mapping = Dict.empty(u8, val_type)
-            return st
-        _indexer_ctor_impls[tup] = impl
+
+        long_hash = unique_hash(tup)
+
+        if(not source_in_cache('MemSetIndexer', long_hash)):
+            types_bytes = cloudpickle.dumps((indexer_type, val_type))
+            source = f'''
+import cloudpickle
+from numba import u8, types, njit 
+from numba.typed import Dict
+from numba.experimental.structref import new
+from cre.vector import VectorType
+
+vec2_type = types.Tuple((VectorType,VectorType))
+indexer_type, val_type = cloudpickle.loads({types_bytes})
+@njit(indexer_type(), cache=True)
+def ctor():
+    st = new(indexer_type)
+    st.head = 0
+    st.mapping = Dict.empty(val_type, vec2_type)
+    st.inv_mapping = Dict.empty(u8, val_type)
+    return st
+'''
+            source_to_cache('MemSetIndexer', long_hash, source)
+        ctor = import_from_cached('MemSetIndexer', long_hash, ['ctor'])['ctor']
+        print(ctor)
+        _indexer_ctor_impls[tup] = ctor
     return _indexer_ctor_impls[tup]
+
+
 
 from cre.fact_intrinsics import fact_lower_getattr
 @njit(cache=True)

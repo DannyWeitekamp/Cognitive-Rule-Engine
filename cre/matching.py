@@ -1887,7 +1887,6 @@ def get_graph(ms, conds):
     conds.matcher_inst = cast(graph, StructRefType)
     return graph
 
-from cre.utils import timenow
 @njit(MatchIteratorType(MemSetType, ConditionsType), cache=True)
 def get_match_iter(ms, conds):
 

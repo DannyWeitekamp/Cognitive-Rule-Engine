@@ -18,6 +18,7 @@ from numba.core.dispatcher import Dispatcher
 import numba.typed.typedlist as tl_mod 
 import numba.typed.typeddict as td_mod
 import cloudpickle
+import warnings
 #Monkey Patch Numba so that the builtin functions for List() and Dict() cache between runs 
 def monkey_patch_caching(mod,exclude=[]):
     for name, val in mod.__dict__.items():
@@ -97,101 +98,77 @@ def standardize_type(typ, context, name='', attr=''):
     if(hasattr(typ, "_fact_type")): typ = typ._fact_type
     return typ
 
-GLOBAL_TYPE_COUNT = -1
+# -----------------------------------------------------------------------
+# : Type Registry (part of disk cache)
 
-# The fact registry is used to give a unique number to each fact definition
-#  it is just a text file with <Fact Name> <Hash Code> on each line
+# The fact registry is used to give a unique 't_id' number to each type definition
+#  in CRE it is just a text file with <t_id> <Type Name> <Hash Code> on each line
+#  This is necessary so that, for instance, custom Fact types can 
+
+def load_type_registry():
+    type_registry, type_registry_map = [], {}
+    i = 0
+    has_warned = False
+    path = get_cache_path("type_registry",suffix='')
+    if(os.path.exists(path)):
+        with open(path,'r') as f:
+            for i, line in enumerate(f):
+                tokens = line.split()
+                c, name, hash_code = tokens[0], tokens[1], tokens[2]
+                if(not has_warned and c != str(i)):
+                    warnings.warn("CRE cache's type registry is non-contiguous. This may indicate a filesystem race condition in a previous CRE session. This can cause mistyping errors which can produce segmentation faults.", RuntimeWarning)
+                    has_warned = True
+                type_registry.append((name, hash_code))
+                type_registry_map[(name, hash_code)] = i
+    return type_registry, type_registry_map
+
+
+# These are supposed to be synced with a disk resource (i.e. the 'type_registry' file) 
+#  so they are globally defined outside of a particular cre_context(), and should
+#  be shared across different threads running CRE on the same filesystem.
+TYPE_REGISTRY, TYPE_REGISTRY_MAP = load_type_registry()
+
 def lines_in_type_registry():
-    global GLOBAL_TYPE_COUNT
-    if(GLOBAL_TYPE_COUNT == -1):
-        try:
-            with open(get_cache_path("type_registry",suffix=''),'r') as f:
-                GLOBAL_TYPE_COUNT = len([1 for line in f])
-        except FileNotFoundError:
-            GLOBAL_TYPE_COUNT = 0
-    return GLOBAL_TYPE_COUNT
+    return len(TYPE_REGISTRY)
 
 from cre.utils import PrintElapse
 def add_type_pickle(typ, t_id):
+    ''' Creates a pickled cache for a type object. Note: add_to_type_registry
+        can be be called with typ=None, in which case a call to this should follow.
+        This pattern allows a type to have access to its t_id before it is defined.
+    '''
+
     pickle_dir = get_cache_path("type_pickles",suffix='')
     os.makedirs(pickle_dir, exist_ok=True)
-    # print(os.path.join(pickle_dir,f'{t_id}.pkl'))
     with open(os.path.join(pickle_dir,f'{t_id}.pkl'), 'wb') as f:
         cloudpickle.dump(typ, f)
 
-
 def add_to_type_registry(name, hash_code, typ=None):
-    global GLOBAL_TYPE_COUNT
-    if(GLOBAL_TYPE_COUNT == -1): lines_in_type_registry()
-    count = GLOBAL_TYPE_COUNT
-    with open(get_cache_path("type_registry",suffix=''),'a') as f:
-        f.write(f"{count} {name} {hash_code}\n")
-    if(typ is not None): add_type_pickle(typ, count)
-    GLOBAL_TYPE_COUNT += 1
+    ''' Adds a type name and hash to the type registry and returns a new t_id.
+        If the 'typ' object is given then the type is also pickled and placed in the cache.'''
+
+    tup = (name,hash_code)
+    if(tup not in TYPE_REGISTRY_MAP):
+        count = len(TYPE_REGISTRY)
+        with open(get_cache_path("type_registry",suffix=''),'a') as f:
+            f.write(f"{count} {name} {hash_code}\n")
+        TYPE_REGISTRY.append(tup)
+        TYPE_REGISTRY_MAP[tup] = count
+        if(typ is not None): add_type_pickle(typ, count)
     return count
 
-def type_from_t_id(t_id):
+def unpickle_type_from_t_id(t_id):
     if(t_id < len(DEFAULT_REGISTERED_TYPES)):
         return list(DEFAULT_REGISTERED_TYPES.values())[t_id]
     name, hash_code = None, None
     pickle_dir = get_cache_path("type_pickles",suffix='')
     with open(os.path.join(pickle_dir,f'{t_id}.pkl'), 'rb') as f:
         typ = cloudpickle.load(f)
-    # with open(get_cache_path("type_registry",suffix=''),'r') as f:
-    #     for i, line in enumerate(f):
-    #         if(i == t_id):
-    #             tokens = line.split()
-    #             name, hash_code = tokens[0], tokens[1]
-    #             break
-
-    # fact_type = import_from_cached(name, hash_code, ['fact_type'])['fact_type']
     return typ
 
 def t_id_from_type_name(name, hash_code):
-    # if(hash_code is None): hash_code = hash(typ)
-    # name = str(typ)
-    # if(name == 'undefined'):
-    #     print(">?", repr(typ))
-    #     raise ValueError("Trying to register t_id for 'undefined'")
-    # print("<<",name,typ)
-    with open(get_cache_path("type_registry",suffix=''),'r') as f:
-        for i, line in enumerate(f):
-            tokens = line.split()
-            # print(i, tokens[1], tokens[2], tokens[1] == name, tokens[2] == hash_code)
-            if(tokens[1] == name and tokens[2] == hash_code):
-                return i
-    return -1
+    return TYPE_REGISTRY_MAP.get((name, hash_code), -1)
             
-
-
-
-
-# @intrinsic
-# def _instrinstic_get_null_meminfo(typingctx):
-#   def codegen(context, builder, sig, args):
-#       null_meminfo = context.get_constant_null(types.MemInfoPointer(types.voidptr))
-#       context.nrt.incref(builder, types.MemInfoPointer(types.voidptr), null_meminfo)
-#       return null_meminfo
-        
-#   sig = types.MemInfoPointer(types.voidptr)()
-
-#   return sig, codegen
-
-# @njit(cache=True)
-# def _get_null_meminfo():
-#   return _instrinstic_get_null_meminfo()
-
-# NULL_MEMINFO = _get_null_meminfo()
-
-# CRE_TYPE_EXECUTABLE    =int('10000000', 2)
-# CRE_TYPE_VAR           =int('10010000', 2)
-# CRE_TYPE_OP            =int('10100000', 2)
-# CRE_TYPE_CONDITIONS    =int('10110000', 2)
-# CRE_TYPE_RULE          =int('11000000', 2)
-
-# CRE_TYPE_FACT          = int('00001000', 2)
-# CRE_TYPE_ATOM          = int('00001001', 2)
-# CRE_TYPE_PRED          = int('00001010', 2)
 
 
 DEFAULT_REGISTERED_TYPES = {

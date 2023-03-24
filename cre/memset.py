@@ -848,12 +848,9 @@ def fact_iter_next(it):
 base_indexer_fields = {
     # Context Data object 
     "head" : i8,
-    # "t_id_set" : DictType(u2,i8),
     "mapping" : types.Any,
     "attr" : types.Any,
     "types_t_ids" : types.Any,
-    
-    
 }
 
 @structref.register
@@ -886,8 +883,6 @@ def get_base_types_with_attr(attr):
                 base_types[base_type] = val_type
 
     out = Tuple(tuple([Tuple((bt, vt)) for bt,vt in base_types.items()]))
-    print(tuple([(bt, vt) for bt,vt in base_types.items()]))
-    print(">>", out)
     return out
 
 vec2_type = Tuple((VectorType,VectorType))

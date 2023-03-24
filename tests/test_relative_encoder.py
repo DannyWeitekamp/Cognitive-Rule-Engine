@@ -108,6 +108,7 @@ def test_relative_encoder():
         p1, p2, p3  = ps[0],ps[1],ps[2]
         vp1,vp2,vp2 = vs[0],vs[1],vs[2]
 
+        print(ms)
         print(feat_ms)
         re.update()
 
@@ -331,7 +332,8 @@ def test_b_rel_enc_100x100_encode(benchmark):
 
 if __name__ == "__main__":
     import faulthandler; faulthandler.enable()
-    test_re_mem_leaks()
+    test_relative_encoder()
+    # test_re_mem_leaks()
 
     # test_downcasted_heads()
     # test_relative_encoder()

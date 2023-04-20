@@ -337,6 +337,31 @@ def ptr_to_var_name(ptr):
     return s
 
 
+base64_alpha_num = (
+              "A","B","C","D","E","F","G","H","I","J","K","L","M","N","O",
+              "P","Q","R","S","T","U","V","W","X","Y","Z","a","b","c","d",
+              "e","f","g","h","i","j","k","l","m","n","o","p","q","r","s",
+              "t","u","v","w","x","y","z","0","1","2","3","4","5","6","7","8","9","A","B")
+base64_alpha_num_ord = tuple([u1(ord(x)) for x in base64_alpha_num])
+
+@njit(unicode_type(u1[::1], i8), cache=True)
+def byte_string_to_base64(byte_arr, n_char):
+    s = _empty_string(PY_UNICODE_1BYTE_KIND, n_char)
+    for i in range(n_char):
+        bit_ind = (i*6)
+        lower_ind = bit_ind >> 3
+        upper_ind = (bit_ind+6) >> 3
+        offset = max(bit_ind-(lower_ind << 3),0)
+        overflow = max((bit_ind+6)-((lower_ind+1) << 3),0)
+        lower_width = (6-overflow)
+
+        byte = (byte_arr[lower_ind] >> offset) & (255 >> (8-lower_width))
+        overflow_byte = byte_arr[upper_ind] & (255 >> (8-overflow))
+        byte |= overflow_byte << lower_width
+        
+        _set_code_point(s, i, base64_alpha_num_ord[byte])
+    return s
+
 
 # @njit
 # def failed_int():

@@ -30,36 +30,13 @@ class PrintElapse():
         print(f'{self.name}: {self.t1-self.t0:.2f} ms')
 
 
-def get_base_ops():
+def get_base_funcs():
     from cre.default_funcs import Add, Multiply, Concatenate
     Add_f8 = Add(Var(f8),Var(f8))
     Multiply_f8 = Multiply(Var(f8),Var(f8))
     print(Add_f8, Multiply_f8)
     return Add_f8, Multiply_f8, Concatenate
-    # Concatenate_str = Add(Var(unicode_type), Var(unicode_type))
-    # class Add(Op):
-    #     signature = f8(f8,f8)        
-    #     short_hand = '({0}+{1})'
-    #     commutes = True
-    #     def check(a, b):
-    #         return a > 0
-    #     def call(a, b):
-    #         return a + b
-
-    # class Multiply(Op):
-    #     signature = f8(f8,f8)
-    #     short_hand = '({0}*{1})'
-    #     commutes = True
-    #     def check(a, b):
-    #         return b != 0
-    #     def call(a, b):
-    #         return a * b  
-
-    # class Concatenate(Op):
-    #     signature = unicode_type(unicode_type,unicode_type)
-    #     short_hand = '({0}+{1})'
-    #     def call(a, b):
-    #         return a + b  
+    
 
 
 i8_2x_tuple = Tuple((i8,i8))
@@ -70,29 +47,6 @@ def setup_float(planner=None,n=5):
     for x in range(5):
         planner.declare(float(x))
 
-    # @njit(cache=True)
-    # def inject_float_data(planner,n):
-    #     val_map = Dict.empty(f8,i8_2x_tuple)
-    #     l = List.empty_list(f8,n)
-    #     # print("START")
-    #     for x in np.arange(n,dtype=np.float64):
-    #         # print(x)
-    #         l.append(x)
-    #         v = Var(f8)
-    #         # print("VPTR", _raw_ptr_from_struct(v))
-    #         rec = SC_Record(v)
-    #         rec_entry = np.empty((1,),dtype=np.int64)
-    #         rec_entry[0] = _ptr_from_struct_incref(rec)
-
-    #         rec_entry_ptr = _get_array_data_ptr(rec_entry)
-    #         val_map[x] = (0, rec_entry_ptr)
-    #     # print("END")
-    #     planner.flat_vals_ptr_dict[('float64',0)] = _ptr_from_struct_incref(l)
-    #     planner.val_map_ptr_dict['float64'] = _ptr_from_struct_incref(val_map)
-    # # print("INJECT")
-    # inject_float_data(planner,n)
-    # print("END!")
-
     return planner
 
 def setup_str(planner=None,n=5):
@@ -102,29 +56,10 @@ def setup_str(planner=None,n=5):
     for x in range(65,n+65):
         planner.declare(chr(x))
 
-    # @njit(cache=True)
-    # def inject_str_data(planner,n):
-    #     val_map = Dict.empty(unicode_type,i8_2x_tuple)
-    #     l = List.empty_list(unicode_type,n)
-    #     for _x in range(65,n+65):
-    #         x = chr(_x)
-    #         print(x)
-    #         l.append(x)
-    #         rec = SC_Record(Var(unicode_type))
-    #         rec_entry = np.empty((1,),dtype=np.int64)
-    #         rec_entry[0] = _ptr_from_struct_incref(rec)
-    #         rec_entry_ptr = _get_array_data_ptr(rec_entry)
-    #         val_map[x] = (0, rec_entry_ptr)
-
-    #     planner.flat_vals_ptr_dict[('unicode_type',0)] = _ptr_from_struct_incref(l)
-    #     planner.val_map_ptr_dict['unicode_type'] = _ptr_from_struct_incref(val_map)
-
-    # inject_str_data(planner,n)
-
     return planner
 
 def test_apply_multi():
-    Add, Multiply, Concatenate = get_base_ops()
+    Add, Multiply, Concatenate = get_base_funcs()
     planner = setup_float()
     rec = apply_multi(Add, planner, 0)
     d_typ = DictType(f8,i8_2x_tuple)
@@ -152,7 +87,7 @@ def test_apply_multi():
     
 
 def test_insert_record():
-    Add, Multiply, Concatenate = get_base_ops()
+    Add, Multiply, Concatenate = get_base_funcs()
     planner = setup_float()
     rec = apply_multi(Add, planner, 0)
 
@@ -217,7 +152,7 @@ def summarize_depth_vals(planner, typ, depth):
     return impl
 
 def test_join_records_of_type():
-    Add, Multiply, Concatenate = get_base_ops()
+    Add, Multiply, Concatenate = get_base_funcs()
     planner = setup_float()
     rec = apply_multi(Add, planner, 0)
     insert_record(planner, rec, T_ID_FLOAT, 1)
@@ -240,7 +175,7 @@ def test_join_records_of_type():
 
 
 def test_forward_chain_one():
-    Add, Multiply, Concatenate = get_base_ops()
+    Add, Multiply, Concatenate = get_base_funcs()
     # fd_typ = DictType(f8, i8)
     # fl_typ = ListType(f8)
     # sd_typ = DictType(unicode_type, i8)
@@ -272,7 +207,7 @@ def test_forward_chain_one():
 
 
 def setup_retrace(n=5):
-    Add, Multiply, Concatenate = get_base_ops()
+    Add, Multiply, Concatenate = get_base_funcs()
     print(repr(Add), repr(Multiply), repr(Concatenate))
     planner = setup_float(n=n)
     planner = setup_str(planner,n=n)
@@ -288,12 +223,12 @@ def tree_str(root,ind=0):
     s_ind = ' '*ind
     s = ''
     for entry in root.entries:
-        # print("child.is_op", child.is_op)
-        if(entry.is_op):
-            op, child_arg_ptrs = entry.op, entry.child_arg_ptrs
+        # print("child.is_func", child.is_func)
+        if(entry.is_func):
+            func, child_arg_ptrs = entry.func, entry.child_arg_ptrs
         #     # for i in range(ind): s += " "
                 
-            s += f"\n{s_ind}{op}("
+            s += f"\n{s_ind}{func}("
         #     # print(child_arg_ptrs)
             for i, ptr in enumerate(child_arg_ptrs):
                 
@@ -315,25 +250,19 @@ def test_build_explanation_tree():
     print("BEF EX")
     root = build_explanation_tree(planner, f8, 36.0)
     print("BEF STR")
-    for op in root:
-        print(op)
-        # print(op_comp.vars)
-    print()
-    # print(tree_str(root,0))
-    # for child in root.children:
-    #     op, args = child
-    #     print(op.name)
+    for func in root:
+        print(func)
 
 def test_search_for_explanations(n=5):
-    ops = get_base_ops()
+    funcs = get_base_funcs()
     # print(repr(Add), repr(Multiply), repr(Concatenate))
     planner = setup_float(n=n)
     # planner = setup_str(planner,n=n)
 
-    expl_tree = search_for_explanations(planner, 36.0, ops=ops, search_depth=2)
+    expl_tree = search_for_explanations(planner, 36.0, funcs=funcs, search_depth=2)
     # print(tree_str(expl_tree))
-    for op in expl_tree:
-        print(op)
+    for func in expl_tree:
+        print(func)
 
 
 
@@ -347,15 +276,15 @@ def used_bytes(garbage_collect=True):
 #NOTE: Need to fix this seems to leak declared objects. 
 def test_mem_leaks(n=5):
     with cre_context("test_mem_leaks") as context:
-        ops = get_base_ops()
+        funcs = get_base_funcs()
         init_used = used_bytes()
 
         # for i in range(5):
         #     planner = setup_float(n=n)
         #     expl_tree = search_for_explanations(planner, 36.0,
-        #         ops=ops, search_depth=2, context=context)
+        #         funcs=funcs, search_depth=2, context=context)
         #     expl_tree_iter = iter(expl_tree)
-        #     for op_comp,binding in expl_tree_iter:
+        #     for f_comp,binding in expl_tree_iter:
         #         pass
 
         #     planner = None
@@ -387,9 +316,9 @@ def test_mem_leaks(n=5):
             planner = SetChainingPlanner([BOOP])
             b = declare_em(planner,"A")
             # expl_tree = search_for_explanations(planner, 36.0,
-            #     ops=ops, search_depth=2, context=context)
+            #     funcs=funcs, search_depth=2, context=context)
             # expl_tree_iter = iter(expl_tree)
-            # for op_comp,binding in expl_tree_iter:
+            # for f_comp,binding in expl_tree_iter:
             #     pass
             print("<<", b._meminfo.refcount)
 
@@ -433,8 +362,8 @@ def test_declare_fact():
         assert summarize_depth_vals(planner, f8, 0)[0] == 5
 
 
-        expls = planner.search_for_explanations(36.0, ops=get_base_ops(), search_depth=2)
-        A_op_comp_binding_pairs = list(iter(expls))
+        expls = planner.search_for_explanations(36.0, funcs=get_base_funcs(), search_depth=2)
+        A_f_comp_binding_pairs = list(iter(expls))
 
         planner = SetChainingPlanner([BOOP])
         declare_em(planner,"A")
@@ -444,18 +373,17 @@ def test_declare_fact():
         # assert summarize_depth_vals(planner, unicode_type, 0)[0] == 5
         assert summarize_depth_vals(planner, f8, 0)[0] == 5
 
-        expls = planner.search_for_explanations(36.0, ops=get_base_ops(), search_depth=2)
-        AB_op_comp_binding_pairs = list(iter(expls))
+        expls = planner.search_for_explanations(36.0, funcs=get_base_funcs(), search_depth=2)
+        AB_f_comp_binding_pairs = list(iter(expls))
 
-        assert len(AB_op_comp_binding_pairs) >= 4 * len(A_op_comp_binding_pairs)
+        assert len(AB_f_comp_binding_pairs) >= 4 * len(A_f_comp_binding_pairs)
 
         # print("(()()))")
-        for i, (op, binding) in enumerate(A_op_comp_binding_pairs):
-            # op = op_comp.flatten()
-            print("<<", op, binding)
+        for i, (func, binding) in enumerate(A_f_comp_binding_pairs):
+            print("<<", func, binding)
 
 
-            assert(op(*binding)==36.0)
+            assert(func(*binding)==36.0)
 
             # Flattening takes a while so stop after 3 
             if(i >= 2): break
@@ -485,10 +413,10 @@ def test_declare_fact_w_conversions():
         assert summarize_depth_vals(planner, unicode_type, 0)[0] == 6
         assert summarize_depth_vals(planner, f8, 0)[0] == 5
 
-        expls = planner.search_for_explanations(36.0, ops=get_base_ops(), search_depth=2)
-        A_op_comp_binding_pairs = list(iter(expls))
+        expls = planner.search_for_explanations(36.0, funcs=get_base_funcs(), search_depth=2)
+        A_f_comp_binding_pairs = list(iter(expls))
 
-        assert len(A_op_comp_binding_pairs) > 0
+        assert len(A_f_comp_binding_pairs) > 0
 
         print("---------------------------------------------------------")
 
@@ -500,42 +428,40 @@ def test_declare_fact_w_conversions():
         assert summarize_depth_vals(planner, unicode_type, 0)[0] == 7
         assert summarize_depth_vals(planner, f8, 0)[0] == 5
 
-        expls = planner.search_for_explanations(36.0, ops=get_base_ops(), search_depth=2)
-        AB_op_comp_binding_pairs = list(iter(expls))
+        expls = planner.search_for_explanations(36.0, funcs=get_base_funcs(), search_depth=2)
+        AB_f_comp_binding_pairs = list(iter(expls))
 
-        assert len(AB_op_comp_binding_pairs) >= 4 * len(A_op_comp_binding_pairs)
+        assert len(AB_f_comp_binding_pairs) >= 4 * len(A_f_comp_binding_pairs)
 
-        for i, (op, binding) in enumerate(A_op_comp_binding_pairs):
-            # op = op_comp.flatten()
-            print("<<", op, binding)
+        for i, (func, binding) in enumerate(A_f_comp_binding_pairs):
+            print("<<", func, binding)
 
-            assert(op(*binding)==36.0)
+            assert(func(*binding)==36.0)
 
             # Flattening takes a while so stop after 3 
             if(i >= 2): break
 
         print("---------------------------------------------------------")
-        # Check for key error bug when don't have Ops for all decalared types.
+        # Check for key error bug when don't have funcs for all decalared types.
         from cre.default_funcs import Add, Multiply
         Add_f8 = Add(f8, f8)
         Multiply_f8 = Multiply(f8, f8)
-        ops = [Add_f8, Multiply_f8]
+        funcs = [Add_f8, Multiply_f8]
         planner = SetChainingPlanner([BOOP])
         
         for i in range(5):
             b = BOOP("A",str(i))
             planner.declare(b)
 
-        expls = planner.search_for_explanations(36.0, ops=ops, search_depth=2)
-        AB_op_comp_binding_pairs = list(iter(expls))
+        expls = planner.search_for_explanations(36.0, funcs=funcs, search_depth=2)
+        AB_f_comp_binding_pairs = list(iter(expls))
 
-        assert len(AB_op_comp_binding_pairs) > 0
+        assert len(AB_f_comp_binding_pairs) > 0
 
-        for i, (op, binding) in enumerate(AB_op_comp_binding_pairs):
-            # op = op_comp.flatten()
-            print("<<", op, binding)
+        for i, (func, binding) in enumerate(AB_f_comp_binding_pairs):
+            print("<<", func, binding)
 
-            assert(op(*binding)==36.0)
+            assert(func(*binding)==36.0)
 
             # Flattening takes a while so stop after 3 
             if(i >= 2): break
@@ -557,10 +483,10 @@ def test_min_stop_depth():
             b = BOOP("A",str(i))
             planner.declare(b)
 
-        expls = planner.search_for_explanations(36.0, ops=[Add_f8, Multiply_f8], search_depth=2)
-        new_op, match = list(expls)[0]
-        print(new_op, match)
-        # new_op = op_comp.flatten()
+        expls = planner.search_for_explanations(36.0, funcs=[Add_f8, Multiply_f8], search_depth=2)
+        new_func, match = list(expls)[0]
+        print(new_func, match)
+        # new_func = f_comp.flatten()
 
         planner = SetChainingPlanner([BOOP])
 
@@ -570,20 +496,20 @@ def test_min_stop_depth():
         planner.declare(BOOP("Q","36"))
         print("----------------------------------------")
 
-        expls = planner.search_for_explanations(36.0, ops=[new_op], 
+        expls = planner.search_for_explanations(36.0, funcs=[new_func], 
             search_depth=1, min_stop_depth=1)
         assert len(list(expls)) > 0
 
-        op, match = list(expls)[0]
+        func, match = list(expls)[0]
 
-        print(op, match)
+        print(func, match)
 
         planner = SetChainingPlanner([BOOP])
         for i in range(2,5):
             b = BOOP("A",str(i))
             planner.declare(b)
 
-        expls = planner.search_for_explanations(3.0, ops=[new_op], 
+        expls = planner.search_for_explanations(3.0, funcs=[new_func], 
             search_depth=1, min_stop_depth=1)
 
         assert expls == None
@@ -595,19 +521,19 @@ def test_min_stop_depth():
             planner.declare(b)
         # planner.declare(BOOP("Q","36"))
 
-        expls = planner.search_for_explanations(36.0, ops=[Add_f8, Multiply_f8],
+        expls = planner.search_for_explanations(36.0, funcs=[Add_f8, Multiply_f8],
                     min_stop_depth=1, search_depth=1)
 
         print(summarize_depth_vals(planner, BOOP, 1))
         print(summarize_depth_vals(planner, unicode_type, 1))
         print(summarize_depth_vals(planner, f8, 1))
-        # for i, (op_comp, binding) in enumerate(expls):
-        #     print(op_comp, binding)
+        # for i, (f_comp, binding) in enumerate(expls):
+        #     print(f_comp, binding)
         # raise ValueError()
 
         print("END")
 
-        expls = planner.search_for_explanations(36.0, ops=[Add_f8, Multiply_f8],
+        expls = planner.search_for_explanations(36.0, funcs=[Add_f8, Multiply_f8],
                     min_stop_depth=1, search_depth=2)
 
         print(summarize_depth_vals(planner, BOOP, 2))
@@ -620,9 +546,9 @@ def test_min_stop_depth():
 
         # raise ValueError()
 
-        for i, (op, match) in enumerate(expls):
-            print(op, match)
-            print(op(*match))
+        for i, (func, match) in enumerate(expls):
+            print(func, match)
+            print(func(*match))
 
         print("END")
 
@@ -647,11 +573,11 @@ def test_non_numerical_vals():
         print(summarize_depth_vals(planner,unicode_type, 0))
         print(summarize_depth_vals(planner,f8, 0))
 
-        expls = planner.search_for_explanations(2.0, ops=[Add_f8], 
+        expls = planner.search_for_explanations(2.0, funcs=[Add_f8], 
             search_depth=1)
 
-        for i, (op, binding) in enumerate(expls):
-            print(op, binding)
+        for i, (func, binding) in enumerate(expls):
+            print(func, binding)
 
 def test_const_funcs():
     with cre_context("test_const_funcs"):
@@ -676,22 +602,22 @@ def test_const_funcs():
         print(summarize_depth_vals(planner,unicode_type, 0))
         print(summarize_depth_vals(planner,f8, 0))
 
-        expls = planner.search_for_explanations(11.0, ops=[Add_f8, Ten], 
+        expls = planner.search_for_explanations(11.0, funcs=[Add_f8, Ten], 
             search_depth=1)
 
-        for i, (op, match) in enumerate(expls):
-            print(op, match)
-            print(op(*match))
-            assert op(*match) == 11.0
+        for i, (func, match) in enumerate(expls):
+            print(func, match)
+            print(func(*match))
+            assert func(*match) == 11.0
             
 
 
 def test_policy_search(n=5):
-    [Add_f8, Multiply_f8, Concatenate] = ops = get_base_ops()
+    [Add_f8, Multiply_f8, Concatenate] = funcs = get_base_funcs()
         
     # No Policy
     planner = setup_float(n=n)
-    expl_tree = search_for_explanations(planner, 36.0, ops=ops, search_depth=2)
+    expl_tree = search_for_explanations(planner, 36.0, funcs=funcs, search_depth=2)
     no_policy_expls = list(expl_tree)    
 
     # Policy
@@ -726,7 +652,7 @@ def test_policy_search(n=5):
         # planner.declare(9.0)
         # planner.declare(5.0)
         # planner.declare(4.0)
-        # expls = planner.search_for_explanations(36.0, ops=ops, search_depth=2)
+        # expls = planner.search_for_explanations(36.0, funcs=funcs, search_depth=2)
 
 
 
@@ -757,7 +683,7 @@ def test_policy_search(n=5):
 
 
 def benchmark_apply_multi():
-    Add, Multiply, Concatenate = get_base_ops()
+    Add, Multiply, Concatenate = get_base_funcs()
     planner = setup_float(n=1000)
 
     apply_multi(Add, planner, 0)
@@ -766,7 +692,7 @@ def benchmark_apply_multi():
             apply_multi(Add, planner, 0)
 
 def benchmark_retrace_goals_back_one():
-    Add, Multiply, Concatenate = get_base_ops()
+    Add, Multiply, Concatenate = get_base_funcs()
     planner = setup_retrace()
     goals = List([36.0])
 
@@ -778,39 +704,39 @@ def benchmark_retrace_goals_back_one():
 
 
 # @njit(cache=False)
-def foo_gen():
-    for i in range(10):
-        yield i
+# def foo_gen():
+#     for i in range(10):
+#         yield i
 
-def product_of_generators(generators):
-    iters = []
-    out = []
+# def product_of_generators(generators):
+#     iters = []
+#     out = []
     
-    while(True):
-        #Create any iterators that need to be created
-        while(len(iters) < len(generators)):
-            it = generators[len(iters)]()
-            iters.append(it)
+#     while(True):
+#         #Create any iterators that need to be created
+#         while(len(iters) < len(generators)):
+#             it = generators[len(iters)]()
+#             iters.append(it)
         
-        iter_did_end = False
-        while(len(out) < len(iters)):
-            #Try to fill in any missing part of out
-            try:
-                nxt = next(iters[len(out)])
-                out.append(nxt)
-            #If any of the iterators failed pop up an iterator
-            except StopIteration as e:
-                # Stop yielding when 0th iter fails
-                if(len(iters) == 1):
-                    return
-                out = out[:-1]
-                iters = iters[:-1]
-                iter_did_end = True
+#         iter_did_end = False
+#         while(len(out) < len(iters)):
+#             #Try to fill in any missing part of out
+#             try:
+#                 nxt = next(iters[len(out)])
+#                 out.append(nxt)
+#             #If any of the iterators failed pop up an iterator
+#             except StopIteration as e:
+#                 # Stop yielding when 0th iter fails
+#                 if(len(iters) == 1):
+#                     return
+#                 out = out[:-1]
+#                 iters = iters[:-1]
+#                 iter_did_end = True
 
-        if(iter_did_end): continue
+#         if(iter_did_end): continue
 
-        yield out
-        out = out[:-1]
+#         yield out
+#         out = out[:-1]
 
 # with PrintElapse("gen_iters"):
 #     l = [x for x in product_of_generators([foo_gen,foo_gen,foo_gen, foo_gen])]
@@ -841,8 +767,8 @@ if __name__ == "__main__":
     # test_join_records_of_type()
     # test_forward_chain_one()
     # test_build_explanation_tree()
-    # test_search_for_explanations()
-    test_declare_fact()
+    test_search_for_explanations()
+    # test_declare_fact()
     # test_mem_leaks(n=10)
     # benchmark_apply_multi()
     # benchmark_retrace_back_one()

@@ -286,6 +286,8 @@ class Conditions(structref.StructRefProxy):
     def antiunify(self, other, return_score=False, normalize='left',
          fix_same_var=False, fix_same_alias=False):
         norm_enum = resolve_normalize_enum(normalize)
+        if(not isinstance(other, Conditions)):
+            other = Conditions(other)
         new_conds, score = conds_antiunify(self, other, norm_enum,
                                     fix_same_var, fix_same_alias) 
         if(return_score):
@@ -1445,52 +1447,54 @@ f8_i2_arr_tup = Tuple((f8,i2[::1]))
 @njit(cache=True)
 def score_remaps(lit_set_a, lit_set_b, bpti_a, bpti_b, a_fixed_inds, 
      op_key_intersection=None, max_remaps=15):
-    # print(lit_set_a, lit_set_b)
     if(op_key_intersection is None):
         op_key_intersection = intersect_keys(lit_set_a, lit_set_b)
 
-    # print("Q")
+    scored_remap_sets = List()
+
+    # Case 1: There are no common literals between the conditions
+    if(len(op_key_intersection) == 0):
+        a_ind_set = List([np.arange(len(bpti_a), dtype=np.uint16)])
+        b_ind_set = List([np.arange(len(bpti_b), dtype=np.uint16)])
+        remaps = get_possible_remap_inds(a_ind_set, b_ind_set, len(bpti_a), len(bpti_b), a_fixed_inds)
+        
+        scores = np.empty(len(remaps),dtype=np.float64)
+        for c, remap in enumerate(remaps):
+            matched_As = get_matched_mask(a_ind_set, b_ind_set, remap)
+            scores[c] = np.sum(matched_As)
+
+        scored_remap_sets.append((remaps,scores))
+
+    # Case 2: There are some common literals between the conditions
+    else:
+        for k in op_key_intersection:
+            a_ind_set = lit_set_to_ind_sets(lit_set_a[k], bpti_a)
+            b_ind_set = lit_set_to_ind_sets(lit_set_b[k], bpti_b)
+
+            remaps = get_possible_remap_inds(a_ind_set, b_ind_set, len(bpti_a), len(bpti_b), a_fixed_inds)
+            scores = np.empty(len(remaps),dtype=np.float64)
+            for c, remap in enumerate(remaps):
+                matched_As = get_matched_mask(a_ind_set,b_ind_set,remap)
+                scores[c] = np.sum(matched_As)
+
+            scored_remap_sets.append((remaps,scores))
+
+
 
     scored_remaps = List.empty_list(f8_i2_arr_tup)
     # For every unique type of literal (e.g. (x<y) & (a<b))
-    for k in op_key_intersection:
-        # print("<<", k)
-        # print(lit_set_a[k])
-        # print("R", k)
+    
+    for remaps, scores in scored_remap_sets:    
 
-        a_ind_set = lit_set_to_ind_sets(lit_set_a[k], bpti_a)
-        b_ind_set = lit_set_to_ind_sets(lit_set_b[k], bpti_b)
-
-        # print(a_ind_set)
-        remaps = get_possible_remap_inds(a_ind_set, b_ind_set, len(bpti_a), len(bpti_b), a_fixed_inds)
-        scores = np.empty(len(remaps),dtype=np.float64)
-        for c, remap in enumerate(remaps):
-            # print("remap: ", remap)
-            matched_As = get_matched_mask(a_ind_set,b_ind_set,remap)
-            scores[c] = np.sum(matched_As)
-
-        # print(len(remaps), remaps)
-
-        # print("T")
         # Order by score, drop remaps that have a score of zero 
         order = np.argsort(scores)
         first_nonzero = 0
         for ind in order:
             if(scores[ind] > 0): break
             first_nonzero +=1
-        # print("first_nonzero", first_nonzero)
+
         order = order[first_nonzero:][::-1][:min(max_remaps, len(order))]
-        # order = order[first_nonzero:][::-1]
-
-
-        # if(len(order) > 100):
-        #     raise ValueError()
-        #     print(len(order))
-        # print(len(order))
-        # print(order)
-
-        # print("U")
-
+        
         og_L = len(scored_remaps)
         ref_was_merged = np.zeros(og_L, dtype=np.uint8)
         n_merged = 0
@@ -1522,21 +1526,14 @@ def score_remaps(lit_set_a, lit_set_b, bpti_a, bpti_b, a_fixed_inds,
                             ref_was_merged[j] = 1
                         was_merged = True
 
-                        
-                    
-                    # print("<<", status, ref_remap, remap, merged_remap)
             if(not was_merged):
                 scored_remaps.append((score,remap))
 
-        # print("V")
         # Sort the scored_remap list
         scores = np.empty(len(scored_remaps),dtype=np.float64)
         for i,(s,_) in enumerate(scored_remaps): scores[i] = s
         order = np.argsort(scores)[::-1]
         scored_remaps = List([scored_remaps[ind] for ind in order])
-
-        # print("X")
-    # print(scored_remaps)
 
     return scored_remaps
 
@@ -1623,8 +1620,9 @@ def _max_remap_score_for_alignments(score_matrix):
     return score, col_assign_per_row
 
 @njit(cache=True)
-def _conj_from_litset_and_remap(ls_a,ls_b, remap, keys, bpti_a, bpti_b):
+def _conj_from_litset_and_remap(ls_a, ls_b, remap, keys, bpti_a, bpti_b):
     conj = List.empty_list(LiteralType)
+
     for unq_key in keys:
         lit_set_a = ls_a[unq_key]
         lit_set_b = ls_b[unq_key]
@@ -1690,11 +1688,9 @@ def _conds_antiunify(c_a, c_b, fix_same_var, fix_same_alias):
     # Case 1: c_a and c_b are both single conjunctions like (lit1 & lit2 & lit3)
     if(len(ls_as) == 1 and len(ls_bs) == 1):
         op_key_intersection = intersect_keys(ls_as[0], ls_bs[0])
-        # print(op_key_intersection)
         scored_remaps = score_remaps(ls_as[0], ls_bs[0], bpti_a, bpti_b, a_fixed_inds,
                                     op_key_intersection=op_key_intersection)
         best_score, best_remap = scored_remaps[0]
-
 
         conj = _conj_from_litset_and_remap(ls_as[0], ls_bs[0], 
                  best_remap, op_key_intersection, bpti_a, bpti_b)
@@ -1781,15 +1777,15 @@ def conds_antiunify(c_a, c_b, normalize=1,
          fix_same_var=False, fix_same_alias=False):
     c, score = _conds_antiunify(c_a, c_b, fix_same_var, fix_same_alias)
     if(normalize == AU_NORMALIZE_LEFT):
-        n_literals_a = count_literals(c_a)
+        n_literals_a = max(count_literals(c_a),1)
         return c, score / n_literals_a
     elif(normalize == AU_NORMALIZE_RIGHT):
-        n_literals_b = count_literals(c_b)
+        n_literals_b = max(count_literals(c_b),1)
         return c, score / n_literals_b
     elif(normalize == AU_NORMALIZE_MAX):
-        n_literals_a = count_literals(c_a)
-        n_literals_b = count_literals(c_b)
-        return c, score / max(n_literals_a, n_literals_b)
+        n_literals_a = max(count_literals(c_a),1)
+        n_literals_b = max(count_literals(c_b),1)
+        return c, score / max(max(n_literals_a, n_literals_b),1)
     else:
         return c, score
 

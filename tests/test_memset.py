@@ -1,7 +1,7 @@
 from cre.context import cre_context
 from cre.fact import define_fact
 from cre.tuple_fact import TF, TupleFact
-from cre.memset import MemSet, MemSetType, decode_idrec, encode_idrec, next_empty_f_id, make_f_id_empty, retracted_f_ids_for_t_id
+from cre.memset import MemSet, MemSetType, decode_idrec, encode_idrec, next_empty_f_id, make_f_id_empty, retracted_f_ids_for_t_id, get_facts
 from numba import njit
 from numba.types import unicode_type, NamedTuple
 from numba.typed import List
@@ -16,6 +16,7 @@ import gc
 from numba.core.runtime.nrt import rtsys
 from weakref import WeakKeyDictionary
 import pytest
+from copy import copy
 
 
 tf_spec = {"value" : "string",
@@ -431,6 +432,44 @@ def test_free_refs():
 
 
 
+def test_long_hash():
+    print("START test_long_hash")
+    with cre_context("test_long_hash"):
+        spec1 = {"A" : "string", "B" : "number"}
+        BOOP1 = define_fact("BOOP1", spec1)
+        spec2 = {"inherit_from" : BOOP1, "C" : "number"}
+        BOOP2 = define_fact("BOOP2", spec2)
+        spec3 = {"inherit_from" : BOOP2, "D" : "number"}
+        BOOP3 = define_fact("BOOP3", spec3)
+
+        ms10 = MemSet()
+        ms10.declare(BOOP1("A",1))
+        ms10.declare(BOOP1("B",2))
+        ms10.declare(BOOP1("C",3))
+
+        hsh10 = ms10.long_hash()
+
+        ms11 = MemSet()
+        ms11.declare(BOOP1("C",3))
+        ms11.declare(BOOP1("A",1))
+        ms11.declare(BOOP1("B",2))
+
+        hsh11 = ms11.long_hash()
+
+        ms12 = copy(ms10)
+        hsh12 = ms12.long_hash()
+
+        ms20 = MemSet()
+        ms20.declare(BOOP2("C",3))
+        ms20.declare(BOOP2("A",1))
+        ms20.declare(BOOP2("B",2))
+
+        hsh20 = ms20.long_hash()
+        
+        assert hsh10 == hsh11
+        assert hsh10 == hsh12
+        assert hsh10 != hsh20
+
 
 def _test_modify_from_deref_infos():
     from cre.var import Var
@@ -546,7 +585,8 @@ def test_b_get_facts_10000(benchmark):
 
 if __name__ == "__main__":
     import faulthandler; faulthandler.enable()
-    test_indexer()
+    test_long_hash()
+    # test_indexer()
     # test_declare_retract()
     # test_retroactive_register()
     # test_declare_retract_tuple_fact()
@@ -563,4 +603,4 @@ if __name__ == "__main__":
     # _delcare_10000(MemSet())
 
     # _test_modify_from_deref_infos()
-    test_free_refs()
+    # test_free_refs()

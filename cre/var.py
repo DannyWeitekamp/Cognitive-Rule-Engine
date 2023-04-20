@@ -468,6 +468,14 @@ class Var(StructRefProxy):
             self._derefs_str = "".join([f"[{x}]" if x.isdigit() else f".{x}" for x in self.deref_attrs])#str_var_derefs(self)
         return self._derefs_str
 
+    @classmethod
+    def from_ptr(cls, ptr):
+        return var_from_ptr(ptr)
+
+@njit(VarType(i8), cache=True)
+def var_from_ptr(ptr):
+    return cast(ptr, VarType)
+
 #### Get Attribute Overloading ####
 
 @infer_getattr

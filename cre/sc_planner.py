@@ -21,16 +21,16 @@ from cre.vector import VectorType
 from cre.fact import Fact, gen_fact_import_str, get_offsets_from_member_types
 from cre.fact_intrinsics import fact_lower_getattr
 from cre.var import Var, VarTypeClass, var_append_deref, var_extend
-# from cre.op import CREFuncType, CREFuncTypeClass
+# from CREFunc import CREFuncType, CREFuncTypeClass
 from cre.func import CREFuncType, CREFuncTypeClass, CREFunc, cre_func_call_self, set_base_arg_val_impl, get_return_val_impl, CFSTATUS_ERROR, CFSTATUS_TRUTHY
 from cre.make_source import make_source, gen_def_func, gen_assign, resolve_template, gen_def_class
 from cre.obj import CREObjType
-from cre.core import T_ID_OP, T_ID_VAR
+from cre.core import T_ID_FUNC, T_ID_VAR
 from numba.core import imputils, cgutils
 from numba.core.datamodel import default_manager, models
 from numba.experimental.function_type import _get_wrapper_address
 
-from cre.func import cre_func_deep_copy_generic, set_var_arg, set_op_arg, reinitialize
+from cre.func import cre_func_deep_copy_generic, set_var_arg, set_func_arg, reinitialize
 
 
 from operator import itemgetter
@@ -51,11 +51,11 @@ from cre.default_funcs import Identity
 This file implements the SetChainingPlanner which solves planning problems
 akin to the "24 game" (given 4 numbers find a way to manipulate them to get 24)
 The set chaining planner solves these problems for a given a set of values 
-of essentially any type (number, string, object, etc...), a set of operations, 
+of essentially any type (number, string, object, etc...), a set of functions, 
 and a goal value of any type, the planner will find compositions of starting
-values and operations that achieve the goal state. This planner searches for
+values and functions that achieve the goal state. This planner searches for
 the goal value in a forward chaining manner by exploring every combination of
-values and compositions of operations up to a fixed depth. For instance,
+values and compositions of functions up to a fixed depth. For instance,
 (1+3) = 4 could be discovered at depth 1, and (1+2)+(3-2) = 4 could be discovered
 at a depth of 2. The planner is "set chaining" because it uses a hashmap to 
 ensure that at each depth only unique values are used to compute the values for
@@ -68,37 +68,37 @@ This file implements:
     be declared to this structure. The method self.search_for_explanations() can be used to solve 
     the search problem, and outputs the root node of an ExplanationTree containing the solutions found 
     up to a fixed depth. Every forward pass of the planner is stored in memory. After the goal
-    is produced at a particular depth an operation composition is reconstructed by 
+    is produced at a particular depth a function composition is reconstructed by 
     filtering backwards from the goal state to the initial declared values.
 
 -SC_Record
     An internal structure to the SetChainingPlanner representing the application
-    of an operation (a cre.Op) over a particular range of the unique values calculated for a
+    of a function (a CREFunc) over a particular range of the unique values calculated for a
     particular depth. An SC_Record is a lightweight form of bookeeping that is used
-    to reconstruct solutions (i.e. operation compositions + starting values) in a 
+    to reconstruct solutions (i.e. function compositions + starting values) in a 
     backwards fashion from the depth where the goal value was found. For every application
-    of a cre.Op the that produces value 'v', the 'data' of an SC_Record 'rec' fills in a record entry:
+    of a CREFunc the that produces value 'v', the 'data' of an SC_Record 'rec' fills in a record entry:
         [*rec, *prev_entry, arg_ind0, arg_ind1, ...] where '*rec' is a pointer to the SC_Record
     '*prev_entry' is the previous record entry associated with value 'v' or zero if there wasn't one yet,
-    and arg0,arg1,arg2,... are indicies for the arguments to this application of operation. Note that,
+    and arg_ind0,arg_ind1,... are indicies for the arguments to this application of the function. Note that,
     we keep around *prev_entry in order to essentially build a linked list of entries associated with each 
-    unique value. To limit the memory/cache footprint of tracking each entry---there can be millions at deeper 
-    depths---all entry information is encoded in a contigous preallocated array. Consequently *rec, *prev_entry,
+    unique value. To limit the memory/cache footprint of tracking each entry (there can be millions at deeper 
+    depths) all entry information is encoded in a contigous preallocated array. Consequently *rec, *prev_entry,
     are weak (i.e. not refcounted pointers). 
      
 -ExplanationTree
     An explanation tree is a compact datastructure for holding all solutions to a SetChainingPlanner's 
     search. An ExplanationTree can hold a large number of solutions to a search (essentially compositions of 
-    cre.Op instances) in a manner that is considerably more compact than a flat list of (possibly many thousands 
-    of) solutions. An explanation tree is not a proper tree. Each node consists of multiple entries, each of which 
-    represents the application of a cre.Op or terminal variable and has 'n' child ExplanationTrees, for each 
-    of its 'n' arguments. Thus, unlike a normal tree which has a fixed set of children per node, a ExplanationTree 
+    CREFunc instances) in a manner that is considerably more compact than a flat list of (possibly many thousands 
+    of) solutions. An explanation tree is not a proper tree, it is more akin to an option-tree. Each node consists of multiple 
+    entries, each of which represents the application of a CREFunc or terminal variable and has 'n' child ExplanationTrees, 
+    for each  of its 'n' arguments. Thus, unlike a normal tree which has a fixed set of children per node, a ExplanationTree 
     instance contains a set of sets of child ExplanationTrees. A fixed choice of entries starting from the root 
-    ExplanationTree down to terminal entries represents a single cre.Op composition.
+    ExplanationTree down to terminal entries represents a single CREFunc composition.
 
 -ExplanationTreeEntry
-    Represents a non-terminal cre.Op ('is_op'==True) in a composition or a terminal cre.Var ('is_op'==False).
-    In the non-terminal case holds a reference to a cre.Op instance and child ExplanationTrees for each argument. 
+    Represents a non-terminal CREFunc ('is_func'==True) in a composition or a terminal cre.Var ('is_func'==False).
+    In the non-terminal case holds a reference to a CREFunc instance and child ExplanationTrees for each argument. 
     In the terminal case keeps a reference to a cre.Var.
 '''
 
@@ -117,22 +117,22 @@ SC_Record_field_dict = {
     #  *rec and *prev_entry, are each distributed across two entries in this u4 array. 
     'data' : u4[::1],
 
-    # List of ranges (start,end) over which the op has been applied for each argument.
+    # List of ranges (start,end) over which the func has been applied for each argument.
     'stride' : i8[:,::1],
 
-    # Whether the record is non-terminal---from applying a cre.Op and not from a declared value.
-    'is_op' : u1,
+    # Whether the record is non-terminal---from applying a CREFunc and not from a declared value.
+    'is_func' : u1,
 
-    # If non-terminal then holds the cre.Op
-    'op' : CREFuncType,
+    # If non-terminal then holds the CREFunc
+    'func' : CREFuncType,
 
-    # The number of input arguments for self.op.
+    # The number of input arguments for self.func.
     'n_args' : i8,
 
     # If terminal then holds a cre.Var as a placeholder for the declared value. 
     'var' : VarType,
 
-    # The depth at which the op was applied/inserted, or '0' for declared values
+    # The depth at which the func was applied/inserted, or '0' for declared values
     'depth' : i8,
 }
 
@@ -141,14 +141,14 @@ SC_Record, SC_RecordType = \
     define_structref("SC_Record", SC_Record_fields, define_constructor=False)
     
 @overload(SC_Record, prefer_literal=False)
-def overload_SC_Record(op_or_var, depth=0, n_args=0, stride=None, prev_entry_ptr=0):
+def overload_SC_Record(func_or_var, depth=0, n_args=0, stride=None, prev_entry_ptr=0):
     '''Implements the constructor for an SC_Record'''
 
-    if(isinstance(op_or_var, CREFuncTypeClass)):
-        def impl(op_or_var, depth=0, n_args=0, stride=None, prev_entry_ptr=0):
+    if(isinstance(func_or_var, CREFuncTypeClass)):
+        def impl(func_or_var, depth=0, n_args=0, stride=None, prev_entry_ptr=0):
             st = new(SC_RecordType)
-            st.is_op = True
-            st.op = op_or_var
+            st.is_func = True
+            st.func = func_or_var
             st.depth = depth
             st.n_args = n_args
 
@@ -164,11 +164,11 @@ def overload_SC_Record(op_or_var, depth=0, n_args=0, stride=None, prev_entry_ptr
             st.data = np.empty(data_len,dtype=np.uint32)
             
             return st
-    elif(isinstance(op_or_var, VarTypeClass)):
-        def impl(op_or_var, depth=0, n_args=0, stride=None, prev_entry_ptr=0):
+    elif(isinstance(func_or_var, VarTypeClass)):
+        def impl(func_or_var, depth=0, n_args=0, stride=None, prev_entry_ptr=0):
             st = new(SC_RecordType)
-            st.is_op = False
-            st.var = cast(op_or_var, VarType) 
+            st.is_func = False
+            st.var = cast(func_or_var, VarType) 
             st.depth = depth
             st.n_args = 0
 
@@ -190,7 +190,7 @@ dict_t_id_to_record_list_type = DictType(u2, record_list_type)
 t_id_int_tuple = Tuple((u2,i8))
 
 SetChainingPlanner_field_dict = {
-    'ops': ListType(CREFuncType),
+    'funcs': ListType(CREFuncType),
     # List of dictionaries that map:
     #  Tuple(type_t_id,depth[int]) -> ListType[Record])
     'declare_records' : DictType(u2, ListType(SC_RecordType)),
@@ -213,8 +213,8 @@ SetChainingPlanner_field_dict = {
     # A list of tuples with (fact_type, attr, conversions) for the planner's known fact_types
     'semantic_visible_attrs' : types.Any,
 
-    # A mapping of strings like "('fact_name', 'attr', 'type')" to op instances used for conversions
-    'conversion_ops' :  DictType(unicode_type, CREFuncType)
+    # A mapping of strings like "('fact_name', 'attr', 'type')" to CREFunc instances used for conversions
+    'conversion_funcs' :  DictType(unicode_type, CREFuncType)
 }
 
 @structref.register
@@ -226,7 +226,7 @@ class SetChainingPlannerTypeClass(types.StructRef):
 GenericSetChainingPlannerType = SetChainingPlannerTypeClass([(k,v) for k,v in SetChainingPlanner_field_dict.items()])
 
 def get_semantic_visible_attrs(fact_types):
-    ''' Takes in a set of fact types and returns all (fact, attribute, ((conv_type, conv_op)...) tuples
+    ''' Takes in a set of fact types and returns all (fact, attribute, ((conv_type, conv_func)...) tuples
         for attributes that are both "semnatic" and "visible". 
     '''
     if(not isinstance(fact_types,(list,tuple))): fact_types = [fact_types]
@@ -243,7 +243,7 @@ def get_semantic_visible_attrs(fact_types):
                     is_new = False
                     break
 
-            # TODO: Can return this functionality when ops have specialized numba_types
+            # TODO: Can return this functionality when CREFuncs have specialized numba_types
             conversions = None            
             if('conversions' in attr_spec):
                 # conversions = tuple([(k,v) for k,v in attr_spec['conversions'].items()])
@@ -271,10 +271,10 @@ def register_conversions(planner, typ):
         attr_spec = fact_type.instance_type.clean_spec[attr.literal_value]
 
         if('conversions' in attr_spec):
-            for conv_type, conv_op in attr_spec['conversions'].items(): 
+            for conv_type, conv_func in attr_spec['conversions'].items(): 
                 tup = (str(fact_type.instance_type), attr.literal_value, repr(conv_type))
-                add_conversion_op(planner,str(tup),conv_op)
-                # planner.conversion_ops[str(tup)] = conv_op
+                add_conversion_func(planner,str(tup),conv_func)
+                # planner.conversion_funcs[str(tup)] = conv_func
 
 class SetChainingPlanner(structref.StructRefProxy):
     def __new__(cls, fact_types=None):
@@ -289,14 +289,14 @@ class SetChainingPlanner(structref.StructRefProxy):
     def declare(self, val, var=None):
         return planner_declare(self, val, var)
 
-    def search_for_explanations(self, goal, ops=None, policy=None,
+    def search_for_explanations(self, goal, funcs=None, policy=None,
              search_depth=1, min_stop_depth=None,context=None):
-        return search_for_explanations(self, goal, ops, policy,
+        return search_for_explanations(self, goal, funcs, policy,
                         search_depth, min_stop_depth, context)
 
     @property
-    def conversion_ops(self):
-        return get_conversion_ops(self)
+    def conversion_funcs(self):
+        return get_conversion_funcs(self)
 
     @property
     def num_forward_inferences(self):
@@ -305,12 +305,12 @@ class SetChainingPlanner(structref.StructRefProxy):
 define_boxing(SetChainingPlannerTypeClass, SetChainingPlanner)
 
 @njit(cache=True)
-def get_conversion_ops(self):
-    return self.conversion_ops
+def get_conversion_funcs(self):
+    return self.conversion_funcs
 
 @njit(cache=True)
-def add_conversion_op(self, conv_str, op):
-    self.conversion_ops[conv_str] = op
+def add_conversion_func(self, conv_str, func):
+    self.conversion_funcs[conv_str] = func
 
 @njit(cache=True)
 def sc_planner_ctor(sc_planner_type):
@@ -321,7 +321,7 @@ def sc_planner_ctor(sc_planner_type):
     st.val_map_ptr_dict = Dict.empty(u2, ptr_t)
     st.inv_val_map_ptr_dict = Dict.empty(u2, ptr_t)
     st.flat_vals_ptr_dict = Dict.empty(t_id_int_tuple, ptr_t)
-    st.conversion_ops = Dict.empty(unicode_type, CREFuncType)
+    st.conversion_funcs = Dict.empty(unicode_type, CREFuncType)
     return st
 
 #------------------------------------------------------------------
@@ -360,43 +360,12 @@ def ensure_ptr_dicts(planner, typ):
     return impl
 
 
-# from cre.fact import gen_fact_import_str
-# def gen_src_planner_declare_fact(fact_def, visible_attrs=[], ind='    '):
-#     name = fact_def._fact_name
-#     src = \
-# f'''
-# from numba import njit, types
-# from cre.var import Var, get_var_type
-# from cre.sc_planner import planner_declare_val, SetChainingPlannerType
-# {gen_fact_import_str(fact_def)}
-# var_type = get_var_type({name},{name})
-# @njit(types.void(SetChainingPlannerType, {name}, types.Optional(var_type)),cache=True)
-# def declare_fact(planner, fact, var=None):
-#     v = Var({name}) if var is None else var
-#     planner_declare_val(planner,fact,v)
-# '''
-#     src += indent("\n".join([f"planner_declare_val(planner, fact.{attr}, v.{attr})" for attr in visible_attrs]),prefix=ind)
-#     return src
-
-# def get_planner_declare_fact(fact_def, visible_attrs=[],
-#          include_vis_at_def=True):
-#     ''' '''
-#     visible_attrs = assert_visible_attrs(fact_def, visible_attrs, include_vis_at_def)
-#     hash_code = unique_hash([fact_def._hash_code, visible_attrs])  
-#     # print(get_cache_path('sc_planner_declare_fact',hash_code, unique_hash([fact_def._hash_code, visible_attrs])  ))
-#     if(not source_in_cache('sc_planner_declare_fact', hash_code)):
-#         src = gen_src_planner_declare_fact(fact_def, visible_attrs)
-#         source_to_cache('sc_planner_declare_fact',hash_code,src)
-#     l = import_from_cached('sc_planner_declare_fact',hash_code,['declare_fact'])
-#     return l['declare_fact']
-#         source_to_cache
-
 @generated_jit(cache=True,nopython=True)
-def planner_declare_val(planner, val, op_or_var):
+def planner_declare_val(planner, val, func_or_var):
     '''Declares a primative value or fact (but not its visible attributes)
         into the 0th depth of a planner instance.'''
     val_typ = val
-    def impl(planner, val, op_or_var):
+    def impl(planner, val, func_or_var):
         # Ensure that various data structures exist for this val_type
         flat_vals, val_map, inv_val_map, declare_records = \
             ensure_ptr_dicts(planner, val_typ)
@@ -405,8 +374,8 @@ def planner_declare_val(planner, val, op_or_var):
         is_prev = prev_entry_ptr != 0
 
         # Make a new Record for this declaration
-        rec = SC_Record(op_or_var, prev_entry_ptr=prev_entry_ptr)
-        var_ptr = cast(op_or_var, i8)
+        rec = SC_Record(func_or_var, prev_entry_ptr=prev_entry_ptr)
+        var_ptr = cast(func_or_var, i8)
         declare_records.append(rec)
         
         # If the is new add it to 'flat_vals'
@@ -428,11 +397,11 @@ def planner_declare_val(planner, val, op_or_var):
     return impl 
 
 @generated_jit(cache=True,nopython=True)
-def planner_declare_conversion(planner, val, op_or_var, source_ind=None):
+def planner_declare_conversion(planner, val, func_or_var, source_ind=None):
     '''Declares a primative value or fact (but not its visible attributes)
         into the 0th depth of a planner instance.'''
     val_typ = val
-    def impl(planner, val, op_or_var, source_ind=None):
+    def impl(planner, val, func_or_var, source_ind=None):
         # Ensure that various data structures exist for this val_type
         flat_vals, val_map, inv_val_map, declare_records = \
             ensure_ptr_dicts(planner, val_typ)
@@ -452,7 +421,7 @@ def planner_declare_conversion(planner, val, op_or_var, source_ind=None):
             stride = None
 
         # Make a new Record for this declaration
-        rec = SC_Record(op_or_var, n_args=1, stride=stride, prev_entry_ptr=prev_entry_ptr)
+        rec = SC_Record(func_or_var, n_args=1, stride=stride, prev_entry_ptr=prev_entry_ptr)
         rec_ptr = cast(rec, i8)
         data = rec.data
         data[0] = u4(rec_ptr) # get low bits
@@ -464,7 +433,7 @@ def planner_declare_conversion(planner, val, op_or_var, source_ind=None):
         if(source_ind is not None):
             data[4] = source_ind
 
-        op_ptr = cast(op_or_var, i8)
+        f_ptr = cast(func_or_var, i8)
         declare_records.append(rec)
         
         # If the is new add it to 'flat_vals'
@@ -475,41 +444,13 @@ def planner_declare_conversion(planner, val, op_or_var, source_ind=None):
         val_map[val] = (0, rec_entry_ptr)
 
         # And associate the var_ptr with val in inv_val_map
-        inv_val_map[op_ptr] = val
+        inv_val_map[f_ptr] = val
         # print("Conv_ptr", var_ptr, val, rec_entry_ptr)
         return len(flat_vals)-1
     return impl 
 
 
-# def try_conv(conv_op, val):    
-#     try: 
-#         conv_val = float(val)    
-#     except Exception:
-#         return False, 0.0
-#     return True, conv_val
 
-# @njit(cache=True)
-# def planner_try_delcare_converison(planner, call_f_type, conv_type, val, conv_op, source_ind):
-#     conv_func = _func_from_address(call_f_type, conv_op.call_addr)
-#     # try:
-#     # with objmode(conv_val=f8):
-#     # try:
-#     conv_val = conv_func(val)
-#     # except:
-#     #     conv_val = 700.0
-#     #     ok = True
-#     # except Exception:
-#     #     ok = False
-#             # return
-
-#     # if(ok):
-#     # print("CONV", val, conv_val)
-#         # planner_declare_conversion(planner, conv_val, conv_op, source_ind)
-        
-
-
-#NOTE: With current Op implementation there is no numba type for an op
-#   This means we need to deal with op instances 
 @generated_jit(cache=True, nopython=True)
 def planner_declare_conversions(planner, val, fact_type, attr, source_ind):
     fact_type = fact_type.instance_type
@@ -527,18 +468,18 @@ def planner_declare_conversions(planner, val, fact_type, attr, source_ind):
         set_base = set_base_arg_val_impl(val)
         def impl(planner, val, fact_type, attr, source_ind):
             for conv_str in literal_unroll(conversion_strs):
-                if(conv_str in planner.conversion_ops):
-                    _conv_op = planner.conversion_ops[conv_str]    
+                if(conv_str in planner.conversion_funcs):
+                    _conv_func = planner.conversion_funcs[conv_str]    
                 else:
                     raise ValueError("Planner not instantiated with fact_type, that defines a conversion.")
                 
-                conv_op = cast(_conv_op, cf_type)
-                set_base(conv_op, 0, val)
-                status = cre_func_call_self(conv_op)
+                conv_func = cast(_conv_func, cf_type)
+                set_base(conv_func, 0, val)
+                status = cre_func_call_self(conv_func)
                 if(status > CFSTATUS_TRUTHY):
                     return 
-                conv_val = get_ret(conv_op)
-                planner_declare_conversion(planner, conv_val, conv_op, source_ind)                    
+                conv_val = get_ret(conv_func)
+                planner_declare_conversion(planner, conv_val, conv_func, source_ind)                    
                     
     else:
         def impl(planner, val, fact_type, attr, source_ind):
@@ -601,9 +542,9 @@ def recover_arg_ind(planner, arg):
     return impl
 
 
-def should_commute_skip(arg_inds, op):
+def should_commute_skip(arg_inds, func):
     for k, ind in enumerate(arg_inds):
-        comm_args = op.right_commutes.get(k,[])
+        comm_args = func.right_commutes.get(k,[])
         for j in comm_args:
             if(arg_inds[k] < arg_inds[j]):
                 return True
@@ -611,8 +552,8 @@ def should_commute_skip(arg_inds, op):
 
 
 #TODO njit it
-def commute_sensitive_arg_ind_product(op, arg_inds_by_type):
-    arg_ind_sets = [arg_inds_by_type[str(typ)] for typ in op.arg_types]
+def commute_sensitive_arg_ind_product(func, arg_inds_by_type):
+    arg_ind_sets = [arg_inds_by_type[str(typ)] for typ in func.arg_types]
     lengths = np.array([len(x) for x in arg_ind_sets],dtype=np.int64)
     inds = np.zeros(len(arg_ind_sets),dtype=np.int64)
 
@@ -624,7 +565,7 @@ def commute_sensitive_arg_ind_product(op, arg_inds_by_type):
 
         # No redundant Indicies
         if(np.sum(inds.reshape(1,-1) == inds.reshape(-1,1)) <= len(inds) and
-           not should_commute_skip(arg_inds, op)):
+           not should_commute_skip(arg_inds, func)):
             out.append(arg_inds)
 
         inds[k] += 1
@@ -640,10 +581,10 @@ def commute_sensitive_arg_ind_product(op, arg_inds_by_type):
 
 from numba.core.runtime.nrt import rtsys
 from cre.core import standardize_type
-def search_for_explanations(self, goal, ops=None, policy=None,
+def search_for_explanations(self, goal, funcs=None, policy=None,
              search_depth=1, min_stop_depth=None,context=None):
     '''For SetChainingPlanner 'self' produce an explanation tree
-        holding all cre.Op compositions of 'ops' up to depth 'search_depth'
+        holding all CREFunc compositions of 'funcs' up to depth 'search_depth'
         that produce 'goal' from the planner's declared starting values.
     '''
 
@@ -654,11 +595,11 @@ def search_for_explanations(self, goal, ops=None, policy=None,
         else:
             min_stop_depth = len(policy)
 
-    # Declare any constant ops
-    if(ops is not None):
-        for op in ops:
-            if(op.n_args == 0):
-                planner_declare_conversion(self, op(), op, None)
+    # Declare any constant funcs
+    if(funcs is not None):
+        for func in funcs:
+            if(func.n_args == 0):
+                planner_declare_conversion(self, func(), func, None)
 
 
     context = cre_context(context)
@@ -674,12 +615,12 @@ def search_for_explanations(self, goal, ops=None, policy=None,
         depth += 1
         if(depth <= self.curr_infer_depth): continue
                 
-        # Apply the input ops in the forward direction once.
+        # Apply the input funcs in the forward direction once.
         if(policy is None):
-            if(ops is None): raise ValueError("Must provide ops or policy.")
+            if(func is None): raise ValueError("Must provide funcs or policy.")
             # with PrintElapse("forward"):
-            # print([o._type for o in ops])
-            forward_chain_one(self, ops, min_stop_depth)
+            # print([o._type for o in funcs])
+            forward_chain_one(self, funcs, min_stop_depth)
 
         # Policy Case
         else:
@@ -687,16 +628,16 @@ def search_for_explanations(self, goal, ops=None, policy=None,
             depth_policy = []
             # print(policy)
             for t in policy[depth-1]:
-                op, arg_set = (t[0], t[1]) if(isinstance(t, tuple)) else (t, None)
+                func, arg_set = (t[0], t[1]) if(isinstance(t, tuple)) else (t, None)
                 # print(depth, "::", op, arg_set)
 
                 # If the policy didn't provide any args then try all permutations
                 if(arg_set is None or len(arg_set) == 0 or
                     # TODO: For now also try all combinations if the number of args is too small
                     #  but in the future can do all vs this.
-                    len(arg_set) < op.n_args
+                    len(arg_set) < func.n_args
                     ):
-                    depth_policy.append(op)
+                    depth_policy.append(func)
                     continue
 
 
@@ -712,12 +653,12 @@ def search_for_explanations(self, goal, ops=None, policy=None,
                     arg_inds_by_type[u2(type_t_id)] = arr
                 
                 # Make Cartesian Product of arg_inds
-                arg_inds = commute_sensitive_arg_ind_product(op, arg_inds_by_type)
-                # arg_inds = list(itertools.product(*[arg_inds_by_type[str(typ)] for typ in op.signature.args]))
+                arg_inds = commute_sensitive_arg_ind_product(func, arg_inds_by_type)
+                # arg_inds = list(itertools.product(*[arg_inds_by_type[str(typ)] for typ in func.signature.args]))
                 arg_inds = np.array(arg_inds,dtype=np.int64)
                     
 
-                depth_policy.append((op, arg_inds))
+                depth_policy.append((func, arg_inds))
 
             # Apply policy
             forward_chain_one(self, depth_policy, min_stop_depth)
@@ -810,8 +751,8 @@ def join_records_of_type(self, depth, typ):
     return impl
 
 
-def join_records(self, depth, ops):
-    typs = set([op.return_type for op in ops])
+def join_records(self, depth, funcs):
+    typs = set([func.return_type for func in funcs])
     for typ in typs:
         val_to_depth = join_records_of_type(self, depth, typ)
 
@@ -820,46 +761,46 @@ def join_records(self, depth, ops):
 # : Forward Chaining
 
 def forward_chain_one(self, depth_policy=None, min_stop_depth=-1):
-    '''Applies 'ops' on all current inferred values'''
+    '''Applies 'funcs' on all current inferred values'''
     nxt_depth = self.curr_infer_depth+1
-    if(depth_policy is None): depth_policy = self.ops
+    if(depth_policy is None): depth_policy = self.func
 
-    ops = []
-    for op in depth_policy:
+    funcs = []
+    for func in depth_policy:
 
         # If policy provides arg_inds then apply each set 
         #  of arg_inds one at a time.
-        if(isinstance(op, tuple)):
-            op, arg_inds = op
+        if(isinstance(func, tuple)):
+            func, arg_inds = func
             for inds in arg_inds:
-                sig = op.signature
-                # v = call_op_for_inds(self, op, sig.return_type, sig.args, self.curr_infer_depth, inds)
+                sig = func.signature
+                # v = call_op_for_inds(self, func, sig.return_type, sig.args, self.curr_infer_depth, inds)
                 # print(v)
-                rec = apply_one(op, self, sig.return_type, sig.args,
+                rec = apply_one(func, self, sig.return_type, sig.args,
                     inds, self.curr_infer_depth, min_stop_depth)
 
                 # Insert records
                 if(rec is not None):
-                    insert_record(self, rec, op.return_t_id, nxt_depth)
+                    insert_record(self, rec, func.return_t_id, nxt_depth)
 
         # If no arg_inds are provided then apply all permutations 
-        #  of arguments to the op.
-        elif(op.n_args > 0):
-            rec = apply_multi(op, self,
+        #  of arguments to the func.
+        elif(func.n_args > 0):
+            rec = apply_multi(func, self,
                 self.curr_infer_depth, min_stop_depth)
 
             # Insert records
             if(rec is not None):
-                insert_record(self, rec, op.return_t_id, nxt_depth)
+                insert_record(self, rec, func.return_t_id, nxt_depth)
         else:
             # Constant CREFunc case ignore at forward step
             continue
 
         
-        ops.append(op)
+        funcs.append(func)
 
 
-    join_records(self, nxt_depth, ops)
+    join_records(self, nxt_depth, funcs)
     self.curr_infer_depth = nxt_depth
 
 #---------------------------------
@@ -887,7 +828,7 @@ def arg_from_ind(planner, ind, typ, depth):
     return impl
 
 @generated_jit(cache=True, nopython=True)
-def call_op_for_inds(planner, op, return_type, arg_types, depth, inds):
+def call_op_for_inds(planner, func, return_type, arg_types, depth, inds):
     return_type = return_type.instance_type
     arg_types = tuple([a.instance_type for a in arg_types])
     
@@ -897,7 +838,7 @@ def call_op_for_inds(planner, op, return_type, arg_types, depth, inds):
     type_names = tuple([str(x) for x in arg_types])
     # arg_types = types.TypeRef(Tuple(arg_types))
 
-    def impl(planner, op, return_type, arg_types, depth, inds):
+    def impl(planner, func, return_type, arg_types, depth, inds):
         arg_ptrs = np.empty(len(arg_types),dtype=np.int64)
         i = 0
         for lst_typ in literal_unroll(lst_types):
@@ -912,26 +853,26 @@ def call_op_for_inds(planner, op, return_type, arg_types, depth, inds):
         # if(status > 0):
 
 
-        # if(op.check_addr != -1 and op.check_addr != 0):
-        #     check = _func_from_address(check_type, op.check_addr)
+        # if(func.check_addr != -1 and func.check_addr != 0):
+        #     check = _func_from_address(check_type, func.check_addr)
         #     if(not check(*args)):
         #         return None
 
 
-        # call = _func_from_address(call_type, op.call_addr)
-        val = op(*args)
+        # call = _func_from_address(call_type, func.call_addr)
+        val = func(*args)
         return val
 
     return impl
 
 
 @generated_jit(cache=True, nopython=True)
-def apply_one(op, planner, return_type, arg_types, inds, curr_infer_depth, min_stop_depth):
+def apply_one(func, planner, return_type, arg_types, inds, curr_infer_depth, min_stop_depth):
     return_type = return_type.instance_type
     ret_d_typ = DictType(return_type,Tuple((i8,i8)))  
     ret_type_name = str(return_type)  
-    def impl(op, planner, return_type, arg_types, inds, curr_infer_depth, min_stop_depth):
-        v = call_op_for_inds(planner, op, return_type, arg_types, curr_infer_depth, inds)
+    def impl(func, planner, return_type, arg_types, inds, curr_infer_depth, min_stop_depth):
+        v = call_op_for_inds(planner, func, return_type, arg_types, curr_infer_depth, inds)
         if(v is None):
             return
 
@@ -939,8 +880,8 @@ def apply_one(op, planner, return_type, arg_types, inds, curr_infer_depth, min_s
         nxt_depth = curr_infer_depth+1
         stride[:, 0] = inds
         stride[:, 1] = inds+1
-        n_args = len(op.head_ranges)
-        rec = SC_Record(op, nxt_depth, n_args, stride)
+        n_args = len(func.head_ranges)
+        rec = SC_Record(func, nxt_depth, n_args, stride)
         data = rec.data
 
         val_map =  _dict_from_ptr(ret_d_typ,
@@ -980,7 +921,7 @@ def count_forward_inferences(self):
     for recs_at_depth in self.forward_records:
         for recs in recs_at_depth.values():
             for rec in recs:
-                if(rec.is_op):
+                if(rec.is_func):
                     n += np.prod(rec.stride[:,1] - rec.stride[:,0])
     return n
 
@@ -999,10 +940,10 @@ else:
 ''',prefix=ind)
 
 
-def gen_apply_multi_source(op, generic, ind='    '):
-    '''Generates source code for an apply_multi() implementation for a cre.Op'''
-    has_check = hasattr(op,'check')
-    sig = op.signature
+def gen_apply_multi_source(func, generic, ind='    '):
+    '''Generates source code for an apply_multi() implementation for a CREFunc'''
+    has_check = hasattr(func,'check')
+    sig = func.signature
     args = sig.args
     typs = {}
     for typ in sig.args:
@@ -1022,8 +963,8 @@ from cre.sc_planner import SC_Record
 ''' 
     if(not generic):
         imp_targets = ['call_heads'] + (['check'] if has_check else [])
-        src += f'''{gen_import_str(op.func_name,
-                     op.long_hash, imp_targets)}\n\n'''
+        src += f'''{gen_import_str(func.func_name,
+                     func.long_hash, imp_targets)}\n\n'''
 
     src += "".join([f'typ{i}'+", " for i in range(len(typs))]) + \
              f'= cloudpickle.loads({cloudpickle.dumps(tuple(typs.keys()))})\n'
@@ -1047,7 +988,7 @@ ret_d_typ = DictType(ret_typ,Tuple((i8,i8)))
 
 ENTRY_WIDTH = 4+N_ARGS
 @njit(cache=True)
-def apply_multi(op, planner, depth, min_stop_depth):
+def apply_multi(func, planner, depth, min_stop_depth):
 '''
 
     for tn, typ in enumerate(typs.keys()):
@@ -1062,9 +1003,9 @@ def apply_multi(op, planner, depth, min_stop_depth):
     src += indent(f'''
 nxt_depth = depth + 1
 stride = np.array([{stride_defaults}],dtype=np.int64)
-val_map =  _dict_from_ptr(ret_d_typ, planner.val_map_ptr_dict[u2({op.return_t_id!r})])
+val_map =  _dict_from_ptr(ret_d_typ, planner.val_map_ptr_dict[u2({func.return_t_id!r})])
 
-rec = SC_Record(op, nxt_depth, N_ARGS, stride)
+rec = SC_Record(func, nxt_depth, N_ARGS, stride)
 data = rec.data
 d_ptr = _get_array_raw_data_ptr(data)
 rec_ptr = cast(rec, i8)
@@ -1076,8 +1017,8 @@ val_map_defaults = (-1,0)
     for i, arg in enumerate(args):
         src += f'{c_ind}for i{i} in range(stride[{i}][0],stride[{i}][1]):\n'
         c_ind += ind
-        if(i in op.right_commutes):
-            ignore_conds = ' or '.join([f"i{i} > i{j}" for j in op.right_commutes[i]])
+        if(i in func.right_commutes):
+            ignore_conds = ' or '.join([f"i{i} > i{j}" for j in func.right_commutes[i]])
             src += f'{c_ind}if({ignore_conds}): continue\n'
         
 
@@ -1091,12 +1032,12 @@ val_map_defaults = (-1,0)
 
     if(generic):
         for i in a_cnt:
-            src += indent(f'set_base{it_inds[i]}(op,{i},a{i})\n',prefix=c_ind)
+            src += indent(f'set_base{it_inds[i]}(func,{i},a{i})\n',prefix=c_ind)
         src += indent(f'''
-status = cre_func_resolve_call_self(op)
+status = cre_func_resolve_call_self(func)
 if(status > CFSTATUS_TRUTHY):
     continue
-v = get_ret(op)\n''', prefix=c_ind)
+v = get_ret(func)\n''', prefix=c_ind)
     else:
         src += indent(f'v = call_heads({_as})\n',prefix=c_ind)
 
@@ -1142,35 +1083,35 @@ def _assert_prepared(self, typ, depth):
     return impl
     
 
-def apply_multi(op, planner, depth, min_stop_depth=-1):
-    '''Applies 'op' at 'depth' and returns the SC_Record'''
+def apply_multi(func, planner, depth, min_stop_depth=-1):
+    '''Applies 'func' at 'depth' and returns the SC_Record'''
 
-    # If it doesn't already exist generate and inject '_apply_multi' into 'op'
-    # print("apply_multi", type(op))
-    if(not hasattr(op,'_apply_multi')):
+    # If it doesn't already exist generate and inject '_apply_multi' into 'func'
+    # print("apply_multi", type(func))
+    if(not hasattr(func,'_apply_multi')):
         # Run a generic implementation if we cannot safely inline call_heads
         #  i.e. if can raise an error,  is composed, or otherwise untyped
-        generic = (not getattr(op._type,'no_raise',False) or op.long_hash is None or 
-                   op.is_composed or op.func_name == "GenericCREFunc")
+        generic = (not getattr(func._type,'no_raise',False) or func.long_hash is None or 
+                   func.is_composed or func.func_name == "GenericCREFunc")
 
         if(generic):
-            hash_code = unique_hash_v([op.return_type, op.arg_types])
+            hash_code = unique_hash_v([func.return_type, func.arg_types])
         else:
-            hash_code = unique_hash_v([op.long_hash])
+            hash_code = unique_hash_v([func.long_hash])
         # print(get_cache_path('apply_multi',hash_code))
         if(not source_in_cache('apply_multi',hash_code)):
-            src = gen_apply_multi_source(op, generic)
+            src = gen_apply_multi_source(func, generic)
             source_to_cache('apply_multi',hash_code,src)
         l = import_from_cached('apply_multi',hash_code,['apply_multi'])
-        setattr(op,'_apply_multi', l['apply_multi'])
+        setattr(func,'_apply_multi', l['apply_multi'])
         # print("<<<", type(am))
 
-    typ = op.return_type
+    typ = func.return_type
     # typ_name = str(typ)
     _assert_prepared(planner, typ, depth)
 
-    am = getattr(op,'_apply_multi')
-    return am(op,planner,depth,min_stop_depth)
+    am = getattr(func,'_apply_multi')
+    return am(func,planner,depth,min_stop_depth)
 
 #------------------------------------------------------------------
 # : Retracing + Explanation Tree Construction 
@@ -1179,11 +1120,11 @@ def apply_multi(op, planner, depth, min_stop_depth=-1):
 # : Explanation Tree Entry
 
 ExplanationTreeEntry_field_dict = {
-    # Whether the entry is non-terminal and represents the application of a cre.Op. 
-    "is_op" : u1,
+    # Whether the entry is non-terminal and represents the application of a CREFunc. 
+    "is_func" : u1,
 
-    # If non-terminal the cre.Op applied
-    "op" : CREFuncType,
+    # If non-terminal the CREFunc applied
+    "func" : CREFuncType,
 
     # If terminal the cre.Var instance
     "var" : VarType,
@@ -1196,19 +1137,19 @@ ExplanationTreeEntry, ExplanationTreeEntryType = \
     define_structref("ExplanationTreeEntry", ExplanationTreeEntry_fields, define_constructor=False)
 
 @generated_jit(cache=True, nopython=True)
-def expl_tree_entry_ctor(op_or_var, child_arg_ptrs=None):
-    if(isinstance(op_or_var, CREFuncTypeClass)):
-        def impl(op_or_var, child_arg_ptrs):
+def expl_tree_entry_ctor(func_or_var, child_arg_ptrs=None):
+    if(isinstance(func_or_var, CREFuncTypeClass)):
+        def impl(func_or_var, child_arg_ptrs):
             st = new(ExplanationTreeEntryType)
-            st.is_op = True
-            st.op = op_or_var
+            st.is_func = True
+            st.func = func_or_var
             st.child_arg_ptrs = child_arg_ptrs
             return st
-    elif(isinstance(op_or_var, VarTypeClass)):
-        def impl(op_or_var, child_arg_ptrs=None):
+    elif(isinstance(func_or_var, VarTypeClass)):
+        def impl(func_or_var, child_arg_ptrs=None):
             st = new(ExplanationTreeEntryType)
-            st.is_op = False
-            st.var = cast(op_or_var, VarType) 
+            st.is_func = False
+            st.var = cast(func_or_var, VarType) 
             return st
     return impl
 
@@ -1291,7 +1232,7 @@ def extract_rec_entry(d_ptr):
     ptrs = _arr_from_data_ptr(d_ptr, (2,),dtype=np.int64)
     rec_ptr, next_entry_ptr = ptrs[0], ptrs[1]
     if(rec_ptr == 0):
-        raise ValueError("Null Record Pointer. Check that op or conversion didn't silently fail.")
+        raise ValueError("Null Record Pointer. Check that func or conversion didn't silently fail.")
     # print("R", rec_ptr, next_entry_ptr)
     # print(rec_ptr, next_entry_ptr)
     # if(next_entry_ptr <= 4): raise ValueError()
@@ -1326,12 +1267,12 @@ def _fill_arg_inds_from_rec_entries(re_ptr, new_arg_inds, expl_tree, retrace_dep
             re_ptr = re_next_re_ptr
             continue
         # print(re_rec.depth, retrace_depth)
-        if(re_rec.is_op):
-            op = re_rec.op 
-            # print(op, re_ptr, re_next_re_ptr, re_args)
+        if(re_rec.is_func):
+            func = re_rec.func 
+            # print(func, re_ptr, re_next_re_ptr, re_args)
             child_arg_ptrs = List.empty_list(ptr_t, len(re_args))#np.empty(len(re_args), dtype=np.int64)
-            for i, (hr, arg_ind) in enumerate(zip(op.head_ranges, re_args)):
-                arg_t_id = u2(op.head_infos[hr.start].base_t_id)
+            for i, (hr, arg_ind) in enumerate(zip(func.head_ranges, re_args)):
+                arg_t_id = u2(func.head_infos[hr.start].base_t_id)
                 #Make sure a set of indicies has been instantied for 'arg_t_id'
                 if(u2(arg_t_id) not in new_arg_inds):
                     new_arg_inds[u2(arg_t_id)] = Dict.empty(i8,ExplanationTreeType)
@@ -1344,7 +1285,7 @@ def _fill_arg_inds_from_rec_entries(re_ptr, new_arg_inds, expl_tree, retrace_dep
                 child_arg_ptrs.append(_ptr_from_struct_incref(uai[arg_ind]))
 
             # Throw new tree entry instance into the children of 'expl_tree'
-            entry = expl_tree_entry_ctor(op, child_arg_ptrs)
+            entry = expl_tree_entry_ctor(func, child_arg_ptrs)
             expl_tree.entries.append(entry)
             # re = next_rec_entry(re)  
             # re_ptr = re_next_re_ptr
@@ -1543,8 +1484,8 @@ def build_explanation_tree(planner, g_typ, goal):
 #     return len(tree_entry.child_arg_ptrs)
 
 # @njit(u1(ExplanationTreeEntryType),cache=True)
-# def expl_tree_entry_is_op(tree_entry):
-#     return tree_entry.is_op
+# def expl_tree_entry_is_func(tree_entry):
+#     return tree_entry.is_func
 
 # @njit(CREFuncType(ExplanationTreeEntryType),cache=True)
 # def expl_tree_entry_get_op(tree_entry):
@@ -1605,16 +1546,16 @@ def build_explanation_tree(planner, g_typ, goal):
 #     def __call__(self):
 #         return gen_op_comps_from_expl_tree(self.child_tree)
         
-# # from cre.op import OpComp
+# # from CREFunc import OpComp
 # def gen_op_comps_from_expl_tree(tree):
 #     '''A generator of OpComps from an ExplanationTree'''
 #     for i in range(expl_tree_num_entries(tree)):
 #         tree_entry = expl_tree_ith_entry(tree, i)
         
-#         if(expl_tree_entry_is_op(tree_entry)):
+#         if(expl_tree_entry_is_func(tree_entry)):
 #             func = expl_tree_entry_get_op(tree_entry)
 #             # print(op)
-#             # op = op.recover_singleton_inst()
+#             # op = func.recover_singleton_inst()
 #             # print(op)
 #             child_generators = []
 #             for j in range(expl_tree_entry_num_args(tree_entry)):
@@ -1720,8 +1661,8 @@ def expl_tree_iter_next(t_iter):
         # ------
         #  : Depth first traversal 
 
-        # Op Case
-        if(entry.is_op):
+        # Func Case
+        if(entry.is_func):
 
             if(keep_incrementing):
                 # Don't use cached func until hits an unchanged iter
@@ -1729,13 +1670,13 @@ def expl_tree_iter_next(t_iter):
 
             # If no more incrementation use the cached func if not NULL
             if(not keep_incrementing and cast(t_iter.cached_func,i8) != 0):
-                # print(f"Skip ({t_iter.entry_ind}/{t_iter.n_entries})", entry.op.name_data.name)
+                # print(f"Skip ({t_iter.entry_ind}/{t_iter.n_entries})", entry.func.name_data.name)
                 f_obj = cast(t_iter.cached_func, CREObjType)
                 t_iter, i, args = stack.pop(-1)
                 args.append(f_obj)
             else:
                 if(i < len(entry.child_arg_ptrs)):
-                    # print(f"Iter ({t_iter.entry_ind}/{t_iter.n_entries})", f"i:{i}/{len(entry.child_arg_ptrs)}", entry.op)
+                    # print(f"Iter ({t_iter.entry_ind}/{t_iter.n_entries})", f"i:{i}/{len(entry.child_arg_ptrs)}", entry.func)
 
                     # Push this frame to stack
                     stack.append((t_iter, i+1, args))
@@ -1753,13 +1694,13 @@ def expl_tree_iter_next(t_iter):
                     args = List.empty_list(CREObjType)
                     i = 0
                 else:
-                    # print(f"Term ({t_iter.entry_ind}/{t_iter.n_entries})", entry.op)
+                    # print(f"Term ({t_iter.entry_ind}/{t_iter.n_entries})", entry.func)
                     # ------
                     #  : Reached the last entry in breadth 
                     #     i.e. all args have been resolved so need to pop back w/ CREFunc
 
                     # Make the cre_func from the collected args
-                    cf = cre_func_deep_copy_generic(entry.op)
+                    cf = cre_func_deep_copy_generic(entry.func)
                     for j, arg in enumerate(args):
                         t_id, _, _ = decode_idrec(arg.idrec)
                         if(t_id == T_ID_VAR):
@@ -1767,7 +1708,7 @@ def expl_tree_iter_next(t_iter):
                             set_var_arg(cf, j, cast(arg, VarType))
                         else:
                             # print(f"  {j}:", cast(arg, CREFuncType))
-                            set_op_arg(cf, j, cast(arg, CREFuncType))
+                            set_func_arg(cf, j, cast(arg, CREFuncType))
                     reinitialize(cf)
 
                     # if(t_iter.reparam_func_addr != 0):
@@ -1839,65 +1780,33 @@ class ExplanationTreeIter():
         return self
 
     def __next__(self):
-        var, op = expl_tree_iter_next(self.iter)
-        if(op is None):
+        var, func = expl_tree_iter_next(self.iter)
+        if(func is None):
             if(var is not None):
                 # If iteration returns a Var then convert it to
                 #  an Identity CREFunc so that it is callable
-                op = Identity(var)
+                func = Identity(var)
             else:
                 raise StopIteration()
 
         # Get the match values from their associated base var ptrs
         vals = []
-        for base_ptr, arg_t_id in zip(op.base_var_ptrs, op.base_t_ids):
+        for base_ptr, arg_t_id in zip(func.base_var_ptrs, func.base_t_ids):
             val = get_read_inv_val_map_impl(arg_t_id)(self.expl_tree, base_ptr)
             vals.append(val)
 
-        op = self.reparam_func_ep(op)
+        func = self.reparam_func_ep(func)
 
-        return op, vals
-
-
-# def expl_tree_inter_next_func_comp(t_iter):
-#     stack = List()
-
-#     # while(t_iter.entry_ind < len(t_iter.tree.entries)):
-#     while(len(stack) > 0):
-#         if(t_iter.entry_ind >= len(t_iter.tree.entries)):
-#             t_iter = stack.pop(-1)
-
-#         tree = t_iter.tree
-
-#         if(tree.is_op):
-#             for j, arg_ind in tree.arg_inds:
-#                 if()
-#             if(tree.arg_inds )
-#             for child_iter in t_iter.child_iters:
-
-#             stack.append()
-#         else:
-#             args.append()
-
-#         else:
-#             entry = t_iter.tree.entries[t_iter.entry_ind]
-#             t_iter.arg_ind += 1
-#             if(t_iter.arg_ind > len(entry.child_arg_ptrs)):
-#                 t_iter.arg_ind = 0
-#                 t_iter.entry_ind += 1
-#             else:
-#                 arg =
+        return func, vals
 
 
+#-----------------------------
+# : Explanation Tree Esimate Length and Sample 
 
-
-
-
-
-
-
-
-
+# TODO
+# @njit(cache=True)
+# def expl_tree_estimate_length(expl_tree):
+#     pass
 
 
 
@@ -1923,7 +1832,7 @@ Need to try to cast on declare, or try casting all reasonable
     types on forward chain. The latter case would have some elegance
     but would be less performant. Frankly it may be necessary. 
 
--Casting could overloaded and built into the ops themselves either:
+-Casting could overloaded and built into the funcs themselves either:
     -Explicitly with more than one signature, or a valid arg casting dict
 
 THINGS:
@@ -1934,25 +1843,6 @@ THINGS:
 
 '''
 
-###
-
-###TODO TODO
-'''
-[x] Recover values from Vars
-[x] Decalaration
-[ ] Auto declaration:
-   -How should that work?
-   -Probably should just hook up to wm
-   -Have flag on attribute that is like: "visible" 
-
-[x]. Commuting: steal from numbert 
-4. Mute Exception: steal from numbert 
-
-5. Rename:
--mem -> WM 
--fact_type -> base_type
-
-'''
 
 
 ##THINKING 
@@ -2087,17 +1977,17 @@ Notes on incrementally updating the planner:
 '''
 So we need a standard way of writing things into the starting buffer 
 of the planner it seems like having a bunch of Var instances be 
-essentially the ops for those depth 0 values. This way we already have
+essentially the funcs for those depth 0 values. This way we already have
 a standard way of encoding deref instructions.
-So then we need some kind of flag on the recEntry like is_op
+So then we need some kind of flag on the recEntry like is_func
 it seems like this warrants a new structref TreeEntry to replace 
 the tuple that is there now. We probably should not recycle the Record 
 instance because it has a ref to 'data' which is big should get able to 
 be freed even if the Explanation tree sticks around for a long time.
 
 So we have TreeEntry:
--is_op : u1
--op : CREFuncType
+-is_func : u1
+-func : CREFuncType
 -var : VarType
 
 '''

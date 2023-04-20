@@ -19,6 +19,7 @@ import numba.typed.typedlist as tl_mod
 import numba.typed.typeddict as td_mod
 import cloudpickle
 import warnings
+import threading
 #Monkey Patch Numba so that the builtin functions for List() and Dict() cache between runs 
 def monkey_patch_caching(mod,exclude=[]):
     for name, val in mod.__dict__.items():
@@ -101,10 +102,11 @@ def standardize_type(typ, context, name='', attr=''):
 # -----------------------------------------------------------------------
 # : Type Registry (part of disk cache)
 
+registry_lock = threading.Lock()
+
 # The fact registry is used to give a unique 't_id' number to each type definition
 #  in CRE it is just a text file with <t_id> <Type Name> <Hash Code> on each line
 #  This is necessary so that, for instance, custom Fact types can 
-
 def load_type_registry():
     type_registry, type_registry_map = [], {}
     i = 0
@@ -137,7 +139,6 @@ def add_type_pickle(typ, t_id):
         can be be called with typ=None, in which case a call to this should follow.
         This pattern allows a type to have access to its t_id before it is defined.
     '''
-
     pickle_dir = get_cache_path("type_pickles",suffix='')
     os.makedirs(pickle_dir, exist_ok=True)
     with open(os.path.join(pickle_dir,f'{t_id}.pkl'), 'wb') as f:
@@ -146,14 +147,14 @@ def add_type_pickle(typ, t_id):
 def add_to_type_registry(name, hash_code, typ=None):
     ''' Adds a type name and hash to the type registry and returns a new t_id.
         If the 'typ' object is given then the type is also pickled and placed in the cache.'''
-
     tup = (name,hash_code)
     if(tup not in TYPE_REGISTRY_MAP):
-        count = len(TYPE_REGISTRY)
+        with registry_lock:
+            count = len(TYPE_REGISTRY)
+            TYPE_REGISTRY.append(tup)
+        TYPE_REGISTRY_MAP[tup] = count
         with open(get_cache_path("type_registry",suffix=''),'a') as f:
             f.write(f"{count} {name} {hash_code}\n")
-        TYPE_REGISTRY.append(tup)
-        TYPE_REGISTRY_MAP[tup] = count
         if(typ is not None): add_type_pickle(typ, count)
     return count
 
@@ -172,20 +173,22 @@ def t_id_from_type_name(name, hash_code):
 
 
 DEFAULT_REGISTERED_TYPES = {
-                            'undefined': types.undefined,
-                            'bool' : types.bool_,
-                            'int' : i8,
-                            'float' : f8,
-                            'str' : unicode_type,
-                            'CREObj' : types.undefined,
-                            'Fact' : types.undefined,
-                            'TupleFact' : types.undefined,
-                            'Var': types.undefined,
-                            'Op' : types.undefined,
-                            'Literal' : types.undefined,
-                            'Conditions' : types.undefined,
-                            'Rule' : types.undefined
-                            }
+    'undefined': types.undefined,
+    'bool' : types.bool_,
+    'int' : i8,
+    'float' : f8,
+    'str' : unicode_type,
+
+    # These types filled w/ add_to_type_registry() in source files.
+    'CREObj' : types.undefined,
+    'Fact' : types.undefined,
+    'TupleFact' : types.undefined,
+    'Var': types.undefined,
+    'CREFunc' : types.undefined,
+    'Literal' : types.undefined,
+    'Conditions' : types.undefined,
+    'Rule' : types.undefined
+}
 
 if(not os.path.exists(get_cache_path("type_registry",suffix=''))):
     for name in DEFAULT_REGISTERED_TYPES:
@@ -210,7 +213,7 @@ T_ID_CRE_OBJ = DEFAULT_TYPE_T_IDS['CREObj']
 T_ID_FACT = DEFAULT_TYPE_T_IDS['Fact']
 T_ID_TUPLE_FACT = DEFAULT_TYPE_T_IDS['TupleFact']
 T_ID_VAR = DEFAULT_TYPE_T_IDS['Var']
-T_ID_OP = DEFAULT_TYPE_T_IDS['Op']
+T_ID_FUNC = DEFAULT_TYPE_T_IDS['CREFunc']
 T_ID_LITERAL = DEFAULT_TYPE_T_IDS['Literal']
 T_ID_CONDITIONS = DEFAULT_TYPE_T_IDS['Conditions']
 T_ID_RULE = DEFAULT_TYPE_T_IDS['Rule']
@@ -220,7 +223,6 @@ SHORT_NAMES = {
     types.undefined : "undf",
     types.bool_ : "bool",
     i8 : "i8",
-
     f8 : "f8",
     unicode_type : "str",
 }

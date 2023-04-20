@@ -1,7 +1,7 @@
 from numba import generated_jit, njit, i8, f8
 from numba.types import unicode_type, FunctionType
 from numba.core.errors import NumbaError, NumbaPerformanceWarning
-from cre.func import CREFunc, set_op_arg, set_var_arg, reinitialize, CREFuncTypeClass, cre_func_copy
+from cre.func import CREFunc, set_func_arg, set_var_arg, reinitialize, CREFuncTypeClass, cre_func_copy
 from cre.obj import _get_chr_mbrs_infos_from_attrs, _iter_mbr_infos
 from cre.fact import define_fact
 from cre.var import Var
@@ -83,6 +83,7 @@ def test_string():
             init_bytes = used_bytes()
         else:
             assert used_bytes() == init_bytes
+
 
 
 def test_obj():
@@ -183,8 +184,8 @@ def compose_hardcoded(f, g):
     reinitialize(g1)
     set_var_arg(g2, 0, Var(f8,"y"))
     reinitialize(g2)
-    set_op_arg(_f, 0, g1)
-    set_op_arg(_f, 1, g2)
+    set_func_arg(_f, 0, g1)
+    set_func_arg(_f, 1, g2)
     reinitialize(_f)
     return _cast_structref(new_f_type, _f)
 
@@ -546,7 +547,24 @@ def test_bad_compose():
         q("A","B")
 
         
+def test_minimal_str():
+    from cre.default_funcs import CastFloat, CastStr
+    with cre_context("test_minimal_str"):
+        BOOP = define_fact("BOOP", 
+            {"id": unicode_type, "val" : f8}
+        )
 
+        a,b = Var(BOOP,"a"), Var(BOOP,"b")
+
+        c = CastStr(CastFloat(a.id) + (b.val))
+
+        assert str(c) == "str(float(a.id) + b.val)"
+        assert c.minimal_str(ignore_funcs=[CastFloat, CastStr]) == "a + b"
+
+        c = CastStr(CastFloat(a.id) + (b.val) + 100)        
+
+        assert str(c) == "str((float(a.id) + b.val) + 100)"
+        assert c.minimal_str(ignore_funcs=[CastFloat, CastStr]) == "(a + b) + 100"
 
 
 # ---------------------------------------------------
@@ -679,7 +697,8 @@ if __name__ == "__main__":
     # test_op_arith_overloads()
     # test_ptr_ops()
     # test_constant()
-    test_bad_compose()
+    # test_bad_compose()
+    test_minimal_str()
 
     sys.exit()
     # @njit(f8(f8,f8),cache=True)

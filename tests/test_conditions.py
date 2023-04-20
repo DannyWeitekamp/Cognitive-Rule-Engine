@@ -515,6 +515,20 @@ def test_anti_unify():
     c12, score = c1.antiunify(c2, return_score=True, fix_same_alias=True) #conds_antiunify(c1,c2)
     assert str(c12) == str(c12_ref)
     assert score == 1./5.
+
+    # TODO: Edge cases, unconditioned variables / variables with no supporting literals
+    c1 = x & y & z
+    c2 = X & Y & Z
+    c12_ref = x & y & z
+    c12, score = c1.antiunify(c2, return_score=True, fix_same_alias=True) #conds_antiunify(c1,c2)
+    print("A", c12_ref)
+    print("B", c12)
+    print(score)
+    # assert str(c12) == str(c12_ref)
+    # assert score == 1.
+
+
+
     
 
 if(__name__ == "__main__"):
@@ -522,9 +536,9 @@ if(__name__ == "__main__"):
     from cre.func import cre_func_unique_string
     x, y, z = Var(f8,'x'), Var(f8,'y'), Var(f8,'z')
 
-    print(cre_func_unique_string((x + z) + (y + z)))
-    print(cre_func_unique_string((x + z) + (y + 1)))
-    print(cre_func_unique_string((x + 1) + (y + z)))
+    # print(cre_func_unique_string((x + z) + (y + z)))
+    # print(cre_func_unique_string((x + z) + (y + 1)))
+    # print(cre_func_unique_string((x + 1) + (y + z)))
     # test_var()
     test_anti_unify()
     # test_unconditioned()

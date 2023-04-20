@@ -5,7 +5,7 @@ from numba.typed import List
 from numba.types import ListType, unicode_type
 from cre.obj import CREObjType, cre_obj_get_item, cre_obj_get_member_t_ids
 from cre.fact import define_fact
-from cre.core import short_name, T_ID_TUPLE_FACT, T_ID_OP, T_ID_VAR
+from cre.core import short_name, T_ID_TUPLE_FACT, T_ID_FUNC, T_ID_VAR
 from cre.context import cre_context
 from cre.utils import cast, decode_idrec
 from cre.var import get_deref_attrs_str, VarType
@@ -81,7 +81,7 @@ def gval_str(gval):
         # print("head.idrec", head_t_id,x0,x1,T_ID_TUPLE_FACT)
         if(head_t_id == T_ID_TUPLE_FACT):
             t_ids = cre_obj_get_member_t_ids(head)
-            if(t_ids[0] == T_ID_OP and np.all(t_ids[:1]==T_ID_VAR)):
+            if(t_ids[0] == T_ID_FUNC and np.all(t_ids[:1]==T_ID_VAR)):
                 op = cre_obj_get_item(head, CREFuncType, 0)
                 v_strs = List.empty_list(unicode_type)
                 for i in range(1,head.num_chr_mbrs):

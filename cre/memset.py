@@ -95,6 +95,10 @@ class MemSet(structref.StructRefProxy):
         self.indexers = {}
         return self
 
+    # def __init__(self, context=None, auto_clear_refs=False):
+
+
+
     @property
     def context(self):
         if(not hasattr(self,'_context')):
@@ -174,14 +178,22 @@ class MemSet(structref.StructRefProxy):
         # with PrintElapse("__REPR__"):
         return self._repr_helper(repr,**kwargs)
 
-    def copy(self):
-        return memset_copy(self)
-
     def __copy__(self):
-        return memset_copy(self)
+        cpy = memset_copy(self)
+        cpy._context = self._context
+        cpy.indexers = {}
+        return cpy
+
+    copy = __copy__
 
     def clear_refs(self):
         memset_clear_refs(self)
+
+    # def __hash__(self):
+    #     hash_bytes = memset_long_hash(self)
+
+    def long_hash(self, nchars=30):
+        return memset_long_hash_str(self, nchars)
     
 
     def __del__(self):        
@@ -953,6 +965,7 @@ from cre.fact_intrinsics import fact_lower_getattr
 @njit(cache=True)
 def indexer_update_declare(self, change_event, fact): 
     val = fact_lower_getattr(fact, self.attr)
+
     if(val not in self.mapping):
         self.mapping[val] = (new_vector(1), new_vector(1))
     idrec_vec, hole_vec = self.mapping[val]
@@ -1042,6 +1055,79 @@ def memset_copy(self):
     
     return new
 
+
+from cre.hashing import accum_item_hash
+from numba.cpython.hashing import _Py_hash_t, _PyHASH_XXPRIME_5
+from numba import u8
+from cre.type_conv import byte_string_to_base64
+
+@njit(cache=True, locals={"i": u8, "c": u8, "nc": u8, "mx": u8,"rest": u8})
+def memset_long_hash_bytes(ms, byte_width=24):
+    facts = get_facts(ms, None)
+    fact_hashes = np.empty(len(facts), dtype=np.uint64)
+    for i, fact in enumerate(facts):
+        fact_hashes[i] = hash(fact)
+
+    hash_bytes = np.empty(byte_width, dtype=np.uint8)
+    buffer0 = np.empty(1, dtype=np.uint64)
+    buffer = np.empty(8, dtype=np.uint8)
+    
+
+    # Fill hash_bytes with starting stuff 
+    acc = accum_item_hash(u8(_PyHASH_XXPRIME_5), len(facts))
+    for c in range(0,byte_width,8):
+        
+        buffer0[0] = u8(accum_item_hash(acc, c))
+        # print(c,c+8, buffer0, buffer0.view(np.uint8))
+        mx = min(byte_width, c+8)
+        hash_bytes[c:mx] = buffer0.view(np.uint8)[:mx-c]
+
+    # print("BEF")
+    # print(hash_bytes)
+
+    inds = np.argsort(fact_hashes)
+
+    c = 0
+    for i in inds:
+        fact = facts[i]
+        fact_hash = hash(fact)
+
+        nc = c+8
+        mx = min(len(hash_bytes), nc)
+        rest = nc-mx
+        l = 8-rest
+
+        # print("A")
+        # lower bit
+        buffer[:l] = hash_bytes[c:mx]
+        # print("b")
+        # upper bit that might have been cut off
+        if(rest):
+            buffer[l:8] = hash_bytes[:rest]
+
+        # print("c")
+        acc = buffer.view(np.uint64)[0]
+        acc = accum_item_hash(acc, fact_hash)
+        # print("C", acc)
+        buffer0[:] = acc
+        buffer = buffer0.view(np.uint8)
+        # print("C", acc)
+        hash_bytes[c:mx] = buffer[:l]
+
+        if(rest):
+            hash_bytes[:rest] = buffer[l:8]
+        
+        c = (c +8) % byte_width
+    return hash_bytes
+
+@njit(cache=True)
+def memset_long_hash_str(ms, n_char=30):
+    byte_width = u8(np.ceil((n_char * 6) / 8.0))
+
+    hash_bytes = memset_long_hash_bytes(ms, byte_width)
+    s = byte_string_to_base64(hash_bytes, n_char)
+
+    return s
 
 
 

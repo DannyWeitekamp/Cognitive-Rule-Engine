@@ -9,16 +9,16 @@ from cre.obj import CREObjTypeClass, CREObjType, member_info_type, _iter_mbr_inf
 from numba.core.datamodel import default_manager, models
 from numba.experimental.structref import define_attributes, StructRefProxy, new, define_boxing
 import operator
-from cre.core import T_ID_CONDITIONS, T_ID_LITERAL, T_ID_OP, T_ID_FACT, T_ID_VAR, T_ID_UNDEFINED, T_ID_BOOL, T_ID_INT, T_ID_FLOAT, T_ID_STR, T_ID_TUPLE_FACT
+from cre.core import T_ID_CONDITIONS, T_ID_LITERAL, T_ID_FUNC, T_ID_FACT, T_ID_VAR, T_ID_UNDEFINED, T_ID_BOOL, T_ID_INT, T_ID_FLOAT, T_ID_STR, T_ID_TUPLE_FACT
 # from cre.primitive import BooleanPrimitiveType, IntegerPrimitiveType, FloatPrimitiveType, StringPrimitiveType
 from cre.tuple_fact import TupleFact
 from cre.var import VarType
 # from cre.op import GenericOpType
-from cre.func import CREFuncType, ARGINFO_VAR, ARGINFO_OP, ARGINFO_CONST
+from cre.func import CREFuncType, ARGINFO_VAR, ARGINFO_FUNC, ARGINFO_CONST
 from cre.fact import BaseFact
 from cre.conditions import LiteralType, ConditionsType
 from numba.cpython.hashing import _Py_hash_t, _Py_uhash_t, _PyHASH_XXROTATE, _PyHASH_XXPRIME_1, _PyHASH_XXPRIME_2, _PyHASH_XXPRIME_5, process_return
-from cre.hashing import accum_item_hash
+from cre.hashing import accum_item_hash, unicode_hash_noseed
 
 
 
@@ -65,7 +65,7 @@ def var_eq(a, b):
 @njit(boolean(CREObjType, CREObjType),cache=True)
 def cre_func_eq(a, b):
     t_id_b,_, _ = decode_idrec(b.idrec)
-    if(t_id_b != T_ID_OP): return False
+    if(t_id_b != T_ID_FUNC): return False
 
     oa = cast(a, CREFuncType)
     ob = cast(b, CREFuncType)
@@ -94,7 +94,7 @@ def cre_func_eq(a, b):
                 is_eq = eq_from_t_id_ptr(inf_a.t_id, 
                     inf_a.ptr, inf_b.ptr)
                 if(not is_eq): return False
-            elif(inf_a.type == ARGINFO_OP):
+            elif(inf_a.type == ARGINFO_FUNC):
                 _oa = cast(inf_a.ptr, CREFuncType)
                 _ob = cast(inf_b.ptr, CREFuncType)
                 stack.append((_oa,_ob))
@@ -215,7 +215,7 @@ def tuple_fact_eq(a, b):
                 mbr_b = cast(_load_ptr(i8,data_ptr_b), CREObjType)
                 if(t_id_a==T_ID_VAR):
                     if(not var_eq(mbr_a,mbr_b)): return False
-                elif(t_id_a==T_ID_OP):
+                elif(t_id_a==T_ID_FUNC):
                     if(not cre_func_eq(mbr_a,mbr_b)): return False
                 elif(t_id_a==T_ID_LITERAL):
                     if(not literal_eq(mbr_a,mbr_b)): return False
@@ -247,7 +247,7 @@ def _cre_obj_eq(a,b):
                 return tuple_fact_eq(a,b)
             elif(t_id==T_ID_VAR):
                 return var_eq(a,b)
-            elif(t_id==T_ID_OP):
+            elif(t_id==T_ID_FUNC):
                 return cre_func_eq(a,b)
             elif(t_id==T_ID_LITERAL):
                 return literal_eq(a,b)
@@ -277,7 +277,7 @@ def hash_from_t_id_ptr(t_id, data_ptr):
     elif(t_id == T_ID_FLOAT):
         return hash(_load_ptr(f8, data_ptr))
     elif(t_id == T_ID_STR):
-        return hash(_load_ptr(unicode_type, data_ptr))
+        return unicode_hash_noseed(_load_ptr(unicode_type, data_ptr))
     return u8(-1)
 
 
@@ -332,7 +332,7 @@ def cre_func_hash(x):
                 elif(inf.type == ARGINFO_CONST):
                     const_hash = hash_from_t_id_ptr(inf.t_id, inf.ptr)
                     acc = accum_item_hash(acc, const_hash) 
-                elif(inf.type == ARGINFO_OP):
+                elif(inf.type == ARGINFO_FUNC):
                     _ox = cast(inf.ptr, CREFuncType)
                     stack.append(_ox)
         x.hash_val = acc
@@ -380,11 +380,13 @@ def fact_hash(x):
                 raise Exception()
                 # acc = accum_item_hash(acc, tuple_fact_hash(x))
             elif(t_id == T_ID_FACT):
+                pass
                 # hash on the pointer 
-                ptr = _load_ptr(i8, data_ptr)
-                acc = accum_item_hash(acc, _PyHASH_XXPRIME_5 if(ptr == 0) else ptr)
+                # ptr = _load_ptr(i8, data_ptr)
+                # acc = accum_item_hash(acc, _PyHASH_XXPRIME_5 if(ptr == 0) else ptr)
             else:
                 # hash primitives
+                # print("Prim", hash_from_t_id_ptr(t_id, data_ptr))
                 acc = accum_item_hash(acc, hash_from_t_id_ptr(t_id, data_ptr))
 
         acc = accum_item_hash(acc,tl)
@@ -432,7 +434,7 @@ def tuple_fact_hash(x):
                     if(t_id==T_ID_VAR):
                         # print("----- VAR -----")
                         mbr_hash = var_hash(mbr)
-                    elif(t_id==T_ID_OP):
+                    elif(t_id==T_ID_FUNC):
                         # print("----- OP -----")
                         mbr_hash = cre_func_hash(mbr)
                     elif(t_id==T_ID_LITERAL):
@@ -481,7 +483,7 @@ def _cre_obj_hash(x):
                 return tuple_fact_hash(x) 
             elif(t_id==T_ID_VAR):
                 return var_hash(x) 
-            elif(t_id==T_ID_OP):
+            elif(t_id==T_ID_FUNC):
                 return cre_func_hash(x) 
             elif(t_id==T_ID_LITERAL):
                 return literal_hash(x)

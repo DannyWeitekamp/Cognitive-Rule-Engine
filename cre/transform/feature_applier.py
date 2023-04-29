@@ -124,7 +124,7 @@ class FeatureApplier(structref.StructRefProxy):
 
     def add_op(self,op):
         context = cre_context()
-        print("add op:", op, type(op))
+        # print("add op:", op, type(op))
         self.ops.append(op)
         gval_t_ids = np.array([context.get_t_id(_type=get_gval_type(x)) for x in op.signature.args],dtype=np.uint16)
         add_op(self, op, gval_t_ids)
@@ -347,7 +347,7 @@ def update_op(self, return_type, arg_types, op_ind):
         call_self_func = get_best_call_self(op,True)
 
         # call_head_ptrs = _func_from_address(call_head_ptrs_func_type, op.call_head_ptrs_addr)
-        enum_d = self.enumerizer.dict_for_type(return_type)
+        enum_d, enum_inv_d = self.enumerizer.dicts_for_type(return_type)
         # print("A")
         for gval_ptrs in iter_arg_gval_ptrs(self, arg_gval_t_ids):
             # For each gval get the address for 'head' and val' slot
@@ -363,7 +363,7 @@ def update_op(self, return_type, arg_types, op_ind):
                 continue
             v = get_ret(op)
             # print(v)
-            nom = self.enumerizer.enumerize(v,enum_d)
+            nom = self.enumerizer.to_enum(v, enum_d, enum_inv_d)
             gval = new_gval(head=tf,val=v,nom=nom)
             idrec = self.out_memset.declare(gval)
             # print("C")

@@ -133,6 +133,10 @@ class SpecializedTFProxy(TupleFactProxy):
 
     def __str__(self):
         return f"TF({{', '.join([str(tf_get_item(self,mt,i)) for i,mt in enumerate(member_types)])}})"
+
+    def __getitem__(self, i):
+        mt = member_types[i]
+        return tf_get_item(self,mt,i)
 {properties}
 
 @overload(SpecializedTFProxy, prefer_literal=False)

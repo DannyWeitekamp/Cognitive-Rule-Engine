@@ -118,7 +118,7 @@ def test_vectorizer():
 
 
         # Make sure that get_inv_map works
-        inv_map = vr.get_inv_map()
+        # inv_map = vr.get_inv_map()
 
 
 

@@ -112,7 +112,6 @@ LiteralType = LiteralTypeClass(literal_fields)
 register_global_default("Literal", LiteralType)
 
 @njit(LiteralType(CREFuncType),cache=True)
-# @overload(Literal)
 def literal_ctor(op):
     st = new(LiteralType)
     st.idrec = encode_idrec(T_ID_LITERAL, 0, 0)

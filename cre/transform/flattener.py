@@ -241,7 +241,7 @@ def flattener_update_for_attr(self, fact, id_attr, attr):
 
         ###### End Var(...).attr #####
 
-        nom = self.enumerizer.enumerize(v) #2.3 ms / 10k 
+        nom = self.enumerizer.to_enum(v) #2.3 ms / 10k 
 
         # Make the gval.
         g = new_gval(head=self.var_map[tup], val=v, nom=nom) #2.6ms / 10k 

@@ -265,7 +265,7 @@ class Var(StructRefProxy):
                     context = cre_context()
                     self._base_type = context.get_type(t_id=self.base_t_id)
             return self._base_type
-        elif(attr == 'head_type'):
+        elif(attr == 'head_type' or attr == 'return_type'):
             if('_head_type' not in self.__dict__):
                 head_type_ref = self._numba_type_.field_dict['head_type']
                 if(head_type_ref != types.Any):

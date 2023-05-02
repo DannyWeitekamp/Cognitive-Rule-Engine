@@ -133,7 +133,7 @@ def setup_fact_types():
     #             context.get_type(name="Button"),
     #             context.get_type(name="Container"),
     #             )
-    print("Define!!!", context.name)
+    # print("Define!!!", context.name)
     Component = define_fact("Component", {
         "id" : str,
         # "x" : {"type" : float, "visible" : False},
@@ -166,18 +166,11 @@ def setup_fact_types():
 
 def setup_pipeline():
     Container, TextField, Component, Button = setup_fact_types()
-    if(not hasattr(TextField, 'spec')):
-        print("\nNO SPEC")
-        print(TextField.__dict__)
-        raise ValueError()
-    else:
-        print("\nHAS SPEC")
-        print(TextField.__dict__)
 
     fact_types = [Container, TextField, Component, Button]
     feat_types = [eq_f8, eq_str]
     val_types = [f8,unicode_type,boolean]
-    print("Feat_types", feat_types)
+    # print("Feat_types", feat_types)
 
     wm = MemSet()
     conv = MemSetBuilder(wm)

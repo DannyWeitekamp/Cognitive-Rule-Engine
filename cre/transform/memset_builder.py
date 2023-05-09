@@ -1,3 +1,4 @@
+from numba.typed import List
 from cre.context import cre_context
 from cre.memset import MemSet
 
@@ -43,9 +44,19 @@ class MemSetBuilder():
                 if(attr not in config): continue
                 val_name = config[attr]
                 if(not val_name): continue # i.e. skip if None or empty str
-                if(val_name not in fact_instances):
-                    raise ValueError(f"Reference to unspecified fact {val_name}.")
-                setattr(fact, attr, fact_instances[val_name])
+
+                if isinstance(val_name, list):
+                    fact_list = []
+                    for elem_val_name in val_name:
+                        if(not elem_val_name): continue # i.e. skip if None or empty str
+                        if(elem_val_name not in fact_instances):
+                            raise ValueError(f"Reference to unspecified fact {elem_val_name} in {val_name}.")
+                        fact_list.append(fact_instances[elem_val_name])
+                    setattr(fact, attr, List(fact_list))
+                else:
+                    if(val_name not in fact_instances):
+                        raise ValueError(f"Reference to unspecified fact {val_name}.")
+                    setattr(fact, attr, fact_instances[val_name])
 
         # Declare each fact to a new MemSet
         if(out_memset is None):

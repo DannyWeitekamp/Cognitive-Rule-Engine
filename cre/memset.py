@@ -955,7 +955,7 @@ def ctor():
 '''
             source_to_cache('MemSetIndexer', long_hash, source)
         ctor = import_from_cached('MemSetIndexer', long_hash, ['ctor'])['ctor']
-        print(ctor)
+        # print(ctor)
         _indexer_ctor_impls[tup] = ctor
     return _indexer_ctor_impls[tup]
 

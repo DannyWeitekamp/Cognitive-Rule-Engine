@@ -192,20 +192,24 @@ def float_to_str(x):
 # Monkey Patch type conversions so that float(str) and str(float)
 # work like in normal python
 
-@overload(str)
+@overload_method(types.Float, '__str__')
 def overload_float_to_str(x):
-    if(x is types.bool_):
-        def impl(x):
-            return "True" if x else "False"
-    elif(x in types.real_domain): 
-        def impl(x):
-            return float_to_str(x)
-    elif(x in types.integer_domain):
-        def impl(x):
-            return int_to_str(x)
-    else:
-        return
+    def impl(x):
+        return float_to_str(x)
     return impl
+# def overload_float_to_str(x):
+#     if(x is types.bool_):
+#         def impl(x):
+#             return "True" if x else "False"
+#     elif(x in types.real_domain): 
+#         def impl(x):
+#             return float_to_str(x)
+#     elif(x in types.integer_domain):
+#         def impl(x):
+#             return int_to_str(x)
+#     else:
+#         return
+#     return impl
 
 @overload(float)
 def overload_str_to_float(x):

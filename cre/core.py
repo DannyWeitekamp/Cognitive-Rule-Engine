@@ -156,6 +156,8 @@ def add_to_type_registry(name, hash_code, typ=None):
         with open(get_cache_path("type_registry",suffix=''),'a') as f:
             f.write(f"{count} {name} {hash_code}\n")
         if(typ is not None): add_type_pickle(typ, count)
+    else:
+        count = TYPE_REGISTRY_MAP[tup]
     return count
 
 def unpickle_type_from_t_id(t_id):

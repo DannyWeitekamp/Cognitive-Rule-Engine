@@ -1,4 +1,4 @@
-
+import numpy as np
 import sys,os
 import hashlib 
 import timeit
@@ -60,7 +60,7 @@ class _UniqueHashable():
 def update_unique_hash(m,obj):
 	if(isinstance(obj,str)):
 		m.update(obj.encode('utf-8'))
-	elif(isinstance(obj,(tuple,list))):
+	elif(isinstance(obj,(tuple,list, np.ndarray))):
 		for i,x in enumerate(obj):
 			update_unique_hash(m,i)
 			update_unique_hash(m,x)

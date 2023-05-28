@@ -9,7 +9,7 @@ from numba.core.extending import register_jitable
 # : accum_item_hash
 
 @njit(_Py_uhash_t(_Py_uhash_t,_Py_uhash_t), cache=True)
-def accum_item_hash(acc,lane):
+def accum_item_hash(acc, lane):
     if lane == _Py_uhash_t(-1):
         return _Py_uhash_t(1546275796)
     acc += lane * _PyHASH_XXPRIME_2

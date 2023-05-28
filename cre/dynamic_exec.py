@@ -5,7 +5,7 @@ from numba.typed import List
 from numba.extending import  overload, overload_method
 from cre.utils import cast, _load_ptr, _raw_ptr_from_struct, _raw_ptr_from_struct_incref, CastFriendlyMixin, decode_idrec, _func_from_address, _incref_structref, _struct_get_data_ptr, _sizeof_type, _decref_structref
 from cre.structref import define_structref
-from cre.obj import CREObjTypeClass, CREObjType, member_info_type, _iter_mbr_infos
+from cre.obj import CREObjTypeClass, CREObjType, member_info_type, _iter_mbr_infos, OBJECT_MBR_ID, PRIMITIVE_MBR_ID
 from numba.core.datamodel import default_manager, models
 from numba.experimental.structref import define_attributes, StructRefProxy, new, define_boxing
 import operator
@@ -278,7 +278,8 @@ def hash_from_t_id_ptr(t_id, data_ptr):
         return hash(_load_ptr(f8, data_ptr))
     elif(t_id == T_ID_STR):
         return unicode_hash_noseed(_load_ptr(unicode_type, data_ptr))
-    return u8(-1)
+    print(t_id, "BAD T_ID")
+    return u8(0)
 
 
 
@@ -379,15 +380,14 @@ def fact_hash(x):
             if(t_id == T_ID_TUPLE_FACT):
                 raise Exception()
                 # acc = accum_item_hash(acc, tuple_fact_hash(x))
-            elif(t_id == T_ID_FACT):
-                pass
+            elif(m_id == PRIMITIVE_MBR_ID):
+                # hash primitives
+                acc = accum_item_hash(acc, hash_from_t_id_ptr(t_id, data_ptr))                
+            else:
                 # hash on the pointer 
                 # ptr = _load_ptr(i8, data_ptr)
                 # acc = accum_item_hash(acc, _PyHASH_XXPRIME_5 if(ptr == 0) else ptr)
-            else:
-                # hash primitives
-                # print("Prim", hash_from_t_id_ptr(t_id, data_ptr))
-                acc = accum_item_hash(acc, hash_from_t_id_ptr(t_id, data_ptr))
+                pass
 
         acc = accum_item_hash(acc,tl)
         x.hash_val = acc
@@ -472,30 +472,36 @@ def tuple_fact_hash(x):
 
 #     return process_return(hsh)
 
+@njit(_Py_hash_t(CREObjType), locals={"hsh" : _Py_hash_t}, cache=True)
+def cre_obj_hash(x):
+    t_id,_, _ = decode_idrec(x.idrec)
+    hsh = 0
+    if(t_id==T_ID_TUPLE_FACT):
+        hsh = tuple_fact_hash(x) 
+    elif(t_id==T_ID_VAR):
+        hsh = var_hash(x) 
+    elif(t_id==T_ID_FUNC):
+        hsh = cre_func_hash(x) 
+    elif(t_id==T_ID_LITERAL):
+        hsh = literal_hash(x)
+    elif(t_id==T_ID_CONDITIONS):
+        hsh = conds_hash(x)
+    else:
+        hsh = fact_hash(x)
+    return hsh
+
+
 
 @overload(hash)
 @overload_method(CREObjTypeClass, '__hash__')
+@overload_method(CREObjType, '__hash__') # Not sure why but is necessary
 def _cre_obj_hash(x):
+    print("------IMPL-----", x, isinstance(x, CREObjTypeClass))
     if(isinstance(x,CREObjTypeClass)):
         def impl(x):
-            t_id,_, _ = decode_idrec(x.idrec)
-            if(t_id==T_ID_TUPLE_FACT):
-                return tuple_fact_hash(x) 
-            elif(t_id==T_ID_VAR):
-                return var_hash(x) 
-            elif(t_id==T_ID_FUNC):
-                return cre_func_hash(x) 
-            elif(t_id==T_ID_LITERAL):
-                return literal_hash(x)
-            elif(t_id==T_ID_CONDITIONS):
-                return conds_hash(x)
-            else:
-                return fact_hash(x)            
+            return cre_obj_hash(x)
         return impl
-
-@njit(_Py_hash_t(CREObjType), cache=True)
-def cre_obj_hash(x):
-    return hash(x)
+print("THIS HAS BEEN CALLED")
 
 
 #### __str__ ### 

@@ -1,6 +1,6 @@
 from numba import njit, f8, types
 from numba.types import unicode_type
-from cre.utils import decode_idrec, PrintElapse, _raw_ptr_from_struct
+from cre.utils import decode_idrec, PrintElapse, _raw_ptr_from_struct, used_bytes, NRTStatsEnabled
 from cre.context import cre_context 
 from cre.memset import MemSet, MemSetType 
 from cre.fact import define_fact
@@ -141,35 +141,30 @@ def do_feat_apply(fa,ms):
     return fa.out_memset
 
 
-def used_bytes(garbage_collect=True):
-    if(garbage_collect): gc.collect()
-    stats = rtsys.get_allocation_stats()
-    # print(stats)
-    return stats.alloc-stats.free
-
 def test_fa_mem_leaks():
-    with cre_context("test_fa_mem_leaks"):
-        spec ={ "A" : {"type" : "string", "visible" : True},
-            "B" : {"type" : "number", "visible" : True}
-              }
-        BOOP = define_fact("BOOP", spec)
+    with NRTStatsEnabled:
+        with cre_context("test_fa_mem_leaks"):
+            spec ={ "A" : {"type" : "string", "visible" : True},
+                "B" : {"type" : "number", "visible" : True}
+                  }
+            BOOP = define_fact("BOOP", spec)
 
-        for k in range(5):
-            ms = MemSet()
-            for i in range(20):
-                ms.declare(BOOP(str(i),i))
+            for k in range(5):
+                ms = MemSet()
+                for i in range(20):
+                    ms.declare(BOOP(str(i),i))
 
-            fl = Flattener((BOOP,),ms,id_attr="A")
-            flat_ms = fl()
-            fa = FeatureApplier([eq_f8,eq_str],flat_ms)
-            feat_ms = fa()
+                fl = Flattener((BOOP,),ms,id_attr="A")
+                flat_ms = fl()
+                fa = FeatureApplier([eq_f8,eq_str],flat_ms)
+                feat_ms = fa()
 
-            if(k <= 1):
-                init_bytes = used_bytes()
-            else:
-                print("<<", used_bytes()-init_bytes)
+                if(k <= 1):
+                    init_bytes = used_bytes()
+                else:
+                    print("<<", used_bytes()-init_bytes)
 
-        assert used_bytes()-init_bytes == 0
+            assert used_bytes()-init_bytes == 0
 
 @pytest.mark.benchmark(group="transform")
 def test_b_feat_apply_100x100(benchmark):

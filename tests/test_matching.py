@@ -4,7 +4,7 @@ from numba.typed import List
 from cre.conditions import *
 from cre.memset import MemSet
 from cre.context import cre_context
-# from cre.matching import get_ptr_matches,_get_matches
+from cre.utils import used_bytes, NRTStatsEnabled
 from cre.utils import PrintElapse, _struct_from_ptr, _list_base,_list_base_from_ptr,_load_ptr, _incref_structref, _raw_ptr_from_struct
 from numba.core.runtime.nrt import rtsys
 import gc
@@ -417,12 +417,6 @@ def test_same_parents():
 
 
 
-def used_bytes():
-    stats = rtsys.get_allocation_stats()
-    # print(stats)
-    return stats.alloc-stats.free
-
-
 with cre_context("test_matching_benchmarks"):
     BOOP = define_fact("BOOP",{"name": "string", "B" : "number"})
 
@@ -431,96 +425,97 @@ from weakref import WeakValueDictionary
 from cre.default_funcs import LessThan, ObjEquals
 from cre.var import var_assign_alias
 def test_mem_leaks():
-    # with cre_context("test_matching_benchmarks"):
+    with NRTStatsEnabled:
+        # with cre_context("test_matching_benchmarks"):
 
-    # Lead with these because in principle when an Op is typed a singleton inst is alloced
-    (c,ms),_ = matching_alphas_setup()
-    (c,ms),_ = matching_betas_setup()
-    c,ms = None,None; gc.collect()
+        # Lead with these because in principle when an Op is typed a singleton inst is alloced
+        (c,ms),_ = matching_alphas_setup()
+        (c,ms),_ = matching_betas_setup()
+        c,ms = None,None; gc.collect()
 
-    init_used = used_bytes()
+        init_used = used_bytes()
 
-    # Vars    
-    for i in range(2):
-        l1, l2 = Var(BOOP,"l1"), Var(BOOP,"l2")
-        l1, l2 = None,None; gc.collect()
-        # print(used_bytes()-init_used)
+        # Vars    
+        for i in range(2):
+            l1, l2 = Var(BOOP,"l1"), Var(BOOP,"l2")
+            l1, l2 = None,None; gc.collect()
+            # print(used_bytes()-init_used)
+            assert used_bytes()==init_used
+
+        # print()
+        # Explicit op 1 literal
+        for i in range(2):
+            l1, l2 = Var(BOOP,"l1"), Var(BOOP,"l2")
+            op = LessThan(l1.B, l2.B)
+            l1, l2, op = None, None, None; gc.collect()
+            if(i==0): init_used = used_bytes()
+            print(used_bytes()-init_used)
+            assert used_bytes()==init_used
+
+        # print()
+        # Explicit ptrop 1 literal
+        for i in range(2):
+            l1, l2 = Var(BOOP,"l1"), Var(BOOP,"l2")
+            op = ObjEquals(l1, l1)
+            op, l1, l2 = None, None,None; gc.collect()
+            if(i==0): init_used = used_bytes()
+            # print(used_bytes()-init_used)
+            assert used_bytes()==init_used
+
+
+        # Shorthand 1 literal
+        for i in range(2):
+            l1, l2 = Var(BOOP,"l1"), Var(BOOP,"l2")
+            c = (l1.B < 0)
+            # print(type(c),l1._meminfo.refcount, l2._meminfo.refcount)
+            c = None; gc.collect()
+            # print(l1._meminfo.refcount,l2._meminfo.refcount)
+            c, l1, l2 = None, None,None; gc.collect()
+            if(i==0): init_used = used_bytes()
+            # print(used_bytes())
+            assert used_bytes()==init_used
+        # print()
+        # raise ValueError()
+        # AND
+        for i in range(2):
+            l1, l2 = Var(BOOP,"l1"), Var(BOOP,"l2")
+            c = (l1.B > 0) & (l2.B != 3) 
+            c, l1, l2 = None, None,None; gc.collect()
+            if(i==0): init_used = used_bytes()
+            # print(used_bytes()-init_used)
+            assert used_bytes()==init_used
+
+
+
+        # Alphas setup 
+        (c,ms),_ = matching_alphas_setup()    
+        c, ms = None, None; gc.collect()
         assert used_bytes()==init_used
 
-    # print()
-    # Explicit op 1 literal
-    for i in range(2):
-        l1, l2 = Var(BOOP,"l1"), Var(BOOP,"l2")
-        op = LessThan(l1.B, l2.B)
-        l1, l2, op = None, None, None; gc.collect()
-        if(i==0): init_used = used_bytes()
-        print(used_bytes()-init_used)
+        # Betas setup
+        (c,ms),_ = matching_betas_setup()
+        c,ms = None,None; gc.collect()
         assert used_bytes()==init_used
 
-    # print()
-    # Explicit ptrop 1 literal
-    for i in range(2):
-        l1, l2 = Var(BOOP,"l1"), Var(BOOP,"l2")
-        op = ObjEquals(l1, l1)
-        op, l1, l2 = None, None,None; gc.collect()
-        if(i==0): init_used = used_bytes()
-        # print(used_bytes()-init_used)
+        (c,ms),_ = matching_alphas_setup()
+        print("c", c._meminfo.refcount)
+
+        # from cre.matching import update_graph, build_corgi_graph
+        # corgi_graph = build_corgi_graph(ms, c)
+        # update_graph(corgi_graph)
+        with cre_context("test_matching_benchmarks") as ctxt:
+            matches = c.get_matches(ms)
+
+        # distr_dnf = c.distr_dnf
+        # corgi_graph = c.corgi_graph
+        # print("c", c._meminfo.refcount, 'corgi_graph', corgi_graph._meminfo.refcount, "matches", matches._meminfo.refcount)
+        c,matches,ms,ctxt = None,None,None,None; gc.collect()
+
+        # print('corgi_graph', corgi_graph._meminfo.refcount)
+
+
+        # print(used_bytes(),init_used)
         assert used_bytes()==init_used
-
-
-    # Shorthand 1 literal
-    for i in range(2):
-        l1, l2 = Var(BOOP,"l1"), Var(BOOP,"l2")
-        c = (l1.B < 0)
-        # print(type(c),l1._meminfo.refcount, l2._meminfo.refcount)
-        c = None; gc.collect()
-        # print(l1._meminfo.refcount,l2._meminfo.refcount)
-        c, l1, l2 = None, None,None; gc.collect()
-        if(i==0): init_used = used_bytes()
-        # print(used_bytes())
-        assert used_bytes()==init_used
-    # print()
-    # raise ValueError()
-    # AND
-    for i in range(2):
-        l1, l2 = Var(BOOP,"l1"), Var(BOOP,"l2")
-        c = (l1.B > 0) & (l2.B != 3) 
-        c, l1, l2 = None, None,None; gc.collect()
-        if(i==0): init_used = used_bytes()
-        # print(used_bytes()-init_used)
-        assert used_bytes()==init_used
-
-
-
-    # Alphas setup 
-    (c,ms),_ = matching_alphas_setup()    
-    c, ms = None, None; gc.collect()
-    assert used_bytes()==init_used
-
-    # Betas setup
-    (c,ms),_ = matching_betas_setup()
-    c,ms = None,None; gc.collect()
-    assert used_bytes()==init_used
-
-    (c,ms),_ = matching_alphas_setup()
-    print("c", c._meminfo.refcount)
-
-    # from cre.matching import update_graph, build_corgi_graph
-    # corgi_graph = build_corgi_graph(ms, c)
-    # update_graph(corgi_graph)
-    with cre_context("test_matching_benchmarks") as ctxt:
-        matches = c.get_matches(ms)
-
-    # distr_dnf = c.distr_dnf
-    # corgi_graph = c.corgi_graph
-    # print("c", c._meminfo.refcount, 'corgi_graph', corgi_graph._meminfo.refcount, "matches", matches._meminfo.refcount)
-    c,matches,ms,ctxt = None,None,None,None; gc.collect()
-
-    # print('corgi_graph', corgi_graph._meminfo.refcount)
-
-
-    # print(used_bytes(),init_used)
-    assert used_bytes()==init_used
 
 
 from cre.utils import _cast_structref
@@ -539,61 +534,61 @@ def foo(x):
 from cre.matching import get_graph, match_iter_next_ptrs
 
 def test_swap_memset():
-    
-    
-    for i in range(2):
-        # Test that we can swap the memset without leaks
-        (c,ms),_ = matching_betas_setup()
-        # print(foo(ms))
-        # print("<< ms BEF",ms._meminfo.refcount)
+    with NRTStatsEnabled:
+            
+        for i in range(2):
+            # Test that we can swap the memset without leaks
+            (c,ms),_ = matching_betas_setup()
+            # print(foo(ms))
+            # print("<< ms BEF",ms._meminfo.refcount)
 
-        # bef = used_bytes()
-        # graph = get_graph(ms,c)
-        # graph_bytes =  used_bytes()-bef
-        # print(">>", graph_bytes)
-        m_iter = c.get_matches(ms)    
-        m_iter = c.get_matches(ms)    
-        print("m_iter", m_iter._meminfo.refcount)
-        print("<< ms AFT",ms._meminfo.refcount)
-        match_iter_next_ptrs(m_iter)
-        print("m_iter", m_iter._meminfo.refcount)
-        print("<< ms AFT",ms._meminfo.refcount)
-        matches = list(m_iter)
-        matches=None
-        print("m_iter", m_iter._meminfo.refcount)
-        print("<< ms AFT",ms._meminfo.refcount)
+            # bef = used_bytes()
+            # graph = get_graph(ms,c)
+            # graph_bytes =  used_bytes()-bef
+            # print(">>", graph_bytes)
+            m_iter = c.get_matches(ms)    
+            m_iter = c.get_matches(ms)    
+            print("m_iter", m_iter._meminfo.refcount)
+            print("<< ms AFT",ms._meminfo.refcount)
+            match_iter_next_ptrs(m_iter)
+            print("m_iter", m_iter._meminfo.refcount)
+            print("<< ms AFT",ms._meminfo.refcount)
+            matches = list(m_iter)
+            matches=None
+            print("m_iter", m_iter._meminfo.refcount)
+            print("<< ms AFT",ms._meminfo.refcount)
 
-        # print("<< ms AFT",ms._meminfo.refcount)
-        # print("<< graph AFT",graph._meminfo.refcount)
+            # print("<< ms AFT",ms._meminfo.refcount)
+            # print("<< graph AFT",graph._meminfo.refcount)
 
-        (_,ms2),_ = matching_betas_setup()
-        # graph2 = get_graph(ms2,c)
-        # bef = used_bytes()
-        m_iter2 = c.get_matches(ms2)
-        matches2 = list(m_iter2)
+            (_,ms2),_ = matching_betas_setup()
+            # graph2 = get_graph(ms2,c)
+            # bef = used_bytes()
+            m_iter2 = c.get_matches(ms2)
+            matches2 = list(m_iter2)
 
 
-        graph = None; graph2 = None;
-        print("<< ms CLN",ms._meminfo.refcount)
-        m_iter = None; m_iter2 = None;
-        print("<< ms CLN",ms._meminfo.refcount)
-        matches = None; matches2 = None;
-        print("<< ms CLN",ms._meminfo.refcount)
+            graph = None; graph2 = None;
+            print("<< ms CLN",ms._meminfo.refcount)
+            m_iter = None; m_iter2 = None;
+            print("<< ms CLN",ms._meminfo.refcount)
+            matches = None; matches2 = None;
+            print("<< ms CLN",ms._meminfo.refcount)
 
-        ms = None; ms2 = None; c=None; _=None;
-        gc.collect()
-        # print("!!!", bef-used_bytes())
+            ms = None; ms2 = None; c=None; _=None;
+            gc.collect()
+            # print("!!!", bef-used_bytes())
 
-        # print("<< graph CLN",graph._meminfo.refcount)
-        
-        
+            # print("<< graph CLN",graph._meminfo.refcount)
+            
+            
 
-        # assert len(matches)==len(matches2)
-        if(i == 0):
-            init_used = used_bytes()
-        else:
-            print(used_bytes()-init_used)
-            assert used_bytes()==init_used
+            # assert len(matches)==len(matches2)
+            if(i == 0):
+                init_used = used_bytes()
+            else:
+                print(used_bytes()-init_used)
+                assert used_bytes()==init_used
 
 
 

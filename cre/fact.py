@@ -1,6 +1,6 @@
 from numba import types, njit, guvectorize, vectorize, prange, generated_jit
 from numba.experimental import jitclass, structref
-from numba import deferred_type, optional
+from numba import deferred_type, optional, objmode
 from numba import void,b1,u1,u2,u4,u8,i1,i2,i4,i8,f4,f8,c8,c16
 from numba.typed import List, Dict
 from numba.core.types import (DictType, ListType, unicode_type, float64, NamedTuple, NamedUniTuple, UniTuple, Array, Tuple)
@@ -23,12 +23,15 @@ from numba.core.typing import signature
 # from numba.core.extending import overload
 
 from cre.core import TYPE_ALIASES, JITSTRUCTS, py_type_map, numba_type_map, numpy_type_map, register_global_default, lines_in_type_registry, add_to_type_registry, add_type_pickle
+from cre.context import cre_context
 from cre.caching import unique_hash_v, source_to_cache, import_from_cached, source_in_cache, get_cache_path
 from cre.structref import gen_structref_code, define_structref
 # from cre.context import cre_context
-from cre.utils import (cast, struct_get_attr_offset, _obj_cast_codegen,
+from cre.utils import (cast, struct_get_attr_offset, _obj_cast_codegen, 
                        _ptr_from_struct_codegen, CastFriendlyMixin, _obj_cast_codegen,
-                        PrintElapse, _struct_get_data_ptr, _ptr_from_struct_incref)
+                       PrintElapse, _struct_get_data_ptr, _ptr_from_struct_incref,
+                       deref_info_type, DEREF_TYPE_ATTR, DEREF_TYPE_LIST,
+                       _ptr_to_data_ptr, _list_base_from_ptr)
 from cre.obj import CREObjTypeClass, cre_obj_field_dict, CREObjModel, CREObjType, member_info_type, CREObjProxy
 
 from numba.core.typeconv import Conversion
@@ -71,7 +74,7 @@ class Fact(CREObjTypeClass):
 
     def get_attr_deref_info(self, attr):
         from cre.context import cre_context
-        from cre.utils import deref_info_type, DEREF_TYPE_ATTR, DEREF_TYPE_LIST
+        
         priv_var_name = f"_{attr}_deref_info"
         if(not hasattr(self, priv_var_name)):
             a_id = self.get_attr_a_id(attr)
@@ -183,6 +186,26 @@ class Fact(CREObjTypeClass):
     def __setstate__(self, d):
         self.__dict__ = d
 
+
+
+
+
+@overload_method(Fact, '__str__')
+def overload_str(self):
+    def impl(self):
+        with objmode(s='unicode_type'):
+            s = str(self)
+        return s
+    return impl
+
+
+@overload_method(Fact, '__repr__')
+def overload_repr(self):
+    def impl(self):
+        with objmode(s='unicode_type'):
+            s = repr(self)
+        return s
+    return impl
 
 @generated_jit(cache=True)
 def call_untyped_fact(self, **kwargs):
@@ -588,6 +611,14 @@ class FactProxy(CREObjProxy):
     def __repr__(self):
         return str(self)
 
+
+    def resolve_deref(self, derefs):
+        if(not isinstance(derefs, np.ndarray)):
+            derefs = derefs.deref_infos
+        ctx = cre_context()
+        out_type = ctx.get_type(t_id=derefs[-1]['t_id'])
+        return resolve_deref(self, derefs, out_type)
+
     # def __eq__(self, other):
     #     from cre.dynamic_exec import fact_eq
     #     return fact_eq(self.asa(CREObjType), other.asa(CREObjType))
@@ -785,6 +816,23 @@ def gen_fact_src(typ, fields, t_id, inherit_from=None, specialization_name=None,
     param_seq = ",".join([f"{attr}" for attr,t in fields])
     attr_tup = tuple([attr for attr,t in fields])
 
+
+    as_dict_setters = []
+    for attr,t in fields:
+        print(attr, t)
+        if(isinstance(t, Fact)):
+            s = f"'{attr}':getattr(get_{attr}(self), key_attr, None)"
+        elif(isinstance(t, ListType)):
+            if(isinstance(t.item_type, Fact)):
+                s = f"'{attr}':[getattr(x, key_attr, None) for x in get_{attr}(self)]"
+            else:
+                s = f"'{attr}':list(get_{attr}(self))"
+        else:
+            s = f"'{attr}':get_{attr}(self)"
+
+        as_dict_setters.append(s)
+    as_dict_setters = ", ".join(as_dict_setters)
+
     # base_list = ",".join([f"'{k}'" for k,v in _base_fact_fields])
     # base_type_list = ",".join([str(v) for k,v in _base_fact_fields])
 
@@ -815,7 +863,7 @@ from numba.core.types import *
 from numba.core.types import unicode_type, ListType, UniTuple, Tuple
 from numba.experimental import structref
 from numba.experimental.structref import new#, define_boxing
-from numba.core.extending import overload, lower_cast, type_callable
+from numba.core.extending import overload, overload_method, lower_cast, type_callable
 from numba.core.imputils import numba_typeref_ctor
 from cre.fact_intrinsics import define_boxing, get_fact_attr_ptr, _register_fact_structref, fact_mutability_protected_setattr, fact_lower_setattr, _fact_get_chr_mbrs_infos
 from cre.fact import repr_list_attr, repr_fact_attr, FactProxy, Fact, UntypedFact{", BaseFact, base_list_type, fact_to_ptr, get_inheritance_bytes_len_ptr" if typ != "BaseFact" else ""}, uint_to_inheritance_bytes
@@ -929,6 +977,9 @@ class {typ}Proxy(FactProxy):
 
     def __str__(self):
         return self.__repr__()
+
+    def as_dict(self, key_attr='idrec'):
+        return {{'type' : '{typ}', {as_dict_setters}}}
 
 
 {properties}
@@ -1262,6 +1313,45 @@ def asa(self, typ):
             return cast(self, typ)
     return impl
 
+
+# -------
+# : Functions for dereferencing Facts
+
+@njit(i8(deref_info_type,i8),inline='never',cache=True)
+def deref_once(deref, inst_ptr):
+    if(deref.type == u1(DEREF_TYPE_ATTR)):
+        return _ptr_to_data_ptr(inst_ptr)
+    else:
+        return _list_base_from_ptr(inst_ptr)
+
+@njit(i8(BaseFact, deref_info_type[::1]),cache=True)
+def resolve_deref_data_ptr(fact, deref_infos):
+    '''
+    '''
+    inst_ptr = cast(fact, i8)
+    if(len(deref_infos) > 1):
+        for k in range(len(deref_infos)-1):
+            if(inst_ptr == 0): break;
+            deref = deref_infos[k]
+            data_ptr = deref_once(deref, inst_ptr)
+            inst_ptr = _load_ptr(i8, data_ptr+deref.offset)
+
+    if(inst_ptr != 0):
+        deref = deref_infos[-1]
+        data_ptr = deref_once(deref, inst_ptr)
+        return data_ptr+deref.offset
+    else:
+        return 0
+
+
+@generated_jit(cache=True)
+def resolve_deref(self, deref_infos, out_type):
+    def impl(self, deref_infos, out_type):
+        data_ptr = resolve_deref_data_ptr(self, deref_infos)
+        if(data_ptr == 0):
+            raise AttributeError("Failed to dereference Fact.")
+        return _load_ptr(out_type, data_ptr)
+    return impl
 
 
 

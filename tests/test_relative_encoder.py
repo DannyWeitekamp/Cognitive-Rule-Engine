@@ -8,7 +8,7 @@ from cre.var import Var
 from cre.transform.flattener import Flattener
 from cre.transform.feature_applier import FeatureApplier
 from cre.transform.relative_encoder import _check_needs_rebuild, RelativeEncoder, get_relational_fact_attrs, next_adjacent
-from cre.utils import PrintElapse, deref_info_type
+from cre.utils import PrintElapse, deref_info_type, used_bytes, NRTStatsEnabled
 from cre.fact import define_fact
 from cre.default_funcs import Equals
 from cre.context import cre_context
@@ -127,9 +127,6 @@ def setup_update():
         Component, Container, TestLL = def_fact_types()
 
         ms = MemSet()
-
-
-        # init_bytes = used_bytes()  
         
         fl = Flattener((TestLL,), in_memset=ms, id_attr="id",)
         end = first = TestLL(id="q",value="1")
@@ -142,11 +139,7 @@ def setup_update():
         re.update()
 
         ms.declare(end)
-        # print("first", first._meminfo.refcount)
 
-
-
-        # init_bytes = used_bytes()
         for i in range(100):
             # erc0 = end._meminfo.refcount
             new_end = TestLL(str(i),str(i),end)
@@ -184,45 +177,39 @@ def do_encode_rel(ms,feat_ms,fl,fa,re,ps,vs):
     rel_ms = re.encode_relative_to(feat_ms, ps,vs)
 
 
-
-def used_bytes(garbage_collect=True):
-    if(garbage_collect): gc.collect()
-    stats = rtsys.get_allocation_stats()
-    # print(stats)
-    return stats.alloc-stats.free
-
 # NOTE: Requires revisiting. Definitely partial leak here.
 #   The relative encoder seems to be aquiring a reference
 #   to each of the facts in the memset at instantiation.
 def test_re_mem_leaks():
-    with cre_context("test_re_mem_leaks"):
-        for i in range(5):
-            args, kwargs = setup_update()
-            (re,ms,end) = args
-            # first = ms.get_facts()[0]
+    with NRTStatsEnabled:
+        with cre_context("test_re_mem_leaks"):
+            for i in range(5):
+                args, kwargs = setup_update()
+                (re,ms,end) = args
+                # first = ms.get_facts()[0]
 
-            # print(re._meminfo.refcount)
-            # print(ms._meminfo.refcount)
-            # print("first", first._meminfo.refcount)
-            # print("end", end._meminfo.refcount)
-            ms.clear_refs()
-            
-            # print("Free first", first._meminfo.refcount)
-            # print("Free end", end._meminfo.refcount)
+                # print(re._meminfo.refcount)
+                # print(ms._meminfo.refcount)
+                # print("first", first._meminfo.refcount)
+                # print("end", end._meminfo.refcount)
+                ms.clear_refs()
+                
+                # print("Free first", first._meminfo.refcount)
+                # print("Free end", end._meminfo.refcount)
 
-            ms =None; gc.collect()
+                ms =None; gc.collect()
 
-            # print("msnull first", first._meminfo.refcount)
-            # print("msnull end", end._meminfo.refcount)
+                # print("msnull first", first._meminfo.refcount)
+                # print("msnull end", end._meminfo.refcount)
 
-            # NOTE: really ought to be fine when == 0
-            if(i <= 1):
-                init_bytes = used_bytes()
-            else:
-                print("<<", used_bytes()-init_bytes)
+                # NOTE: really ought to be fine when == 0
+                if(i <= 1):
+                    init_bytes = used_bytes()
+                else:
+                    print("<<", used_bytes()-init_bytes)
 
-        # Commenting out for now until larger memleak issue is resolved for facts
-        assert used_bytes()-init_bytes == 0
+            # Commenting out for now until larger memleak issue is resolved for facts
+            assert used_bytes()-init_bytes == 0
 
 
 def test_downcasted_heads():

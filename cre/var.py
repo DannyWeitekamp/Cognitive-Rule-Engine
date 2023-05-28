@@ -75,9 +75,11 @@ class VarTypeClass(CREObjTypeClass):
     type_cache = {}
 
     def __new__(cls, base_type=None, head_type=None):
+        print(cls, base_type, head_type)
         if(head_type is None): head_type = base_type
         
         unq_tup = (base_type, head_type)
+
         self = cls.type_cache.get(unq_tup, None)
         if(self is not None):
             return self
@@ -472,9 +474,18 @@ class Var(StructRefProxy):
     def from_ptr(cls, ptr):
         return var_from_ptr(ptr)
 
-@njit(VarType(i8), cache=True)
-def var_from_ptr(ptr):
-    return cast(ptr, VarType)
+    def copy(self):
+        return var_copy(self)
+
+    def __copy__(self):
+        return var_copy(self)
+
+    def with_alias(self, alias):
+        return var_with_alias(self, alias)
+
+
+# Manually define the boxing to avoid constructor overloading
+define_boxing(VarTypeClass, Var)
 
 #### Get Attribute Overloading ####
 
@@ -656,6 +667,7 @@ def get_deref_attrs_str(self):
     return impl
 
 @generated_jit(cache=True)
+@overload_method(VarTypeClass, '__str__')
 @overload(str)
 def var_str(self):
     if(not isinstance(self,VarTypeClass)): return
@@ -668,14 +680,7 @@ def var_str(self):
             return f'{self.alias}{deref_str}' 
     return impl
 
-@njit(cache=True)    
-def get_var_ptr(self):
-    return cast(self, i8)
 
-
-@njit(cache=True)    
-def get_var_ptr_incref(self):
-    return _ptr_from_struct_incref(self)
 
 
 
@@ -742,8 +747,19 @@ def var_get_head_t_id(self):
 def var_get_base_t_id(self):
     return self.base_t_id
 
-# Manually define the boxing to avoid constructor overloading
-define_boxing(VarTypeClass, Var)
+
+
+@njit(VarType(i8), cache=True)
+def var_from_ptr(ptr):
+    return cast(ptr, VarType)
+
+@njit(cache=True)    
+def get_var_ptr(self):
+    return cast(self, i8)
+
+@njit(cache=True)    
+def get_var_ptr_incref(self):
+    return _ptr_from_struct_incref(self)
 
 
 # var_type_cache = {}
@@ -813,30 +829,67 @@ def overload_Var(typ,alias=""):
 
 #### getattr and dereferencing ####
 
-@njit(types.void(VarType, VarType),cache=True)
-def var_memcopy(self,st):
-    # new_deref_attrs = List.empty_list(unicode_type)
-    # new_deref_infos = np.empty(len(),dtype=deref_info_type)
-    # for x in lower_getattr(self,"deref_attrs"):
-    #     new_deref_attrs.append(x)
-    # old_deref_infos
-    # for i,y in enumerate(lower_getattr(self,"deref_infos")):
-    #     new_deref_infos[i] = y
-    lower_setattr(st,'idrec', lower_getattr(self,"idrec"))
-    lower_setattr(st,'is_not', lower_getattr(self,"is_not"))
-    lower_setattr(st,'base_ptr', lower_getattr(self,"base_ptr"))
-    lower_setattr(st,'base_ptr_ref', lower_getattr(self,"base_ptr_ref"))
-    # lower_setattr(st,'alias_', lower_getattr(self,"alias_"))
-    # lower_setattr(st,'deref_attrs',new_deref_attrs)
-    lower_setattr(st,'deref_infos', lower_getattr(self,"deref_infos").copy())
-    # base_type_name = lower_getattr(self,"base_type_name")
-    lower_setattr(st,'base_t_id',lower_getattr(self,"base_t_id"))
-    lower_setattr(st,'head_t_id',lower_getattr(self,"head_t_id"))
-
+# @njit(types.void(VarType, VarType),cache=True)
+# def var_memcopy(self,st):
+#     # new_deref_attrs = List.empty_list(unicode_type)
+#     # new_deref_infos = np.empty(len(),dtype=deref_info_type)
+#     # for x in lower_getattr(self,"deref_attrs"):
+#     #     new_deref_attrs.append(x)
+#     # old_deref_infos
+#     # for i,y in enumerate(lower_getattr(self,"deref_infos")):
+#     #     new_deref_infos[i] = y
+    
 
 # @generated_jit(cache=True)
 # def var_append_deref(self,deref):
+
+# ------------------------
+# : Copying, extending, and renaming Vars
+#   Note: We use lower_get/setattr to get around the fact that Var().whatever 
+#     creates a new var extended with a dereference.        
+
+@njit(VarType(VarType), cache=True)
+def var_copy(self):
+    st = new(VarType)
+
+    deref_infos = lower_getattr(self,"deref_infos").copy()
+    lower_setattr(st,'deref_infos', deref_infos)
+
+    if(len(deref_infos) == 0):
+        # If we are copying a base Var then it is its own base.
+        lower_setattr(st,'base_ptr', cast(st, i8))
+        lower_setattr(st,'base_ptr_ref', ptr_t(0))
+        lower_setattr(st,'alias_', lower_getattr(self,"alias_"))
+    else:
+        # If we are copying a Var with derefs then we need to borrow a
+        #  reference to the original base.
+        base_ptr_ref = lower_getattr(self, "base_ptr_ref")
+        if(not base_ptr_ref == 0):
+            _incref_ptr(base_ptr_ref)
+        lower_setattr(st,'base_ptr_ref', base_ptr_ref)
+        lower_setattr(st,'base_ptr', lower_getattr(self,"base_ptr"))
     
+    lower_setattr(st,'idrec', lower_getattr(self,"idrec"))
+    lower_setattr(st,'is_not', lower_getattr(self,"is_not"))
+    lower_setattr(st,'base_t_id', lower_getattr(self,"base_t_id"))
+    lower_setattr(st,'head_t_id', lower_getattr(self,"head_t_id"))
+    lower_setattr(st,'deref_attrs_str', lower_getattr(self,"deref_attrs_str"))
+    return st    
+
+@njit(VarType(VarType, unicode_type), cache=True)
+def var_with_alias(self, alias):
+    st = var_copy(self)
+    if(len(self.deref_infos) == 0):
+        lower_setattr(st, "alias_", alias)
+    else:
+        # If realiasing a Var with derefs then we need to make a new base
+        old_base = cast(lower_getattr(self,"base_ptr"), VarType)
+        new_base = var_copy(old_base)
+        lower_setattr(new_base, "alias_", alias)
+        # Borrow a reference to the new base
+        lower_setattr(st, "base_ptr_ref", _ptr_from_struct_incref(new_base))
+        lower_setattr(st, "base_ptr", cast(new_base,i8))
+    return st
 
 
 @njit(types.void(VarType, u4, i4, u2, u1), cache=True)
@@ -887,10 +940,17 @@ def var_append_deref(self, attr):
 
     # print("AFT")
     def impl(self, attr):
-        st = new(var_struct_type)
-        var_memcopy(cast(self, VarType),st)
+        # st = new(var_struct_type)
+        # var_memcopy(cast(self, VarType),st)
+        # lower_setattr(st, 'base_ptr_ref', _ptr_from_struct_incref(self))
+        st = var_copy(self)
         _var_append_deref(st, a_id, offset, head_t_id, typ=DEREF_TYPE_ATTR)
-        lower_setattr(st, 'base_ptr_ref', _ptr_from_struct_incref(self))
+        was_base = len(self.deref_infos) == 0
+        if(was_base):
+            # If was a base var then borrow its pointer
+            lower_setattr(st, "base_ptr", cast(self, i8))
+            lower_setattr(st, 'base_ptr_ref', _ptr_from_struct_incref(self))
+        lower_setattr(st,'deref_attrs_str', None)
         return st
     return impl
 
@@ -906,45 +966,43 @@ def var_append_deref(self, attr):
 @njit(VarType(VarType, u4, i8, i8, i8), cache=True)
 def generic_var_append_deref(self, a_id, offset, head_t_id, typ=DEREF_TYPE_ATTR):
     # _incref_structref(base_var)
-    st = new(VarType)
+    st = var_copy(self)
+    # st = new(VarType)
     was_base = len(self.deref_infos) == 0
-    var_memcopy(self, st)
-    _var_append_deref(st, a_id, offset, head_t_id, typ=typ)
+    # var_memcopy(self, st)
     if(was_base):
         # If was a base var then borrow its pointer
+        lower_setattr(st, "base_ptr", cast(self, i8))
         lower_setattr(st, 'base_ptr_ref', _ptr_from_struct_incref(self))
+    _var_append_deref(st, a_id, offset, head_t_id, typ=typ)
+    lower_setattr(st,'deref_attrs_str', None)
+    
+
     return st
 
 @njit(VarType(VarType, deref_info_type[::1]), cache=True)
 def var_extend(self, deref_infos):
-    st = new(VarType)
+    st = var_copy(self)
     was_base = len(self.deref_infos) == 0
-    var_memcopy(self, st)
+    if(was_base):
+        # If was a base var then borrow its pointer
+        lower_setattr(st, "base_ptr", cast(self, i8))
+        lower_setattr(st, 'base_ptr_ref', _ptr_from_struct_incref(self))
+    # st = new(VarType)
+    # was_base = len(self.deref_infos) == 0
+    # var_memcopy(self, st)
+    # if(was_base):
+    #     # If was a base var then borrow its pointer
+    #     lower_setattr(st, 'base_ptr_ref', _ptr_from_struct_incref(self))
+
     new_deref_infos = np.empty(len(self.deref_infos) + len(deref_infos), dtype=deref_info_type)
     new_deref_infos[:len(self.deref_infos)] = self.deref_infos
     new_deref_infos[len(self.deref_infos):] = deref_infos
     lower_setattr(st, 'deref_infos', new_deref_infos)
     lower_setattr(st, 'head_t_id', new_deref_infos[-1].t_id)
-    if(was_base):
-        # If was a base var then borrow its pointer
-        lower_setattr(st, 'base_ptr_ref', _ptr_from_struct_incref(self))
-    return st
-
-
+    lower_setattr(st,'deref_attrs_str', None)
     
-# -------------------------------------------------------------
-# : copy
-
-# @njit(VarType(VarType), cache=True)
-# def var_deep_copy(v):
-#     new_v = new(VarType)
-#     var_memcopy(new_v, v)
-#     if()
-#     return 
-
-
-
-
+    return st
 
 
 

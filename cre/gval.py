@@ -1,6 +1,6 @@
 import numpy as np
 from numba import types, f8, i8, u8, boolean, generated_jit, objmode
-from numba.extending import overload
+from numba.extending import overload, overload_method
 from numba.typed import List
 from numba.types import ListType, unicode_type
 from cre.obj import CREObjType, cre_obj_get_item, cre_obj_get_member_t_ids
@@ -20,7 +20,7 @@ gval_spec = {
     "nom" : u8,
     "val" : types.Any,
 }
-gval = define_fact("gval", gval_spec)
+gval, GvalTypeClass = define_fact("gval", gval_spec, return_type_class=True)
 
 _gval_types = {}
 def get_gval_type(val_type, context=None):
@@ -71,6 +71,7 @@ def _val_to_str(val):
 
 
 @generated_jit(cache=True,nopython=True)
+@overload_method(GvalTypeClass, "__str__")
 @overload(str)
 def gval_str(gval):
     if('gval' not in getattr(gval, '_fact_name','')): return
@@ -88,7 +89,7 @@ def gval_str(gval):
                     v = cre_obj_get_item(head, VarType, i)
                     s = get_deref_attrs_str(v)
                     v_strs.append(v.alias + get_deref_attrs_str(v))
-                head_str = op.name_data.expr_template.format(v_strs)
+                head_str = op.origin_data.expr_template.format(v_strs)
             else:
                 with objmode(head_str=unicode_type):
                     head_str = str(head)

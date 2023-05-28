@@ -1,11 +1,9 @@
 from numba import njit, types
-from cre.utils import decode_idrec 
+from cre.utils import decode_idrec, used_bytes, NRTStatsEnabled
 from cre.context import cre_context 
 from cre.memset import MemSet, MemSetType 
 from cre.transform.flattener import Flattener, flattener_update
 from cre.fact import define_fact
-from numba.core.runtime.nrt import rtsys
-import gc
 import pytest
 
 def flat_ms_vals(flat_ms):
@@ -69,31 +67,27 @@ def test_flatten():
         assert values == {"A", "B", "E" ,"Z", 15., 16., 777., 106.}
 
 
-def used_bytes(garbage_collect=True):
-    if(garbage_collect): gc.collect()
-    stats = rtsys.get_allocation_stats()
-    # print(stats)
-    return stats.alloc-stats.free
 
 
 def test_fl_mem_leaks():
-    with cre_context("test_fl_mem_leaks"):
-        spec ={ "A" : {"type" : "string", "visible" : True},
-                "B" : {"type" : "number", "visible" : True}
-          }
-        BOOP = define_fact("BOOP", spec)
+    with NRTStatsEnabled:
+        with cre_context("test_fl_mem_leaks"):
+            spec ={ "A" : {"type" : "string", "visible" : True},
+                    "B" : {"type" : "number", "visible" : True}
+              }
+            BOOP = define_fact("BOOP", spec)
 
-        for k in range(5):
-            ms = MemSet()
-            for i in range(10):
-                ms.declare(BOOP(str(i),i))
+            for k in range(5):
+                ms = MemSet()
+                for i in range(10):
+                    ms.declare(BOOP(str(i),i))
 
-            fl = Flattener([BOOP],in_memset=ms,id_attr="A")
-            flat_ms = fl(ms)
-            if(k <= 1):
-                init_bytes = used_bytes()
+                fl = Flattener([BOOP],in_memset=ms,id_attr="A")
+                flat_ms = fl(ms)
+                if(k <= 1):
+                    init_bytes = used_bytes()
 
-        assert used_bytes()-init_bytes == 0
+            assert used_bytes()-init_bytes == 0
 
 
         

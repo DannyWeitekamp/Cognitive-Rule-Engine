@@ -124,7 +124,7 @@ def literal_ctor(op):
 
 
 #TODO: STR
-@overload(str)
+@overload_method(LiteralTypeClass, "__str__")
 def _literal_str(self):
     if(not isinstance(self, LiteralTypeClass)): return
     def impl(self):
@@ -781,6 +781,8 @@ def conds_repr_ampersand_short(self, indent=" "):
 
 
 
+
+@overload_method(ConditionsTypeClass, "__str__")
 @overload(str)
 def overload_conds_str(self):
     if(not isinstance(self, ConditionsTypeClass)): return
@@ -1004,8 +1006,9 @@ def dnf_not(c_dnf):
 @njit(VarType(VarType,),cache=True)
 def _build_var_conjugate(v):
     if(v.conj_ptr == 0):
-        conj = new(VarType)
-        var_memcopy(v,conj)
+        conj = var_copy(v)
+        # conj = new(VarType)
+        # var_memcopy(v,conj)
         conj.is_not = u1(0) if v.is_not else u1(1)
         conj.conj_ptr = _ptr_from_struct_incref(v)
         v.conj_ptr = _ptr_from_struct_incref(conj)

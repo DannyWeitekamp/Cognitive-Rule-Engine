@@ -8,7 +8,8 @@ from cre.sc_planner import (gen_apply_multi_source, search_for_explanations,
                      join_records_of_type, forward_chain_one, extract_rec_entry,
                      retrace_goals_back_one, expl_tree_ctor, planner_declare,
                     build_explanation_tree, ExplanationTreeType, SC_Record, SC_RecordType)
-from cre.utils import _ptr_from_struct_incref, _list_from_ptr, _dict_from_ptr, _struct_from_ptr
+from cre.utils import (_ptr_from_struct_incref, _list_from_ptr, _dict_from_ptr, _struct_from_ptr,
+                        used_bytes, NRTStatsEnabled)
 from cre.var import Var
 from cre.context import cre_context
 from cre.fact import define_fact
@@ -145,8 +146,8 @@ def summarize_depth_vals(planner, typ, depth):
 
             l = _list_from_ptr(l_typ, planner.flat_vals_ptr_dict[tup])
             d = _dict_from_ptr(d_typ, planner.val_map_ptr_dict[u2(typ_t_id)])
-            print(l,d)
-            # print(l)
+            # print(l,d)
+            print(l)
             # print(d)
             return len(l), min(l),max(l),len(d), min(d),max(d)
     return impl
@@ -266,72 +267,66 @@ def test_search_for_explanations(n=5):
 
 
 
-def used_bytes(garbage_collect=True):
-    if(garbage_collect): gc.collect()
-    stats = rtsys.get_allocation_stats()
-    # print(stats)
-    return stats.alloc-stats.free
-
-
 #NOTE: Need to fix this seems to leak declared objects. 
 def test_mem_leaks(n=5):
-    with cre_context("test_mem_leaks") as context:
-        funcs = get_base_funcs()
-        init_used = used_bytes()
+    with NRTStatsEnabled:
+        with cre_context("test_mem_leaks") as context:
+            funcs = get_base_funcs()
+            init_used = used_bytes()
 
-        # for i in range(5):
-        #     planner = setup_float(n=n)
-        #     expl_tree = search_for_explanations(planner, 36.0,
-        #         funcs=funcs, search_depth=2, context=context)
-        #     expl_tree_iter = iter(expl_tree)
-        #     for f_comp,binding in expl_tree_iter:
-        #         pass
+            # for i in range(5):
+            #     planner = setup_float(n=n)
+            #     expl_tree = search_for_explanations(planner, 36.0,
+            #         funcs=funcs, search_depth=2, context=context)
+            #     expl_tree_iter = iter(expl_tree)
+            #     for f_comp,binding in expl_tree_iter:
+            #         pass
 
-        #     planner = None
-        #     expl_tree = None
-        #     expl_tree_iter = None
-        #     if(i == 0): 
-        #         init_used = used_bytes()
-        #     else:
-        #         print(used_bytes() - init_used)
+            #     planner = None
+            #     expl_tree = None
+            #     expl_tree_iter = None
+            #     if(i == 0): 
+            #         init_used = used_bytes()
+            #     else:
+            #         print(used_bytes() - init_used)
 
-        # assert used_bytes() == init_used
+            # assert used_bytes() == init_used
 
 
-        BOOP = define_fact("BOOP", {
-            "A" : "string",
-            "B" : {"type": "number", "visible":  True, "semantic" : True}
-        })
-        
-        def declare_em(planner,s="A"):
-            for i in range(n):
-                b = BOOP(s,i)
-                print("BEF", b._meminfo.refcount)
-                planner.declare(b)
-                print("AFT", b._meminfo.refcount)
-            return b
+            BOOP = define_fact("BOOP", {
+                "A" : "string",
+                "B" : {"type": "number", "visible":  True, "semantic" : True}
+            })
+            
+            def declare_em(planner,s="A"):
+                for i in range(n):
+                    b = BOOP(s,i)
+                    print("BEF", b._meminfo.refcount)
+                    planner.declare(b)
+                    print("AFT", b._meminfo.refcount)
+                return b
 
-        print("-----")
-        for i in range(5):
-            planner = SetChainingPlanner([BOOP])
-            b = declare_em(planner,"A")
-            # expl_tree = search_for_explanations(planner, 36.0,
-            #     funcs=funcs, search_depth=2, context=context)
-            # expl_tree_iter = iter(expl_tree)
-            # for f_comp,binding in expl_tree_iter:
-            #     pass
-            print("<<", b._meminfo.refcount)
+            print("-----")
+            for i in range(5):
+                planner = SetChainingPlanner([BOOP])
+                b = declare_em(planner,"A")
+                # expl_tree = search_for_explanations(planner, 36.0,
+                #     funcs=funcs, search_depth=2, context=context)
+                # expl_tree_iter = iter(expl_tree)
+                # for f_comp,binding in expl_tree_iter:
+                #     pass
+                print("<<", b._meminfo.refcount)
 
-            planner = None
-            expl_tree = None
-            expl_tree_iter = None
-            b = None
-            if(i == 0): 
-                init_used = used_bytes()
-            else:
-                print(used_bytes() - init_used)
+                planner = None
+                expl_tree = None
+                expl_tree_iter = None
+                b = None
+                if(i == 0): 
+                    init_used = used_bytes()
+                else:
+                    print(used_bytes() - init_used)
 
-        assert used_bytes() == init_used
+            assert used_bytes() == init_used
 
 
 
@@ -637,7 +632,36 @@ def test_policy_search(n=5):
     
     assert len(policy_expls) < len(no_policy_expls)
 
-    
+def test_divide():
+    from cre.default_funcs import Divide, Multiply
+    Divide_f8 = Divide(Var(f8),Var(f8))
+    Multiply_f8 = Multiply(Var(f8),Var(f8))
+
+
+    planner = SetChainingPlanner()
+    for x in [360, 135, 6]:
+        planner.declare(float(x))
+
+    expls = planner.search_for_explanations(13.5, funcs=[Divide_f8, Multiply_f8], 
+            search_depth=3, min_stop_depth=1)
+    for f, m in expls:
+        print(f.depth, f, m)
+
+
+    planner = SetChainingPlanner()
+    for x in [2, 12, 3]:
+        planner.declare(float(x))
+
+    expls = planner.search_for_explanations(8.0, funcs=[Divide_f8, Multiply_f8], 
+            search_depth=3, min_stop_depth=1)
+
+    print(summarize_depth_vals(planner, f8, 0))
+    print(summarize_depth_vals(planner, f8, 1))
+    print(summarize_depth_vals(planner, f8, 2))
+
+    for f, m in expls:
+        print(f.depth, f, m)
+
 
 
 
@@ -767,7 +791,8 @@ if __name__ == "__main__":
     # test_join_records_of_type()
     # test_forward_chain_one()
     # test_build_explanation_tree()
-    test_search_for_explanations()
+    # test_search_for_explanations()
+    test_divide()
     # test_declare_fact()
     # test_mem_leaks(n=10)
     # benchmark_apply_multi()

@@ -12,6 +12,8 @@ from cre.utils import  _raw_ptr_from_struct, _cast_structref
 
 import  cre.dynamic_exec
 
+
+
 # BOOP = define_fact("BOOP",{"A": "string", "B" : "number"})
 
 #TODO: would be nice to have functionality like x:=Var(BOOP) => Var(BOOP,'x')
@@ -36,9 +38,31 @@ def test_var():
         def var_to_str(v):
             return str(v)
 
-        v = Var(BOOP,'Q').A
+        Q = Var(BOOP,'Q')
+
+        print(Q.copy())
+
+        v = Q.A
+        print(v)
         assert var_to_str(v) == "Q.A"
         assert str(v) == "Q.A"
+
+        Z = Q.with_alias("Z")
+        print(Z)
+        assert var_to_str(Z) == "Z"
+        assert str(Z) == "Z"
+
+        x = v.with_alias("Z")
+        print(x)
+        assert var_to_str(x) == "Z.A"
+        assert str(x) == "Z.A"
+
+        l1 = Var(BOOP)
+        l2 = Var(BOOP)
+        assert l1.base_ptr == l1.B.base_ptr 
+        assert l2.base_ptr == l2.B.base_ptr 
+        
+
 
 
 # from cre.conditions import conds_repr, conditions_repr
@@ -539,10 +563,10 @@ if(__name__ == "__main__"):
     # print(cre_func_unique_string((x + z) + (y + z)))
     # print(cre_func_unique_string((x + z) + (y + 1)))
     # print(cre_func_unique_string((x + 1) + (y + z)))
-    # test_var()
-    test_anti_unify()
+    test_var()
+    # test_anti_unify()
     # test_unconditioned()
-    # test_build_conditions()
+    test_build_conditions()
     # test_list_operations()
     # test_link()
     # test_initialize()

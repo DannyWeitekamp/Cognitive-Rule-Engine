@@ -5,7 +5,7 @@ from numba import deferred_type, optional
 from numba import void,b1,u1,u2,u4,u8,i1,i2,i4,i8,f4,f8,c8,c16
 from numba import types
 from numba.typed import List, Dict
-from numba.core.types import DictType, ListType, unicode_type, float64, NamedTuple, NamedUniTuple, UniTuple, Tuple, Array, optional
+from numba.core.types import DictType, ListType, unicode_type, float64, UniTuple, Tuple, Array, optional
 from numba.cpython.unicode import  _set_code_point
 from numba.experimental import structref
 from numba.experimental.structref import new
@@ -18,7 +18,6 @@ from numba.experimental.function_type import _get_wrapper_address
 from llvmlite import binding as ll
 
 from cre.caching import unique_hash, source_to_cache, import_from_cached, source_in_cache
-from collections import namedtuple
 import numpy as np
 import timeit
 import itertools
@@ -32,12 +31,12 @@ from cre.context import CREContextDataType, CREContext, ensure_inheritance, cre_
 
 # from cre.subscriber import BaseSubscriberType
 from cre.structref import define_structref, define_boxing, CastFriendlyStructref
-from cre.fact import Fact, BaseFact, cast_fact, get_inheritance_t_ids
+from cre.fact import Fact, BaseFact, cast_fact, get_inheritance_t_ids, resolve_deref_data_ptr
 from cre.tuple_fact import TF, TupleFact
 from cre.fact_intrinsics import fact_lower_setattr
 from cre.utils import (cast, CastFriendlyMixin, lower_setattr, _meminfo_from_struct, decode_idrec, encode_idrec, _call_dtor,
   _ptr_from_struct_incref,  _decref_ptr, _decref_structref, _raw_ptr_from_struct_incref,  _obj_cast_codegen, _incref_structref, 
- _store, _load_ptr, deref_info_type, DEREF_TYPE_ATTR, DEREF_TYPE_LIST, _ptr_to_data_ptr, _list_base_from_ptr, new_w_del)
+ _store, _load_ptr, DEREF_TYPE_ATTR, DEREF_TYPE_LIST, _ptr_to_data_ptr, _list_base_from_ptr, new_w_del)
 from cre.vector import new_vector, VectorType
 from cre.caching import import_from_cached, source_in_cache, source_to_cache
 from cre.obj import copy_cre_obj, cre_obj_clear_refs
@@ -117,9 +116,10 @@ class MemSet(structref.StructRefProxy):
         return memset_retract(self,identifier)
 
     def _get_indexer(self, attr):
-        if(attr not in self.indexers):
-            self.indexers[attr] = new_indexer(attr)
-        return self.indexers[attr]
+        indexer = self.indexers.get(attr)
+        if(indexer is None):
+            indexer = self.indexers[attr] = Indexer(attr)
+        return indexer
 
     def get_facts(self,typ=None, no_subtypes=False,**kwargs):
         self.context._ensure_retro_registers()
@@ -128,7 +128,7 @@ class MemSet(structref.StructRefProxy):
         if(len(kwargs) > 0):
             attr, val = list(kwargs.items())[0]
             indexer = self._get_indexer(attr)
-            return indexer_get_facts(indexer, self, val)
+            return indexer.get_facts(self, val)
 
         # Implement .get_facts(type)
         if(isinstance(typ,str)):
@@ -149,10 +149,14 @@ class MemSet(structref.StructRefProxy):
         if(len(kwargs) > 0):
             attr, val = list(kwargs.items())[0]
             indexer = self._get_indexer(attr)
-            return indexer_get_fact(indexer, self, val)
+            return indexer.get_fact(self, val)
 
         # Implement .get_fact(idrec)
-        return memset_get_fact(self, args[0])
+        identifier = args[0]
+        if(isinstance(identifier, str)):
+            return memset_get_fact_by_name(self, identifier)
+        else:
+            return memset_get_fact_by_idrec(self, identifier)
 
     def get_ptr(self):
         return get_ptr(self)
@@ -208,6 +212,18 @@ class MemSet(structref.StructRefProxy):
             if(isinstance(e, TypeError) and "not callable" in str(e)): return
             
             print("An error occured when trying to clean a cre.MemSet object:\n",e)
+
+    def as_dict(self, key_attr='idrec'):
+        d = {}
+        if(key_attr):
+            for fact in self.get_facts():
+                fd = fact.as_dict(key_attr)
+                d[fd[key_attr]] = fd
+        else:
+            for i, fact in enumerate(self.get_facts()):
+                d[i] = fact.as_dict(key_attr)
+        return d
+
 
 define_boxing(MemSetTypeClass, MemSet)
 
@@ -472,34 +488,38 @@ def modify(ms,fact,attr,val):
 
 #### get_fact ####
 
-@generated_jit(cache=True)
+@njit(BaseFact(MemSetType,u8), cache=True)
+def memset_get_fact_by_idrec(self, idrec):
+    t_id, f_id, _ =  decode_idrec(idrec)
+    # if(t_id != typ_t_id): raise ValueError(err_msg)
+    facts = facts_for_t_id(self, t_id) #negligible
+    fact_ptr = facts.data[f_id]
+    return cast(fact_ptr, BaseFact)
+
+@njit(BaseFact(MemSetType,unicode_type), cache=True)
+def memset_get_fact_by_name(self, name):
+    idrec = self.names_to_idrecs[name]
+    t_id, f_id, _ =  decode_idrec(idrec)
+    # if(t_id != typ_t_id): raise ValueError(err_msg)
+    facts = facts_for_t_id(self, t_id) #negligible
+    fact_ptr = facts.data[f_id]
+    return cast(fact_ptr, BaseFact)
+
 @overload_method(MemSetTypeClass, "get_fact")
 def memset_get_fact(self, identifier, typ=None):
     if(isinstance(typ,types.Omitted) or typ is None):
         return_typ = BaseFact    
     else:
         return_typ = typ.instance_type
-    # context = cre_context()
-    # typ_t_id = context.get_t_id(_type=return_typ)
-    # err_msg = f"Invalid idrec for {return_typ}."
     if(isinstance(identifier, types.Integer)):
         def impl(self, identifier, typ=None):
-            t_id, f_id, _ =  decode_idrec(identifier)
-            # if(t_id != typ_t_id): raise ValueError(err_msg)
-            facts = facts_for_t_id(self, t_id) #negligible
-            fact_ptr = facts.data[f_id]
-            return cast(fact_ptr, return_typ)
+            return cast(memset_get_fact_by_idrec(self, identifier), return_typ)
 
     elif(isinstance(identifier, unicode_type)):
         def impl(self, identifier, typ=None):
-            idrec = self.names_to_idrecs[identifier]
-            t_id, f_id, _ =  decode_idrec(idrec)
-            # if(t_id != typ_t_id): raise ValueError(err_msg)
-            facts = facts_for_t_id(self, t_id) #negligible
-            fact_ptr = facts.data[f_id]
-            return cast(fact_ptr, return_typ)
-
+            return cast(memset_get_fact_by_name(self, identifier),return_typ)
     return impl
+
 
 #### overloads for declare, rectract, modify ####
 
@@ -560,31 +580,7 @@ def memset_modify(self, fact, attr, val):
 
     return impl
 
-@njit(i8(deref_info_type,i8),inline='never',cache=True)
-def deref_once(deref, inst_ptr):
-    if(deref.type == u1(DEREF_TYPE_ATTR)):
-        return _ptr_to_data_ptr(inst_ptr)
-    else:
-        return _list_base_from_ptr(inst_ptr)
 
-@njit(i8(BaseFact, deref_info_type[::1]),cache=True)
-def resolve_deref_data_ptr(fact, deref_infos):
-    '''
-    '''
-    inst_ptr = cast(fact, i8)
-    if(len(deref_infos) > 1):
-        for k in range(len(deref_infos)-1):
-            if(inst_ptr == 0): break;
-            deref = deref_infos[k]
-            data_ptr = deref_once(deref, inst_ptr)
-            inst_ptr = _load_ptr(i8, data_ptr+deref.offset)
-
-    if(inst_ptr != 0):
-        deref = deref_infos[-1]
-        data_ptr = deref_once(deref, inst_ptr)
-        return data_ptr+deref.offset
-    else:
-        return 0
 
 @generated_jit(nopython=True, cache=True)
 def memset_modify_w_deref_infos(self, fact, deref_infos, val):
@@ -870,7 +866,27 @@ class IndexerTypeClass(CastFriendlyStructref):
     pass
 
 class Indexer(structref.StructRefProxy):
-    pass
+    def __new__(cls, attr):
+        base_types = get_base_types_with_attr(attr)
+        attr_type = base_types[0][1]
+        ctor, indexer_type = indexer_ctor_impl(base_types, attr)
+        self = ctor()
+
+        indexer_get_facts.compile(ListType(BaseFact)(indexer_type, MemSetType, attr_type))
+        indexer_get_fact.compile(BaseFact(indexer_type, MemSetType, attr_type))
+
+        self.get_facts_ep = indexer_get_facts.overloads[(indexer_type, MemSetType, attr_type)].entry_point
+        self.get_fact_ep = indexer_get_fact.overloads[(indexer_type, MemSetType, attr_type)].entry_point
+        return self
+
+    def get_facts(self, memset, val):
+        return self.get_facts_ep(self, memset, val)
+
+
+    def get_fact(self, memset, val):
+        return self.get_fact_ep(self, memset, val)
+
+
 
 
 define_boxing(IndexerTypeClass, Indexer)
@@ -901,9 +917,9 @@ vec2_type = Tuple((VectorType,VectorType))
 
 # TODO: Should probably see if there is a way to make more generic 
 #  version of Indexer
-def new_indexer(attr):
-    base_types = get_base_types_with_attr(attr)
-    return indexer_ctor_impl(base_types, attr)()
+# def new_indexer(attr):
+#     base_types = get_base_types_with_attr(attr)
+#     return indexer_ctor_impl(base_types, attr)()
 
 _indexer_ctor_impls = {}
 def indexer_ctor_impl(base_types, attr):
@@ -955,8 +971,8 @@ def ctor():
 '''
             source_to_cache('MemSetIndexer', long_hash, source)
         ctor = import_from_cached('MemSetIndexer', long_hash, ['ctor'])['ctor']
-        print(ctor)
-        _indexer_ctor_impls[tup] = ctor
+        # print(ctor)
+        _indexer_ctor_impls[tup] = (ctor, indexer_type)
     return _indexer_ctor_impls[tup]
 
 
@@ -1000,6 +1016,8 @@ def indexer_update(self, memset):
     base_types_t_ids = tuple(base_types_t_ids)
     def impl(self, memset):
         cq = memset.change_queue
+        if(self.head == cq.head): return
+
         for change_event in accumulate_change_events(cq, self.head, cq.head):
             for tup in literal_unroll(base_types_t_ids):
                 base_type, t_ids = tup
@@ -1017,22 +1035,31 @@ def indexer_update(self, memset):
 
 @njit(cache=True)
 def indexer_get_facts(self, memset, val):
-    indexer_update(self, memset)
+    if(self.head != memset.change_queue.head):
+        indexer_update(self, memset)
     facts = List.empty_list(BaseFact)
     if(val in self.mapping):
         idrecs, _ = self.mapping[val]
         for i in range(idrecs.head):
             idrec = u8(idrecs.data[i])
             if(idrec != 0):
-                facts.append(memset_get_fact(memset,idrec))
+                facts.append(memset_get_fact_by_idrec(memset,idrec))
     return facts
 
 @njit(cache=True)
 def indexer_get_fact(self, memset, val):
-    facts = indexer_get_facts(self, memset, val)
-    if(len(facts) == 0):
-        raise KeyError("No fact found.")
-    return facts[0]
+    if(self.head != memset.change_queue.head):
+        indexer_update(self, memset)
+    if(val in self.mapping):
+        idrecs, _ = self.mapping[val]
+        for i in range(idrecs.head):
+            idrec = u8(idrecs.data[i])
+            if(idrec != 0):
+                return memset_get_fact_by_idrec(memset,idrec)
+    raise KeyError("No fact found.")
+
+
+
 
 
 # ----------------------------------------------------------------------
@@ -1061,7 +1088,7 @@ from numba.cpython.hashing import _Py_hash_t, _PyHASH_XXPRIME_5
 from numba import u8
 from cre.type_conv import byte_string_to_base64
 
-@njit(cache=True, locals={"i": u8, "c": u8, "nc": u8, "mx": u8,"rest": u8})
+@njit(cache=True, locals={"i": u8, "j": u8, "c": u8, "nc": u8, "mx": u8,"rest": u8})
 def memset_long_hash_bytes(ms, byte_width=24):
     facts = get_facts(ms, None)
     fact_hashes = np.empty(len(facts), dtype=np.uint64)
@@ -1075,43 +1102,35 @@ def memset_long_hash_bytes(ms, byte_width=24):
 
     # Fill hash_bytes with starting stuff 
     acc = accum_item_hash(u8(_PyHASH_XXPRIME_5), len(facts))
-    for c in range(0,byte_width,8):
-        
+    for c in range(0,byte_width,8):        
         buffer0[0] = u8(accum_item_hash(acc, c))
-        # print(c,c+8, buffer0, buffer0.view(np.uint8))
         mx = min(byte_width, c+8)
         hash_bytes[c:mx] = buffer0.view(np.uint8)[:mx-c]
 
-    # print("BEF")
-    # print(hash_bytes)
-
     inds = np.argsort(fact_hashes)
-
     c = 0
-    for i in inds:
+    for j, i in enumerate(inds):
         fact = facts[i]
-        fact_hash = hash(fact)
+        fact_hash = fact_hashes[i]
 
         nc = c+8
         mx = min(len(hash_bytes), nc)
         rest = nc-mx
         l = 8-rest
 
-        # print("A")
         # lower bit
         buffer[:l] = hash_bytes[c:mx]
-        # print("b")
+
         # upper bit that might have been cut off
         if(rest):
             buffer[l:8] = hash_bytes[:rest]
 
-        # print("c")
         acc = buffer.view(np.uint64)[0]
+        acc = accum_item_hash(acc, j)
         acc = accum_item_hash(acc, fact_hash)
-        # print("C", acc)
+
         buffer0[:] = acc
         buffer = buffer0.view(np.uint8)
-        # print("C", acc)
         hash_bytes[c:mx] = buffer[:l]
 
         if(rest):

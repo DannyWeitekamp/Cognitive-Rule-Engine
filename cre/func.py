@@ -19,7 +19,7 @@ from cre.utils import (cast, _sizeof_type, _nullify_attr, new_w_del, _memcpy, _f
 from cre.utils import PrintElapse, encode_idrec, assign_to_alias_in_parent_frame, as_typed_list, lower_setattr, _store, _store_safe, _tuple_getitem
 from cre.vector import VectorType
 from cre.fact import Fact, gen_fact_import_str, get_offsets_from_member_types
-from cre.var import Var, var_extend, var_memcopy, VarType, VarTypeClass
+from cre.var import Var, var_extend,  VarType, VarTypeClass
 from cre.obj import CREObjType, cre_obj_field_dict, CREObjTypeClass, CREObjProxy, member_info_type, set_chr_mbrs, cre_obj_get_item_t_id_ptr, cre_obj_set_item, cre_obj_get_item, PRIMITIVE_MBR_ID
 from cre.core import T_ID_FUNC, T_ID_STR, register_global_default
 from cre.make_source import make_source, gen_def_func, gen_assign, gen_if, gen_not, resolve_template, gen_def_class
@@ -201,7 +201,8 @@ def CREFunc_method(cf_type, sig, _fn_name=None, on_error='error',**kwargs):
 # ----------------------------------------------------------------------
 # : CREFunc jitted side
 
-NameData, NameDataType = define_structref("NameData", {
+OriginData, OriginDataType = define_structref("OriginData", {
+    "ptr" : i8,
     "name" : unicode_type,
     "expr_template" : unicode_type,
     "shorthand_template" : unicode_type,
@@ -211,8 +212,9 @@ NameData, NameDataType = define_structref("NameData", {
 cre_func_fields_dict = {
     **cre_obj_field_dict, 
 
-    # Keeps track of name and various ways of printing the CREFunc
-    "name_data" : NameDataType,
+    # Keeps track of data pertaining to the base CREFunc that originated this 
+    # CREFunc including a weak pointer, it's name and various ways of printing it.
+    "origin_data" : OriginDataType,
 
     # The number of arguments taken by this cf.
     "n_args" : i8,
@@ -375,6 +377,7 @@ class CREFuncTypeClass(types.Callable, CREObjTypeClass):
             return f"CREFunc[{self.func_name}{hsh}{arg_s}->{self.return_type}{':c' if self.is_composed else ''}]"
         else:
             return f"{self.func_name}"
+
 
     @property
     def symbol_prefix(self):
@@ -570,6 +573,14 @@ class CREFunc(StructRefProxy):
     def __repr__(self):
         return cre_func_str(self, False, True, "")
 
+    def __hash__(self):
+        from cre.dynamic_exec import cre_func_hash
+        return cre_func_hash(self)
+
+    @property
+    def unique_str(self):
+        return cre_func_unique_string(self)
+
     def minimal_str(self, show_derefs=False, ignore_funcs=[]):
         ignore_pattern = "".join([f"{f.func_name}," for f in ignore_funcs]) 
         return cre_func_str(self, True, show_derefs, ignore_pattern)
@@ -650,6 +661,13 @@ class CREFunc(StructRefProxy):
         impl = set_const_arg_impl(arg)
         impl(new_cf, i, arg)
 
+    def get_const_root_arg(self, i, _typ=None):
+        impl = get_const_root_arg_impl(_typ)
+        return impl(self, i)
+
+
+
+
     @property
     @njit(i8(CREFuncType), cache=True)
     def n_args(self):
@@ -679,6 +697,11 @@ class CREFunc(StructRefProxy):
     @njit(i8(CREFuncType), cache=True)
     def depth(self):
         return i8(self.depth)
+
+    @property
+    @njit(unicode_type(CREFuncType), cache=True)
+    def name(self):
+        return self.origin_data.name
 
 
     def recover_return_type(self):
@@ -714,11 +737,21 @@ class CREFunc(StructRefProxy):
 
     @property    
     def base_t_ids(self):
-        return get_base_t_ids_ep(self)  
+        return get_base_t_ids_ep(self)
+
+    @property    
+    def arg_t_ids(self):
+        return get_base_t_ids_ep(self)
 
     @property    
     def head_var_ptrs(self):
         return get_head_var_ptrs(self)    
+
+    def get_ptr(self):
+        return func_get_ptr(self)
+    @classmethod
+    def from_ptr(cls, ptr):
+        return func_from_ptr(ptr)
 
     def __lt__(self, other): 
         from cre.default_funcs import LessThan
@@ -811,6 +844,10 @@ class CREFunc(StructRefProxy):
 
 define_boxing(CREFuncTypeClass, CREFunc)
 
+
+# --------------------------
+# : Getters for various attribute definitions 
+
 @njit(i8[::1](CREFuncType), cache=True)
 def get_base_var_ptrs(self):
     base_var_ptrs = np.empty(self.n_args,dtype=np.int64)
@@ -829,6 +866,7 @@ def get_base_var_aliases_pattern(self):
     if(len(pattern) > 0):
         pattern = pattern[:-1]
     return pattern
+ 
 
 @overload_attribute(CREFuncTypeClass, "base_var_ptrs")
 def overload_base_var_ptrs(self):
@@ -859,7 +897,34 @@ def get_head_var_ptrs(self):
 
 @overload_attribute(CREFuncTypeClass, "head_var_ptrs")
 def overload_head_var_ptrs(self):
+    # Not code: returning implementation above
     return get_head_var_ptrs.py_func
+
+@overload_attribute(CREFuncTypeClass, "origin")
+def overload_origin(self):
+    # Note: This is is dereferencing a weak pointer, but should be safe
+    #   since the CREFunc should keep a reference to it's origin
+    def impl(self):
+        return cast(self.origin_data.ptr, CREFuncType)
+    return impl
+
+@overload_attribute(CREFuncTypeClass, "name")
+def overload_name(self):
+    def impl(self):
+        return self.origin_data.name
+    return impl
+
+@overload_attribute(CREFuncTypeClass, "expr_template")
+def overload_expr_template(self):
+    def impl(self):
+        return self.origin_data.expr_template
+    return impl
+
+@overload_attribute(CREFuncTypeClass, "shorthand_template")
+def overload_shorthand_template(self):
+    def impl(self):
+        return self.origin_data.shorthand_template
+    return impl
 
 # ------------------------------
 # : CREFunc initialization
@@ -1079,13 +1144,25 @@ def cre_func_ctor(_cf_type, name, expr_template, shorthand_template, is_ptr_func
                 repr_const_addrs[i-1] = _get_global_fn_addr(repr_const_symbols[i])
         # return repr_const_addrs
         # repr_const_addrs = make_repr_const_addrs(cf, arg_types)
-        cf.name_data = NameData(name, expr_template, shorthand_template, repr_const_addrs)        
+        cf.origin_data = OriginData(cast(cf,i8), name, expr_template, shorthand_template, repr_const_addrs)        
         cf.is_composed = False
         cf.depth = 1
 
         casted = cast(cf, CREFuncType)
         return casted 
     return impl
+
+# -------------------------------------
+# : Helper Functions 
+
+@njit(CREFuncType(i8), cache=True)
+def func_from_ptr(ptr):
+    return cast(ptr, CREFuncType)
+
+@njit(i8(CREFuncType), cache=True)
+def func_get_ptr(self):
+    return cast(self, i8)
+
 
 # --------------------------------------------------------------
 # : Copy
@@ -1112,7 +1189,7 @@ def cre_func_copy(cf):
     _nullify_attr(cpy, 'head_ranges')
     _nullify_attr(cpy, 'head_infos')
     _nullify_attr(cpy, 'root_arg_infos')
-    _nullify_attr(cpy, 'name_data')
+    _nullify_attr(cpy, 'origin_data')
     _nullify_attr(cpy, 'prereq_instrs')
 
     # Rebuild head_ranges, head_infos, prereq_instrs from common buffer
@@ -1129,7 +1206,7 @@ def cre_func_copy(cf):
 
     cpy.return_data_ptr = cf.return_data_ptr+cpy_delta
     cpy.root_arg_infos = cf.root_arg_infos.copy()
-    cpy.name_data = cf.name_data
+    cpy.origin_data = cf.origin_data
     cpy.is_initialized = False
 
     # print("::", f"{cf_ptr}:{cast(cf.root_arg_infos, i8)}","|", f"{cpy_ptr}:{cast(cpy.root_arg_infos, i8)}")
@@ -1255,6 +1332,29 @@ def set_const_arg_impl(_val, use_ep=False):
         return set_const_arg_overloads[nb_val_type][1]
     else:
         return set_const_arg_overloads[nb_val_type][0]
+
+
+get_const_root_arg_overloads = {}
+def get_const_root_arg_impl(_typ_or_t_id, use_ep=False):
+    _typ = _typ_or_t_id
+    if(isinstance(_typ_or_t_id, int)):
+        context = cre_context()
+        _typ = context.get_type(t_id=_typ_or_t_id)
+
+    sig = _typ(CREFuncType, i8)
+    @njit(sig,cache=True)
+    def _get_const_root_arg(self, i):
+        return _load_ptr(_typ, self.root_arg_infos[i].ptr)
+    entry_point = next(iter(_get_const_root_arg.overloads.values())).entry_point
+    get_const_root_arg_overloads[_typ] = (_get_const_root_arg, entry_point)
+    if(use_ep):
+        return get_const_root_arg_overloads[_typ][1]
+    else:
+        return get_const_root_arg_overloads[_typ][0]
+
+
+        
+
 
 
 @generated_jit(cache=True)
@@ -1788,14 +1888,14 @@ def cre_func_str(self, use_shorthand, use_derefs, ignore_pattern):
                     else:
                         arg_strs.append(var.alias) 
                 elif(arg_info.type == ARGINFO_CONST):
-                    addr = cf.name_data.repr_const_addrs[i]
+                    addr = cf.origin_data.repr_const_addrs[i]
                     fn = _func_from_address(rc_fn_typ, addr)
                     arg_strs.append(fn(cf,i))
                 else:
                     raise ValueError("Bad arginfo type.")
                 i += 1
         while(i >= len(cf.root_arg_infos)):
-            nd = cf.name_data
+            nd = cf.origin_data
 
             should_ignore = f"{nd.name}," in ignore_pattern
             if(should_ignore):
@@ -1811,7 +1911,7 @@ def cre_func_str(self, use_shorthand, use_derefs, ignore_pattern):
                 break
 
             if(use_shorthand and not should_ignore):
-                parent_nd = stack[-1][0].name_data
+                parent_nd = stack[-1][0].origin_data
                 parent_tmp = parent_nd.shorthand_template if use_shorthand else parent_nd.expr_template
                 if(tmp[-1] != ")" and parent_tmp[-1] != ")"):
                     s = f"({s})"
@@ -1820,6 +1920,7 @@ def cre_func_str(self, use_shorthand, use_derefs, ignore_pattern):
             arg_strs.append(s)
     return s
 
+@overload_method(CREFuncTypeClass, '__str__')
 @overload(str)
 def overload_cre_func_str(self):
     if(self is not CREFuncType): return
@@ -1989,8 +2090,7 @@ from numba.core.errors import NumbaError, NumbaPerformanceWarning
 from cre.utils import _incref_structref, cast, PrintElapse, _load_ptr, _obj_cast_codegen, _store_safe, _struct_get_attr_ptr
 from cre.func import (ensure_repr_const, cre_func_ctor, CREFunc_method, CREFunc_assign_method_addr,
     CREFuncTypeClass, CREFuncType, VarType, CFSTATUS_TRUTHY, CFSTATUS_FALSEY, CFSTATUS_NULL_DEREF, CFSTATUS_ERROR)
-from cre.memset import resolve_deref_data_ptr
-from cre.fact import BaseFact
+from cre.fact import BaseFact, resolve_deref_data_ptr
 import cloudpickle
 
 
@@ -2150,7 +2250,7 @@ def cre_func_unique_string(self):
                     vs += f'({str(i8(d.type))},{str(i8(d.t_id))},{str(i8(d.a_id))},{str(i8(d.offset))}){delim}'
                 arg_strs.append(vs) 
             elif(arg_info.type == ARGINFO_CONST):
-                addr = cf.name_data.repr_const_addrs[i]
+                addr = cf.origin_data.repr_const_addrs[i]
                 fn = _func_from_address(rc_fn_typ, addr)
                 arg_strs.append(fn(cf,i))
             i += 1

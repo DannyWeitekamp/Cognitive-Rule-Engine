@@ -1047,6 +1047,26 @@ class PrintElapse():
         self.t1 = time.time_ns()/float(1e6)
         print(f'{self.name}: {self.t1-self.t0:.6f} ms')
 
+##### Stuff for finding memleaks #####
+from numba.core.runtime import rtsys, _nrt_python
+import gc
+
+class NRTStatsEnabledMeta(type):
+    def __enter__(self):
+        _nrt_python.memsys_enable_stats()
+
+    def __exit__(self, *args):
+        _nrt_python.memsys_disable_stats()        
+
+class NRTStatsEnabled(metaclass=NRTStatsEnabledMeta):
+    def __new__(cls):
+        return cls
+
+def used_bytes(garbage_collect=True):
+    if(garbage_collect): gc.collect()
+    stats = rtsys.get_allocation_stats()
+    return stats.alloc-stats.free
+
 
 ##### Cacheable Version of Typed List Generation / Iteration ####
 

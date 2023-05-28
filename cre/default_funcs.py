@@ -1,5 +1,5 @@
-from numba import i8, njit
-from numba.types import unicode_type
+from numba import njit
+from numba.types import unicode_type, string, f8, i8
 from cre.func import CREFunc
 from cre.utils import _load_ptr
 

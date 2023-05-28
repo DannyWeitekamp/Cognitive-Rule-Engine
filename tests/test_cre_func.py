@@ -5,137 +5,138 @@ from cre.func import CREFunc, set_func_arg, set_var_arg, reinitialize, CREFuncTy
 from cre.obj import _get_chr_mbrs_infos_from_attrs, _iter_mbr_infos
 from cre.fact import define_fact
 from cre.var import Var
-from cre.utils import PrintElapse, _func_from_address, _cast_structref
+from cre.utils import PrintElapse, _func_from_address, _cast_structref, NRTStatsEnabled, used_bytes
 from cre.context import cre_context
 import cre.type_conv
 import pytest
 
-from numba.core.runtime.nrt import rtsys
-def used_bytes():
-    stats = rtsys.get_allocation_stats()
-    return stats.alloc-stats.free
+
 
 
 def test_numerical():
-    @CREFunc(signature=i8(i8,i8,i8,i8))
-    def Add(a, b, c, d):
-        return a + b + c +d
+    with NRTStatsEnabled:
+        @CREFunc(signature=i8(i8,i8,i8,i8))
+        def Add(a, b, c, d):
+            return a + b + c +d
 
-    a = Var(i8,'a')
-    b = Var(i8,'b')
-    c = Var(i8,'c')
+        a = Var(i8,'a')
+        b = Var(i8,'b')
+        c = Var(i8,'c')
 
-    z = Add(a,b,c,c)
-    assert z.depth == 1
+        z = Add(a,b,c,c)
+        assert z.depth == 1
 
-    # print("<<", str(z))
-    assert z(1,2,3) == 9
-    assert str(z) == "Add(a, b, c, c)"
-    q = z(c,c,c)
-    # print("<<", q)
-    assert(q(7)==28)
-    assert str(q) == "Add(c, c, c, c)"
+        # print("<<", str(z))
+        assert z(1,2,3) == 9
+        assert str(z) == "Add(a, b, c, c)"
+        q = z(c,c,c)
+        # print("<<", q)
+        assert(q(7)==28)
+        assert str(q) == "Add(c, c, c, c)"
 
-    assert Add(a,Add(a,b,c,a),c,c)(1,2,3) == 14
-    assert Add(Add(Add(2,1,1,a),2,1,Add(2,1,1,b)),1,1,c)(1,2,3) == 19
-    z = Add(Add(Add(2,1,1,a),2,1,Add(2,1,1,b)),1,1,c)
-    assert str(z) == "Add(Add(Add(2, 1, 1, a), 2, 1, Add(2, 1, 1, b)), 1, 1, c)"
-    assert z.depth == 3
-
-    @CREFunc(signature=f8(f8,f8),
-            shorthand='{0}+{1}')
-    def Add(a, b):
-        return a + b
-
-    assert Add(9.0, 7.0) == 16.0
-
-    for i in range(2):
-        a = Var(f8,'a')
-        Incr = Add(Var(f8,'a'),1.0)
-        assert Incr(3.0) == 4.0
-        assert str(Incr) == "a+1.0"
-
-        if(i == 0):
-            init_bytes = used_bytes()
-        else:
-            assert used_bytes() == init_bytes
-
-
-
-def test_string():
-    @CREFunc(signature=unicode_type(unicode_type,unicode_type),
-            shorthand='{0}+{1}')
-    def Concat(a, b):
-        return a + b
-    
-    a = Var(unicode_type,'a')
-    b = Var(unicode_type,'b')
-    c = Var(unicode_type,'c')
-
-    for i in range(2):
-        z = Concat("|", Concat(Concat(b,c),"|" ))
-
-        assert z("X","Y") == "|XY|"
-        assert str(z) == "'|'+((b+c)+'|')"
+        assert Add(a,Add(a,b,c,a),c,c)(1,2,3) == 14
+        assert Add(Add(Add(2,1,1,a),2,1,Add(2,1,1,b)),1,1,c)(1,2,3) == 19
+        z = Add(Add(Add(2,1,1,a),2,1,Add(2,1,1,b)),1,1,c)
+        assert str(z) == "Add(Add(Add(2, 1, 1, a), 2, 1, Add(2, 1, 1, b)), 1, 1, c)"
         assert z.depth == 3
 
-        if(i == 0):
-            init_bytes = used_bytes()
-        else:
-            assert used_bytes() == init_bytes
-
-
-
-def test_obj():
-    with cre_context("test_obj"):
-        BOOP = define_fact("BOOP", {"A" :unicode_type, "B" :i8})
-
-        @CREFunc(signature=unicode_type(unicode_type,unicode_type),
+        @CREFunc(signature=f8(f8,f8),
                 shorthand='{0}+{1}')
-        def Concat(a, b):
+        def Add(a, b):
             return a + b
 
-        @CREFunc(signature=BOOP(BOOP,BOOP),
-                shorthand='{0}+{1}')
-        def CatBOOPs(a, b):
-            return BOOP(a.A + b.A, a.B + b.B)
+        assert Add(9.0, 7.0) == 16.0
 
-        a = Var(BOOP,'a')
-        b = Var(BOOP,'b')
-        c = Var(BOOP,'c')
-        
         for i in range(2):
-            ba, bb = BOOP("A",1), BOOP("B",2)
+            a = Var(f8,'a')
+            Incr = Add(Var(f8,'a'),1.0)
+            assert Incr(3.0) == 4.0
+            assert str(Incr) == "a+1.0"
 
-            z = Concat(a.A, a.A)
-
-            assert z(ba) == "AA"
-            assert str(z) == "a.A+a.A"
-
-            z = Concat(a.A, b.A)
-
-            assert z(ba,bb) == "AB"
-            assert str(z) == "a.A+b.A"
-
-            z = Concat(Concat("|", Concat(a.A, b.A)),"|")
-            assert z(ba,bb) == "|AB|"
-            
-
-            zboop = CatBOOPs(a,b)
-
-            assert zboop(ba,bb) == BOOP(A="AB", B=3)
-            assert str(zboop) == "a+b"
-
-            # Make sure "head_var_ptrs" actually grabs vars w/ derefs
-            assert not any(z.base_var_ptrs == z.head_var_ptrs)
-
-            z = None
-            zboop = None
             if(i == 0):
                 init_bytes = used_bytes()
             else:
                 assert used_bytes() == init_bytes
-                # print(used_bytes(), init_bytes)
+
+
+
+def test_string():
+    with NRTStatsEnabled:
+        @CREFunc(signature=unicode_type(unicode_type,unicode_type),
+                shorthand='{0}+{1}')
+        def Concat(a, b):
+            return a + b
+        
+        a = Var(unicode_type,'a')
+        b = Var(unicode_type,'b')
+        c = Var(unicode_type,'c')
+
+        for i in range(2):
+            z = Concat("|", Concat(Concat(b,c),"|" ))
+
+            assert z("X","Y") == "|XY|"
+            assert str(z) == "'|'+((b+c)+'|')"
+            assert z.depth == 3
+
+            if(i == 0):
+                init_bytes = used_bytes()
+            else:
+                assert used_bytes() == init_bytes
+
+
+
+def test_obj():
+    with NRTStatsEnabled:
+        with cre_context("test_obj"):
+            BOOP = define_fact("BOOP", {"A" :unicode_type, "B" :i8})
+
+            @CREFunc(signature=unicode_type(unicode_type,unicode_type),
+                    shorthand='{0}+{1}')
+            def Concat(a, b):
+                return a + b
+
+            @CREFunc(signature=BOOP(BOOP,BOOP),
+                    shorthand='{0}+{1}')
+            def CatBOOPs(a, b):
+                return BOOP(a.A + b.A, a.B + b.B)
+
+            a = Var(BOOP,'a')
+            b = Var(BOOP,'b')
+            c = Var(BOOP,'c')
+            
+            for i in range(2):
+                ba, bb = BOOP("A",1), BOOP("B",2)
+
+                z = Concat(a.A, a.A)
+                print(z(ba), str(z))
+
+                assert z(ba) == "AA"
+                assert str(z) == "a.A+a.A"
+
+                z = Concat(a.A, b.A)
+
+                assert z(ba,bb) == "AB"
+                assert str(z) == "a.A+b.A"
+
+                z = Concat(Concat("|", Concat(a.A, b.A)),"|")
+                assert z(ba,bb) == "|AB|"
+                
+
+                zboop = CatBOOPs(a,b)
+
+                assert zboop(ba,bb) == BOOP(A="AB", B=3)
+                assert str(zboop) == "a+b"
+
+                # Make sure "head_var_ptrs" actually grabs vars w/ derefs
+                assert not any(z.base_var_ptrs == z.head_var_ptrs)
+
+                z = None
+                zboop = None
+                if(i == 0):
+                    init_bytes = used_bytes()
+                else:
+                    assert used_bytes() == init_bytes
+                    # print(used_bytes(), init_bytes)
 
 def test_mixed_types():
     from cre.default_funcs import Identity
@@ -685,7 +686,7 @@ if __name__ == "__main__":
     # test_no_mutate_on_compose()
     # test_numerical()
     # test_string()
-    # test_obj()
+    test_obj()
     # test_mixed_types()
     # test_njit_compose()
     # test_compose_deref_bases()
@@ -698,7 +699,7 @@ if __name__ == "__main__":
     # test_ptr_ops()
     # test_constant()
     # test_bad_compose()
-    test_minimal_str()
+    # test_minimal_str()
 
     sys.exit()
     # @njit(f8(f8,f8),cache=True)

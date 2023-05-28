@@ -152,7 +152,7 @@ class CREObjTypeClass(CastFriendlyMixin, types.StructRef):
 CREObjType = CREObjTypeClass(cre_obj_fields) 
 register_global_default("CREObj", CREObjType)
 default_manager.register(CREObjTypeClass, CREObjModel)
-define_attributes(CREObjType)
+define_attributes(CREObjType) #Not sure why but define on type instead of type_class
 
 
 meminfo_type = types.MemInfoPointer(types.voidptr)

@@ -11,7 +11,7 @@ import logging
 import numpy as np
 import pytest
 from collections import namedtuple
-from cre.utils import _struct_from_meminfo, PrintElapse
+from cre.utils import _struct_from_meminfo, PrintElapse, used_bytes, NRTStatsEnabled
 import gc
 from numba.core.runtime.nrt import rtsys
 from weakref import WeakKeyDictionary
@@ -241,7 +241,7 @@ def test_retroactive_register():
         # assert np.array_equal(c.get_child_t_ids(t_id=b1_t_id),[b1_t_id,b2_t_id,b3_t_id])
 
 
-from cre.memset import new_indexer, indexer_update, indexer_get_facts, indexer_get_fact
+from cre.memset import Indexer, indexer_update, indexer_get_facts, indexer_get_fact
 def test_indexer():
     with cre_context("test_indexer"):
         spec1 = {"A" : "string", "B" : "number"}
@@ -259,7 +259,7 @@ def test_indexer():
         ms.declare(BOOP2("b", 2))
         ms.declare(BOOP3("b", 3))
 
-        indexer = new_indexer("A")
+        indexer = Indexer("A")
         indexer_update(indexer, ms)
         facts = indexer_get_facts(indexer, ms,"a")
 
@@ -339,95 +339,93 @@ with cre_context("test_mem_leaks"):
     TextField = define_fact("TextField",tf_spec)
     BOOP = define_fact("BOOP",{"A": "string", "B" : "number"})
 
-def used_bytes():
-    stats = rtsys.get_allocation_stats()
-    print(stats)
-    return stats.alloc-stats.free
-
 
 def test_mem_leaks():
+
     ''' Test for MemSet leaks in mem. This test might fail if other tests fail
         even if there is nothing wrong '''
-    with cre_context("test_mem_leaks"):
-        init_used = used_bytes()
+    with NRTStatsEnabled:
+        with cre_context("test_mem_leaks"):
+            init_used = used_bytes()
 
-        # Empty Mem
-        ms = MemSet()
-        ms = None; gc.collect()
-        print(used_bytes()-init_used)
-        assert used_bytes()-init_used <= 0
+            # Empty Mem
+            ms = MemSet()
+            ms = None; gc.collect()
+            print(used_bytes()-init_used)
+            assert used_bytes()-init_used <= 0
 
-        # Declare a bunch of stuff
-        ms = MemSet()
-        for i in range(100):
-            tf = TextField()
-            ms.declare(tf, str(i))
-        tf, ms = None, None; gc.collect()
-        assert used_bytes()-init_used <= 0
+            # Declare a bunch of stuff
+            ms = MemSet()
+            for i in range(100):
+                tf = TextField()
+                ms.declare(tf, str(i))
+            tf, ms = None, None; gc.collect()
+            assert used_bytes()-init_used <= 0
 
-        # Declare More than one kind of stuff
-        ms = MemSet()
-        for i in range(100):
-            tf = TextField(value=str(i))
-            b = BOOP(A=str(i), B=i)
-            ms.declare(tf, str(i))
-            ms.declare(b, "B"+str(i))
-        tf, ms, b = None, None, None; gc.collect()
-        assert used_bytes()-init_used <= 0
+            # Declare More than one kind of stuff
+            ms = MemSet()
+            for i in range(100):
+                tf = TextField(value=str(i))
+                b = BOOP(A=str(i), B=i)
+                ms.declare(tf, str(i))
+                ms.declare(b, "B"+str(i))
+            tf, ms, b = None, None, None; gc.collect()
+            assert used_bytes()-init_used <= 0
 
-        # Declare More than one kind of stuff and retract some
-        ms = MemSet()
-        for i in range(100):
-            tf = TextField(value=str(i))
-            b = BOOP(A=str(i), B=i)
-            ms.declare(tf, str(i))
-            ms.declare(b, "B"+str(i))
-        for i in range(0,100,10):
-            ms.retract(str(i))
-            ms.retract("B"+str(i))
-        tf, ms, b = None, None, None; gc.collect()
-        # print(used_bytes()-init_used)
-        assert used_bytes()-init_used <= 0
+            # Declare More than one kind of stuff and retract some
+            ms = MemSet()
+            for i in range(100):
+                tf = TextField(value=str(i))
+                b = BOOP(A=str(i), B=i)
+                ms.declare(tf, str(i))
+                ms.declare(b, "B"+str(i))
+            for i in range(0,100,10):
+                ms.retract(str(i))
+                ms.retract("B"+str(i))
+            tf, ms, b = None, None, None; gc.collect()
+            # print(used_bytes()-init_used)
+            assert used_bytes()-init_used <= 0
 
 def test_free_refs():
-    with cre_context("test_free_refs"):
-        BOOP = define_fact("BOOP", {"name" : unicode_type, "nxt" : "TestLL"})
-        TestLL = define_fact("TestLL", {"name" : unicode_type, "nxt" : "TestLL"})
-        init_used = used_bytes()
+    with NRTStatsEnabled:
+        with cre_context("test_free_refs"):
+            BOOP = define_fact("BOOP", {"name" : unicode_type, "nxt" : "TestLL"})
+            TestLL = define_fact("TestLL", {"name" : unicode_type, "nxt" : "TestLL"})
+            init_used = used_bytes(False)
 
-        for i in range(2):
-            a = TestLL("a")
-            # print("a_refs", a._meminfo.refcount)
-            b = TestLL("b",a)
-            c = TestLL("c",a)
-            # print('0: ---')
-            # print("a_refs", a._meminfo.refcount)
-            # print("b_refs", b._meminfo.refcount)
-            a.nxt = b
-            # print('1: ---')
-            # print("a_refs", a._meminfo.refcount)
-            # print("b_refs", b._meminfo.refcount)
-            a.nxt = c
-            # print('2: ---')
-            # print("a_refs", a._meminfo.refcount)
-            # print("b_refs", b._meminfo.refcount)
-            ms = MemSet(auto_clear_refs=i==1)
-            ms.declare(a)
-            ms.declare(b)
-            ms.declare(c)
-            # print('3: ---')
-            # print("a_refs", a._meminfo.refcount)
-            # print("b_refs", b._meminfo.refcount)
-            if(i==0): ms.clear_refs()
-            ms = None
+            for i in range(2):
+                a = TestLL("a")
+                # print("a_refs", a._meminfo.refcount)
+                b = TestLL("b",a)
+                c = TestLL("c",a)
+                # print('0: ---')
+                # print("a_refs", a._meminfo.refcount)
+                # print("b_refs", b._meminfo.refcount)
+                a.nxt = b
+                # print('1: ---')
+                # print("a_refs", a._meminfo.refcount)
+                # print("b_refs", b._meminfo.refcount)
+                a.nxt = c
+                # print('2: ---')
+                # print("a_refs", a._meminfo.refcount)
+                # print("b_refs", b._meminfo.refcount)
+                ms = MemSet(auto_clear_refs=i==1)
+                ms.declare(a)
+                ms.declare(b)
+                ms.declare(c)
+                # print('3: ---')
+                # print("a_refs", a._meminfo.refcount)
+                # print("b_refs", b._meminfo.refcount)
+                # if(i==0): ms.clear_refs()
+                ms = None
 
-            # print("BYTES", used_bytes()-init_used)
-            # print("a_refs", a._meminfo.refcount)
-            # print("b_refs", b._meminfo.refcount)
-            # print("c_refs", c._meminfo.refcount)
-            a,b,c = None,None, None
-            # print("BYTES", used_bytes()-init_used)
-            assert used_bytes() == init_used
+                # print("BYTES", used_bytes()-init_used)
+                # print("a_refs", a._meminfo.refcount)
+                # print("b_refs", b._meminfo.refcount)
+                # print("c_refs", c._meminfo.refcount)
+                a,b,c = None,None, None
+                # print("BYTES", used_bytes()-init_used)
+                assert used_bytes(False) == init_used
 
 
 
@@ -447,6 +445,7 @@ def test_long_hash():
         ms10.declare(BOOP1("B",2))
         ms10.declare(BOOP1("C",3))
 
+        print("--MS10--")
         hsh10 = ms10.long_hash()
 
         ms11 = MemSet()
@@ -454,10 +453,15 @@ def test_long_hash():
         ms11.declare(BOOP1("A",1))
         ms11.declare(BOOP1("B",2))
 
+        print("--MS11--")
         hsh11 = ms11.long_hash()
+
+        assert hsh10 == hsh11
 
         ms12 = copy(ms10)
         hsh12 = ms12.long_hash()
+
+        assert hsh10 == hsh12
 
         ms20 = MemSet()
         ms20.declare(BOOP2("C",3))
@@ -466,9 +470,27 @@ def test_long_hash():
 
         hsh20 = ms20.long_hash()
         
-        assert hsh10 == hsh11
-        assert hsh10 == hsh12
+        
+        
         assert hsh10 != hsh20
+
+        # Ensure that hashing doesn't comute within facts 
+        TextField = define_fact("TextField", {"id" : str, "value" : str})
+        ms1 = MemSet()
+        ms1.declare(TextField('A','4'))
+        ms1.declare(TextField('B','4'))
+        ms1.declare(TextField('C',''))
+
+        ms2 = MemSet()
+        ms2.declare(TextField('A',''))
+        ms2.declare(TextField('B','4'))
+        ms2.declare(TextField('C','4'))
+
+        hsh1 = ms1.long_hash()
+        hsh2 = ms2.long_hash()
+        print(hsh1,hsh2)
+        assert hsh1 != hsh2
+
 
 
 def _test_modify_from_deref_infos():
@@ -524,7 +546,7 @@ def _test_modify_from_deref_infos():
 #### helper funcs #####
 
 with cre_context("test_memset"):
-    BOOP = define_fact("BOOP",{"A": "string", "B" : "number"})
+    BOOP = define_fact("BOOP",{"A": {"type" : str, "unique_id" : True}, "B" : "number"})
 
 
 def _benchmark_setup():
@@ -540,7 +562,7 @@ def _benchmark_setup():
 def _delcare_10000(ms):
     out = np.empty((10000,),dtype=np.uint64)
     for i in range(10000):
-        out[i] = ms.declare(BOOP("?",i))
+        out[i] = ms.declare(BOOP(str(i),i))
     return out
 
 @pytest.mark.benchmark(group="memset")
@@ -581,6 +603,15 @@ def _get_facts_10000(ms):
 def test_b_get_facts_10000(benchmark):
     benchmark.pedantic(_get_facts_10000,setup=get_facts_setup, warmup_rounds=1)
 
+def _get_facts_by_id_10000(ms):
+    for i in range(10000):
+        ms.get_fact(A=str(i))
+
+@pytest.mark.benchmark(group="memset")
+def test_b_get_facts_by_id_10000(benchmark):
+    with cre_context("test_memset"):
+        benchmark.pedantic(_get_facts_by_id_10000, setup=get_facts_setup, warmup_rounds=1)
+
 
 
 if __name__ == "__main__":
@@ -604,3 +635,14 @@ if __name__ == "__main__":
 
     # _test_modify_from_deref_infos()
     # test_free_refs()
+    # with PrintElapse("EEP"):
+    #     with cre_context("test_memset"):
+    #         (ms,),_ = get_facts_setup()
+
+    #         d = ms.as_dict()
+    #         print(d)
+    #         a = ms.get_fact(A=str('0'))
+    #         print(a.as_dict())
+            
+                
+            # print(ms.get_fact(A=str(i)))

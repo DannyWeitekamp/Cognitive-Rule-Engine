@@ -63,6 +63,9 @@ def accumulate_change_events(cq, start, end=-1):
     '''
     # cq = incr_pr.in_mem.mem_data.change_queue
     if(end == -1): end = cq.head
+    if(start == end):
+        return List.empty_list(ChangeEventType)
+
     ce_dict = Dict.empty(u8,ChangeEventType)
     for i in range(start, end):
         t_id, f_id, a_id = decode_idrec(cq[i])

@@ -290,7 +290,7 @@ class SetChainingPlanner(structref.StructRefProxy):
         return planner_declare(self, val, var)
 
     def search_for_explanations(self, goal, funcs=None, policy=None,
-             search_depth=1, min_stop_depth=None,context=None):
+             search_depth=1, min_stop_depth=None,context=None, **kwargs):
         return search_for_explanations(self, goal, funcs, policy,
                         search_depth, min_stop_depth, context)
 
@@ -552,8 +552,8 @@ def should_commute_skip(arg_inds, func):
 
 
 #TODO njit it
-def commute_sensitive_arg_ind_product(func, arg_inds_by_type):
-    arg_ind_sets = [arg_inds_by_type[str(typ)] for typ in func.arg_types]
+def commute_sensitive_arg_ind_product(func, arg_inds_by_t_id):
+    arg_ind_sets = [arg_inds_by_t_id[t_id] for t_id in func.arg_t_ids]
     lengths = np.array([len(x) for x in arg_ind_sets],dtype=np.int64)
     inds = np.zeros(len(arg_ind_sets),dtype=np.int64)
 
@@ -617,7 +617,7 @@ def search_for_explanations(self, goal, funcs=None, policy=None,
                 
         # Apply the input funcs in the forward direction once.
         if(policy is None):
-            if(func is None): raise ValueError("Must provide funcs or policy.")
+            if(funcs is None): raise ValueError("Must provide funcs or policy.")
             # with PrintElapse("forward"):
             # print([o._type for o in funcs])
             forward_chain_one(self, funcs, min_stop_depth)
@@ -641,20 +641,20 @@ def search_for_explanations(self, goal, funcs=None, policy=None,
                     continue
 
 
-                arg_inds_by_type = {}
+                arg_inds_by_t_id = {}
                 for arg in arg_set:
                     try:
                         type_t_id, arg_ind = recover_arg_ind(self, arg)
-                    except ValueError:
+                    except ValueError as e:
                         continue
 
-                    arr = arg_inds_by_type.get(u2(type_t_id), [])
+                    arr = arg_inds_by_t_id.get(u2(type_t_id), [])
                     arr.append(arg_ind)
-                    arg_inds_by_type[u2(type_t_id)] = arr
+                    arg_inds_by_t_id[u2(type_t_id)] = arr
                 
                 # Make Cartesian Product of arg_inds
-                arg_inds = commute_sensitive_arg_ind_product(func, arg_inds_by_type)
-                # arg_inds = list(itertools.product(*[arg_inds_by_type[str(typ)] for typ in func.signature.args]))
+                arg_inds = commute_sensitive_arg_ind_product(func, arg_inds_by_t_id)
+                # arg_inds = list(itertools.product(*[arg_inds_by_t_id[str(typ)] for typ in func.signature.args]))
                 arg_inds = np.array(arg_inds,dtype=np.int64)
                     
 
@@ -835,14 +835,16 @@ def call_op_for_inds(planner, func, return_type, arg_types, depth, inds):
     lst_types = tuple([ListType(arg_type) for arg_type in arg_types])
     call_type = types.FunctionType(return_type(*arg_types))
     check_type = types.FunctionType(types.boolean(*arg_types))
-    type_names = tuple([str(x) for x in arg_types])
+
+    context = cre_context()
+    type_t_ids = tuple([context.get_t_id(_type=t) for t in arg_types])
     # arg_types = types.TypeRef(Tuple(arg_types))
 
     def impl(planner, func, return_type, arg_types, depth, inds):
         arg_ptrs = np.empty(len(arg_types),dtype=np.int64)
         i = 0
         for lst_typ in literal_unroll(lst_types):
-            iter_base = _list_base_from_ptr(planner.flat_vals_ptr_dict[(type_names[i],depth)])
+            iter_base = _list_base_from_ptr(planner.flat_vals_ptr_dict[(type_t_ids[i],depth)])
             size = _listtype_sizeof_item(lst_typ)
             arg_ptrs[i] = iter_base + inds[i] * size
             i += 1
@@ -870,7 +872,8 @@ def call_op_for_inds(planner, func, return_type, arg_types, depth, inds):
 def apply_one(func, planner, return_type, arg_types, inds, curr_infer_depth, min_stop_depth):
     return_type = return_type.instance_type
     ret_d_typ = DictType(return_type,Tuple((i8,i8)))  
-    ret_type_name = str(return_type)  
+    context = cre_context()
+    ret_type_t_id = context.get_t_id(_type=return_type)
     def impl(func, planner, return_type, arg_types, inds, curr_infer_depth, min_stop_depth):
         v = call_op_for_inds(planner, func, return_type, arg_types, curr_infer_depth, inds)
         if(v is None):
@@ -885,7 +888,7 @@ def apply_one(func, planner, return_type, arg_types, inds, curr_infer_depth, min
         data = rec.data
 
         val_map =  _dict_from_ptr(ret_d_typ,
-            planner.val_map_ptr_dict[ret_type_name])
+            planner.val_map_ptr_dict[ret_type_t_id])
 
         d_ptr = _get_array_raw_data_ptr(data)
         rec_ptr = cast(rec, i8)
@@ -1095,7 +1098,7 @@ def apply_multi(func, planner, depth, min_stop_depth=-1):
                    func.is_composed or func.func_name == "GenericCREFunc")
 
         if(generic):
-            hash_code = unique_hash_v([func.return_type, func.arg_types])
+            hash_code = unique_hash_v([func.return_type, func.arg_types, func.right_commutes])
         else:
             hash_code = unique_hash_v([func.long_hash])
         # print(get_cache_path('apply_multi',hash_code))
@@ -1670,7 +1673,7 @@ def expl_tree_iter_next(t_iter):
 
             # If no more incrementation use the cached func if not NULL
             if(not keep_incrementing and cast(t_iter.cached_func,i8) != 0):
-                # print(f"Skip ({t_iter.entry_ind}/{t_iter.n_entries})", entry.func.name_data.name)
+                # print(f"Skip ({t_iter.entry_ind}/{t_iter.n_entries})", entry.func.origin_data.name)
                 f_obj = cast(t_iter.cached_func, CREObjType)
                 t_iter, i, args = stack.pop(-1)
                 args.append(f_obj)

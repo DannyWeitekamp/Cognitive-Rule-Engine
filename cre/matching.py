@@ -14,14 +14,14 @@ from cre.utils import (cast, wptr_t, ptr_t, _dict_from_ptr, _get_array_raw_data_
          lower_getattr, lower_setattr, ptr_to_meminfo, _memcpy, _incref_ptr, _incref_structref)
 from cre.structref import define_structref, StructRefType
 from cre.caching import gen_import_str, unique_hash_v, import_from_cached, source_to_cache, source_in_cache, cache_safe_exec, get_cache_path
-from cre.memset import MemSetType, resolve_deref_data_ptr
+from cre.memset import MemSetType
 from cre.vector import VectorType
 from cre.var import VarType
 # from cre.op import CREFuncType
 from cre.func import CREFuncType, CFSTATUS_TRUTHY, get_best_call_self, set_base_arg_val_impl, REFKIND_UNICODE, REFKIND_STRUCTREF
 from cre.conditions import LiteralType, build_distributed_dnf, ConditionsType
 from cre.vector import VectorType, new_vector
-from cre.fact import BaseFact 
+from cre.fact import BaseFact, resolve_deref_data_ptr
 import cloudpickle
 
 from numba.core.imputils import (lower_cast)
@@ -1933,7 +1933,7 @@ def _infer_unprovided(known_ptr, op, arg_ind):
     '''
     # Only bother for beta-like Equals 
     if(known_ptr == 0 or 
-       op.name_data.name != "ObjEquals" or op.n_args != 2):
+       op.origin_data.name != "ObjEquals" or op.n_args != 2):
         return 0
 
     # Only bother if there is only one head associated with var_ind.

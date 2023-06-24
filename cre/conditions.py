@@ -655,7 +655,7 @@ GTE_PY39 = sys.version_info >= (3,9)
 def conds_repr(conds, indent="    "):
     distr_dnf = conds_get_distr_dnf(conds)
     is_disjunct = len(distr_dnf) > 1
-
+    context_data = get_cre_context_data()
     s = "OR(\n" if is_disjunct  else ""
     ind1 = indent if is_disjunct else ""
     ind2 = indent*2 if is_disjunct else indent
@@ -667,10 +667,11 @@ def conds_repr(conds, indent="    "):
             # Repr the Var 
             v = conds.vars[j]
             if(k == 0):
+                base_name = context_data.t_id_to_type_names[u2(v.base_t_id)]
                 if(GTE_PY39):
-                    s += f"{v.alias}:=Var({get_base_type_name(v)})"
+                    s += f"{v.alias}:=Var({base_name})"
                 else:
-                    s += f"Var({get_base_type_name(v)}, '{v.alias}'"
+                    s += f"Var({base_name}, '{v.alias}'"
             else:
                 s += f"{v.alias}"
 

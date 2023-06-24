@@ -8,7 +8,7 @@ from numba.experimental import structref
 from numba.experimental.structref import new, define_attributes, _Utils
 from numba.extending import SentryLiteralArgs, lower_cast, overload_method, intrinsic, overload_attribute, intrinsic, lower_getattr_generic, overload, infer_getattr, lower_setattr_generic
 from numba.core.typing.templates import AttributeTemplate
-from cre.context import cre_context
+from cre.context import cre_context, get_cre_context_data
 from cre.structref import define_structref, define_boxing, define_structref_template, CastFriendlyStructref
 from cre.fact import define_fact, BaseFact, cast_fact, DeferredFactRefType, Fact, _standardize_type
 from cre.utils import cast, PrintElapse, ptr_t, decode_idrec, lower_getattr,  lower_setattr, lower_getattr, _decref_ptr, _incref_ptr, _incref_structref, _ptr_from_struct_incref
@@ -609,75 +609,79 @@ def resolve_deref_attrs(self):
         typ = context.get_type(t_id=x['t_id'])
     return deref_attrs
 
-### Methods that require python interpreter ### 
-# Note: could get around this is there was some way to load cre_context.context_data
-#  as some kind of global variable within the numba runtime
+# ### Methods that require python interpreter ### 
+# # Note: could get around this is there was some way to load cre_context.context_data
+# #  as some kind of global variable within the numba runtime
 
-@generated_jit
-@overload_method(VarTypeClass, "get_head_type_name")
-def get_head_type_name(self):
-    def impl(self):
-        # print("GET HEAD")
-        with objmode(head_type_name=unicode_type):
-            context = cre_context()
-            head_type_name = str(context.get_type(t_id=self.head_t_id))
-        return head_type_name
-    return impl
+# @generated_jit
+# @overload_method(VarTypeClass, "get_head_type_name")
+# def get_head_type_name(self):
+#     def impl(self):
+#         # print("GET HEAD")
+#         with objmode(head_type_name=unicode_type):
+#             context = cre_context()
+#             head_type_name = str(context.get_type(t_id=self.head_t_id))
+#         return head_type_name
+#     return impl
 
-@generated_jit
-@overload_method(VarTypeClass, "get_base_type_name")
-def get_base_type_name(self):
-    def impl(self):
-        with objmode(base_type_name=unicode_type):
-            context = cre_context()
-            base_type = context.get_type(t_id=self.base_t_id)
-            base_type_name = getattr(base_type,'_fact_name',str(base_type))
-        return base_type_name
-    return impl
+# @generated_jit
+# @overload_method(VarTypeClass, "get_base_type_name")
+# def get_base_type_name(self):
+#     def impl(self):
+#         with objmode(base_type_name=unicode_type):
+#             context = cre_context()
+#             base_type = context.get_type(t_id=self.base_t_id)
+#             base_type_name = getattr(base_type,'_fact_name',str(base_type))
+#         return base_type_name
+#     return impl
 
-@generated_jit
-@overload_method(VarTypeClass, "get_deref_attrs")
+
+@njit(ListType(unicode_type)(VarType), cache=True)
 def get_deref_attrs(self):
-    str_list_type = ListType(unicode_type)
-    def impl(self):
-        # print("GET DEREF ATTRS")
-        with objmode(deref_attrs=str_list_type):
-            context = cre_context()
-            deref_attrs = List.empty_list(unicode_type)
-            typ = self.base_type
-            for i,x in enumerate(self.deref_infos):
-                if(isinstance(typ, ListType)):
-                    deref_attrs.append(f"{x['a_id']}")
-                else:
-                    deref_attrs.append(typ.get_attr_from_a_id(x['a_id']))
-                typ = context.get_type(t_id=x['t_id'])
-        return deref_attrs
-    return impl
+    deref_attrs = List.empty_list(unicode_type)
+    context_data = get_cre_context_data()
+    t_id = self.base_t_id
+    for di in self.deref_infos:
+        if(di.type == DEREF_TYPE_LIST):
+            deref_attrs.append(f"[{di.a_id}]")
+        else:
+            deref_attrs.append(context_data.attr_names[(u2(t_id), u1(di.a_id))])
+        t_id = di.t_id
+    for di in self.deref_infos:
+        deref_attrs.append(context_data.attr_names[(u2(t_id), u1(di.a_id))])
+        t_id = di.t_id
+    return deref_attrs
 
-@generated_jit
-@overload_method(VarTypeClass, "get_deref_attr_str")
+@njit(unicode_type(VarType), cache=True)
 def get_deref_attrs_str(self):
-    def impl(self):
-        # If self.deref_attrs_str is None then get it from object mode.
-        if(self.deref_attrs_str is None):
-            with objmode(deref_attrs_str=unicode_type):
-                deref_attrs_str = self.deref_attrs_str
-            self.deref_attrs_str = deref_attrs_str
-        return self.deref_attrs_str
-    return impl
+    context_data = get_cre_context_data()
+    t_id = self.base_t_id
+    s = ""
+    for di in self.deref_infos:
+        if(di.type == DEREF_TYPE_LIST):
+            s += f"[{di.a_id}]"
+        else:
+            s += f".{context_data.attr_names[(u2(t_id), u1(di.a_id))]}"
+        t_id = di.t_id
+    return s
 
-@generated_jit(cache=True)
+
+@njit(unicode_type(VarType), cache=True)
+def var_str(self):
+    alias = self.alias
+    deref_str = get_deref_attrs_str(self)
+    if(len(alias)==0):
+        return f'{ptr_to_var_name(self.base_ptr)}{deref_str}'
+    else:
+        return f'{self.alias}{deref_str}' 
+
+# @generated_jit(cache=True)
 @overload_method(VarTypeClass, '__str__')
 @overload(str)
-def var_str(self):
+def var_str_overload(self):
     if(not isinstance(self,VarTypeClass)): return
     def impl(self):
-        alias = self.alias
-        deref_str = get_deref_attrs_str(self)
-        if(len(alias)==0):
-            return f'{ptr_to_var_name(self.base_ptr)}{deref_str}'
-        else:
-            return f'{self.alias}{deref_str}' 
+        return var_str(self)
     return impl
 
 

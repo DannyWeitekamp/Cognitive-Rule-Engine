@@ -192,6 +192,7 @@ def compose_hardcoded(f, g):
 
 @njit(cache=True)
 def compose_overloaded(f, g):
+    
     x,y = Var(f8,"x"), Var(f8,"y")
     h = f(g(x),g(y))
     return h
@@ -686,11 +687,11 @@ if __name__ == "__main__":
     # test_no_mutate_on_compose()
     # test_numerical()
     # test_string()
-    test_obj()
+    # test_obj()
     # test_mixed_types()
     # test_njit_compose()
     # test_compose_deref_bases()
-    # test_not_jittable()
+    test_not_jittable()
     # test_returns_object()
     # test_var_cmp_overloads()
     # test_var_arith_overloads()

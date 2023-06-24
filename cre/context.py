@@ -1,58 +1,80 @@
 from numba import types, njit, generated_jit
 from numba import void,b1,u1,u2,u4,u8,i1,i2,i4,i8,f4,f8,c8,c16
 from numba.typed import List, Dict
-from numba.core.types import DictType, ListType, unicode_type
+from numba.core.types import DictType, ListType, unicode_type, Tuple
 # from numba.cpython.unicode import  _set_code_point
-from cre.core import TYPE_ALIASES, DEFAULT_REGISTERED_TYPES, JITSTRUCTS, py_type_map, numba_type_map, numpy_type_map, unpickle_type_from_t_id, t_id_from_type_name, add_to_type_registry
+from cre.core import (TYPE_ALIASES, DEFAULT_REGISTERED_TYPES, JITSTRUCTS,
+                        py_type_map, numba_type_map, numpy_type_map,
+                        unpickle_type_from_t_id, t_id_from_type_name,
+                        add_to_type_registry, SHORT_NAMES, DEFAULT_TYPE_T_IDS)
 from cre.caching import unique_hash
 # from cre.struct_gen import gen_struct_code
 from cre.structref import define_structref
-from cre.utils import PrintElapse
+from cre.utils import PrintElapse, _set_global, _get_global, cast, _incref_ptr
 from numba.extending import overload_method
 from numba.experimental.structref import new
 import numpy as np
 import os
 
-
-context_data_fields = [
-    ("name", unicode_type),
-    ("unhandled_retro_registers", ListType(i8)),
-    ("fact_to_t_id" , DictType(unicode_type,i8)),
-    ("parent_t_ids", ListType(i8[::1])),
-    ("child_t_ids", ListType(i8[::1]))
-]
+t_id_a_id_tup_type = Tuple((u2,u1))
+context_data_fields = {
+    "name": unicode_type,
+    "unhandled_retro_registers": ListType(u2),
+    "fact_to_t_id": DictType(unicode_type, u2),
+    "t_id_to_type_names": DictType(u2, unicode_type),
+    "parent_t_ids": ListType(u2[::1]),
+    "child_t_ids": ListType(u2[::1]),
+    "attr_names" : DictType(t_id_a_id_tup_type, unicode_type)
+}
 
 CREContextData, CREContextDataType, CREContextDataTypeClass  = define_structref("CREContextData",context_data_fields, define_constructor=False, return_type_class=True)
 
-i8_arr_type = i8[::1]
+@njit(types.void(CREContextDataType), cache=True)
+def set_cre_context_data(context_data):
+    _set_global(i8, "_CRE_context_data", cast(context_data,i8))
+
+@njit(CREContextDataType(), cache=True)
+def get_cre_context_data():
+    context_data_ptr = _get_global(i8, "_CRE_context_data")
+    _incref_ptr(context_data_ptr)
+    return cast(context_data_ptr, CREContextDataType)
+
+u2_arr_type = u2[::1]
 @njit(CREContextDataType(unicode_type), cache=True)
 def new_cre_context(name):
     st = new(CREContextDataType)
     st.name = name
-    st.unhandled_retro_registers = List.empty_list(i8)
-    st.fact_to_t_id = Dict.empty(unicode_type,i8)
-    st.parent_t_ids = List.empty_list(i8_arr_type)
-    st.child_t_ids = List.empty_list(i8_arr_type)
+    st.unhandled_retro_registers = List.empty_list(u2)
+    st.fact_to_t_id = Dict.empty(unicode_type, u2)
+    st.t_id_to_type_names = Dict.empty(u2, unicode_type)
+    st.parent_t_ids = List.empty_list(u2_arr_type)
+    st.child_t_ids = List.empty_list(u2_arr_type)
+    st.attr_names = Dict.empty(t_id_a_id_tup_type, unicode_type)
     return st 
 
 
-@njit(cache=True)
-def assign_name_to_t_id(cd,name,t_id):
-    cd.fact_to_t_id[name] = t_id 
+@njit(types.void(CREContextDataType, unicode_type, u2), cache=True)
+def assign_name_to_t_id(cd, name, t_id):
+    cd.fact_to_t_id[name] = u2(t_id)
+    cd.t_id_to_type_names[u2(t_id)] = name
+
+@njit(types.void(CREContextDataType, u2, u1, unicode_type), cache=True)
+def assign_a_id_attr(cd, t_id, a_id, name):
+    cd.attr_names[(u2(t_id), u1(a_id))] = name 
 
 @njit(cache=True)
 def ensure_inheritance(cd, t_id, inh_t_id=-1):
     # Ensure that parent_t_ids and child_t_ids are big enough
     for i in range(len(cd.parent_t_ids),t_id+1):
-        cd.parent_t_ids.append(np.zeros((0,),dtype=np.int64))
+        cd.parent_t_ids.append(np.zeros((0,),dtype=np.uint16))
 
     for i in range(len(cd.child_t_ids),t_id+1):
-        cd.child_t_ids.append(np.zeros((0,),dtype=np.int64))
+        cd.child_t_ids.append(np.zeros((0,),dtype=np.uint16))
 
     # Use inh_fact_num to fill in the parents 
     if(inh_t_id != -1):
         old_arr = cd.parent_t_ids[inh_t_id]
-        new_arr = np.empty((len(old_arr)+1,),dtype=np.int64)
+        new_arr = np.empty((len(old_arr)+1,),dtype=np.uint16)
         new_arr[:len(old_arr)] = old_arr
         new_arr[-1] = inh_t_id
         cd.parent_t_ids[t_id] = new_arr
@@ -61,7 +83,7 @@ def ensure_inheritance(cd, t_id, inh_t_id=-1):
     for p_t_id in cd.parent_t_ids[t_id]:
         if(t_id not in cd.child_t_ids[p_t_id]):
             old_arr = cd.child_t_ids[p_t_id]
-            new_arr = np.empty((len(old_arr)+1,),dtype=np.int64)
+            new_arr = np.empty((len(old_arr)+1,),dtype=np.uint16)
             new_arr[:len(old_arr)] = old_arr
             new_arr[-1] = t_id
             cd.child_t_ids[p_t_id] = new_arr
@@ -69,7 +91,7 @@ def ensure_inheritance(cd, t_id, inh_t_id=-1):
     # Always treat as own child
     if(t_id not in cd.child_t_ids[t_id]):
         old_arr = cd.child_t_ids[t_id]
-        new_arr = np.empty((len(old_arr)+1,),dtype=np.int64)
+        new_arr = np.empty((len(old_arr)+1,),dtype=np.uint16)
         new_arr[:len(old_arr)] = old_arr
         new_arr[-1] = t_id
         cd.child_t_ids[t_id] = new_arr
@@ -78,11 +100,11 @@ def ensure_inheritance(cd, t_id, inh_t_id=-1):
 
 @njit(cache=True)
 def clear_unhandled_retro_registers(self):
-    self.unhandled_retro_registers = List.empty_list(i8)
+    self.unhandled_retro_registers = List.empty_list(u2)
 
 @njit(cache=True)
 def get_unhandled_retro_registers(self):
-    arr = np.empty((len(self.unhandled_retro_registers),), dtype=np.int64)
+    arr = np.empty((len(self.unhandled_retro_registers),), dtype=np.uint16)
     for i, t_id in enumerate(self.unhandled_retro_registers):
         arr[i] = t_id
     return arr
@@ -134,10 +156,6 @@ class CREContext(object):
         self.t_id_to_type = list(DEFAULT_REGISTERED_TYPES.values())
         self.type_to_t_id = {typ:i for i,typ in enumerate(self.t_id_to_type)}
 
-        
-
-
-
         self.op_instances = {}
         self.deferred_types = {}
         
@@ -145,6 +163,11 @@ class CREContext(object):
         self.children_of = {}
         
         self.context_data = cd = new_cre_context(name)
+
+        for s,t in DEFAULT_REGISTERED_TYPES.items():
+            t_id = DEFAULT_TYPE_T_IDS[s]
+            s = SHORT_NAMES.get(t, s)
+            assign_name_to_t_id(self.context_data, s, t_id)
 
         
     def get_deferred_type(self,name):
@@ -187,7 +210,7 @@ class CREContext(object):
 
     def _assign_name_t_id(self, name, typ, t_id):
         '''For this context associate a name and t_id with typ.''' 
-        assign_name_to_t_id(self.context_data,name,t_id)
+        assign_name_to_t_id(self.context_data, name, t_id)
 
         # Fill in the python facing 'name_to_type'
         # print(name, "->", str(typ))
@@ -203,6 +226,9 @@ class CREContext(object):
         self.t_id_to_type[t_id] = typ
         self.type_to_t_id[typ] = t_id
 
+    def _register_attr_names(self, typ, t_id):
+        for a_id, attr in enumerate(typ.field_dict_keys):
+            assign_a_id_attr(self.context_data, u2(t_id), u1(a_id), attr)
 
     def _register_fact_type(self, name, fact_type, inherit_from=None):
         '''Registers a fact_type to this context. Keeps track of inheritance and casting information'''
@@ -211,6 +237,7 @@ class CREContext(object):
         inh_t_id = inherit_from.t_id if inherit_from is not None else -1
         ensure_inheritance(self.context_data, t_id, inh_t_id)
         self._assign_name_t_id(name, fact_type, t_id)
+        self._register_attr_names(fact_type, t_id)
 
 
         
@@ -344,12 +371,14 @@ class CREContext(object):
     def __enter__(self):
         self.enter_count += 1
         self.token_prev_context = cre_context_ctxvar.set(self.name)
+        set_cre_context_data(self.context_data)
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.enter_count -= 1
         if(self.enter_count == 0):
             cre_context_ctxvar.reset(self.token_prev_context)
+            set_cre_context_data(CREContext.get_context().context_data)
         if(exc_val): raise exc_val.with_traceback(exc_tb)
 
         return self
@@ -357,4 +386,4 @@ class CREContext(object):
 def cre_context(context=None):
     return CREContext.get_context(context)
 
-
+set_cre_context_data(CREContext.get_default_context().context_data)

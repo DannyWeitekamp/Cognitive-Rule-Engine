@@ -22,7 +22,6 @@ class MemSetBuilder():
             self.relational_attrs[type_name] = attrs
         return self.relational_attrs[type_name]
 
-
     def tranform(self, state_dict, out_memset=None, return_map=False):
         '''Converts a dictionary of dictionaries each representing a fact into a MemSet'''
         # Make each fact instance, but skip setting any relational members.

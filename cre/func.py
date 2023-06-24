@@ -720,11 +720,19 @@ class CREFunc(StructRefProxy):
         return get_base_var_ptrs(self)  
 
     @property    
+    def head_var_ptrs(self):
+        return get_head_var_ptrs(self)    
+
+    @property    
     def base_vars(self):
         base_vars = []
         for var_ptr in self.base_var_ptrs:
             base_vars.append(Var.from_ptr(var_ptr))
-        raise NotImplementedError()
+        return base_vars
+
+    @property
+    def head_vars(self):
+        return get_head_vars(self)
 
     @property    
     def base_var_aliases(self):
@@ -743,9 +751,7 @@ class CREFunc(StructRefProxy):
     def arg_t_ids(self):
         return get_base_t_ids_ep(self)
 
-    @property    
-    def head_var_ptrs(self):
-        return get_head_var_ptrs(self)    
+    
 
     def get_ptr(self):
         return func_get_ptr(self)
@@ -886,6 +892,21 @@ get_base_t_ids_ep = get_base_t_ids.overloads[(CREFuncType,)].entry_point
 def overload_base_t_ids(self):
     return get_base_t_ids.py_func
 
+
+var_lst_t = ListType(VarType)
+@njit(ListType(ListType(VarType))(CREFuncType), cache=True)
+def get_head_vars(self):
+    head_vars = List.empty_list(var_lst_t)
+    for i, hrng in enumerate(self.head_ranges):
+        base_heads = List.empty_list(VarType)
+        for j in range(hrng.start,hrng.end):
+            hi = self.head_infos[j]
+            base_heads.append(cast(hi.var_ptr, VarType))
+        head_vars.append(base_heads)
+    return head_vars
+
+# -- TODO: These probably shouldn't output a flat array  --
+
 @njit(i8[::1](CREFuncType), cache=True)
 def get_head_var_ptrs(self):
     head_var_ptrs = np.empty(self.n_args,dtype=np.int64)
@@ -899,6 +920,8 @@ def get_head_var_ptrs(self):
 def overload_head_var_ptrs(self):
     # Not code: returning implementation above
     return get_head_var_ptrs.py_func
+
+# ----------------------------------
 
 @overload_attribute(CREFuncTypeClass, "origin")
 def overload_origin(self):

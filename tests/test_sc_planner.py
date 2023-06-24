@@ -461,6 +461,68 @@ def test_declare_fact_w_conversions():
             # Flattening takes a while so stop after 3 
             if(i >= 2): break
 
+
+        # Special Example
+        # TODO: WRITE ASSERTIONS FOR THIS
+        @CREFunc(signature=f8(f8,f8),
+            shorthand = '{0} + {1}',
+            commutes=True)
+        def Add(a, b):
+            return a + b
+
+        @CREFunc(signature=f8(f8,f8,f8),
+            shorthand = '{0} + {1} + {2}',
+            commutes=True)
+        def Add3(a, b, c):
+            return a + b + c
+
+        @CREFunc(signature=f8(f8), shorthand = 'TensDigit({0})')
+        def TensDigit(a):
+            return (a // 10) % 10
+
+        print("THIS", TensDigit(12.0), TensDigit(7))
+
+        @CREFunc(signature=f8(f8), shorthand = 'OnesDigit({0})')
+        def OnesDigit(a):
+            return a % 10
+
+        funcs = [OnesDigit, TensDigit, Add, Add3]
+        planner = SetChainingPlanner([BOOP])
+        planner.declare(BOOP("A","7"))
+        planner.declare(BOOP("B","7"))
+        planner.declare(BOOP("C","1"))
+        expls = planner.search_for_explanations(1.0, funcs=funcs, search_depth=2, min_stop_depth=2, min_solution_depth=1)
+        if(expls is None):
+            print("NO EXPLANATIONS")
+        else:
+            for f in expls:
+                print(f)
+        print(summarize_depth_vals(planner, f8, 0))
+        print(summarize_depth_vals(planner, f8, 1))
+        print(summarize_depth_vals(planner, f8, 2))
+
+
+        funcs = [OnesDigit, TensDigit, Add3]
+        planner = SetChainingPlanner([BOOP])
+        planner.declare(BOOP("A","7"))
+        planner.declare(BOOP("B","7"))
+        planner.declare(BOOP("C","1"))
+        expls = planner.search_for_explanations(5.0, funcs=funcs, search_depth=2, min_stop_depth=1)
+        if(expls is None):
+            print("NO EXPLANATIONS")
+        else:
+            for f in expls:
+                print(f)
+        print(summarize_depth_vals(planner, f8, 0))
+        print(summarize_depth_vals(planner, f8, 1))
+        print(summarize_depth_vals(planner, f8, 2))
+
+
+        # AB_f_comp_binding_pairs = list(iter(expls))
+
+
+
+
 def test_min_stop_depth():
     with cre_context("test_min_stop_depth"):
         BOOP = define_fact("BOOP", {
@@ -792,7 +854,7 @@ if __name__ == "__main__":
     # test_forward_chain_one()
     # test_build_explanation_tree()
     # test_search_for_explanations()
-    test_divide()
+    # test_divide()
     # test_declare_fact()
     # test_mem_leaks(n=10)
     # benchmark_apply_multi()
@@ -803,7 +865,7 @@ if __name__ == "__main__":
     #     print(i)
     # test_declare_fact()
     # test_declare_fact()
-    # test_declare_fact_w_conversions()
+    test_declare_fact_w_conversions()
     # test_min_stop_depth()
     # test_const_funcs()
 

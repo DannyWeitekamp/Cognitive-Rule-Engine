@@ -298,7 +298,7 @@ def _test_link():
     
 def test_multiple_deref():
     with cre_context("test_ref_matching"):
-        TestLL = define_fact("TestLL",{"name": "string", "B" :'number', "nxt" : "TestLL"})
+        TestLL = define_fact("TestLL", {"name": "string", "B" :'number', "nxt" : "TestLL"})
 
         v1 = Var(TestLL,'v1')
         v2 = Var(TestLL,'v2')
@@ -349,7 +349,6 @@ def test_list_operations():
 @njit(cache=True)
 def hsh(x):
     return hash(x)
-
 
 def test_hash():
     ''' Tests hashing for Var, Literal, and Conditions '''
@@ -563,10 +562,10 @@ if(__name__ == "__main__"):
     # print(cre_func_unique_string((x + z) + (y + z)))
     # print(cre_func_unique_string((x + z) + (y + 1)))
     # print(cre_func_unique_string((x + 1) + (y + z)))
-    test_var()
-    # test_anti_unify()
+    # test_var()
+    test_anti_unify()
     # test_unconditioned()
-    test_build_conditions()
+    # test_build_conditions()
     # test_list_operations()
     # test_link()
     # test_initialize()

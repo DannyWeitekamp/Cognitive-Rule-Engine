@@ -278,7 +278,7 @@ def hash_from_t_id_ptr(t_id, data_ptr):
         return hash(_load_ptr(f8, data_ptr))
     elif(t_id == T_ID_STR):
         return unicode_hash_noseed(_load_ptr(unicode_type, data_ptr))
-    print(t_id, "BAD T_ID")
+    # print(t_id, "BAD T_ID")
     return u8(0)
 
 
@@ -495,13 +495,12 @@ def cre_obj_hash(x):
 @overload(hash)
 @overload_method(CREObjTypeClass, '__hash__')
 @overload_method(CREObjType, '__hash__') # Not sure why but is necessary
-def _cre_obj_hash(x):
+def _cre_obj_hash_overload(x):
     print("------IMPL-----", x, isinstance(x, CREObjTypeClass))
     if(isinstance(x,CREObjTypeClass)):
         def impl(x):
             return cre_obj_hash(x)
         return impl
-print("THIS HAS BEEN CALLED")
 
 
 #### __str__ ### 

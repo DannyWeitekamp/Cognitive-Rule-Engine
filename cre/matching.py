@@ -624,7 +624,7 @@ def parse_change_events(r_graph):
         if(t_id not in global_t_id_root_map): continue
         root_mem = global_t_id_root_map[t_id]
 
-        # Declare Case
+        # Modify Case
         if(change_event.was_modified):
             for a_id in change_event.a_ids:
                 # Add this idrec to relevant deref idrecs
@@ -635,18 +635,20 @@ def parse_change_events(r_graph):
                         # print("added: ", node.lit, 't_id=', t_id, 'f_id=', f_id, 'a_id=', a_id)
                         node.modify_idrecs[arg_ind].add(encode_idrec(t_id, f_id, a_id))
 
-        elif(change_event.was_declared):
+        # Declare/Modify Case
+        if(change_event.was_declared or change_event.was_modified):
             k = len(root_mem.change_inds)
             setitem_buffer(root_mem, 'change_buffer', k, i8(f_id))
             root_mem.change_inds = root_mem.change_buffer[:k+1]
 
-            idrec = encode_idrec(t_id,f_id,0)# if(a_id != RETRACT) else u8(0)
-            root_mem.idrecs_to_inds[idrec] = i8(f_id)
+            if(change_event.was_declared):
+                idrec = encode_idrec(t_id,f_id,0)# if(a_id != RETRACT) else u8(0)
+                root_mem.idrecs_to_inds[idrec] = i8(f_id)
 
-            node_memory_insert_match_buffers(root_mem, i8(f_id), idrec, i8(f_id))
-            if(i8(f_id) >= len(root_mem.match_idrecs)):
-                root_mem.match_idrecs = root_mem.match_idrecs_buffer[:i8(f_id)+1]
-                root_mem.match_inp_inds = root_mem.match_inp_inds_buffer[:i8(f_id)+1]
+                node_memory_insert_match_buffers(root_mem, i8(f_id), idrec, i8(f_id))
+                if(i8(f_id) >= len(root_mem.match_idrecs)):
+                    root_mem.match_idrecs = root_mem.match_idrecs_buffer[:i8(f_id)+1]
+                    root_mem.match_inp_inds = root_mem.match_inp_inds_buffer[:i8(f_id)+1]
         else:            
             k = len(root_mem.remove_inds)
             setitem_buffer(root_mem, 'remove_buffer', k, i8(f_id))
@@ -1934,18 +1936,20 @@ def _infer_unprovided(known_ptr, op, arg_ind):
     # Only bother for beta-like Equals 
     if(known_ptr == 0 or 
        op.origin_data.name != "ObjEquals" or op.n_args != 2):
-        return 0
+        # Skip Case
+        return 0, False
 
-    # Only bother if there is only one head associated with var_ind.
+    # Only bother if there is only one head associated with arg_ind.
     hr = op.head_ranges[arg_ind]
     if(hr.end-hr.start == 1):
         v = cast(op.head_infos[hr.start].var_ptr, VarType)
         other_data_ptr = resolve_deref_data_ptr(cast(known_ptr,BaseFact), v.deref_infos)
         other_ptr = _load_ptr(i8, other_data_ptr)
-        return other_ptr
+        return other_ptr, False
 
     # print("OTHER FAIL")
-    return 0
+    # Fail Case
+    return 0, True
 
 # Compile implementation of set_base_arg for BaseFact type
 set_base_fact_arg = set_base_arg_val_impl(BaseFact)
@@ -1960,6 +1964,7 @@ def cum_weight_of_matching_nodes(ms, conds, match_idrecs, zero_on_fail=False):
     for lst in corgi_graph.nodes_by_nargs:
         for node in lst:
             # TODO: Handle cases of Exists() and truncated match lists
+
             # If is an identiy node then give weight automatically
             if(node.op is None):
                 cum_weight += 1.0
@@ -1969,7 +1974,9 @@ def cum_weight_of_matching_nodes(ms, conds, match_idrecs, zero_on_fail=False):
             total_weight += node.lit.weight
 
             # Set arguments
+            # TODO: Should set up so never need to skip (every literal always evaluated)
             skip = False
+            infer_fail = False
             for i, var_ind in enumerate(node.var_inds):
                 ptr_i = match_ptrs[var_ind]
 
@@ -1978,17 +1985,25 @@ def cum_weight_of_matching_nodes(ms, conds, match_idrecs, zero_on_fail=False):
                 if(ptr_i == 0 and node.op.n_args == 2):
                     j = 1 if i == 0 else 0
                     known_ptr = match_ptrs[node.var_inds[j]]
-                    ptr_i = _infer_unprovided(known_ptr, node.op, j)
+                    ptr_i, skip = _infer_unprovided(known_ptr, node.op, j)
                     match_ptrs[var_ind] = ptr_i
 
+                if(skip):
+                    continue
+
                 if(ptr_i == 0):
-                    skip = True
+                    infer_fail = True
                     continue
                         
                 set_base_fact_arg(node.op, i, cast(ptr_i, BaseFact))
             
             if(skip):
                 # print("SKIP", node.op, node.lit.weight)
+                continue
+
+            if(infer_fail):
+                if(zero_on_fail):
+                    return 0.0, 0.0    
                 continue
             # Call
             call_self = get_best_call_self(node.op, False)

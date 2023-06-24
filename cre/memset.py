@@ -36,10 +36,10 @@ from cre.tuple_fact import TF, TupleFact
 from cre.fact_intrinsics import fact_lower_setattr
 from cre.utils import (cast, CastFriendlyMixin, lower_setattr, _meminfo_from_struct, decode_idrec, encode_idrec, _call_dtor,
   _ptr_from_struct_incref,  _decref_ptr, _decref_structref, _raw_ptr_from_struct_incref,  _obj_cast_codegen, _incref_structref, 
- _store, _load_ptr, DEREF_TYPE_ATTR, DEREF_TYPE_LIST, _ptr_to_data_ptr, _list_base_from_ptr, new_w_del)
+ _store, _load_ptr, DEREF_TYPE_ATTR, DEREF_TYPE_LIST, _ptr_to_data_ptr, _list_base_from_ptr, new_w_del, _store_safe)
 from cre.vector import new_vector, VectorType
 from cre.caching import import_from_cached, source_in_cache, source_to_cache
-from cre.obj import copy_cre_obj, cre_obj_clear_refs
+from cre.obj import copy_cre_obj, cre_obj_clear_refs, _iter_mbr_infos, OBJECT_MBR_ID
 
 BASE_T_ID_STACK_SIZE = 16
 BASE_F_ID_STACK_SIZE = 64
@@ -336,7 +336,7 @@ def facts_for_t_id(ms,t_id):
     if(t_id >= L):
         expand_mem_set_types(ms, (t_id+1)-L)
     # print("Declare", t_id, mem_data.facts[t_id])
-    return cast(ms.facts[t_id], VectorType)
+    return cast(ms.facts[u8(t_id)], VectorType)
 
 @njit(cache=True)
 def fact_at_f_id(typ, t_id_facts,f_id):
@@ -348,7 +348,7 @@ def fact_at_f_id(typ, t_id_facts,f_id):
 
 @njit(cache=True)
 def retracted_f_ids_for_t_id(ms,t_id):
-    return cast(ms.retracted_f_ids[t_id], VectorType)
+    return cast(ms.retracted_f_ids[u8(t_id)], VectorType)
 
 #### Helper Functions ####
 
@@ -389,11 +389,11 @@ def resolve_t_id(ms, fact):
     t_id, _, _ = decode_idrec(fact.idrec)
 
     # Ensure that inheritance structures are up to date
-    if(t_id >= len(cd.child_t_ids) or len(cd.child_t_ids[t_id])==0):
+    if(t_id >= len(cd.child_t_ids) or len(cd.child_t_ids[u8(t_id)])==0):
         inh_t_ids = get_inheritance_t_ids(fact)
         parent_t_id = -1
         for _t_id in inh_t_ids:
-            cd.unhandled_retro_registers.append(_t_id)
+            cd.unhandled_retro_registers.append(u2(_t_id))
             ensure_inheritance(cd, _t_id, parent_t_id)
             parent_t_id = i8(_t_id)
 
@@ -462,8 +462,13 @@ def declare_fact_name(ms,fact,name):
 @njit(cache=True)
 def retract_by_idrec(ms,idrec):
     t_id, f_id, _ = decode_idrec(idrec) #negligible
+
+    fact = memset_get_fact(ms, idrec)
+    fact_lower_setattr(fact,'idrec',encode_idrec(t_id,0,u1(-1)))
+
     make_f_id_empty(ms,i8(t_id), i8(f_id)) #3.6ms
     ms.change_queue.add(encode_idrec(t_id, f_id, u1(0xFF)))
+
     # signal_subscribers_change(mem, idrec) #.8ms
 
 @njit(cache=True)
@@ -739,7 +744,7 @@ def iter_facts(ms, fact_type, no_subtypes=False):
     def impl(ms, fact_type, no_subtypes=False):
         cd = ms.context_data
         if(no_subtypes):
-            t_ids = np.array((cd.fact_num_to_t_id[fact_num],),dtype=np.int64)
+            t_ids = np.array((cd.fact_num_to_t_id[fact_num],),dtype=np.uint16)
         else:
             t_ids = cd.child_t_ids[cd.fact_num_to_t_id[fact_num]]
         _it = generic_fact_iterator_ctor(ms,t_ids)
@@ -801,11 +806,11 @@ def get_facts(ms, fact_type=None, no_subtypes=False):
     def impl(ms, fact_type=None, no_subtypes=False):
         cd = ms.context_data
         if(get_all):
-            t_ids = np.arange(len(ms.facts), dtype=np.int64)
+            t_ids = np.arange(len(ms.facts), dtype=np.uint16)
         else:
             # t_id = fact_type.t_id#cd.fact_num_to_t_id[fact_num]
             if(no_subtypes):
-                t_ids = np.array((fact_t_id,),dtype=np.int64)
+                t_ids = np.array((fact_t_id,),dtype=np.uint16)
             else:                
                 t_ids = cd.child_t_ids[fact_t_id]
         out = List.empty_list(_fact_type)
@@ -1070,15 +1075,31 @@ def indexer_get_fact(self, memset, val):
 def memset_copy(self):
     new = memset_ctor(self.context_data, False)    
 
-    #Decref all declared facts and their container vectors 
+    new_facts = List.empty_list(BaseFact)
+    ptr_map = Dict.empty(i8,i8)
     for i in range(self.facts.head):
         facts_ptr = self.facts.data[i]
         if(facts_ptr != 0):
             facts = cast(facts_ptr, VectorType)
             for j in range(facts.head):
                 fact_ptr = facts.data[j]
-                fact = cast(fact_ptr, BaseFact)
-                new.declare(copy_cre_obj(fact))
+                if(fact_ptr != 0):
+                    fact = cast(fact_ptr, BaseFact)
+                    new_fact = copy_cre_obj(fact)
+                    ptr_map[fact_ptr] = cast(new_fact,i8)
+                    new.declare(new_fact)
+                    new_facts.append(new_fact)
+
+    # Copy any fact members as weak pointers
+    for new_fact in new_facts:
+        for t_id, m_id, data_ptr in _iter_mbr_infos(new_fact):
+            if(m_id == OBJECT_MBR_ID):
+                old_fact_ptr = _load_ptr(i8, data_ptr)
+                if(old_fact_ptr != 0 and old_fact_ptr in ptr_map):
+                    new_fact = cast(ptr_map[old_fact_ptr],BaseFact)
+                    _store_safe(BaseFact, data_ptr, new_fact)
+
+    # TODO should copy any lists of facts
     
     return new
 

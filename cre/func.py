@@ -577,6 +577,12 @@ class CREFunc(StructRefProxy):
         from cre.dynamic_exec import cre_func_hash
         return cre_func_hash(self)
 
+    def __copy__(self):
+        return cre_func_copy(self)
+
+    def copy(self):
+        return cre_func_copy(self)
+
     @property
     def unique_str(self):
         return cre_func_unique_string(self)
@@ -1039,6 +1045,16 @@ def ensure_repr_const(typ):
             def repr_const(cf, i):
                 v = cre_obj_get_item(cf, typ, i8(1+(i<<1)+1))
                 return f"'{str(v)}'"
+        elif(typ == f8):
+            @njit(sig, cache=True)
+            def repr_const(cf, i):
+                v = cre_obj_get_item(cf, typ, i8(1+(i<<1)+1))
+
+                # Represent round numbers as integers
+                if(int(v) == v):
+                    return str(int(v))
+                else:
+                    return str(v)
         else:
             @njit(sig, cache=True)
             def repr_const(cf, i):
@@ -1367,7 +1383,10 @@ def get_const_root_arg_impl(_typ_or_t_id, use_ep=False):
     sig = _typ(CREFuncType, i8)
     @njit(sig,cache=True)
     def _get_const_root_arg(self, i):
-        return _load_ptr(_typ, self.root_arg_infos[i].ptr)
+        # print(self.root_arg_infos)
+        v = cre_obj_get_item(self, _typ, i8(1+(i<<1)+1))
+        return v
+        # return _load_ptr(_typ, self.root_arg_infos[i].ptr)
     entry_point = next(iter(_get_const_root_arg.overloads.values())).entry_point
     get_const_root_arg_overloads[_typ] = (_get_const_root_arg, entry_point)
     if(use_ep):

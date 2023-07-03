@@ -567,7 +567,7 @@ def test_min_stop_depth():
             planner.declare(b)
 
         expls = planner.search_for_explanations(3.0, funcs=[new_func], 
-            search_depth=1, min_stop_depth=1)
+            search_depth=1, min_stop_depth=1, min_solution_depth=1)
 
         assert expls == None
 
@@ -691,6 +691,12 @@ def test_policy_search(n=5):
     print("----------------")
     for expl in policy_expls:
         print(expl)
+
+    # Policy w/ Args
+    policy = [[(Add_f8, [4.0,2.0])],[(Multiply_f8, [])]]
+    planner = setup_float(n=n)
+    expl_tree = search_for_explanations(planner, 36.0, policy=policy, search_depth=2)
+    policy_expls = list(expl_tree)    
     
     assert len(policy_expls) < len(no_policy_expls)
 
@@ -725,7 +731,50 @@ def test_divide():
         print(f.depth, f, m)
 
 
+def test_const_declarations():
+    from cre.default_funcs import Divide, Multiply
+    Divide_f8 = Divide(Var(f8),Var(f8))
+    Multiply_f8 = Multiply(Var(f8),Var(f8))
 
+
+    planner = SetChainingPlanner()
+    planner.declare(float(360), is_const=True)
+    for x in [135, 6]:
+        planner.declare(float(x))
+
+    # Test No Policy
+    expls = planner.search_for_explanations(13.5, funcs=[Divide_f8, Multiply_f8], 
+            search_depth=3, min_stop_depth=1)
+    for f, m in expls:
+        print(f.depth, f, m)
+
+
+    planner = SetChainingPlanner()
+    planner.declare(float(360), is_const=True)
+    for x in [135, 6]:
+        planner.declare(float(x))
+
+    # Test Policy
+    policy = [[(Divide_f8, [135.0, 360.0]), (Multiply_f8, [6.0, 6.0])], [(Multiply_f8, [])]]
+    expls = planner.search_for_explanations(13.5, policy=policy, 
+            search_depth=3, min_stop_depth=1)
+    for f, m in expls:
+        print(f.depth, f, m)
+
+    # Another test
+    planner = SetChainingPlanner()
+    for x in [2, 12, 3]:
+        planner.declare(float(x))
+
+    expls = planner.search_for_explanations(8.0, funcs=[Divide_f8, Multiply_f8], 
+            search_depth=3, min_stop_depth=1)
+
+    print(summarize_depth_vals(planner, f8, 0))
+    print(summarize_depth_vals(planner, f8, 1))
+    print(summarize_depth_vals(planner, f8, 2))
+
+    for f, m in expls:
+        print(f.depth, f, m)
 
 
 
@@ -865,9 +914,10 @@ if __name__ == "__main__":
     #     print(i)
     # test_declare_fact()
     # test_declare_fact()
-    test_declare_fact_w_conversions()
-    # test_min_stop_depth()
+    # test_declare_fact_w_conversions()
+    test_min_stop_depth()
     # test_const_funcs()
+    # test_const_declarations()
 
     # test_policy_search()
 # from numba import njit, i8

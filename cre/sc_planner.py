@@ -25,7 +25,7 @@ from cre.var import Var, VarTypeClass, var_append_deref, var_extend
 from cre.func import CREFuncType, CREFuncTypeClass, CREFunc, cre_func_call_self, set_base_arg_val_impl, get_return_val_impl, CFSTATUS_ERROR, CFSTATUS_TRUTHY
 from cre.make_source import make_source, gen_def_func, gen_assign, resolve_template, gen_def_class
 from cre.obj import CREObjType
-from cre.core import T_ID_FUNC, T_ID_VAR
+from cre.core import T_ID_FUNC, T_ID_VAR, T_ID_INT, T_ID_FLOAT, T_ID_STR
 from numba.core import imputils, cgutils
 from numba.core.datamodel import default_manager, models
 from numba.experimental.function_type import _get_wrapper_address
@@ -123,6 +123,11 @@ SC_Record_field_dict = {
     # Whether the record is non-terminal---from applying a CREFunc and not from a declared value.
     'is_func' : u1,
 
+    # Whether the record is a constant
+    'is_const' : u1,
+    # 'const_t_id' : u2,
+    # 'const_f_id' : u4,
+
     # If non-terminal then holds the CREFunc
     'func' : CREFuncType,
 
@@ -141,13 +146,14 @@ SC_Record, SC_RecordType = \
     define_structref("SC_Record", SC_Record_fields, define_constructor=False)
     
 @overload(SC_Record, prefer_literal=False)
-def overload_SC_Record(func_or_var, depth=0, n_args=0, stride=None, prev_entry_ptr=0):
+def overload_SC_Record(func_or_var, depth=0, n_args=0, stride=None, prev_entry_ptr=0, is_const=False):
     '''Implements the constructor for an SC_Record'''
 
     if(isinstance(func_or_var, CREFuncTypeClass)):
-        def impl(func_or_var, depth=0, n_args=0, stride=None, prev_entry_ptr=0):
+        def impl(func_or_var, depth=0, n_args=0, stride=None, prev_entry_ptr=0, is_const=False):
             st = new(SC_RecordType)
             st.is_func = True
+            st.is_const = False
             st.func = func_or_var
             st.depth = depth
             st.n_args = n_args
@@ -165,9 +171,10 @@ def overload_SC_Record(func_or_var, depth=0, n_args=0, stride=None, prev_entry_p
             
             return st
     elif(isinstance(func_or_var, VarTypeClass)):
-        def impl(func_or_var, depth=0, n_args=0, stride=None, prev_entry_ptr=0):
+        def impl(func_or_var, depth=0, n_args=0, stride=None, prev_entry_ptr=0, is_const=False):
             st = new(SC_RecordType)
             st.is_func = False
+            st.is_const = is_const
             st.var = cast(func_or_var, VarType) 
             st.depth = depth
             st.n_args = 0
@@ -183,6 +190,7 @@ def overload_SC_Record(func_or_var, depth=0, n_args=0, stride=None, prev_entry_p
     else:
         print('fail')
     return impl
+
 
 
 record_list_type = ListType(SC_RecordType)
@@ -286,8 +294,8 @@ class SetChainingPlanner(structref.StructRefProxy):
         self.curr_infer_depth = 0
         return self
 
-    def declare(self, val, var=None):
-        return planner_declare(self, val, var)
+    def declare(self, val, var=None, is_const=False):
+        return planner_declare(self, val, var, is_const)
 
     def search_for_explanations(self, goal, **kwargs):
         return search_for_explanations(self, goal, **kwargs)
@@ -364,11 +372,11 @@ def planner_declare_val(planner, val, func_or_var):
     pass
 
 @overload(planner_declare_val)
-def planner_declare_val_overload(planner, val, func_or_var):
+def planner_declare_val_overload(planner, val, func_or_var, is_const=False):
     '''Declares a primative value or fact (but not its visible attributes)
         into the 0th depth of a planner instance.'''
     val_typ = val
-    def impl(planner, val, func_or_var):
+    def impl(planner, val, func_or_var, is_const=False):
         # Ensure that various data structures exist for this val_type
         flat_vals, val_map, inv_val_map, declare_records = \
             ensure_ptr_dicts(planner, val_typ)
@@ -377,7 +385,9 @@ def planner_declare_val_overload(planner, val, func_or_var):
         is_prev = prev_entry_ptr != 0
 
         # Make a new Record for this declaration
-        rec = SC_Record(func_or_var, prev_entry_ptr=prev_entry_ptr)
+        rec = SC_Record(func_or_var,
+             prev_entry_ptr=prev_entry_ptr, 
+             is_const=is_const)
         var_ptr = cast(func_or_var, i8)
         declare_records.append(rec)
         
@@ -508,7 +518,7 @@ def _planner_declare(planner, val, var=None):
 
 @overload(_planner_declare)
 @overload_method(SetChainingPlannerTypeClass, "declare")
-def planner_declare_overload(planner, val, var=None):
+def planner_declare_overload(planner, val, var=None, is_const=False):
     '''Declares a primative value or fact (and its visible attributes)
         into the 0th depth of a planner instance.'''
 
@@ -518,7 +528,7 @@ def planner_declare_overload(planner, val, var=None):
         semantic_visible_attrs = get_semantic_visible_attrs(val_typ)
         if(len(semantic_visible_attrs) > 0):
             # Case 1: Declare the fact and its visible-semantic attributes
-            def impl(planner, val, var=None):
+            def impl(planner, val, var=None, is_const=False):
                 _var = Var(val_typ) if var is None else var
 
                 # Declare the fact
@@ -535,20 +545,22 @@ def planner_declare_overload(planner, val, var=None):
                     planner_declare_conversions(planner, attr_val, fact_type, attr, ind)
         else:
             # Case 2: Should declare just the fact
-            def impl(planner, val, var=None):
+            def impl(planner, val, var=None, is_const=False):
                 _var = Var(val_typ) if var is None else var
                 planner_declare_val(planner, val, _var)
     else:
         # Case 3: Declare a plain primative (e.g. a float, int, str ect.)
-        def impl(planner, val, var=None):
+        def impl(planner, val, var=None, is_const=False):
+            # Note: Make a var even for constants so we can 
+            #  recover it from the the inv_val_map
             _var = Var(val_typ) if var is None else var
-            planner_declare_val(planner, val, _var)
-            
+            planner_declare_val(planner, val, _var, is_const)
+        
     return impl
 
 @njit(cache=True)
-def planner_declare(planner, val, var=None):
-    return _planner_declare(planner, val, var)
+def planner_declare(planner, val, var=None, is_const=False):
+    return _planner_declare(planner, val, var, is_const)
 
 #------------------------------------------------------------------
 # : Explanation Search Main Loop
@@ -564,6 +576,7 @@ def recover_arg_ind_overload(planner, arg):
     def impl(planner, arg):
         flat_vals, val_map, inv_val_map, declare_records = \
             ensure_ptr_dicts(planner, arg_type)
+        # print(flat_vals)
         return arg_t_id, flat_vals.index(arg)
     return impl
 
@@ -663,7 +676,7 @@ def search_for_explanations(self, goal, funcs=None, policy=None,
         else:
             # Convert args in policy to arg_inds
             depth_policy = []
-            # print(policy)
+            # print(">>>", policy)
             for t in policy[depth-1]:
                 func, arg_set = (t[0], t[1]) if(isinstance(t, tuple)) else (t, None)
                 # print(depth, "::", op, arg_set)
@@ -689,13 +702,22 @@ def search_for_explanations(self, goal, funcs=None, policy=None,
                     arr.append(arg_ind)
                     arg_inds_by_t_id[u2(type_t_id)] = arr
                 
-                # Make Cartesian Product of arg_inds
+                # try:
+                    # Make Cartesian Product of arg_inds
                 arg_inds = commute_sensitive_arg_ind_product(func, arg_inds_by_t_id)
                 # arg_inds = list(itertools.product(*[arg_inds_by_t_id[str(typ)] for typ in func.signature.args]))
                 arg_inds = np.array(arg_inds,dtype=np.int64)
-                    
-
+                # print("arg_inds", arg_inds)
                 depth_policy.append((func, arg_inds))
+
+                # If policy args fail just skip
+                # except KeyError:
+                #     continue
+                    # print("DEPTH ERRR")
+                    # depth_policy.append(func)
+            # print(">>>", depth_policy)
+
+                
 
             # Apply policy
             forward_chain_one(self, depth_policy)
@@ -787,7 +809,7 @@ def join_records_of_type_overload(self, depth, typ):
         val_map = _dict_from_ptr(dict_typ, self.val_map_ptr_dict[u2(t_id)])
         flat_vals = List.empty_list(typ, len(val_map))
         for val in val_map:
-            flat_vals.append(val) 
+            flat_vals.append(val)
 
         tup = (u2(t_id), depth)
         self.flat_vals_ptr_dict[tup] = _ptr_from_struct_incref(flat_vals)
@@ -1169,6 +1191,9 @@ ExplanationTreeEntry_field_dict = {
     # Whether the entry is non-terminal and represents the application of a CREFunc. 
     "is_func" : u1,
 
+    # Whether the entry is a constant,
+    "is_const" : u1,
+
     # If non-terminal the CREFunc applied
     "func" : CREFuncType,
 
@@ -1207,14 +1232,16 @@ ExplanationTreeEntry, ExplanationTreeEntryType = \
 def func_expl_tree_entry_ctor(func, child_arg_ptrs):
     st = new(ExplanationTreeEntryType)
     st.is_func = True
+    st.is_const = False
     st.func = func
     st.child_arg_ptrs = child_arg_ptrs
     return st
 
 @njit(cache=True)
-def var_expl_tree_entry_ctor(var):
+def var_expl_tree_entry_ctor(var, is_const=False):
     st = new(ExplanationTreeEntryType)
     st.is_func = False
+    st.is_const = is_const
     st.var = var
     return st
 
@@ -1247,11 +1274,6 @@ class ExplanationTree(structref.StructRefProxy):
 read_inv_val_map_impls = {} 
 # @generated_jit(cache=True)
 def get_read_inv_val_map_impl(t_id):
-    ''' Generates the entry_point for an implementation of 
-        'read_inv_val_map' which extracts a value from an ExplanationTree
-        using a var pointer as the key. Returning an entry_point instead of 
-        a dispatcher ignores numba's multi-dispatch type checking.
-    '''
     impl = read_inv_val_map_impls.get(t_id, None)
     if(impl is None):
         typ = cre_context().get_type(t_id=t_id)
@@ -1356,7 +1378,7 @@ def _fill_arg_inds_from_rec_entries(re_ptr, new_arg_inds, expl_tree, retrace_dep
             # re_ptr = re_next_re_ptr
             # re_rec, re_next_re, re_args = extract_rec_entry(re_next_re)
         else:
-            entry = var_expl_tree_entry_ctor(re_rec.var)
+            entry = var_expl_tree_entry_ctor(re_rec.var, is_const=re_rec.is_const)
             expl_tree.entries.append(entry)
             # re = None
         re_ptr = re_next_re_ptr
@@ -1738,18 +1760,55 @@ def new_expl_tree_iterator(tree):
     # st.arg_inds = np.zeros(len(tree.child_arg_ptrs),dtype=np.uint64)
 
 
+from cre.func import set_const_arg_impl
+f_inv_val_t = DictType(i8, f8)
+i_inv_val_t = DictType(i8, i8)
+s_inv_val_t = DictType(i8, unicode_type)
+set_const_arg_f = set_const_arg_impl(f8)
+set_const_arg_i = set_const_arg_impl(i8)
+set_const_arg_s = set_const_arg_impl(unicode_type)
+
+# get_read_inv_val_map_impl()
+
+@njit
+def set_preset_const_arg(cf, j, var, ivm_dict):
+    t_id = var.head_t_id
+    var_ptr = cast(var, i8)
+    inv_val_map_ptr = ivm_dict[u2(t_id)]
+    
+    if(t_id == T_ID_FLOAT):
+        f_inv_val_map = _dict_from_ptr(f_inv_val_t, inv_val_map_ptr)
+        f_val = f_inv_val_map[var_ptr]
+        set_const_arg_f(cf, j, f_val)
+    elif(t_id == T_ID_INT):
+        i_inv_val_map = _dict_from_ptr(i_inv_val_t, inv_val_map_ptr)
+        i_val = i_inv_val_map[var_ptr]
+        set_const_arg_i(cf, j, i_val)
+    elif(t_id == T_ID_STR):
+        s_inv_val_map = _dict_from_ptr(s_inv_val_t, inv_val_map_ptr)
+        s_val = s_inv_val_map[var_ptr]
+        set_const_arg_s(cf, j, s_val)
+    else:
+        raise ValueError(f"Constant with T_ID {t_id} not supported.")
+
+
+
+
+obj_u1_tup_t = Tuple((CREObjType, u1))
+
 @njit(Tuple((types.optional(VarType),types.Optional(CREFuncType)))(ExplanationTreeIteratorType), cache=True)
 def expl_tree_iter_next(t_iter):
     if(t_iter.entry_ind == -1):
         return None, None
 
+    ivm_dict = t_iter.tree.inv_val_map_ptr_dict
     # Whether to increment the t_iter. Remains true until an
     #  incrementation suceeds without overflow.
     keep_incrementing = True
 
     stack = List()
     i = 0 
-    args = List.empty_list(CREObjType)
+    args = List.empty_list(obj_u1_tup_t)
     while(True):
         
         entry = t_iter.tree.entries[t_iter.entry_ind]
@@ -1768,7 +1827,7 @@ def expl_tree_iter_next(t_iter):
                 # print(f"Skip ({t_iter.entry_ind}/{t_iter.n_entries})", entry.func.origin_data.name)
                 f_obj = cast(t_iter.cached_func, CREObjType)
                 t_iter, i, args = stack.pop(-1)
-                args.append(f_obj)
+                args.append((f_obj, entry.is_const))
             else:
                 if(i < len(entry.child_arg_ptrs)):
                     # print(f"Iter ({t_iter.entry_ind}/{t_iter.n_entries})", f"i:{i}/{len(entry.child_arg_ptrs)}", entry.func)
@@ -1786,7 +1845,7 @@ def expl_tree_iter_next(t_iter):
                         t_iter.arg_iters.append(cast(_t_iter,CREObjType))
                         t_iter = _t_iter
 
-                    args = List.empty_list(CREObjType)
+                    args = List.empty_list(obj_u1_tup_t)
                     i = 0
                 else:
                     # print(f"Term ({t_iter.entry_ind}/{t_iter.n_entries})", entry.func)
@@ -1796,11 +1855,17 @@ def expl_tree_iter_next(t_iter):
 
                     # Make the cre_func from the collected args
                     cf = cre_func_deep_copy_generic(entry.func)
-                    for j, arg in enumerate(args):
+                    for j, (arg, is_const) in enumerate(args):
                         t_id, _, _ = decode_idrec(arg.idrec)
                         if(t_id == T_ID_VAR):
-                            # print(f"  {j}:", cast(arg, VarType))
-                            set_var_arg(cf, j, cast(arg, VarType))
+                            var = cast(arg, VarType)
+                            if(is_const):
+                                # print()
+                                set_preset_const_arg(cf, j, var, ivm_dict)
+                                print("IS CONST")
+                            else:
+                                # print(f"  {j}:", cast(arg, VarType))
+                                set_var_arg(cf, j, var)
                         else:
                             # print(f"  {j}:", cast(arg, CREFuncType))
                             set_func_arg(cf, j, cast(arg, CREFuncType))
@@ -1834,8 +1899,8 @@ def expl_tree_iter_next(t_iter):
 
                     # Pop back frame from stack.
                     t_iter, i, args = stack.pop(-1)
-                    args.append(cast(cf, CREObjType))
-        # Var Case
+                    args.append((cast(cf, CREObjType), entry.is_const))
+        # Var and Const Case
         else:
             # print(f"Var:({t_iter.entry_ind}/{t_iter.n_entries})",  str(entry.var))
             
@@ -1854,7 +1919,7 @@ def expl_tree_iter_next(t_iter):
 
             # Pop back frame from stack.
             t_iter, i, args = stack.pop(-1)
-            args.append(cast(entry.var, CREObjType))
+            args.append((cast(entry.var, CREObjType), types.boolean(entry.is_const)))
     
     # Should never reach here
     return None, None

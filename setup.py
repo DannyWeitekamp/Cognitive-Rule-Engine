@@ -75,7 +75,9 @@ def get_ext_modules():
         numba = ensure_numba()
         numba_path = numba.extending.include_path()
         include_dirs = [numba_path, sysconfig.get_path('include')]
-    except:
+    except Exception as e:
+        print("Getting numba path raised:")
+        print(e)
         pass
 
     cre_c_funcs = Extension(

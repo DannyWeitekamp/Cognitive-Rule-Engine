@@ -1,5 +1,3 @@
 numba
-ipython
 numpy
-dill
 cloudpickle

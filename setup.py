@@ -12,6 +12,9 @@ if mo:
 else:
     raise RuntimeError("Unable to find version string in %s." % (VERSIONFILE,))
 
+# TODO: Remove once version dependancy issues in caching are fixed
+__version__ = "0.4.1"
+
 
 # Read requirements.txt for requirements
 with open('requirements.txt') as f: 
@@ -64,12 +67,21 @@ def get_ext_modules():
     f"Ensure python headers installed: `sudo apt-get install libpython{major}.{minor}-dev`"
         )
 
-    numba = ensure_numba()
-    numba_path = numba.extending.include_path()
+    include_dirs = [sysconfig.get_path('include')]
+
+    # Numba is required ahead of time to compile the cfunc extension module.
+    #  But if installing from PyPi then we'll get it precompiled.
+    try:
+        numba = ensure_numba()
+        numba_path = numba.extending.include_path()
+        include_dirs = [numba_path, sysconfig.get_path('include')]
+    except:
+        pass
+
     cre_c_funcs = Extension(
         name='cre_cfuncs', 
         sources=['cre/cfuncs/cre_cfuncs.c'],
-        include_dirs=[numba_path, sysconfig.get_path('include')]
+        include_dirs=include_dirs
     )
     return [cre_c_funcs]
 

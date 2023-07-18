@@ -5,3 +5,4 @@ garbag*
 .zshrc
 *.egg-info
 build
+dist

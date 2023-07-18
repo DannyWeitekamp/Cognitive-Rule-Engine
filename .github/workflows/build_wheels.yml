@@ -15,6 +15,7 @@ jobs:
     name: Build wheels on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: False
       matrix:
         os: [ubuntu-22.04, windows-2022, macos-11]
 
@@ -23,8 +24,8 @@ jobs:
 
       - name: Install Numba
         run: |
-          pip install pip --upgrade
-          pip install numba
+          python3 -m pip install pip --upgrade
+          python3 -m pip install numba
 
       - name: Build wheels
         uses: pypa/cibuildwheel@v2.14.1

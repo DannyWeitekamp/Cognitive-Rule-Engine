@@ -80,6 +80,8 @@ def get_ext_modules():
         print(e)
         pass
 
+    print("INCLUDE DIRS:", include_dirs)
+
     cre_c_funcs = Extension(
         name='cre_cfuncs', 
         sources=['cre/cfuncs/cre_cfuncs.c'],

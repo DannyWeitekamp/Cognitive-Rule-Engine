@@ -100,7 +100,8 @@ setup(
         long_description = long_description, 
         long_description_content_type ="text/markdown", 
         license ='MIT', 
-        packages = find_packages(include=['cre','cre_caching']), 
+        packages = find_packages(), 
+        include_package_data=True, # Prevents files being omitting from wheel. 
 
         entry_points={
             "console_scripts": [

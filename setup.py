@@ -13,7 +13,7 @@ else:
     raise RuntimeError("Unable to find version string in %s." % (VERSIONFILE,))
 
 # TODO: Remove once version dependancy issues in caching are fixed
-__version__ = "0.4.2"
+__version__ = "0.4.3"
 
 
 # Read requirements.txt for requirements

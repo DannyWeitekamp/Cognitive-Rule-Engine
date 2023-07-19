@@ -1,5 +1,8 @@
 name: Build
 
+env:
+  CIBW_BUILD: cp39-*
+
 on:
   workflow_dispatch:
   pull_request:
@@ -12,14 +15,14 @@ on:
 
 jobs:
   build_wheels:
-    name: Build wheels on ${{ matrix.os }}, python${{ matrix.python-version }}
+    name: Build wheels on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: False
       matrix:
         os: [ubuntu-22.04, windows-2022, macos-12] # macosx_x86_64, win_amd64
         # python: ["cp39"] #"cp310", "cp311", "cp312"]  # "pp39"
-        python-version: ["3.9", "3.10"] #"3.8", "pypy3"]
+        # python-version: ["3.9", "3.10"] #"3.8", "pypy3"]
 
     steps:
       - uses: actions/checkout@v3

@@ -1,7 +1,7 @@
 name: Build
 
 env:
-  CIBW_BUILD: cp39-* # Only build minimum version 3.9
+  CIBW_BUILD: cp39-* cp310-* # Only build 3.9, 3.10
   CIBW_SKIP: "*i686 *musllinux*" # skip 32-bit and musllinux 
 
   # Make mac default to universal for arm and x86 support

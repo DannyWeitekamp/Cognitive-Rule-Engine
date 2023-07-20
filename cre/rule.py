@@ -101,9 +101,9 @@ import cloudpickle
 match_types = cloudpickle.loads({cloudpickle.dumps(match_types)})
 rhs_pyfunc = cloudpickle.loads({cloudpickle.dumps(rhs_pyfunc)})
 
-print(match_types)
+# print(match_types)
 signature = types.void(MemSetType, *match_types)
-print(signature)
+# print(signature)
 rhs = njit(signature, cache=True)(rhs_pyfunc)
 
 @njit(types.void(MemSetType, i8[::1]), cache=True)
@@ -135,7 +135,7 @@ def new_rule(lhs, rhs):
 
         with PrintElapse("run"):
             rhs_ptrs = import_from_cached('Rule_RHS', long_hash, ['rhs_ptrs'])['rhs_ptrs']
-            print(list(rhs_ptrs.overloads.keys()))
+            # print(list(rhs_ptrs.overloads.keys()))
         with PrintElapse("assign"):
             rule_assign_imper_rhs(st, rhs_ptrs)
             st._rhs_pyfunc = rhs

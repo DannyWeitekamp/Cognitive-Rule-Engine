@@ -75,7 +75,6 @@ class VarTypeClass(CREObjTypeClass):
     type_cache = {}
 
     def __new__(cls, base_type=None, head_type=None):
-        print(cls, base_type, head_type)
         if(head_type is None): head_type = base_type
         
         unq_tup = (base_type, head_type)

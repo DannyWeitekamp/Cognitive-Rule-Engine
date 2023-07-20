@@ -13,7 +13,7 @@ else:
     raise RuntimeError("Unable to find version string in %s." % (VERSIONFILE,))
 
 # TODO: Remove once version dependancy issues in caching are fixed
-__version__ = "0.4.3"
+__version__ = "0.4.4"
 
 
 # Read requirements.txt for requirements
@@ -105,7 +105,7 @@ setup(
 
         entry_points={
             "console_scripts": [
-                "cre = console.cre_exec:main"
+                "cre = cre.console_script:main"
             ]
         },
         ext_modules = get_ext_modules(),

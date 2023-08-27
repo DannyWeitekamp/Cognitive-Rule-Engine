@@ -65,6 +65,14 @@ class Vectorizer(structref.StructRefProxy):
     def unvectorize(self, slot, nom=0):
         return unvectorize(self, slot, u8(nom))
 
+    def __str__(self):
+        s = "Vectorizer:\n"
+        for head, ss in lst_mapping(self):
+            s += f"\t{ss}->{head}\n"
+        return s
+
+
+
 
 define_boxing(VectorizerTypeClass, Vectorizer)
 
@@ -99,6 +107,7 @@ def vectorizer_apply(self, mem):
         for i, gval in enumerate(mem.get_facts(gval_type)):
 
             if(not gval.head in slot_map):
+                # print("NEW", gval.head)
                 slot = len(slot_map)
                 slot_map[gval.head] = slot
                 inv_slot_map[slot] = gval.head
@@ -161,6 +170,18 @@ def unvectorize(self, slot, nom=0):
         slot, nom = self.inv_one_hot_map[slot]
     head = self.inv_slot_map[slot]
     return head, nom
+
+@njit(cache=True)
+def lst_mapping(self):
+    lst = []
+    if(self.one_hot_nominals):
+        for one_hot_slot, (slot, nom) in self.inv_one_hot_map.items():
+            head = self.inv_slot_map[slot]
+            lst.append((head, f"{one_hot_slot}: ({slot}, {nom})"))
+    else:
+        for slot, head in self.inv_slot_map.items():
+            lst.append((head, f"{slot}"))
+    return lst
 
 
 # Note: Unecessary since inversion is now included with update, but may have other uses

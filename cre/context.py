@@ -227,7 +227,7 @@ class CREContext(object):
         self.type_to_t_id[typ] = t_id
 
     def _register_attr_names(self, typ, t_id):
-        for a_id, attr in enumerate(typ.field_dict_keys):
+        for a_id, (attr,_) in enumerate(typ._fields):
             assign_a_id_attr(self.context_data, u2(t_id), u1(a_id), attr)
 
     def _register_fact_type(self, name, fact_type, inherit_from=None):
@@ -364,6 +364,37 @@ class CREContext(object):
         c_t_ids = self.context_data.child_t_ids
 
         return c_t_ids[t_id]#[0 if inclusive else 1:]
+
+
+    def standardize_type(self, typ, name='', attr=''):
+        '''Takes in a string or type and returns the standardized type'''
+        if(isinstance(typ, type)):
+            typ = typ.__name__
+        if(isinstance(typ,str)):
+            typ_str = typ
+            is_list = typ_str.lower().startswith("list")
+            if(is_list): typ_str = typ_str.split("(")[1][:-1]
+
+            is_deferred = False
+            if(typ_str.lower() in TYPE_ALIASES): 
+                typ = numba_type_map[TYPE_ALIASES[typ_str.lower()]]
+            # elif(typ_str == name):
+            #     typ = context.get_deferred_type(name)# DeferredFactRefType(name)
+            elif(typ_str in self.name_to_type):
+                typ = self.name_to_type[typ_str]
+            else:
+                typ = self.get_deferred_type(typ_str)
+                is_deferred = True
+                # raise TypeError(f"Attribute type {typ_str!r} not recognized in spec" + 
+                #     f" for attribute definition {attr!r}." if attr else ".")
+
+            if(is_list): typ = ListType(typ)
+
+        if(hasattr(typ, "_fact_type")): typ = typ._fact_type
+        return typ
+
+
+
 
     def __str__(self):
         return f"CREContext({self.name})"

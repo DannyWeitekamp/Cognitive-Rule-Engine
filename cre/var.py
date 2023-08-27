@@ -820,13 +820,18 @@ def var_ctor_generic(base_t_id, alias):
 
 @overload(Var)
 def overload_Var(typ,alias=""):
-    _typ = typ.instance_type
-    struct_type = VarTypeClass(_typ,_typ)
-    base_t_id = cre_context().get_t_id(_type=_typ)
-    # print("@@ IMPL VAR :: ", _typ, base_t_id)
-    def impl(typ, alias=""):
-        return var_ctor(struct_type, base_t_id, alias)
-
+    if(hasattr(typ, 'instance_type')):
+        _typ = typ.instance_type
+        struct_type = VarTypeClass(_typ,_typ)
+        base_t_id = cre_context().get_t_id(_type=_typ)
+        # print("@@ IMPL VAR :: ", _typ, base_t_id)
+        def impl(typ, alias=""):
+            return var_ctor(struct_type, base_t_id, alias)
+    else:
+        # Case when typ is t_id
+        def impl(typ, alias=""):
+            base_t_id = typ
+            return var_ctor(VarType, base_t_id, alias)
     return impl
 
 

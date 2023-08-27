@@ -9,7 +9,7 @@ from cre.obj import CREObjTypeClass, CREObjType, member_info_type, _iter_mbr_inf
 from numba.core.datamodel import default_manager, models
 from numba.experimental.structref import define_attributes, StructRefProxy, new, define_boxing
 import operator
-from cre.core import T_ID_CONDITIONS, T_ID_LITERAL, T_ID_FUNC, T_ID_FACT, T_ID_VAR, T_ID_UNDEFINED, T_ID_BOOL, T_ID_INT, T_ID_FLOAT, T_ID_STR, T_ID_TUPLE_FACT
+from cre.core import DEFAULT_T_ID_TYPES, T_ID_CONDITIONS, T_ID_LITERAL, T_ID_FUNC, T_ID_FACT, T_ID_VAR, T_ID_UNDEFINED, T_ID_BOOL, T_ID_INT, T_ID_FLOAT, T_ID_STR, T_ID_TUPLE_FACT
 # from cre.primitive import BooleanPrimitiveType, IntegerPrimitiveType, FloatPrimitiveType, StringPrimitiveType
 from cre.tuple_fact import TupleFact
 from cre.var import VarType
@@ -23,7 +23,7 @@ from cre.hashing import accum_item_hash, unicode_hash_noseed
 
 
     
-
+N_DEFAULT_TYPES = len(DEFAULT_T_ID_TYPES)
 
 
 ### __eq___ ###
@@ -152,9 +152,11 @@ def fact_eq(a, b):
         if(t_id_a != t_id_b): return False
 
         if(t_id_a == T_ID_TUPLE_FACT):
-            raise Exception()
-        elif(t_id_a == T_ID_FACT):
-            if(not _load_ptr(i8, data_ptr_a) == _load_ptr(i8, data_ptr_b)): return False
+            raise Exception("TupleFact Members of Fact Not Implemented.")
+        elif(t_id_a == T_ID_FACT or t_id_a >= N_DEFAULT_TYPES):
+            # Don't check fact members 
+            pass
+            # if(not _load_ptr(i8, data_ptr_a) == _load_ptr(i8, data_ptr_b)): return False
         else:
             if(not eq_from_t_id_ptr(t_id_a, data_ptr_a, data_ptr_b)): return False
 
@@ -222,7 +224,8 @@ def tuple_fact_eq(a, b):
                 elif(t_id_a==T_ID_CONDITIONS):
                     if(not conds_eq(mbr_a,mbr_b)): return False
                 else:
-                    if(not fact_eq(mbr_a,mbr_b)): return False
+                    # print("FACT EQ", mbr_a, mbr_b, fact_eq(mbr_a, mbr_b))
+                    if(not fact_eq(mbr_a, mbr_b)): return False
 
                 
 

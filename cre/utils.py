@@ -1483,6 +1483,10 @@ def _tuple_getitem(typingctx, tup, i):
         # args = cgutils.unpack_tuple(builder, args, len(inp_types))
 
 
+def get_ep(dispatcher):
+    return next(iter(dispatcher.overloads.values())).entry_point
+
+
 ### Timing --- Only works for Linux ###
 from sys import platform
 if('linux' in platform):

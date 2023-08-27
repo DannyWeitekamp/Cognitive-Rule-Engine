@@ -254,6 +254,19 @@ def flattener_update_for_attr(self, fact, id_attr, attr):
 
     return impl
 
+@overload_method(FlattenerTypeClass, 'get_base_var')
+def overload_get_base_var(self, t_id, _id):
+    def impl(self, t_id, _id):
+        btup = (u2(t_id), _id)
+        if(btup not in self.base_var_map):
+            # Make the base_var and cache it.
+            self.base_var_map[btup] = Var(t_id, _id)
+        base_var = cast(self.base_var_map[btup], VarType)
+        return base_var
+    return impl
+
+
+
 @njit(cache=True)
 def clean_a_id(self, change_idrec, a_id):
     '''Cleans the gvals associated with the fact at 'change_idrec' with 'a_id' ''' 

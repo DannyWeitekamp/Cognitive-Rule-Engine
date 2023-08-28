@@ -105,7 +105,7 @@ setup(
 
         entry_points={
             "console_scripts": [
-                "cre = cre.console_script:main"
+                "cre = cre_caching.console_script:main"
             ]
         },
         ext_modules = get_ext_modules(),

@@ -233,7 +233,7 @@ def memset_clear_refs(ms):
     # print("MEMSET DEL!!!", )
     # ms = _struct_from_ptr(MemSetType, _raw_ptr_from_struct(_ms)-48)
     # _incref_structref(ms)
-    # print(ms.facts)
+    # print(ms.facts)./f
     facts = ms.facts#_load_ptr(VectorType, _raw_ptr_from_struct(_ms))
     #Decref all declared facts and their container vectors 
     for i in range(facts.head):
@@ -463,8 +463,8 @@ def declare_fact_name(ms,fact,name):
 def retract_by_idrec(ms,idrec):
     t_id, f_id, _ = decode_idrec(idrec) #negligible
 
-    fact = memset_get_fact(ms, idrec)
-    fact_lower_setattr(fact,'idrec',encode_idrec(t_id,0,u1(-1)))
+    # fact = memset_get_fact(ms, idrec)
+    # fact_lower_setattr(fact,'idrec',encode_idrec(t_id,0,u1(-1)))
 
     make_f_id_empty(ms,i8(t_id), i8(f_id)) #3.6ms
     ms.change_queue.add(encode_idrec(t_id, f_id, u1(0xFF)))

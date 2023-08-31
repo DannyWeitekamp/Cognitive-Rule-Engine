@@ -18,7 +18,7 @@ from cre.vector import VectorType
 from cre.func import CREFuncType, CREFunc, cre_func_unique_string
 
 from cre.obj import CREObjType, CREObjTypeClass
-from cre.core import T_ID_CONDITIONS, T_ID_LITERAL, register_global_default
+from cre.core import T_ID_VAR, T_ID_FUNC, T_ID_CONDITIONS, T_ID_LITERAL, register_global_default
 from numba.core import imputils, cgutils
 from numba.core.datamodel import default_manager, models
 from cre.var import *
@@ -35,11 +35,17 @@ literal_fields_dict = {
     **cre_obj_field_dict,
     "op" : CREFuncType,
     "base_var_ptrs" : i8[:],#UniTuple(i8,2),
+    "var_inds" : i8[:],
     # "cre_ms_ptr" : i8,
     # A weight used for scoring matches and structure remapping  
     "weight" : f4,
+
+    # Whether or not the literal is negated
     "negated" : u1,
     "is_alpha" : u1,
+
+    # The index of the literal in its parent condition
+    
     # "link_data" : LiteralLinkDataType,
 }
 
@@ -117,6 +123,7 @@ def literal_ctor(op):
     st.idrec = encode_idrec(T_ID_LITERAL, 0, 0)
     st.op = op
     st.base_var_ptrs = op.base_var_ptrs
+    st.var_inds = np.arange(op.n_args, dtype=np.int64)
     st.weight = 1.0
     st.negated = 0
     st.is_alpha = u1(len(st.base_var_ptrs) == 1)
@@ -138,6 +145,7 @@ def literal_copy(self):
     st.idrec = self.idrec
     st.op = self.op
     st.base_var_ptrs = self.base_var_ptrs
+    st.var_inds = self.var_inds.copy()
     st.weight = self.weight
     st.negated = self.negated
     st.is_alpha = self.is_alpha
@@ -239,19 +247,20 @@ register_global_default("Conditions", ConditionsType)
 # default_manager.register(VarTypeClass, models.StructRefModel)
 class Conditions(structref.StructRefProxy):
     def __new__(cls, _vars, dnf=None):
-        if(isinstance(_vars,CREFunc)):
-            return cre_func_to_cond(_vars)
+        if(isinstance(_vars, (CREFunc, Var, Literal, Conditions))):
+            return to_cond(_vars)
         else:
-            return conditions_ctor(_vars, dnf)
+            return _conditions_ctor_var_list(_vars, dnf)
+
     def __str__(self):
         return conds_repr(self)
     def __and__(self, other):
-        if(isinstance(other,CREFunc)): other = cre_func_to_cond(other)
+        # if(isinstance(other,CREFunc)): other = to_cond(other)
         conds = conditions_and(self, other) 
         auto_alias_unaliased_vars(conds)
         return conds
     def __or__(self, other):
-        if(isinstance(other,CREFunc)): other = cre_func_to_cond(other)
+        # if(isinstance(other,CREFunc)): other = to_cond(other)
         conds = conditions_or(self, other)
         auto_alias_unaliased_vars(conds)
         return conds
@@ -270,17 +279,16 @@ class Conditions(structref.StructRefProxy):
 
     def check_match(self, match, ms=None):
         from cre.matching import check_match
-        idrecs = np.array([x.idrec for x in match],dtype=np.uint64)
-        return check_match(self, idrecs, ms)
+        ptrs = np.array([x.get_ptr() for x in match], dtype=np.int64)
+        return check_match(self, ptrs)
 
     def set_weight(self, weight):
         conds_set_weight(self, weight)
 
     def score_match(self, match, ms=None):
         from cre.matching import score_match
-        idrecs = np.array([x.idrec for x in match],dtype=np.uint64)
-        # print(self)
-        return score_match(self, idrecs, ms)
+        ptrs = np.array([x.get_ptr() for x in match], dtype=np.int64)
+        return score_match(self, ptrs)
 
     def antiunify(self, other, return_score=False, normalize='left',
          fix_same_var=False, fix_same_alias=False):
@@ -307,8 +315,8 @@ class Conditions(structref.StructRefProxy):
 
 
 
-    def link(self,ms):
-        get_linked_conditions_instance(self,ms,copy=False)
+    # def link(self,ms):
+    #     get_linked_conditions_instance(self,ms,copy=False)
 
     @property
     def signature(self):
@@ -411,22 +419,6 @@ def auto_alias_unaliased_vars(conds):
 
 
 
-
-# @njit(unicode_type(ConditionsType,unicode_type,types.boolean), cache=True)
-# def conds_get_delimited_type_names(self,delim,ignore_ext_nots):
-#     s,l = "", len(self.vars)
-#     for i, v in enumerate(self.vars):
-#         if(ignore_ext_nots and v.is_not): continue
-#         s += v.base_type_name
-#         s += delim
-#     return s[:-len(delim)]
-
-# @njit(void(ConditionsType),cache=True)
-# def conds_dtor(self):
-#     if(self.matcher_inst_ptr): 
-#         _decref_ptr(self.matcher_inst_ptr)
-
-
 ### Helper Functions for expressing conditions as python lists of cre.CREFunc instances ###
 
 @njit(cache=True)
@@ -516,15 +508,6 @@ def conds_get_distr_dnf(self):
 
 
 
-# TODO: Reimplement
-# @overload_method(ConditionsTypeClass,'get_matches')
-# def impl_get_matches(self,ms=None):
-#     from cre.matching import get_matches
-#     def impl(self,ms=None):
-#         return get_matches(ms)
-#     return impl
-
-
 @njit(cache=True)
 def new_dnf(n):
     dnf = List.empty_list(conjunct_type)
@@ -594,7 +577,7 @@ def _conditions_ctor_var_list(_vars,dnf=None):
 
 
 
-@generated_jit(cache=True)
+# @generated_jit(cache=True)
 @overload(Conditions,strict=False)
 def conditions_ctor(_vars, dnf=None):
     if(isinstance(_vars,VarTypeClass)):
@@ -626,26 +609,7 @@ def _get_sig_str(conds):
 
 
 
-# from cre.var import get_base_type_name
-# @njit(cache=True)
-# def conditions_repr(self,alias=None):
-#     s = ""
-#     for j, v in enumerate(self.vars):
-#         s += v.alias
-#         if(j < len(self.vars)-1): s += ", "
-#     s += " = "
-#     for j, v in enumerate(self.vars):
-#         prefix = "NOT" if(v.is_not) else "Var"
-#         s_v = prefix + "(" + get_base_type_name(v) + ")"
-#         # : s_v = "NOT(" + s_v +")"
-#         s += s_v
-#         if(j < len(self.vars)-1): s += ", "
-#     s += "\n"
-#     if(alias is not None):
-#         s += alias +" = "
 
-#     s += conditions_str(self,add_non_conds=True)
-#     return s
 GTE_PY39 = sys.version_info >= (3,9)
 
 
@@ -825,82 +789,46 @@ def build_var_list(base_var_map):
     return var_list
 
 
+@njit(ConditionsType(CREObjType), cache=True)
+def to_cond(self):
+    t_id, _, _ = decode_idrec(self.idrec)
+    if(t_id == T_ID_CONDITIONS):
+        return cast(self, ConditionsType)
 
-@njit(ConditionsType(LiteralType,),cache=True)
-def literal_to_cond(lit):
-    dnf = new_dnf(1)
-    # ind = 0 if (lit.is_alpha) else 1
-    dnf[0].append(lit)
-    _vars = List.empty_list(VarType)
+    elif(t_id == T_ID_VAR):
+        v = cast(self,VarType)
+        return _conditions_ctor_single_var(v)
+    
+    elif(t_id == T_ID_FUNC):
+        fn = cast(self, CREFuncType)
+        self = cast(literal_ctor(fn),CREObjType)
+        t_id = T_ID_LITERAL
+        # Continue on to construct from literal
+    
+    if(t_id == T_ID_LITERAL):
+        lit = cast(self, LiteralType)
+        dnf = new_dnf(1)
+        dnf[0].append(lit)
+        _vars = List.empty_list(VarType)
 
-    for ptr in lit.base_var_ptrs:
-        _vars.append(cast(ptr, VarType))
-    # if(right_var is not None):
-    #     _vars.append(right_var)
-    # pt.negated = negated
-    c = _conditions_ctor_var_list(_vars, dnf)
-    # c = Conditions(_vars, dnf)
-    return c
+        for ptr in lit.base_var_ptrs:
+            _vars.append(cast(ptr, VarType))
+        return _conditions_ctor_var_list(_vars, dnf)
 
-@njit(ConditionsType(CREFuncType,), cache=True)
-def cre_func_to_cond(op):
-    return literal_to_cond(literal_ctor(op))
-
-
+    print(t_id, T_ID_VAR, T_ID_FUNC, T_ID_LITERAL)
+    raise Exception("Object type not recognized for conversion to Conditions object.")
 
 
 @njit(cache=True)
-def _conditions_and(left, right):
-    '''AND is distributive
-    AND((ab+c), (de+f)) = abde+abf+cde+cf'''
-    bvm = build_base_var_map(left.vars,right.vars)
-    dnf = dnf_and(left.dnf, right.dnf)
-    out = _conditions_ctor_base_var_map(bvm, dnf)
-    return out
-
-# @njit(cache=True)
-# def conditions_and_var(left,right):
-#     right_c = _conditions_ctor_single_var(right)
-#     return conditions_and(left,right_c)
-
-# @njit(cache=True)
-# def var_and_conditions(left,right):
-#     left_c = _conditions_ctor_single_var(left)
-#     return conditions_and(left_c,right)
-
-# @njit(cache=True)
-# def var_and(left,right):
-#     left_c = _conditions_ctor_single_var(left)
-#     right_c = _conditions_ctor_single_var(right)
-#     return conditions_and(left_c,right_c)
+def assign_lit_var_inds(dnf, base_var_map):
+    for conjunct in dnf:
+        for lit in conjunct:
+            for i, ptr in enumerate(lit.base_var_ptrs):
+                lit.var_inds[i] = base_var_map[ptr]
 
 
-# @njit(cache=True)
-@generated_jit(cache=True)    
-def conditions_and(self, other):
-    if(isinstance(other, VarTypeClass)):
-        if(isinstance(self,VarTypeClass)):
-            def impl(self,other):
-                self_c = _conditions_ctor_single_var(self)
-                other_c = _conditions_ctor_single_var(other)
-                return _conditions_and(self_c,other_c)
-        else:
-            def impl(self,other):
-                other_c = _conditions_ctor_single_var(other)
-                out = _conditions_and(self,other_c)
-                return out
-    else:
-        if(isinstance(self,VarTypeClass)):
-            def impl(self,other):
-                self_c = _conditions_ctor_single_var(self)
-                return _conditions_and(self_c,other)
-        else:
-            def impl(self,other):
-                return _conditions_and(self,other)
 
-    return impl
-
-
+        
 @njit(cache=True)
 def dnf_and(l_dnf, r_dnf):
     dnf = new_dnf(len(l_dnf)*len(r_dnf))
@@ -916,35 +844,44 @@ def dnf_and(l_dnf, r_dnf):
     return dnf
 
 
+@njit(ConditionsType(CREObjType, CREObjType), cache=True)
+def conditions_and(a, b):
+    c_a = to_cond(a)
+    c_b = to_cond(b)
+    
+    bvm = build_base_var_map(c_a.vars, c_b.vars)
+    dnf = dnf_and(c_a.dnf, c_b.dnf)
+    assign_lit_var_inds(dnf, bvm)
+
+    return _conditions_ctor_base_var_map(bvm, dnf)
+
+
 @njit(cache=True)
-def _conditions_or(left,right):
-    '''OR is additive like
-    OR((ab+c), (de+f)) = ab+c+de+f'''
-    return Conditions(build_base_var_map(left.vars,right.vars),
-                      dnf_or(left.dnf, right.dnf))
+def dnf_or(l_dnf, r_dnf):
+    dnf = new_dnf(len(l_dnf)+len(r_dnf))
+    for i, conjuct in enumerate(l_dnf):
+        for x in conjuct: dnf[i].append(x)
+        # for x in conjuct[0]: dnf[i][0].append(x)
+        # for x in conjuct[1]: dnf[i][1].append(x)
 
-@generated_jit(cache=True)    
-def conditions_or(self,other):
-    if(isinstance(other, VarTypeClass)):
-        if(isinstance(self,VarTypeClass)):
-            def impl(self,other):
-                self_c = _conditions_ctor_single_var(self)
-                other_c = _conditions_ctor_single_var(other)
-                return _conditions_or(self_c,other_c)
-        else:
-            def impl(self,other):
-                other_c = _conditions_ctor_single_var(other)
-                return _conditions_or(self,other_c)
-    else:
-        if(isinstance(self,VarTypeClass)):
-            def impl(self,other):
-                self_c = _conditions_ctor_single_var(self)
-                return _conditions_or(self_c,other)
-        else:
-            def impl(self,other):
-                return _conditions_or(self,other)
+    for i, conjuct in enumerate(r_dnf):
+        k = len(l_dnf)+i
+        for x in conjuct: dnf[k].append(x)
+        # for x in conjuct[0]: dnf[k][0].append(x)
+        # for x in conjuct[1]: dnf[k][1].append(x)
 
-    return impl
+    return dnf
+
+@njit(ConditionsType(CREObjType, CREObjType), cache=True)
+def conditions_or(a, b):
+    c_a = to_cond(a)
+    c_b = to_cond(b)
+
+    bvm = build_base_var_map(c_a.vars, c_b.vars)
+    dnf = dnf_or(c_a.dnf, c_b.dnf)
+    assign_lit_var_inds(dnf, bvm)
+    return _conditions_ctor_base_var_map(bvm, dnf)
+
 
 def OR(*args):
     assert len(args) >= 2, "OR requires at least two arguments"
@@ -966,21 +903,6 @@ def AND(*args):
 
 
 
-@njit(cache=True)
-def dnf_or(l_dnf, r_dnf):
-    dnf = new_dnf(len(l_dnf)+len(r_dnf))
-    for i, conjuct in enumerate(l_dnf):
-        for x in conjuct: dnf[i].append(x)
-        # for x in conjuct[0]: dnf[i][0].append(x)
-        # for x in conjuct[1]: dnf[i][1].append(x)
-
-    for i, conjuct in enumerate(r_dnf):
-        k = len(l_dnf)+i
-        for x in conjuct: dnf[k].append(x)
-        # for x in conjuct[0]: dnf[k][0].append(x)
-        # for x in conjuct[1]: dnf[k][1].append(x)
-
-    return dnf
 
 @njit(cache=True)
 def dnf_not(c_dnf):
@@ -1001,127 +923,8 @@ def dnf_not(c_dnf):
     out_dnf = dnfs[0]
     for i in range(1,len(dnfs)):
         out_dnf = dnf_and(out_dnf,dnfs[i])
+
     return out_dnf
-
-
-@njit(VarType(VarType,),cache=True)
-def _build_var_conjugate(v):
-    if(v.conj_ptr == 0):
-        conj = var_copy(v)
-        # conj = new(VarType)
-        # var_memcopy(v,conj)
-        conj.is_not = u1(0) if v.is_not else u1(1)
-        conj.conj_ptr = _ptr_from_struct_incref(v)
-        v.conj_ptr = _ptr_from_struct_incref(conj)
-    else:
-        conj = cast(v.conj_ptr, VarType)
-    return conj
-
-
-
-@generated_jit(cache=True)
-def _var_NOT(c):
-    '''Implementation of NOT for Vars moved outside of NOT 
-        definition to avoid recursion issue'''
-    if(isinstance(c,VarTypeClass)):
-        st_typ = c
-        def impl(c):
-            if(c.conj_ptr == 0):
-                base = cast(c.base_ptr, VarType)
-
-                conj_base = _build_var_conjugate(base)
-                g_conj = _build_var_conjugate(cast(c, VarType))
-
-                g_conj.base_ptr = cast(conj_base, i8)
-
-            st = cast(c.conj_ptr, st_typ)
-            return st
-        return impl
-
-@njit(cache=True)
-def _conditions_NOT(c):
-    new_vars = List.empty_list(VarType)
-    ptr_map = Dict.empty(i8,i8)
-    for var in c.vars:
-        new_var = _var_NOT(var)
-        ptr_map[cast(var, i8)]  = cast(new_var, i8)
-        new_vars.append(new_var)
-
-    dnf = dnf_copy(c.dnf,shallow=False)
-
-    for i, (alpha_conjuncts, beta_conjuncts) in enumerate(dnf):
-        for alpha_literal in alpha_conjuncts: 
-            alpha_literal.base_var_ptrs = (ptr_map[alpha_literal.base_var_ptrs[0]],0)
-        for beta_literal in beta_conjuncts:
-            t = (ptr_map[beta_literal.base_var_ptrs[0]], ptr_map[beta_literal.base_var_ptrs[1]])
-            beta_literal.base_var_ptrs = t
-
-    return Conditions(new_vars, dnf)
-
-
-def NOT(c, alias=None):
-    ''' Applies existential NOT in python context)''' 
-    if(isinstance(c, (ConditionsTypeClass, Conditions))):
-        # When NOT() is applied to a Conditions object
-        #  apply NOT() to all vars and make sure the pointers
-        #  for the new vars are tracked in the dnf
-        return _conditions_NOT(c)            
-    elif(isinstance(c, (VarTypeClass, Var))):    
-        # Mark a var as NOT(v) meaning we test that nothing
-        #  binds to it. Return a new instance to maintain
-        #  value semantics.
-        out = _var_NOT(c)
-        assign_to_alias_in_parent_frame(out,out.alias)
-        return out
-        
-    elif(hasattr(c,'fact_type') or hasattr(c,'fact_ctor')):
-        # 
-        c = getattr(c, 'fact_type',c)
-        var = Var(c,alias,skip_assign_alias=True)
-        out = _var_NOT(var)
-        out._fact_type = var._fact_type
-        out._head_type = var._head_type
-        assign_to_alias_in_parent_frame(out,alias)
-        return out
-
-
-@overload(NOT)
-def overload_NOT(c, alias=None):
-    ''' Applies existential NOT in numba context -- works same as above''' 
-    if(isinstance(c,ConditionsTypeClass)):
-        def impl(c,alias=None):
-            return _conditions_NOT(c)
-        return impl
-    elif(isinstance(c,VarTypeClass)):
-        #TODO: Possible to assign to alias in parent in jit context?
-        def impl(c,alias=None):
-            return _var_NOT(c)
-        return impl
-    elif(hasattr(c,'fact_type') or hasattr(c,'fact_ctor')):
-        #TODO: Possible to assign to alias in parent in jit context?
-        raise NotImplemented()
-        c = getattr(c, 'fact_type',c)
-        def impl(c, alias=None):
-            return None
-
-
-
-
-@generated_jit(cache=True)
-def conditions_not(c):
-    '''Defines ~x for Var and Conditions''' 
-    if(isinstance(c,ConditionsTypeClass)):
-        # ~ operation inverts the qualifiers and terms like
-        #  ~(ab+c) = ~(ab)c' = (a'+b')c' = a'c'+b'c'
-        def impl(c):
-            dnf = dnf_not(c.dnf)
-            return Conditions(c.base_var_map, dnf)
-    elif(isinstance(c,VarTypeClass)):
-        # If we applied to a var then serves as NOT()
-        def impl(c):
-            return _var_NOT(c)
-    return impl
-
 
 
 @njit(cache=True)
@@ -1129,31 +932,155 @@ def conditions_not(c):
     '''NOT inverts the qualifiers and terms like
     NOT(ab+c) = NOT(ab)+c = (a'+b')c' = a'c'+b'c'''
     dnf = dnf_not(c.dnf)
+    assign_lit_var_inds(dnf, c.base_var_map)
     return Conditions(c.base_var_map, dnf)
 
 
 
 
-@generated_jit(cache=True)
+# @generated_jit(cache=True)
 @overload(operator.and_)
-def cond_and(l, r):
+def cond_overload_and(l, r):
     if(not isinstance(l,ConditionsTypeClass)): return
     if(not isinstance(r,ConditionsTypeClass)): return
     return lambda l,r : conditions_and(l, r)
 
-@generated_jit(cache=True)
+# @generated_jit(cache=True)
 @overload(operator.or_)
-def cond_or(l, r):
+def cond_overload_or(l, r):
     if(not isinstance(l,ConditionsTypeClass)): return
     if(not isinstance(r,ConditionsTypeClass)): return
     return lambda l,r : conditions_or(l, r)
 
-@generated_jit(cache=True)
+# @generated_jit(cache=True)
 @overload(operator.not_)
 @overload(operator.invert)
-def cond_not(c):
+def cond_overload_not(c):
     if(not isinstance(c,ConditionsTypeClass)): return
     return lambda c : conditions_not(c)
+
+
+
+
+# @generated_jit(cache=True)
+
+# NOTE : Pretty sure these are not up to date
+if(False):
+    @njit(VarType(VarType,),cache=True)
+    def _build_var_conjugate(v):
+        if(v.conj_ptr == 0):
+            conj = var_copy(v)
+            # conj = new(VarType)
+            # var_memcopy(v,conj)
+            conj.is_not = u1(0) if v.is_not else u1(1)
+            conj.conj_ptr = _ptr_from_struct_incref(v)
+            v.conj_ptr = _ptr_from_struct_incref(conj)
+        else:
+            conj = cast(v.conj_ptr, VarType)
+        return conj
+
+
+    @njit(VarType(VarType,),cache=True)
+    def var_NOT(v):
+        '''Implementation of NOT for Vars moved outside of NOT 
+            definition to avoid recursion issue'''
+        if(v.conj_ptr == 0):
+            base = cast(v.base_ptr, VarType)
+
+            conj_base = _build_var_conjugate(base)
+            g_conj = _build_var_conjugate(cast(v, VarType))
+
+            g_conj.base_ptr = cast(conj_base, i8)
+
+        st = cast(v.conj_ptr, VarType)
+        return st
+
+    @njit(cache=True)
+    def _conditions_NOT(c):
+        new_vars = List.empty_list(VarType)
+        ptr_map = Dict.empty(i8,i8)
+        for var in c.vars:
+            new_var = var_NOT(var)
+            ptr_map[cast(var, i8)]  = cast(new_var, i8)
+            new_vars.append(new_var)
+
+        dnf = dnf_copy(c.dnf,shallow=False)
+
+        for i, (alpha_conjuncts, beta_conjuncts) in enumerate(dnf):
+            for alpha_literal in alpha_conjuncts: 
+                alpha_literal.base_var_ptrs = (ptr_map[alpha_literal.base_var_ptrs[0]],0)
+            for beta_literal in beta_conjuncts:
+                t = (ptr_map[beta_literal.base_var_ptrs[0]], ptr_map[beta_literal.base_var_ptrs[1]])
+                beta_literal.base_var_ptrs = t
+
+        return Conditions(new_vars, dnf)
+
+
+    def NOT(c, alias=None):
+        ''' Applies existential NOT in python context)''' 
+        if(isinstance(c, (ConditionsTypeClass, Conditions))):
+            # When NOT() is applied to a Conditions object
+            #  apply NOT() to all vars and make sure the pointers
+            #  for the new vars are tracked in the dnf
+            return _conditions_NOT(c)            
+        elif(isinstance(c, (VarTypeClass, Var))):    
+            # Mark a var as NOT(v) meaning we test that nothing
+            #  binds to it. Return a new instance to maintain
+            #  value semantics.
+            out = _var_NOT(c)
+            assign_to_alias_in_parent_frame(out,out.alias)
+            return out
+            
+        elif(hasattr(c,'fact_type') or hasattr(c,'fact_ctor')):
+            # 
+            c = getattr(c, 'fact_type',c)
+            var = Var(c,alias,skip_assign_alias=True)
+            out = _var_NOT(var)
+            out._fact_type = var._fact_type
+            out._head_type = var._head_type
+            assign_to_alias_in_parent_frame(out,alias)
+            return out
+
+
+    @overload(NOT)
+    def overload_NOT(c, alias=None):
+        ''' Applies existential NOT in numba context -- works same as above''' 
+        if(isinstance(c,ConditionsTypeClass)):
+            def impl(c,alias=None):
+                return _conditions_NOT(c)
+            return impl
+        elif(isinstance(c,VarTypeClass)):
+            #TODO: Possible to assign to alias in parent in jit context?
+            def impl(c,alias=None):
+                return _var_NOT(c)
+            return impl
+        elif(hasattr(c,'fact_type') or hasattr(c,'fact_ctor')):
+            #TODO: Possible to assign to alias in parent in jit context?
+            raise NotImplemented()
+            c = getattr(c, 'fact_type',c)
+            def impl(c, alias=None):
+                return None
+
+
+
+
+# @generated_jit(cache=True)
+# def conditions_not(c):
+#     '''Defines ~x for Var and Conditions''' 
+#     if(isinstance(c,ConditionsTypeClass)):
+#         # ~ operation inverts the qualifiers and terms like
+#         #  ~(ab+c) = ~(ab)c' = (a'+b')c' = a'c'+b'c'
+#         def impl(c):
+#             dnf = dnf_not(c.dnf)
+#             return Conditions(c.base_var_map, dnf)
+#     elif(isinstance(c,VarTypeClass)):
+#         # If we applied to a var then serves as NOT()
+#         def impl(c):
+#             return _var_NOT(c)
+#     return impl
+
+
+
 
 
 
@@ -1161,41 +1088,42 @@ def cond_not(c):
 
 #### Linking ####
 
-@njit(cache=True)
-def link_literal_instance(literal, ms):
-    link_data = generate_link_data(literal.pred_node, ms)
-    literal.link_data = link_data
-    literal.ms_ptr = cast(ms, i8)
-    return literal
+if(False):
+    @njit(cache=True)
+    def link_literal_instance(literal, ms):
+        link_data = generate_link_data(literal.pred_node, ms)
+        literal.link_data = link_data
+        literal.ms_ptr = cast(ms, i8)
+        return literal
 
-@njit(cache=True)
-def dnf_copy(dnf,shallow=True):
-    ndnf = new_dnf(len(dnf))
-    for i, (alpha_lit, beta_lit) in enumerate(dnf):
-        for alpha_literal in alpha_lit:
-            new_alpha = alpha_literal if(shallow) else literal_copy(alpha_literal)
-            ndnf[i][0].append(new_alpha)
-        for beta_literal in beta_lit:
-            new_beta = beta_literal if(shallow) else literal_copy(beta_literal)
-            ndnf[i][1].append(new_beta)
-    return ndnf
+    @njit(cache=True)
+    def dnf_copy(dnf,shallow=True):
+        ndnf = new_dnf(len(dnf))
+        for i, (alpha_lit, beta_lit) in enumerate(dnf):
+            for alpha_literal in alpha_lit:
+                new_alpha = alpha_literal if(shallow) else literal_copy(alpha_literal)
+                ndnf[i][0].append(new_alpha)
+            for beta_literal in beta_lit:
+                new_beta = beta_literal if(shallow) else literal_copy(beta_literal)
+                ndnf[i][1].append(new_beta)
+        return ndnf
 
-@njit(cache=True)
-def get_linked_conditions_instance(conds, ms, copy=False):
-    dnf = dnf_copy(conds.dnf,shallow=False) if copy else conds.dnf
-    for alpha_conjunct, beta_conjunct in dnf:
-        for term in alpha_conjunct: link_literal_instance(term, ms)
-        for term in beta_conjunct: link_literal_instance(term, ms)
-    if(copy):
-        new_conds = Conditions(conds.base_var_map, dnf)
-        # if(conds.is_initialized): initialize_conditions(new_conds)
-        conds = new_conds
+    @njit(cache=True)
+    def get_linked_conditions_instance(conds, ms, copy=False):
+        dnf = dnf_copy(conds.dnf,shallow=False) if copy else conds.dnf
+        for alpha_conjunct, beta_conjunct in dnf:
+            for term in alpha_conjunct: link_literal_instance(term, ms)
+            for term in beta_conjunct: link_literal_instance(term, ms)
+        if(copy):
+            new_conds = Conditions(conds.base_var_map, dnf)
+            # if(conds.is_initialized): initialize_conditions(new_conds)
+            conds = new_conds
 
-    #Note... maybe it's simpler to just make mem an optional(memType)
-    old_ptr = conds.ms_ptr
-    conds.ms_ptr = cast(ms, i8)#_ptr_from_struct_incref(mem)
-    if(old_ptr != 0): _decref_ptr(old_ptr)
-    return conds
+        #Note... maybe it's simpler to just make mem an optional(memType)
+        old_ptr = conds.ms_ptr
+        conds.ms_ptr = cast(ms, i8)#_ptr_from_struct_incref(mem)
+        if(old_ptr != 0): _decref_ptr(old_ptr)
+        return conds
 
 
 #### Initialization ####

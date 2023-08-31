@@ -51,7 +51,7 @@ def test_numerical():
             a = Var(f8,'a')
             Incr = Add(Var(f8,'a'),1.0)
             assert Incr(3.0) == 4.0
-            assert str(Incr) == "a+1.0"
+            assert str(Incr) == "a+1"
 
             if(i == 0):
                 init_bytes = used_bytes()

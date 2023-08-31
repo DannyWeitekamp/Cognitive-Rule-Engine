@@ -122,7 +122,7 @@ class CREObjTypeClass(CastFriendlyMixin, types.StructRef):
 
     def __init_subclass__(cls, **kwargs):
         super().__init_subclass__(**kwargs)
-        # Allow numba type inferencer to upcast this type to CREObjType
+        # Allow numba type inferencer to upcast subclasses to CREObjType
         lower_cast(cls, CREObjType)(impl_cre_obj_upcast)
         
 
@@ -551,7 +551,7 @@ def cre_obj_get_member_t_ids(x):
     return t_ids
 
 
-@generated_jit(cache=True,nopython=True)
+# @generated_jit(cache=True,nopython=True)
 @overload_method(CREObjType, "asa")
 def asa(self, typ):
     def impl(self, typ):
@@ -559,38 +559,36 @@ def asa(self, typ):
     return impl
 
 
-@generated_jit(cache=True,nopython=True)
+@njit(cache=True)
 def copy_cre_obj(fact):
-    fact_type = fact
-    def impl(fact):
-        new_fact = _memcpy_structref(fact)
+    new_fact = _memcpy_structref(fact)
 
-        a,b = cast(fact, CREObjType), cast(new_fact, CREObjType)
+    a,b = cast(fact, CREObjType), cast(new_fact, CREObjType)
 
-        t_id, _, _ = decode_idrec(a.idrec)
-        b.idrec = encode_idrec(t_id,0,u1(-1))
-        b.hash_val = 0 
-        for info_a in _iter_mbr_infos(a):
-            t_id_a, m_id_a, data_ptr_a = info_a
-            # t_id_b, m_id_b, data_ptr_b = info_b
+    t_id, _, _ = decode_idrec(a.idrec)
+    b.idrec = encode_idrec(t_id,0,u1(-1))
+    b.hash_val = 0 
+    for info_a in _iter_mbr_infos(a):
+        t_id_a, m_id_a, data_ptr_a = info_a
+        # t_id_b, m_id_b, data_ptr_b = info_b
 
-            if(m_id_a != PRIMITIVE_MBR_ID):
-                obj_ptr = _load_ptr(i8, data_ptr_a)
-                _incref_ptr(obj_ptr)
-            elif(t_id_a == T_ID_STR):
-                s = _load_ptr(unicode_type, data_ptr_a)
-                _incref_structref(s)
-                #_store(unicode_type, data_ptr_b, s)
+        if(m_id_a != PRIMITIVE_MBR_ID):
+            obj_ptr = _load_ptr(i8, data_ptr_a)
+            _incref_ptr(obj_ptr)
+        elif(t_id_a == T_ID_STR):
+            s = _load_ptr(unicode_type, data_ptr_a)
+            _incref_structref(s)
+            #_store(unicode_type, data_ptr_b, s)
 
-        # Weird extra refcounts... as much as 4 extra if call cre_obj_iter_t_id_item_ptrs
-        #  on the new_fact
-        _decref_structref(new_fact)
+    # Weird extra refcounts... as much as 4 extra if call cre_obj_iter_t_id_item_ptrs
+    #  on the new_fact
+    _decref_structref(new_fact)
 
-        return new_fact
-    return impl
+    return new_fact
 
 
-@njit(types.void(CREObjType), cache=True)
+# @njit(types.void(CREObjType), cache=True)
+@njit(cache=True)
 def cre_obj_clear_refs(fact):
     for info_a in _iter_mbr_infos(fact):
         t_id_a, m_id_a, data_ptr_a = info_a

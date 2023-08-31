@@ -10,7 +10,7 @@ from cre.fact_intrinsics import fact_lower_getattr, resolve_fact_getattr_type
 from cre.tuple_fact import TupleFact, TF
 from cre.context import cre_context, CREContext
 # from cre.default_ops import Add, Subtract, Divide
-from cre.var import Var, VarType, var_append_deref
+from cre.var import Var, VarType
 # from cre.op import GenericOpType
 from cre.utils import _dict_from_ptr, ptr_t, _func_from_address, _obj_cast_codegen, _func_from_address, _incref_structref, _ptr_from_struct_incref
 from cre.structref import define_structref

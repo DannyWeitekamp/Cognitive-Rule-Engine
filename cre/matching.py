@@ -1742,7 +1742,7 @@ def update_from_upstream_match(m_iter, m_node):
 
 
 
-@njit(types.boolean(MatchIterNodeType))
+@njit(types.boolean(MatchIterNodeType), cache=True)
 def update_no_depends(m_node):
     # From the output associated with m_node make a copy of match_idrecs
     #  that omits all of the zeros. 
@@ -1955,48 +1955,79 @@ def _infer_unprovided(known_ptr, op, arg_ind):
 set_base_fact_arg = set_base_arg_val_impl(BaseFact)
 
 @njit(cache=True)
-def cum_weight_of_matching_nodes(ms, conds, match_idrecs, zero_on_fail=False):
+def _score_match(conds, match_ptrs, zero_on_fail=False):
     # Get the instance pointers from match_idrecs
-    match_ptrs = match_ptrs_from_idrecs(ms, match_idrecs, len(conds.vars))
-    corgi_graph = get_graph(ms, conds)
+    # match_ptrs = match_ptrs_from_idrecs(ms, match_idrecs, len(conds.vars))
+    # corgi_graph = get_graph(ms, conds)
+
+    # print("START MATCH")
 
     cum_weight, total_weight = 0.0, 0.0
-    for lst in corgi_graph.nodes_by_nargs:
-        for node in lst:
-            # TODO: Handle cases of Exists() and truncated match lists
+    
+    # Pad match_ptrs with zeros to account for variables in the conditions
+    #  for which no match has been provided
+    _match_ptrs = np.zeros(len(conds.vars), np.int64)
+    _match_ptrs[:len(match_ptrs)] = match_ptrs
+    match_ptrs = _match_ptrs
 
-            # If is an identiy node then give weight automatically
-            if(node.op is None):
-                cum_weight += 1.0
-                total_weight += 1.0
-                continue
+    # Give weight for at least having the right var types
+    bad_vars = np.zeros(len(conds.vars), dtype=np.uint8)    
+    for i, v in enumerate(conds.vars):
+        ptr_i = match_ptrs[i]
+        if(ptr_i == 0):
+            continue
 
-            total_weight += node.lit.weight
+        m = cast(ptr_i, BaseFact)
+        t_id, _, _ = decode_idrec(m.idrec)
+
+        total_weight += 1.0
+
+        # NOTE: Need to handle inheritance here... isa()
+        if(v.base_t_id != t_id):
+            bad_vars[i] = u1(1)
+            continue
+
+        cum_weight += 1.0
+        
+
+    # NOTE: MAKE WORK FOR OR
+    for conj in conds.dnf:
+        for lit in conj:
+    # for lst in corgi_graph.nodes_by_nargs:
+        # for node in lst:
+            
+            total_weight += lit.weight
 
             # Set arguments
             # TODO: Should set up so never need to skip (every literal always evaluated)
             skip = False
             infer_fail = False
-            for i, var_ind in enumerate(node.var_inds):
+            for i, var_ind in enumerate(lit.var_inds):
+                if(bad_vars[var_ind]):
+                    continue
+                # print("VAR_IND", var_ind)
                 ptr_i = match_ptrs[var_ind]
-
+                # print("ptr_i", ptr_i)
                 # If a match candidate wasn't provided in match_idrecs
                 #  then try to resolve it.
-                if(ptr_i == 0 and node.op.n_args == 2):
+                if(ptr_i == 0 and lit.op.n_args == 2):
                     j = 1 if i == 0 else 0
-                    known_ptr = match_ptrs[node.var_inds[j]]
-                    ptr_i, skip = _infer_unprovided(known_ptr, node.op, j)
+                    known_ptr = match_ptrs[lit.var_inds[j]]
+                    ptr_i, skip = _infer_unprovided(known_ptr, lit.op, j)
                     match_ptrs[var_ind] = ptr_i
 
                 if(skip):
+                    # print("SKIP", var_ind)
                     continue
 
                 if(ptr_i == 0):
+                    # print("ZERO PTR", var_ind)
                     infer_fail = True
                     continue
-                        
-                set_base_fact_arg(node.op, i, cast(ptr_i, BaseFact))
-            
+
+                # print(i, var_ind, repr(cast(ptr_i, BaseFact)), cast(ptr_i, BaseFact).idrec)
+                set_base_fact_arg(lit.op, i, cast(ptr_i, BaseFact))
+                
             if(skip):
                 # print("SKIP", node.op, node.lit.weight)
                 continue
@@ -2005,18 +2036,21 @@ def cum_weight_of_matching_nodes(ms, conds, match_idrecs, zero_on_fail=False):
                 if(zero_on_fail):
                     return 0.0, 0.0    
                 continue
+
             # Call
-            call_self = get_best_call_self(node.op, False)
-            status = call_self(node.op)
+            call_self = get_best_call_self(lit.op, False)
+            status = call_self(lit.op)
 
             # Add weight if match
-            if((status == CFSTATUS_TRUTHY) ^ node.lit.negated):
+            if((status == CFSTATUS_TRUTHY) ^ lit.negated):
                 # print("OKAY", node.op, node.lit.weight)
-                cum_weight += node.lit.weight
+                cum_weight += lit.weight
             elif(zero_on_fail):
+                # print("BAD Status", lit.op, status, CFSTATUS_TRUTHY)
                 return 0.0, 0.0
             # else:
                 # print("FAIL", node.op, node.lit.weight)
+    # print("END")
     return cum_weight, total_weight
 
 @njit(MemSetType(ConditionsType, types.optional(MemSetType)), cache=True)
@@ -2030,18 +2064,18 @@ def _ensure_ms(conds, ms):
 
 
 @njit(cache=True)
-def score_match(conds, match_idrecs, ms=None):
-    ms = _ensure_ms(conds, ms)
-    corgi_graph = get_graph(ms, conds)
-    cum_weight, total_weight = cum_weight_of_matching_nodes(ms, conds, match_idrecs, False)
+def score_match(conds, match_ptrs):
+    # ms = _ensure_ms(conds, ms)
+    # corgi_graph = get_graph(ms, conds)
+    cum_weight, total_weight = _score_match(conds, match_ptrs, False)
     return cum_weight / total_weight
 
 @njit(cache=True)
-def check_match(conds, match_idrecs, ms=None):
-    ms = _ensure_ms(conds, ms)
-    corgi_graph = get_graph(ms, conds)
+def check_match(conds, match_ptrs):
+    # ms = _ensure_ms(conds, ms)
+    # corgi_graph = get_graph(ms, conds)
     #TODO to make sure checking types
-    w, _ = cum_weight_of_matching_nodes(ms, conds, match_idrecs, True)
+    w, _ = _score_match(conds, match_ptrs, True)
     return w != 0.0
 
 

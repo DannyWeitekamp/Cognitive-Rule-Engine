@@ -10,7 +10,7 @@ from cre.fact_intrinsics import fact_lower_getattr, resolve_fact_getattr_type
 from cre.tuple_fact import TupleFact, TF
 from cre.context import cre_context
 # from cre.default_ops import Add, Subtract, Divide
-from cre.var import Var, VarType, var_append_deref, VarTypeClass
+from cre.var import Var, var_append_deref, VarType, VarTypeClass
 # from cre.op import GenericOpType
 from cre.utils import cast, _func_from_address,  _obj_cast_codegen, _func_from_address, _incref_structref
 from cre.structref import define_structref
@@ -236,7 +236,7 @@ def flattener_update_for_attr(self, fact, id_attr, attr):
 
             # Apply .attr to the base_var and cache it.
             base_var = cast(self.base_var_map[btup], base_var_type)
-            var = var_append_deref(base_var,attr)
+            var = var_append_deref(base_var, attr)
             self.var_map[tup] = cast(var, VarType)
 
         ###### End Var(...).attr #####

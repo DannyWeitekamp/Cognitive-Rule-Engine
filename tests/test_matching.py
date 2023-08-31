@@ -191,6 +191,8 @@ def test_check_and_score_match():
 
         match =[bps[9], bps[7]]
         assert conds.check_match(match, ms) == False
+        print("--------------_")
+        print(conds.score_match(match, ms))
         assert conds.score_match(match, ms) == 2./3
 
         conds = a & b & c & (a.name != "7") & (a.val < b.val) & (b.val < c.val)
@@ -705,7 +707,7 @@ def test_b_matching_betas_lit(benchmark):
 if(__name__ == "__main__"):
     import faulthandler; faulthandler.enable()
     
-    test_mem_leaks()
+    # test_mem_leaks()
     # test_swap_memset()
     # dat = matching_alphas_setup()[0]
     # dat = matching_betas_setup()[0]
@@ -734,7 +736,7 @@ if(__name__ == "__main__"):
 
 
     # test_ref_matching()
-    # test_check_and_score_match()
+    test_check_and_score_match()
     # test_multiple_deref()
     # test_matching_unconditioned()
     # test_list()

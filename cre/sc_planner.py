@@ -18,14 +18,14 @@ from cre.utils import (cast, ptr_t,  decode_idrec, lower_getattr, lower_setattr,
                        _dict_from_ptr, _list_from_ptr, _load_ptr, _arr_from_data_ptr, _get_array_raw_data_ptr, _get_array_raw_data_ptr_incref)
 from cre.utils import assign_to_alias_in_parent_frame, _raw_ptr_from_struct_incref, _func_from_address, _list_base_from_ptr, _listtype_sizeof_item
 from cre.vector import VectorType
-from cre.fact import Fact, gen_fact_import_str, get_offsets_from_member_types
+from cre.fact import BaseFact, Fact, gen_fact_import_str, get_offsets_from_member_types
 from cre.fact_intrinsics import fact_lower_getattr
 from cre.var import Var, VarTypeClass, var_append_deref, var_extend
 # from CREFunc import CREFuncType, CREFuncTypeClass
 from cre.func import CREFuncType, CREFuncTypeClass, CREFunc, cre_func_call_self, set_base_arg_val_impl, get_return_val_impl, CFSTATUS_ERROR, CFSTATUS_TRUTHY
 from cre.make_source import make_source, gen_def_func, gen_assign, resolve_template, gen_def_class
 from cre.obj import CREObjType
-from cre.core import T_ID_FUNC, T_ID_VAR, T_ID_INT, T_ID_FLOAT, T_ID_STR
+from cre.core import T_ID_FUNC, T_ID_VAR, T_ID_INT, T_ID_FLOAT, T_ID_STR, T_ID_FACT
 from numba.core import imputils, cgutils
 from numba.core.datamodel import default_manager, models
 from numba.experimental.function_type import _get_wrapper_address
@@ -229,6 +229,7 @@ SetChainingPlanner_field_dict = {
 class SetChainingPlannerTypeClass(types.StructRef):
     def __str__(self):
         return f"cre.SetChainingPlannerType"
+    __repr__ = __str__
 
 
 GenericSetChainingPlannerType = SetChainingPlannerTypeClass([(k,v) for k,v in SetChainingPlanner_field_dict.items()])
@@ -1046,6 +1047,8 @@ ret_d_typ = DictType(ret_typ,Tuple((i8,i8,i8)))
     # start_kwargs = ", ".join([f'start{i}=0' for i in a_cnt])
     src += f'''N_ARGS = {len(args)}
 
+{"# Generic Implementation" if generic else ""}
+
 ENTRY_WIDTH = 4+N_ARGS
 @njit(cache=True)
 def apply_multi(func, planner, depth):
@@ -1075,11 +1078,17 @@ d_offset=0
 ''',prefix=ind)
     c_ind = copy(ind)
     for i, arg in enumerate(args):
-        src += f'{c_ind}for i{i} in range(stride[{i}][0],stride[{i}][1]):\n'
-        c_ind += ind
         if(i in func.right_commutes):
-            ignore_conds = ' or '.join([f"i{i} > i{j}" for j in func.right_commutes[i]])
-            src += f'{c_ind}if({ignore_conds}): continue\n'
+            rc = func.right_commutes[i]
+            # strt = f'i{rc[-1]}'# if len(rc) == 1 else f"max({','.join([f'i{j}' for j in rc])})"
+            src += f'{c_ind}for i{i} in range(i{rc[-1]}, stride[{i}][1]):\n'
+        else:
+            src += f'{c_ind}for i{i} in range(stride[{i}][0], stride[{i}][1]):\n'
+        c_ind += ind
+        # print(">>", i, func.right_commutes, i in func.right_commutes)
+        # if(i in func.right_commutes):
+        #     ignore_conds = ' or '.join([f"i{i} > i{j}" for j in func.right_commutes[i]])
+        #     src += f'{c_ind}if({ignore_conds}): continue\n'
         
 
     _is = ",".join([f"i{i}" for i in a_cnt])
@@ -1088,6 +1097,7 @@ d_offset=0
     arg_assigns = "\n".join([f"data[d_offset+{4+i}] = i{i}" for i in a_cnt])
 
     src += indent(f'{_as} = {params}\n',prefix=c_ind)
+    # src += indent(f"print({_is}, {_as})\n",prefix=c_ind)
 # {f'if(not check({_as})): continue' if has_check else ""}
 
     if(generic):
@@ -1153,7 +1163,6 @@ def _assert_prepared(self, typ, depth):
 
 def apply_multi(func, planner, depth, min_stop_depth=-1):
     '''Applies 'func' at 'depth' and returns the SC_Record'''
-
     # If it doesn't already exist generate and inject '_apply_multi' into 'func'
     # print("apply_multi", type(func))
     if(not hasattr(func,'_apply_multi')):
@@ -1166,7 +1175,7 @@ def apply_multi(func, planner, depth, min_stop_depth=-1):
             hash_code = unique_hash_v([func.return_type, func.arg_types, func.right_commutes])
         else:
             hash_code = unique_hash_v([func.long_hash])
-        # print(get_cache_path('apply_multi',hash_code))
+        # print(func.name, generic, get_cache_path('apply_multi',hash_code))
         if(not source_in_cache('apply_multi',hash_code)):
             src = gen_apply_multi_source(func, generic)
             source_to_cache('apply_multi',hash_code,src)
@@ -1259,6 +1268,7 @@ ExplanationTree_field_dict = {
 class ExplanationTreeTypeClass(types.StructRef):
     def __str__(self):
         return "ExplanationTreeType"
+    __repr__ = __str__
     
 
 ExplanationTreeType = ExplanationTreeTypeClass([(k,v) for k,v in ExplanationTree_field_dict.items()])
@@ -1271,25 +1281,8 @@ class ExplanationTree(structref.StructRefProxy):
     def __iter__(self):
         return ExplanationTreeIter(self)
 
-read_inv_val_map_impls = {} 
-# @generated_jit(cache=True)
-def get_read_inv_val_map_impl(t_id):
-    impl = read_inv_val_map_impls.get(t_id, None)
-    if(impl is None):
-        typ = cre_context().get_type(t_id=t_id)
-        ivm_typ = DictType(i8, typ)
-        @njit(typ(ExplanationTreeType,i8),cache=True)
-        def read_inv_val_map(expl_tree, var_ptr):
-            inv_val_map_ptr_dict = expl_tree.inv_val_map_ptr_dict
-            inv_val_map = _dict_from_ptr(ivm_typ, inv_val_map_ptr_dict[u2(t_id)])
-            out = inv_val_map[var_ptr]
-            return out#inv_val_map[var_ptr]
+define_boxing(ExplanationTreeTypeClass, ExplanationTree)
 
-        impl_ep = read_inv_val_map.overloads[(ExplanationTreeType,i8)].entry_point
-        impl = read_inv_val_map_impls[t_id] = impl_ep
-    return impl
-
-define_boxing(ExplanationTreeTypeClass,ExplanationTree)
 
 
 @njit(cache=True)
@@ -1305,6 +1298,48 @@ def expl_tree_ctor(entries=None, planner=None):
             # _incref_ptr(ptr) #Note might not need
             st.inv_val_map_ptr_dict[u2(t_id)] = ptr
     return st
+
+# ----------------
+# : Read Inv Val Map
+
+ivm_typ = DictType(i8, i8)
+@njit(i8(ExplanationTreeType, u2, i8),cache=True)
+def read_inv_val_map_int(expl_tree, t_id, var_ptr):
+    return _dict_from_ptr(ivm_typ, expl_tree.inv_val_map_ptr_dict[u2(t_id)])[var_ptr]
+
+ivm_typ = DictType(i8, f8)
+@njit(f8(ExplanationTreeType, u2, i8),cache=True)
+def read_inv_val_map_float(expl_tree, t_id, var_ptr):
+    return _dict_from_ptr(ivm_typ, expl_tree.inv_val_map_ptr_dict[u2(t_id)])[var_ptr]
+
+ivm_typ = DictType(i8, unicode_type)
+@njit(unicode_type(ExplanationTreeType, u2, i8),cache=True)
+def read_inv_val_map_str(expl_tree, t_id, var_ptr):
+    return _dict_from_ptr(ivm_typ, expl_tree.inv_val_map_ptr_dict[u2(t_id)])[var_ptr]
+
+ivm_typ = DictType(i8, BaseFact)
+@njit(BaseFact(ExplanationTreeType, u2, i8),cache=True)
+def read_inv_val_map_fact(expl_tree, t_id, var_ptr):
+    return _dict_from_ptr(ivm_typ, expl_tree.inv_val_map_ptr_dict[u2(t_id)])[var_ptr]
+
+
+read_inv_val_map_impls = {} 
+# @generated_jit(cache=True)
+def get_read_inv_val_map_impl(t_id):
+    impl = read_inv_val_map_impls.get(t_id, None)
+    if(impl is None):
+        if(t_id == T_ID_INT):
+            impl = read_inv_val_map_int
+        elif(t_id == T_ID_FLOAT):
+            impl = read_inv_val_map_float
+        elif(t_id == T_ID_STR):
+            impl = read_inv_val_map_str
+        else:
+            # TODO: Won't always work
+            impl = read_inv_val_map_fact
+        impl_ep = list(impl.overloads.values())[0].entry_point
+        impl = read_inv_val_map_impls[t_id] = impl_ep
+    return impl
 
 
 
@@ -1952,7 +1987,7 @@ class ExplanationTreeIter():
         # Get the match values from their associated base var ptrs
         vals = []
         for base_ptr, arg_t_id in zip(func.base_var_ptrs, func.base_t_ids):
-            val = get_read_inv_val_map_impl(arg_t_id)(self.expl_tree, base_ptr)
+            val = get_read_inv_val_map_impl(arg_t_id)(self.expl_tree, arg_t_id, base_ptr)
             vals.append(val)
 
         func = self.reparam_func_ep(func)

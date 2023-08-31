@@ -223,7 +223,7 @@ class Var(StructRefProxy):
             head_t_id = cre_context().get_t_id(_type=head_type)
             # head_t_id = getattr(head_type, "t_id", -1)
             # print("type, a_id, offset, head_t_id", deref_info_type, a_id, offset, head_t_id)
-            new_var = generic_var_append_deref(self, a_id, offset, head_t_id, typ=deref_info_type)
+            new_var = generic_var_append_deref(self, u4(a_id), offset, head_t_id, typ=deref_info_type)
             # new = generic_var_append_deref(self, attr, a_id, offset, head_type_name, t_id, deref_info_type)
             # struct_type = VarType
         #CHECK THAT PTRS ARE SAME HERE
@@ -348,7 +348,7 @@ class Var(StructRefProxy):
         return GreaterThanEq(self, other)
     def __eq__(self, other): 
         from cre.default_funcs import Equals, ObjEquals, ObjIsNone
-        from cre.conditions import cre_func_to_cond
+        from cre.conditions import to_cond
 
         # with PrintElapse("new_ptr_op"):
         #     npo = ObjIsNone(self)
@@ -358,11 +358,11 @@ class Var(StructRefProxy):
         
         if(other is None):
             # with PrintElapse("new_ObjIsNone"):
-            return cre_func_to_cond(ObjIsNone(self))
+            return to_cond(ObjIsNone(self))
         if(isinstance(other,Var) and isinstance(other.head_type,Fact)):
             # print("ObjEquals")
             # with PrintElapse("new_ObjEquals"):
-            return cre_func_to_cond(ObjEquals(self,other))
+            return to_cond(ObjEquals(self,other))
         # print("Equals")
         return Equals(self, other)
     def __ne__(self, other): 
@@ -427,17 +427,17 @@ class Var(StructRefProxy):
         return Modulus(other, self)
 
     def __and__(self, other):
-        from cre.conditions import conditions_and, cre_func_to_cond
+        from cre.conditions import conditions_and, to_cond
         from cre.func import CREFunc
-        if(isinstance(other,CREFunc)):
-            other = cre_func_to_cond(other)
+        # if(isinstance(other,CREFunc)):
+        #     other = to_cond(other)
         out = conditions_and(self, other)
         return out
 
     def __or__(self, other):
-        from cre.conditions import conditions_or, cre_func_to_cond
+        from cre.conditions import conditions_or, to_cond
         from cre.func import CREFunc
-        if(isinstance(other,CREFunc)): other = cre_func_to_cond(other)
+        # if(isinstance(other,CREFunc)): other = to_cond(other)
         return conditions_or(self, other)
 
     def __invert__(self):
@@ -523,7 +523,7 @@ class StructAttribute(AttributeTemplate):
             # attrty = VarTypeClass([(k,v) for k,v, in field_dict.items()])
             return attrty
         else:
-            raise AttributeError(f"Var[{base_type}] has no attribute '{attr}'")
+            raise AttributeError(f"{typ} has no attribute '{attr}'")
 
 @lower_getattr_generic(VarTypeClass)
 def var_getattr_impl(context, builder, typ, val, attr):
@@ -635,7 +635,8 @@ def resolve_deref_attrs(self):
 #     return impl
 
 
-@njit(ListType(unicode_type)(VarType), cache=True)
+# @njit(ListType(unicode_type)(VarType), cache=True)
+@njit(cache=True)
 def get_deref_attrs(self):
     deref_attrs = List.empty_list(unicode_type)
     context_data = get_cre_context_data()
@@ -651,7 +652,8 @@ def get_deref_attrs(self):
         t_id = di.t_id
     return deref_attrs
 
-@njit(unicode_type(VarType), cache=True)
+# @njit(unicode_type(VarType), cache=True)
+@njit(cache=True)
 def get_deref_attrs_str(self):
     context_data = get_cre_context_data()
     t_id = self.base_t_id
@@ -784,8 +786,8 @@ def get_var_ptr_incref(self):
 #         return var_type_cache[t]
 
 @njit(cache=True)
-def var_ctor(var_struct_type, base_t_id, alias=""):
-    st = new(var_struct_type)
+def var_ctor_generic(base_t_id, alias=""):
+    st = new(VarType)
     lower_setattr(st,'idrec', encode_idrec(T_ID_VAR,0,0xFF))
     lower_setattr(st,'is_not', u1(0))
     lower_setattr(st,'conj_ptr', i8(0))
@@ -813,9 +815,9 @@ def var_ctor(var_struct_type, base_t_id, alias=""):
     return st
 
 
-@njit(VarType(u2, unicode_type), cache=True)
-def var_ctor_generic(base_t_id, alias):
-    return var_ctor(VarType, base_t_id, alias)
+@njit
+def var_ctor(var_type, base_t_id, alias):
+    return cast(var_ctor_generic(base_t_id, alias),var_type)
 
 
 @overload(Var)
@@ -921,8 +923,12 @@ def _var_append_deref(self, a_id, offset, head_t_id, typ):
     # lower_setattr(self,'base_ptr_ref', ptr_t(lower_getattr(self,"base_ptr")))
 
 
-@generated_jit(cache=True)
+# Stub function
 def var_append_deref(self, attr):
+    pass
+
+@overload(var_append_deref)
+def overload_var_append_deref(self, attr):
     SentryLiteralArgs(['attr']).for_function(var_append_deref).bind(self,attr)
     if(self is VarType):
         raise ValueError("var_append_deref() doesn't work on VarType. Use generic_var_append_deref()")
@@ -934,10 +940,10 @@ def var_append_deref(self, attr):
     offset = old_head_type.get_attr_offset(attr)
     # print(old_head_type.instance_type.field_dict)
     head_type = old_head_type.field_dict[attr]
-    base_type = old_var_type.field_dict['base_type'].instance_type
+    # base_type = old_var_type.field_dict['base_type'].instance_type
     head_t_id = cre_context().get_t_id(_type=head_type)
     
-    var_struct_type = VarTypeClass(base_type, head_type)
+    # var_struct_type = VarTypeClass(base_type, head_type)
 
     # print("CONSTR VAR", base_type, head_type, self.name)
     # print("<<", var_struct_type)

@@ -304,7 +304,7 @@ field_list = cloudpickle.loads({cloudpickle.dumps(fields)})
 n_members = len(field_list)
 define_attributes({typ})
 
-@njit(cache=True)
+@njit
 def ctor({param_defaults_seq}):
     st = cast(new_fact(n_members), {typ})
     fact_lower_setattr(st,'idrec',encode_idrec({t_id},0,u1(-1)))

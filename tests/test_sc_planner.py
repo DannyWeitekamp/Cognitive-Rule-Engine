@@ -84,7 +84,7 @@ def test_apply_multi():
     assert summary_vals_map(planner) == (9,0.0,8.0)
     # print(np.array(args_for(planner,6)))
     assert np.array_equal(np.array(args_for(planner,6)),
-                 np.array([[4, 2],[3, 3]]))
+                 np.array([[3, 3],[2, 4]]))
     
 
 def test_insert_record():
@@ -217,7 +217,8 @@ def setup_retrace(n=5):
     return planner
 
 
-@njit(unicode_type(ExplanationTreeType,i8), cache=False)
+# @njit(unicode_type(ExplanationTreeType,i8), cache=False)
+@njit(cache=False)
 def tree_str(root,ind=0):
     # print("START STR TREE")
     # if(len(root.children) == 0): return "?"
@@ -777,6 +778,44 @@ def test_const_declarations():
         print(f.depth, f, m)
 
 
+def test_commutes():
+
+    @CREFunc(signature=f8(f8,f8,f8),
+            shorthand = '{0} + {1} + {2}',
+            commutes=True)
+    def Add3Commutes(a, b, c):
+        return a + b + c
+
+    @CREFunc(signature=f8(f8,f8,f8),
+            shorthand = '{0} + {1} + {2}',
+            commutes=False)
+    def Add3(a, b, c):
+        return a + b + c
+
+    planner = SetChainingPlanner()
+    for x in [2, 12, 3]:
+        planner.declare(float(x))
+    expls = planner.search_for_explanations(17.0, funcs=[Add3], 
+            search_depth=1)
+    expls = list(expls)
+
+    # Should have 3 factorial = 6 explanations
+    assert len(expls) == 6
+
+    print("----------")
+
+    planner = SetChainingPlanner()
+    for x in [2, 12, 3]:
+        planner.declare(float(x))
+    expls = planner.search_for_explanations(17.0, funcs=[Add3Commutes], 
+            search_depth=1)
+    expls = list(expls)
+
+    # Should only have one explanation, with args in declared order.
+    assert len(expls) == 1
+    assert expls[0][1] == [2, 12, 3]
+
+
 
 
 
@@ -885,6 +924,7 @@ def benchmark_retrace_goals_back_one():
 if __name__ == "__main__":
     # Makes it easier to track down segfaults
     import faulthandler; faulthandler.enable()
+    
     # test_non_numerical_vals()
     # with PrintElapse("test_build_explanation_tree"):
     #     test_build_explanation_tree()
@@ -897,7 +937,7 @@ if __name__ == "__main__":
 # 
 
     # pass
-    # test_apply_multi()
+    test_apply_multi()
     # test_insert_record()
     # test_join_records_of_type()
     # test_forward_chain_one()
@@ -908,14 +948,14 @@ if __name__ == "__main__":
     # test_mem_leaks(n=10)
     # benchmark_apply_multi()
     # benchmark_retrace_back_one()
-        # test_apply_multi()
+    # test_commutes()
     # gen = foo_gen()
     # for i in gen:
     #     print(i)
     # test_declare_fact()
     # test_declare_fact()
     # test_declare_fact_w_conversions()
-    test_min_stop_depth()
+    # test_min_stop_depth()
     # test_const_funcs()
     # test_const_declarations()
 

@@ -202,11 +202,11 @@ if __name__ == "__main__":
             pass
 
 
-    # from cre.new_fact.fact import fact_get_str, fact_getitem_impl
-    # f = fact_getitem_impl(unicode_type)
-    # with PrintElapse("Geti_10000_str"):
-    #     for i in range(10000):
-    #         f(b, 0)
+    from cre.new_fact.fact import fact_get_str, fact_getitem_impl
+    f = fact_getitem_impl(unicode_type)
+    with PrintElapse("Geti_10000_str"):
+        for i in range(10000):
+            f(b, 0)
 
     from cre.new_fact.fact import new_fact
     @njit(cache=False)

@@ -837,21 +837,21 @@ class CREFunc(StructRefProxy):
         return Modulus(other, self)
 
     def __and__(self,other):
-        from cre.conditions import cre_func_to_cond, conditions_and
-        self = cre_func_to_cond(self)
-        if(isinstance(other, CREFunc)): other = cre_func_to_cond(other)
+        from cre.conditions import conditions_and
+        # self = cre_func_to_cond(self)
+        # if(isinstance(other, CREFunc)): other = cre_func_to_cond(other)
         # print("<<", type(self), type(other))
         return conditions_and(self, other)
 
     def __or__(self,other):
-        from cre.conditions import cre_func_to_cond, conditions_or
-        self = cre_func_to_cond(self)
-        if(isinstance(other, CREFunc)): other = cre_func_to_cond(other)
+        from cre.conditions import conditions_or
+        # self = cre_func_to_cond(self)
+        # if(isinstance(other, CREFunc)): other = cre_func_to_cond(other)
         return conditions_or(self, other)
 
     def __invert__(self):
-        from cre.conditions import literal_ctor, literal_to_cond, literal_not
-        return literal_to_cond(literal_not(literal_ctor(self)))
+        from cre.conditions import literal_ctor, to_cond, literal_not
+        return to_cond(literal_not(literal_ctor(self)))
 
 
 define_boxing(CREFuncTypeClass, CREFunc)

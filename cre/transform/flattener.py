@@ -253,6 +253,7 @@ def flattener_update_for_attr(self, fact, id_attr, attr):
         self.idrec_map[fact.idrec].append(idrec) #3 ms / 10k 
 
     return impl
+    
 
 @overload_method(FlattenerTypeClass, 'get_base_var')
 def overload_get_base_var(self, t_id, _id):

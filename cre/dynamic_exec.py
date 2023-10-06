@@ -9,7 +9,7 @@ from cre.obj import CREObjTypeClass, CREObjType, member_info_type, _iter_mbr_inf
 from numba.core.datamodel import default_manager, models
 from numba.experimental.structref import define_attributes, StructRefProxy, new, define_boxing
 import operator
-from cre.core import DEFAULT_T_ID_TYPES, T_ID_CONDITIONS, T_ID_LITERAL, T_ID_FUNC, T_ID_FACT, T_ID_VAR, T_ID_UNDEFINED, T_ID_BOOL, T_ID_INT, T_ID_FLOAT, T_ID_STR, T_ID_TUPLE_FACT
+from cre.core import DEFAULT_T_ID_TYPES, T_ID_CONDITIONS, T_ID_LITERAL, T_ID_FUNC, T_ID_FACT, T_ID_VAR, T_ID_UNDEFINED, T_ID_BOOL, T_ID_INT, T_ID_FLOAT, T_ID_STR, T_ID_TUPLE_FACT, T_ID_CRE_OBJ
 # from cre.primitive import BooleanPrimitiveType, IntegerPrimitiveType, FloatPrimitiveType, StringPrimitiveType
 from cre.tuple_fact import TupleFact
 from cre.var import VarType
@@ -144,9 +144,9 @@ def fact_eq(a, b):
     for (info_a), (info_b) in zip(_iter_mbr_infos(a),_iter_mbr_infos(b)):
         t_id_a, m_id_a, data_ptr_a = info_a
         t_id_b, m_id_b, data_ptr_b = info_b
-        if(t_id_a == T_ID_UNDEFINED): 
+        if(t_id_a == T_ID_UNDEFINED or t_id_a == T_ID_CRE_OBJ): 
             t_id_a,_, _ = decode_idrec(cast(_load_ptr(i8, data_ptr_a), CREObjType).idrec)
-        if(t_id_b == T_ID_UNDEFINED): 
+        if(t_id_b == T_ID_UNDEFINED or t_id_b == T_ID_CRE_OBJ): 
             t_id_b,_, _ = decode_idrec(cast(_load_ptr(i8, data_ptr_b), CREObjType).idrec)
 
         if(t_id_a != t_id_b): return False
@@ -158,8 +158,23 @@ def fact_eq(a, b):
             pass
             # if(not _load_ptr(i8, data_ptr_a) == _load_ptr(i8, data_ptr_b)): return False
         else:
-            if(not eq_from_t_id_ptr(t_id_a, data_ptr_a, data_ptr_b)): return False
-
+            mbr_a = cast(_load_ptr(i8,data_ptr_a), CREObjType)
+            mbr_b = cast(_load_ptr(i8,data_ptr_b), CREObjType)
+            if(t_id_a==T_ID_VAR):
+                if(not var_eq(mbr_a,mbr_b)): return False
+            elif(t_id_a==T_ID_FUNC):
+                if(not cre_func_eq(mbr_a,mbr_b)): return False
+            elif(t_id_a==T_ID_LITERAL):
+                if(not literal_eq(mbr_a,mbr_b)): return False
+            elif(t_id_a==T_ID_CONDITIONS):
+                if(not conds_eq(mbr_a,mbr_b)): return False
+            elif(m_id_a == PRIMITIVE_MBR_ID):
+                if(not eq_from_t_id_ptr(t_id_a, data_ptr_a, data_ptr_b)): return False
+            else:
+                # Skip any fact types
+                pass
+                # print("FACT EQ", mbr_a, mbr_b, fact_eq(mbr_a, mbr_b))
+                # if(not fact_eq(mbr_a, mbr_b)): return False
     
     return True
 
@@ -378,14 +393,23 @@ def fact_hash(x):
         acc = _PyHASH_XXPRIME_5
         tl = x.num_chr_mbrs
         for t_id, m_id, data_ptr in _iter_mbr_infos(x):
-            if(t_id == T_ID_UNDEFINED): 
+            if(t_id == T_ID_UNDEFINED or t_id == T_ID_CRE_OBJ): 
                 t_id,_, _ = decode_idrec(cast(_load_ptr(i8, data_ptr), CREObjType).idrec)
+
             if(t_id == T_ID_TUPLE_FACT):
                 raise Exception()
                 # acc = accum_item_hash(acc, tuple_fact_hash(x))
+            elif(t_id == T_ID_VAR):
+                # hash on the pointer 
+                ptr = _load_ptr(i8, data_ptr)
+                if(ptr != 0):
+                    mbr_hash = var_hash(cast(ptr, VarType)) 
+                else:
+                    mbr_hash = _Py_hash_t(_PyHASH_XXPRIME_5)
+                acc = accum_item_hash(acc, mbr_hash)
             elif(m_id == PRIMITIVE_MBR_ID):
                 # hash primitives
-                acc = accum_item_hash(acc, hash_from_t_id_ptr(t_id, data_ptr))                
+                acc = accum_item_hash(acc, hash_from_t_id_ptr(t_id, data_ptr))
             else:
                 # hash on the pointer 
                 # ptr = _load_ptr(i8, data_ptr)
@@ -479,6 +503,7 @@ def tuple_fact_hash(x):
 def cre_obj_hash(x):
     t_id,_, _ = decode_idrec(x.idrec)
     hsh = 0
+
     if(t_id==T_ID_TUPLE_FACT):
         hsh = tuple_fact_hash(x) 
     elif(t_id==T_ID_VAR):

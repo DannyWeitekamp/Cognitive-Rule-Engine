@@ -2,7 +2,7 @@ import numpy as np
 from numba import i8, i4, u8, u1, u2, u4, types, njit, generated_jit, literal_unroll
 from numba.types import FunctionType, unicode_type, Tuple
 from numba.extending import  overload, lower_getattr, overload_method
-from cre.core import register_global_default, T_ID_UNDEFINED, T_ID_BOOL, T_ID_INT, T_ID_FLOAT, T_ID_STR, T_ID_TUPLE_FACT 
+from cre.core import register_global_default, T_ID_UNDEFINED, T_ID_BOOL, T_ID_INT, T_ID_FLOAT, T_ID_STR, T_ID_TUPLE_FACT, T_ID_CRE_OBJ
 from cre.utils import (cast, _memcpy_structref, _obj_cast_codegen, ptr_t,
     _raw_ptr_from_struct_incref, _incref_ptr,
     CastFriendlyMixin, decode_idrec, _func_from_address, _incref_structref,
@@ -115,6 +115,8 @@ def impl_cre_obj_upcast(context, builder, fromty, toty, val):
     return _obj_cast_codegen(context, builder, val, fromty, toty,incref=False)
 
 class CREObjTypeClass(CastFriendlyMixin, types.StructRef):
+    t_id = T_ID_CRE_OBJ
+
     def __init__(self, fields,*args,**kwargs):
         if(isinstance(fields,dict)): fields = [(k,v) for k,v in fields.items()]
         types.StructRef.__init__(self,fields)

@@ -519,7 +519,7 @@ class StructAttribute(AttributeTemplate):
             #      "head_type" : head_type}
             # }
             attrty = VarTypeClass(typ.base_type, head_type.field_dict[attr])
-            print("NEW", attrty)
+            # print("NEW", attrty)
             # attrty = VarTypeClass([(k,v) for k,v, in field_dict.items()])
             return attrty
         else:

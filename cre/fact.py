@@ -22,7 +22,7 @@ from numba.core.typing import signature
 
 # from numba.core.extending import overload
 
-from cre.core import TYPE_ALIASES, JITSTRUCTS, py_type_map, numba_type_map, numpy_type_map, register_global_default, lines_in_type_registry, add_to_type_registry, add_type_pickle
+from cre.core import TYPE_ALIASES, JITSTRUCTS, py_type_map, numba_type_map, numpy_type_map, register_global_default, lines_in_type_registry, add_to_type_registry, add_type_pickle, T_ID_FACT
 from cre.context import cre_context
 from cre.caching import unique_hash_v, source_to_cache, import_from_cached, source_in_cache, get_cache_path
 from cre.structref import gen_structref_code, define_structref
@@ -44,6 +44,8 @@ import numpy as np
 SPECIAL_SPEC_ATTRIBUTES = ["inherit_from"]
 
 class Fact(CREObjTypeClass):
+    t_id = T_ID_FACT
+
     def __init__(self, name, fields, hash_code=None):
         if(hash_code is None):
             hash_code = unique_hash_v([name,fields])

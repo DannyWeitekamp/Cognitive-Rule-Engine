@@ -158,24 +158,24 @@ def fact_eq(a, b):
             pass
             # if(not _load_ptr(i8, data_ptr_a) == _load_ptr(i8, data_ptr_b)): return False
         else:
-            mbr_a = cast(_load_ptr(i8,data_ptr_a), CREObjType)
-            mbr_b = cast(_load_ptr(i8,data_ptr_b), CREObjType)
-            if(t_id_a==T_ID_VAR):
-                if(not var_eq(mbr_a,mbr_b)): return False
-            elif(t_id_a==T_ID_FUNC):
-                if(not cre_func_eq(mbr_a,mbr_b)): return False
-            elif(t_id_a==T_ID_LITERAL):
-                if(not literal_eq(mbr_a,mbr_b)): return False
-            elif(t_id_a==T_ID_CONDITIONS):
-                if(not conds_eq(mbr_a,mbr_b)): return False
-            elif(m_id_a == PRIMITIVE_MBR_ID):
+            if(m_id_a == PRIMITIVE_MBR_ID):
                 if(not eq_from_t_id_ptr(t_id_a, data_ptr_a, data_ptr_b)): return False
             else:
-                # Skip any fact types
-                pass
+                mbr_a = cast(_load_ptr(i8,data_ptr_a), CREObjType)
+                mbr_b = cast(_load_ptr(i8,data_ptr_b), CREObjType)
+                if(t_id_a==T_ID_VAR):
+                    if(not var_eq(mbr_a,mbr_b)): return False
+                elif(t_id_a==T_ID_FUNC):
+                    if(not cre_func_eq(mbr_a,mbr_b)): return False
+                elif(t_id_a==T_ID_LITERAL):
+                    if(not literal_eq(mbr_a,mbr_b)): return False
+                elif(t_id_a==T_ID_CONDITIONS):
+                    if(not conds_eq(mbr_a,mbr_b)): return False
+                else:
+                    # Skip any fact types
+                    pass
                 # print("FACT EQ", mbr_a, mbr_b, fact_eq(mbr_a, mbr_b))
                 # if(not fact_eq(mbr_a, mbr_b)): return False
-    
     return True
 
 

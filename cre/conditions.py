@@ -11,7 +11,7 @@ from cre.context import cre_context
 from cre.structref import define_structref, define_structref_template, StructRefType
 from cre.fact import define_fact, BaseFact, cast_fact, FactProxy
 from cre.utils import cast, _incref_structref, decode_idrec, lower_getattr, lower_setattr, lower_getattr,  _ptr_from_struct_incref, _decref_ptr
-from cre.utils import assign_to_alias_in_parent_frame, meminfo_type
+from cre.utils import assign_to_alias_in_parent_frame, meminfo_type, decref_ptrs
 from cre.vector import VectorType
 
 # from cre.op import CREFuncType, op_str, Op
@@ -113,6 +113,10 @@ def literal_get_weight(self):
 def literal_set_weight(self,weight):
     self.weight = weight
 
+@njit(cache=True)
+def literal_from_ptr(ptr):
+    return cast(ptr, LiteralType)
+
 define_boxing(LiteralTypeClass, Literal)
 LiteralType = LiteralTypeClass(literal_fields)
 register_global_default("Literal", LiteralType)
@@ -195,7 +199,7 @@ conditions_fields_dict = {
     ### Fields that are filled on in instantiation ### 
     **cre_obj_field_dict,
 
-    # The variables used by the condition
+    # The variables used by the conditions
     'vars': ListType(VarType),
 
     # 'not_vars' : ListType(VarType),
@@ -253,7 +257,7 @@ class Conditions(structref.StructRefProxy):
             return _conditions_ctor_var_list(_vars, dnf)
 
     def __str__(self):
-        return conds_repr(self)
+        return conditions_repr(self)
     def __and__(self, other):
         # if(isinstance(other,CREFunc)): other = to_cond(other)
         conds = conditions_and(self, other) 
@@ -277,9 +281,16 @@ class Conditions(structref.StructRefProxy):
         from cre.matching import MatchIterator
         return MatchIterator(ms, self)
 
+    def _match_to_ptrs(self, match):
+        ptrs = np.zeros(len(match), dtype=np.int64)
+        for i, m in enumerate(match):
+            if(m is not None):
+                ptrs[i] = m.get_ptr()
+        return ptrs    
+
     def check_match(self, match, ms=None):
         from cre.matching import check_match
-        ptrs = np.array([x.get_ptr() for x in match], dtype=np.int64)
+        ptrs = self._match_to_ptrs(match)
         return check_match(self, ptrs)
 
     def set_weight(self, weight):
@@ -287,8 +298,21 @@ class Conditions(structref.StructRefProxy):
 
     def score_match(self, match, ms=None):
         from cre.matching import score_match
-        ptrs = np.array([x.get_ptr() for x in match], dtype=np.int64)
+        ptrs = self._match_to_ptrs(match)
         return score_match(self, ptrs)
+
+    def why_not_match(self, match, ms=None):
+        from cre.matching import score_match, WN_VAR_TYPE, why_not_match, np_why_not_type
+        from cre.var import var_from_ptr
+        ptrs = self._match_to_ptrs(match)
+        why_not_arr = why_not_match(self, ptrs)
+        why_nots = []
+        for wn in why_not_arr:
+            if(wn['kind'] == WN_VAR_TYPE):
+                why_nots.append((var_from_ptr(wn['ptr']), wn))
+            else:
+                why_nots.append((literal_from_ptr(wn['ptr']), wn))
+        return why_nots
 
     def antiunify(self, other, return_score=False, normalize='left',
          fix_same_var=False, fix_same_alias=False):
@@ -342,10 +366,10 @@ class Conditions(structref.StructRefProxy):
     def distr_dnf(self):
         return conds_get_distr_dnf(self)
 
-    @property
-    def rete_graph(self):
-        from cre.matching import conds_get_rete_graph
-        return conds_get_rete_graph(self)
+    # @property
+    # def rete_graph(self):
+    #     from cre.matching import conds_get_rete_graph
+    #     return conds_get_rete_graph(self)
 
     def as_dnf_list(self):
         return as_dnf_list(self)
@@ -353,18 +377,159 @@ class Conditions(structref.StructRefProxy):
     def as_distr_dnf_list(self):
         return as_distr_dnf_list(self)
 
+    def as_literal(self):
+        return conditions_as_literal(self)
+
     def __str__(self):
-        return conds_repr(self)
+        return conditions_repr(self)
 
     def __repr__(self):
-        return conds_repr_short(self)
+        return conditions_repr_short(self)
 
-
-    def from_facts(facts,_vars=None, *args, **kwargs):
+    @classmethod
+    def from_facts(cls, facts,_vars=None, *args, **kwargs):
         return conditions_from_facts(facts, _vars, *args, **kwargs)
+
+    # def replace(self, d, c, lit):
+    #     lit = finesse_to_literal(lit)
+    #     return conditions_replace(self, d, c, lit, True)
+        
+    def replace(self, *args):
+        # Replace a literal or var with another
+        # Supports argument patterns:
+        #  
+
+        if(isinstance(args[0], list)):
+            items = args[0]
+        else:
+            items = [args]
+
+        conds = conditions_copy(self)
+        items = [process_remove_item(conds, x) for x in items]
+        items = sorted(items, key=edit_list_sortkey, reverse=True)
+        # print(items)
+        
+        for item_args in items:
+            if(len(item_args) == 2):
+                x = item_args[0]
+                lit = finesse_to_literal(item_args[1])
+                if(isinstance(x, (Literal, Conditions, CREFunc))):
+                    x = finesse_to_literal(x)
+                    indicies = conditions_all_indicies_of(conds, x)
+                    replacements = List([(d, c, lit) for d, c in indicies])
+                    conds = conditions_replace_multi(conds, replacements)
+                elif(isinstance(x, Var)):
+                    raise NotImplemented()
+                    var_ind = conditions_get_var_ind(conds, x)
+                    conds = conditions_replace_var(conds, var_ind, item_args[1])
+                elif(isinstance(x, (int,np.integer))):
+                    raise NotImplemented()
+                    conds = conditions_replace_var(conds, x, item_args[1])
+            elif(len(item_args) == 3):
+                d, c, lit = item_args
+                lit = finesse_to_literal(lit)
+                conds = conditions_replace(conds, d, c, lit)
+            else:
+                raise ValueError(f"Too many arguments for remove(): {args}")
+        return conds
+
+        # new_conds = conditions_copy(self)
+        # for c, d, lit in replacements:
+        #     lit = finesse_to_literal(lit)
+        #     conditions_replace(new_conds, d, c, lit, False)
+        # return new_conds
+
+    def remove(self, *args):
+        if(isinstance(args[0], list)):
+            items = args[0]
+        else:
+            items = [args]
+
+        conds = conditions_copy(self)
+        items = [process_remove_item(conds, x) for x in items]
+        items = sorted(items, key=edit_list_sortkey, reverse=True)
+        # print(items)
+        
+        for item_args in items:
+            # if(not isinstance(item_args, (tuple, list))):
+            #     item_args = (item_args,)
+            # print(item_args)
+            if(len(item_args) == 1):
+                x = item_args[0]
+                # print(x, type(x))
+                if(isinstance(x, (Literal, Conditions, CREFunc))):
+                    x = finesse_to_literal(x)
+                    indicies = conditions_all_indicies_of(conds, x)
+                    conds = conditions_remove_multi(conds, indicies)
+                elif(isinstance(x, Var)):
+                    var_ind = conditions_get_var_ind(conds, x)
+                    conds = conditions_remove_var(conds, var_ind)
+                elif(isinstance(x, (int, np.integer))):
+                    conds = conditions_remove_var(conds, x)
+                else:
+                    raise ValueError(f"Unrecognized removal pattern {item_args}")
+            elif(len(item_args) == 2):
+                d, c = item_args
+                conds = conditions_remove(conds, d, c)
+            else:
+                raise ValueError(f"Too many arguments for remove(): {args}")
+        return conds
+
+
+    # def remove_multi(self, removals):
+    #     removals = sorted(removals, reverse=True)
+    #     new_conds = conditions_copy(self)
+    #     for d, c in removals:
+    #         conditions_remove(new_conds, d, c, False)
+    #     return new_conds
+
+    def indicies_of(self, lit):
+        lit = finesse_to_literal(lit)
+        return conditions_indicies_of(self, lit)
+
+    def all_indicies_of(self, lit):
+        lit = finesse_to_literal(lit)
+        return conditions_all_indicies_of(self, lit)
 
 
 define_boxing(ConditionsTypeClass,Conditions)
+
+def finesse_to_literal(lit):
+    if(isinstance(lit, Literal)):
+        return lit
+    elif(isinstance(lit, Conditions)):
+        return lit.as_literal()
+    elif(isinstance(lit, CREFunc)):    
+        return literal_ctor(lit)
+
+def edit_list_sortkey(x):
+    lst = []
+    for y in x:
+        if(isinstance(y, (Literal, Conditions, CREFunc))):
+            lst.append(-float('inf'))
+        else:
+            lst.append(y)
+    return (len(lst), *lst)
+
+def process_remove_item(conds, x):
+    if(not isinstance(x, (list,tuple))):
+        x = (x,)
+
+    if(isinstance(x[0], Var)):
+        x = (conditions_get_var_ind(conds, x[0]), *x[1:])
+
+    return x
+
+@njit(cache=True)
+def conditions_is_literal(conds):
+    return len(conds.dnf) == 1 and len(conds.dnf[0]) == 1
+
+@njit(cache=True)
+def conditions_as_literal(conds):
+    if(conditions_is_literal(conds)):
+        return conds.dnf[0][0]
+    else:
+        raise ValueError("Conditions contain more than 1 literal, conversion to Literal is ambiguous.")
 
 
 @njit(u2[::1](ConditionsType),cache=True)
@@ -485,7 +650,6 @@ def as_dnf_list(dnf):
         tmp.append(lit)
         lit_i += 1
     return lst
-
 
 
 @njit(cache=True)
@@ -616,7 +780,7 @@ GTE_PY39 = sys.version_info >= (3,9)
 
 
 @njit(cache=True)
-def conds_repr(conds, indent="    "):
+def conditions_repr(conds, indent="    "):
     distr_dnf = conds_get_distr_dnf(conds)
     is_disjunct = len(distr_dnf) > 1
     context_data = get_cre_context_data()
@@ -626,7 +790,7 @@ def conds_repr(conds, indent="    "):
     for k, distr_conjunct in enumerate(distr_dnf):
         s += f"{ind1}AND("
         for j, var_conjuct in enumerate(distr_conjunct):
-            if(j > 0): s+= ind2
+            if(j > 0): s += ind2
 
             # Repr the Var 
             v = conds.vars[j]
@@ -657,7 +821,7 @@ def conds_repr(conds, indent="    "):
 
 
 @njit(cache=True)
-def conds_repr_short(self, indent=" "):
+def conditions_repr_short(self, indent=" "):
     used_var_ptrs = Dict.empty(i8,u1)
     is_disjunct = len(self.dnf) > 1
 
@@ -677,7 +841,7 @@ def conds_repr_short(self, indent=" "):
     return s
 
 @njit(cache=True)
-def conds_repr_ampersand(conds, indent=" "):
+def conditions_repr_ampersand(conds, indent=" "):
     distr_dnf = conds_get_distr_dnf(conds)
     is_disjunct = len(distr_dnf) > 1
 
@@ -705,7 +869,7 @@ def conds_repr_ampersand(conds, indent=" "):
     return s
 
 @njit(cache=True)
-def conds_repr_ampersand_short(self, indent=" "):
+def conditions_repr_ampersand_short(self, indent=" "):
     used_var_ptrs = Dict.empty(i8,u1)
     is_disjunct = len(self.dnf) > 1
 
@@ -826,7 +990,26 @@ def assign_lit_var_inds(dnf, base_var_map):
             for i, ptr in enumerate(lit.base_var_ptrs):
                 lit.var_inds[i] = base_var_map[ptr]
 
+@njit(cache=True)
+def conditions_get_var_ind(conds, var):
+    for i, v in enumerate(conds.vars):
+        if(v == var):
+            return i
+    return -1
 
+@njit(cache=True)
+def conditions_copy(conds):
+    dnf = new_dnf(0)
+    for conj in conds.dnf:
+        new_conj = List.empty_list(LiteralType)
+        for lit in conj:
+            new_conj.append(lit)
+        dnf.append(new_conj)
+
+    new_bvm = Dict.empty(i8,i8)
+    for a,b in conds.base_var_map.items():
+        new_bvm[a] = b
+    return _conditions_ctor_base_var_map(new_bvm, dnf)
 
         
 @njit(cache=True)
@@ -884,7 +1067,9 @@ def conditions_or(a, b):
 
 
 def OR(*args):
-    assert len(args) >= 2, "OR requires at least two arguments"
+    if(len(args) == 1):
+        return Conditions(args[0])
+    # assert len(args) >= 2, "OR requires at least two arguments"
     conds = args[0] | args[1]
     for i in range(2,len(args)):
         conds |= args[i]
@@ -893,7 +1078,10 @@ def OR(*args):
 
 def AND(*args):
     # Note: Can probably njit a lot of this to make it faster.
-    assert len(args) >= 2, "OR requires at least two arguments"
+
+    if(len(args) == 1):
+        return Conditions(args[0])
+    # assert len(args) >= 2, "AND requires at least two arguments"
 
     conds = args[0] & args[1]
     for i in range(2,len(args)):
@@ -1130,7 +1318,7 @@ if(False):
 
 
 @njit(cache=True)
-def build_distributed_dnf(c,index_map=None):
+def build_distributed_dnf(c, index_map=None):
     # print("c.vars", c.vars)
     distr_dnf = List.empty_list(distr_conj_type)
 
@@ -1145,7 +1333,7 @@ def build_distributed_dnf(c,index_map=None):
         distr_dnf.append(var_spec_conj_list)
         for i, v in enumerate(c.vars):
             var_spec_conj_list.append(List.empty_list(LiteralType))
-    
+
     # Fill lists
     for i, conjunct in enumerate(c.dnf):
         distr_conjuct = distr_dnf[i]
@@ -1250,6 +1438,34 @@ def remap_is_valid(remap, poss_remaps):
         if(j > poss_remaps.shape[1]): return False
         poss_remaps[i, j]
 
+@njit(cache=True)
+def align_greedy(score_matrix):
+    N, M = score_matrix.shape
+    alignment = -np.ones(N, dtype=np.int16)
+    covered = -np.ones(M, dtype=np.int16)
+    scores = np.zeros(N, dtype=np.float64)
+
+    c = 0
+    min_ind, max_ind = 99999, -1
+    for flat_ind in np.argsort(score_matrix.flatten())[::-1]:
+        i, j = flat_ind // M, flat_ind % M
+        score = score_matrix[i,j]
+
+        # Early stop
+        if(score == 0.0 or c == N):
+            break
+                    
+        if(alignment[i] == -1 and j not in covered):
+            alignment[i] = i2(j)
+            scores[i] = score
+            covered[c] = i2(j)
+            min_ind = min(j, min_ind)
+            max_ind = max(j, max_ind)
+            c += 1
+
+    return scores, alignment, (min_ind, max_ind+1)
+
+
 @njit(cache=True, locals={"remaps":i2[:,::1]})
 def get_possible_remap_inds(a_ind_set, b_ind_set, n_a, n_b, a_fixed_inds):
     ''' Given arrays of var indicies corresponding to a common type of literal (e.g. (x<y) & (a<b))
@@ -1263,15 +1479,13 @@ def get_possible_remap_inds(a_ind_set, b_ind_set, n_a, n_b, a_fixed_inds):
         n_a/n_b: the number of variables in A and B respectively
         a_fixed_inds : for each var in A var indicies in B that they are certain to map to.
     '''
-
     # Produce a boolean matrix identifying feasible remapping pairs
     poss_remap_matrix = np.zeros((n_a,n_b), dtype=np.uint8)
     for a_base_inds in a_ind_set:
         for b_base_inds in b_ind_set:
+            # A and B are both alphas or both betas
             if(len(a_base_inds) == len(b_base_inds)):
                 for ind_a, ind_b in zip(a_base_inds, b_base_inds):
-                    # print(a_fixed_inds, ind_a)
-                    # if(a_fixed_inds[ind_a] == -1 or a_fixed_inds[ind_a] == ind_b):
                     poss_remap_matrix[ind_a, ind_b] = True
 
     # The marginal sums, i.e. number of remappings of each varibles in A and B, respectively
@@ -1285,7 +1499,7 @@ def get_possible_remap_inds(a_ind_set, b_ind_set, n_a, n_b, a_fixed_inds):
         n_remaps = num_remaps_per_a[i]
         if(n_remaps != 0): n_possibilities *= n_remaps
 
-    
+    print("n_possibilities", n_possibilities)
     
     # Find the first variable that is remappable 
     first_i = 0
@@ -1304,6 +1518,7 @@ def get_possible_remap_inds(a_ind_set, b_ind_set, n_a, n_b, a_fixed_inds):
                     remap_options[i,k] = j
                     k += 1
 
+    print("remap_options", remap_options)
     # Build the set of possible remaps by taking the cartsian product of remap_options
     remaps = np.empty((n_possibilities, n_a), dtype=np.int16)
     
@@ -1383,6 +1598,8 @@ def score_remaps(lit_set_a, lit_set_b, bpti_a, bpti_b, a_fixed_inds,
 
     scored_remap_sets = List()
 
+
+
     # Case 1: There are no common literals between the conditions
     if(len(op_key_intersection) == 0):
         a_ind_set = List([np.arange(len(bpti_a), dtype=np.uint16)])
@@ -1398,17 +1615,36 @@ def score_remaps(lit_set_a, lit_set_b, bpti_a, bpti_b, a_fixed_inds,
 
     # Case 2: There are some common literals between the conditions
     else:
+        remap_score_matrix = np.zeros((len(bpti_a), len(bpti_b)), dtype=np.int32)
+
         for k in op_key_intersection:
             a_ind_set = lit_set_to_ind_sets(lit_set_a[k], bpti_a)
             b_ind_set = lit_set_to_ind_sets(lit_set_b[k], bpti_b)
 
-            remaps = get_possible_remap_inds(a_ind_set, b_ind_set, len(bpti_a), len(bpti_b), a_fixed_inds)
-            scores = np.empty(len(remaps),dtype=np.float64)
-            for c, remap in enumerate(remaps):
-                matched_As = get_matched_mask(a_ind_set,b_ind_set,remap)
-                scores[c] = np.sum(matched_As)
 
-            scored_remap_sets.append((remaps,scores))
+            for a_base_inds in a_ind_set:
+                for b_base_inds in b_ind_set:
+                    # A and B are both alphas or both betas
+                    if(len(a_base_inds) == len(b_base_inds)):
+                        for ind_a, ind_b in zip(a_base_inds, b_base_inds):
+                            remap_score_matrix[ind_a, ind_b] += 1
+            
+        scores, remap, span = align_greedy(remap_score_matrix)
+        print("GREEDY", )
+
+        return List([(np.sum(scores), remap)])
+            # continue
+            # print("ENTER get_possible_remap_inds")
+            # remaps = get_possible_remap_inds(a_ind_set, b_ind_set, len(bpti_a), len(bpti_b), a_fixed_inds)
+            # print("EXIT get_possible_remap_inds")
+            # scores = np.empty(len(remaps),dtype=np.float64)
+            # for c, remap in enumerate(remaps):
+            #     matched_As = get_matched_mask(a_ind_set,b_ind_set,remap)
+            #     scores[c] = np.sum(matched_As)
+
+            # scored_remap_sets.append((remaps,scores))
+
+        
 
 
 
@@ -1466,6 +1702,7 @@ def score_remaps(lit_set_a, lit_set_b, bpti_a, bpti_b, a_fixed_inds,
         order = np.argsort(scores)[::-1]
         scored_remaps = List([scored_remaps[ind] for ind in order])
 
+    print(scored_remaps)
     return scored_remaps
 
         # best_remap = scored_remaps[0]
@@ -1504,7 +1741,7 @@ f8_2darr_type = f8[:,::1]
 i8_arr = i8[::1]
 
 @njit(cache=True)
-def _buid_score_aligment_matrices(ls_as, ls_bs, bpti_a, bpti_b, a_fixed_inds):
+def _build_score_aligment_matrices(ls_as, ls_bs, bpti_a, bpti_b, a_fixed_inds):
     '''For each unique remap make a matrix that holds the remap score between 
        conjunct_i and conjunct_j for all possible alignments of the conjuncts 
        in A and conjuncts in B. Return a list of remap matrix pairs.'''
@@ -1554,22 +1791,26 @@ def _max_remap_score_for_alignments(score_matrix):
 def _conj_from_litset_and_remap(ls_a, ls_b, remap, keys, bpti_a, bpti_b):
     conj = List.empty_list(LiteralType)
 
+    total = 0
+    kept = 0
     for unq_key in keys:
         lit_set_a = ls_a[unq_key]
         lit_set_b = ls_b[unq_key]
         
         ind_set_a = lit_set_to_ind_sets(lit_set_a, bpti_a)
         ind_set_b = lit_set_to_ind_sets(lit_set_b, bpti_b)
-        matched_mask = get_matched_mask(ind_set_a,ind_set_b,remap)
+        matched_mask = get_matched_mask(ind_set_a, ind_set_b, remap)
 
         # print(lit_set_a, lit_set_b, matched_mask)
         for keep_it, lit in zip(matched_mask, lit_set_a):
+            total += 1
             if(keep_it):
                 new_lit = literal_copy(lit)
                 # new_lit = literal_ctor(lit.op)
                 # new_lit.negated = lit.negated
                 conj.append(new_lit)
-    return conj
+                kept += 1
+    return conj, kept
 
 @njit(cache=True,locals={"i" : u2})
 def make_base_ptrs_to_inds(self):
@@ -1599,7 +1840,125 @@ def get_fixed_inds(c_a, c_b, map_same_var, map_same_alias):
 
 
 
-@njit(Tuple((ConditionsType, f8))(ConditionsType, ConditionsType, boolean, boolean), cache=True)
+# @njit(Tuple((f8, i8[::1], i8[::1]))(ConditionsType, ConditionsType, boolean, boolean), cache=True)
+# def structure_map_conds(c_a, c_b, fix_same_var, fix_same_alias):
+
+#     ls_as = conds_to_lit_sets(c_a)
+#     ls_bs = conds_to_lit_sets(c_b)
+
+#     bpti_a = make_base_ptrs_to_inds(c_a)
+#     bpti_b = make_base_ptrs_to_inds(c_b)
+
+#     remap_size = len(bpti_a)
+#     num_conj = len(ls_as)
+#     best_score = -np.inf
+#     best_remap = np.arange(remap_size, dtype=np.int16)
+
+
+#     a_fixed_inds = get_fixed_inds(c_a, c_b, fix_same_var, fix_same_alias)
+    
+#     # Case 1: c_a and c_b are both single conjunctions like (lit1 & lit2 & lit3)
+#     if(len(ls_as) == 1 and len(ls_bs) == 1):
+#         op_key_intersection = intersect_keys(ls_as[0], ls_bs[0])
+#         scored_remaps = score_remaps(ls_as[0], ls_bs[0], bpti_a, bpti_b, a_fixed_inds,
+#                                     op_key_intersection=op_key_intersection)
+#         best_score, best_remap = scored_remaps[0]
+
+#         return best_score, best_remap, np.zeros(1,dtype=np.int64)
+
+#         # conj = _conj_from_litset_and_remap(ls_as[0], ls_bs[0], 
+#         #          best_remap, op_key_intersection, bpti_a, bpti_b)
+
+#         # dnf = List([conj])
+#         # conds = _conditions_ctor_dnf(dnf)
+
+#     # Case 2: c_a or c_b have disjunction like ((lit1 & lit2 & lit3) | (lit4 & lit5))
+#     else:
+#         score_aligment_matrices = _build_score_aligment_matrices(ls_as, ls_bs, bpti_a, bpti_b, a_fixed_inds)
+        
+#         # Find the upperbounds on each remap
+#         score_upperbounds = np.zeros(len(score_aligment_matrices),dtype=np.float64)
+#         for i, (f_remap, score_matrix) in enumerate(score_aligment_matrices):
+#             for row in score_matrix:
+#                 score_upperbounds[i] += np.max(row)
+
+#         # Look for the best remap trying remaps with large upperbounds first
+#         descending_upperbound_order = np.argsort(-score_upperbounds)
+#         best_score = 0
+#         best_alignment = np.empty(0,dtype=np.int64)
+#         for i in descending_upperbound_order:
+#             # Stop looking after couldn't possibly beat the best so far.
+#             upper_bound_score = score_upperbounds[i]
+#             if(upper_bound_score < best_score):
+#                 break
+
+#             # Find the score for the best conjuct alignment for this remap 
+#             f_remap, score_matrix = score_aligment_matrices[i]
+#             score, alignment = _max_remap_score_for_alignments(score_matrix)
+#             if(score > best_score):
+#                 best_remap = f_remap.arr
+#                 best_score = score
+#                 best_alignment = alignment
+
+#         return best_score, best_remap, best_alignment
+
+#         # dnf = List()
+#         # for i, ls_a in enumerate(ls_as):
+#         #     ls_b = ls_bs[alignment[i]]
+
+#         #     op_key_intersection = intersect_keys(ls_a, ls_b)
+#         #     conj = _conj_from_litset_and_remap(ls_a, ls_b,
+#         #              best_remap, op_key_intersection, bpti_a, bpti_b)
+#         #     dnf.append(conj)
+
+        
+#         # conds = _conditions_ctor_dnf(dnf)
+    
+
+#     # Make sure base Vars are ordered like c_a
+#     unordered_base_vars = conds.base_var_map
+#     base_var_map = Dict.empty(i8,i8)
+#     c = 0 
+#     for base_ptr in bpti_a:
+#         if(base_ptr in unordered_base_vars):
+#             base_var_map[base_ptr] = c
+#             c += 1
+#     conds = _conditions_ctor_base_var_map(base_var_map, dnf)
+
+#     return conds, best_score
+
+@njit(cache=True)
+def get_best_alignment_and_remap(remap_score_matrices):
+    l_a, l_b, N, M = remap_score_matrices.shape
+
+    # Fill in a matrix which captures the best remap 
+    #  for each conjunct pair. This is an upper bound
+    #  on the score contribution of the best remap of the
+    #  the best alignment.
+    upb_alignment_matrix = np.zeros((l_a, l_b), dtype=np.int32)
+    remaps = np.empty((l_a, l_b, N), dtype=np.int16)
+    for i in range(l_a):
+        for j in range(l_b):
+            scores, remap, _ = align_greedy(remap_score_matrices[i,j])
+            upb_alignment_matrix[i, j] = np.sum(scores)
+
+    # Assume that the best alignment is just the one that
+    #  maximizes these upper bounds
+    _, alignment, _ = align_greedy(upb_alignment_matrix)
+
+    cum_score_matrix = np.zeros((N, M), dtype=np.int32)
+    for i,j in enumerate(alignment):
+        cum_score_matrix += remap_score_matrices[i,j]
+
+    scores, remap, _ = align_greedy(cum_score_matrix)
+    
+    return alignment, remap, np.sum(scores)
+
+
+
+
+
+@njit(Tuple((ConditionsType, i8))(ConditionsType, ConditionsType, boolean, boolean), boundscheck=True, cache=True)
 # @njit(cache=True)
 def _conds_antiunify(c_a, c_b, fix_same_var, fix_same_alias):
     ls_as = conds_to_lit_sets(c_a)
@@ -1610,20 +1969,76 @@ def _conds_antiunify(c_a, c_b, fix_same_var, fix_same_alias):
 
     remap_size = len(bpti_a)
     num_conj = len(ls_as)
-    best_score = -np.inf
+    best_score = 0
     best_remap = np.arange(remap_size, dtype=np.int16)
 
 
     a_fixed_inds = get_fixed_inds(c_a, c_b, fix_same_var, fix_same_alias)
-    
+
+    remap_score_matrices = np.zeros((len(ls_as), len(ls_bs), len(bpti_a), len(bpti_b)), dtype=np.int32)
+
+    # For each conjunct pair
+    for i, ls_a in enumerate(ls_as):
+        for j, ls_b in enumerate(ls_bs):
+            remap_score_matrix = remap_score_matrices[i, j]
+
+            # Intersect the literals which are common between the conjuncts
+            op_key_intersection = intersect_keys(ls_a, ls_b)
+            for k in op_key_intersection:
+                # Get the indicies assigned to each base var
+                a_ind_set = lit_set_to_ind_sets(ls_a[k], bpti_a)
+                b_ind_set = lit_set_to_ind_sets(ls_b[k], bpti_b)
+
+                # Make counts of each variable by location in each literal
+                a_vars_w_ind = np.zeros((len(bpti_a),2),dtype=np.int16)
+                b_vars_w_ind = np.zeros((len(bpti_b),2),dtype=np.int16)
+                for a_base_inds in a_ind_set:
+                    for v_ind, ind_a in enumerate(a_base_inds):
+                        a_vars_w_ind[ind_a, v_ind] += 1
+                for b_base_inds in b_ind_set:
+                    for v_ind, ind_b in enumerate(b_base_inds):
+                        b_vars_w_ind[ind_b, v_ind] += 1
+
+                # The remap_score_ij is the number of literals that are
+                #  not elminated by the choice to map index j -> i. Thus,
+                #  it is essentially a score of the pairwise goodness of  
+                #  mapping one variable to another.
+                for ind_a in range(len(bpti_a)):
+                    if(a_fixed_inds[ind_a] != -1):
+                        ind_b = a_fixed_inds[ind_a]
+                        s = np.sum(np.minimum(a_vars_w_ind[ind_a], b_vars_w_ind[ind_b]))
+                        remap_score_matrix[ind_a, ind_b] += s
+                    else:    
+                        for ind_b in range(len(bpti_b)):
+                            s = np.sum(np.minimum(a_vars_w_ind[ind_a], b_vars_w_ind[ind_b]))
+                            remap_score_matrix[ind_a, ind_b] += s
+
+
+                # for a_base_inds in a_ind_set:
+                #     b_cover = np.zeros(len(bpti_b), dtype=np.int64)
+                #     for b_base_inds in b_ind_set:
+                #         for ind_a, ind_b in zip(a_base_inds, b_base_inds):
+                #             # if(len(a_base_inds) == len(b_base_inds)):
+                #             #     for ind_a, ind_b in zip(a_base_inds, b_base_inds):
+                #             if(not b_cover[ind_b]):
+                #                 remap_score_matrix[ind_a, ind_b] += 1
+                #                 b_cover[ind_b] = 1
+                            
+    # print("remap_score_matrices", remap_score_matrices[0,0])
     # Case 1: c_a and c_b are both single conjunctions like (lit1 & lit2 & lit3)
     if(len(ls_as) == 1 and len(ls_bs) == 1):
+        # print("ENTER intersect_keys")
         op_key_intersection = intersect_keys(ls_as[0], ls_bs[0])
-        scored_remaps = score_remaps(ls_as[0], ls_bs[0], bpti_a, bpti_b, a_fixed_inds,
-                                    op_key_intersection=op_key_intersection)
-        best_score, best_remap = scored_remaps[0]
+        # print("EXIT intersect_keys")
+        # print("ENTER score_remaps")
+        # scored_remaps = score_remaps(ls_as[0], ls_bs[0], bpti_a, bpti_b, a_fixed_inds,
+        #                             op_key_intersection=op_key_intersection)
+        # print("EXIT score_remaps")
+        # best_score, best_remap = scored_remaps[0]
 
-        conj = _conj_from_litset_and_remap(ls_as[0], ls_bs[0], 
+        scores, best_remap, span = align_greedy(remap_score_matrices[0,0])
+        best_score = np.sum(scores)
+        conj, kept = _conj_from_litset_and_remap(ls_as[0], ls_bs[0], 
                  best_remap, op_key_intersection, bpti_a, bpti_b)
 
         dnf = List([conj])
@@ -1631,42 +2046,48 @@ def _conds_antiunify(c_a, c_b, fix_same_var, fix_same_alias):
 
     # Case 2: c_a or c_b have disjunction like ((lit1 & lit2 & lit3) | (lit4 & lit5))
     else:
-        score_aligment_matrices = _buid_score_aligment_matrices(ls_as, ls_bs, bpti_a, bpti_b, a_fixed_inds)
+        # score_aligment_matrices = _build_score_aligment_matrices(ls_as, ls_bs, bpti_a, bpti_b, a_fixed_inds)
         
-        # Find the upperbounds on each remap
-        score_upperbounds = np.zeros(len(score_aligment_matrices),dtype=np.float64)
-        for i, (f_remap, score_matrix) in enumerate(score_aligment_matrices):
-            for row in score_matrix:
-                score_upperbounds[i] += np.max(row)
+        # # Find the upperbounds on each remap
+        # score_upperbounds = np.zeros(len(score_aligment_matrices),dtype=np.float64)
+        # for i, (f_remap, score_matrix) in enumerate(score_aligment_matrices):
+        #     for row in score_matrix:
+        #         score_upperbounds[i] += np.max(row)
 
-        # Look for the best remap trying remaps with large upperbounds first
-        descending_upperbound_order = np.argsort(-score_upperbounds)
-        best_score = 0
-        best_alignment = np.empty(0,dtype=np.int64)
-        for i in descending_upperbound_order:
-            # Stop looking after couldn't possibly beat the best so far.
-            upper_bound_score = score_upperbounds[i]
-            if(upper_bound_score < best_score):
-                break
+        # # Look for the best remap trying remaps with large upperbounds first
+        # descending_upperbound_order = np.argsort(-score_upperbounds)
+        # best_score = 0
+        # best_alignment = np.empty(0,dtype=np.int64)
+        # for i in descending_upperbound_order:
+        #     # Stop looking after couldn't possibly beat the best so far.
+        #     upper_bound_score = score_upperbounds[i]
+        #     if(upper_bound_score < best_score):
+        #         break
 
-            # Find the score for the best conjuct alignment for this remap 
-            f_remap, score_matrix = score_aligment_matrices[i]
-            score, alignment = _max_remap_score_for_alignments(score_matrix)
-            if(score > best_score):
-                best_remap = f_remap.arr
-                best_score = score
-                best_alignment = alignment
+        #     # Find the score for the best conjuct alignment for this remap 
+        #     f_remap, score_matrix = score_aligment_matrices[i]
+        #     score, alignment = _max_remap_score_for_alignments(score_matrix)
+        #     if(score > best_score):
+        #         best_remap = f_remap.arr
+        #         best_score = score
+        #         best_alignment = alignment
 
+        alignment, remap, best_score = \
+            get_best_alignment_and_remap(remap_score_matrices)
+
+        kept = 0 
         dnf = List()
+        # print("Align", alignment)
+        # print("Remap", remap)
         for i, ls_a in enumerate(ls_as):
             ls_b = ls_bs[alignment[i]]
 
             op_key_intersection = intersect_keys(ls_a, ls_b)
-            conj = _conj_from_litset_and_remap(ls_a, ls_b,
-                     best_remap, op_key_intersection, bpti_a, bpti_b)
+            conj, kpt = _conj_from_litset_and_remap(ls_a, ls_b,
+                     remap, op_key_intersection, bpti_a, bpti_b)
             dnf.append(conj)
+            kept += kpt
 
-        
         conds = _conditions_ctor_dnf(dnf)
     
 
@@ -1680,7 +2101,10 @@ def _conds_antiunify(c_a, c_b, fix_same_var, fix_same_alias):
             c += 1
     conds = _conditions_ctor_base_var_map(base_var_map, dnf)
 
-    return conds, best_score
+    # print("best_score", best_score)
+    # out_score = (f8(kept) / f8(total)) if total != 0 else 0.0
+    print("KEPT TOT", kept)
+    return conds, kept
 
 
 AU_NORMALIZE_NONE = u1(0)
@@ -1706,19 +2130,19 @@ def resolve_normalize_enum(option):
 @njit(cache=True)
 def conds_antiunify(c_a, c_b, normalize=1,
          fix_same_var=False, fix_same_alias=False):
-    c, score = _conds_antiunify(c_a, c_b, fix_same_var, fix_same_alias)
+    c, kept = _conds_antiunify(c_a, c_b, fix_same_var, fix_same_alias)
     if(normalize == AU_NORMALIZE_LEFT):
         n_literals_a = max(count_literals(c_a),1)
-        return c, score / n_literals_a
+        return c, kept / n_literals_a
     elif(normalize == AU_NORMALIZE_RIGHT):
         n_literals_b = max(count_literals(c_b),1)
-        return c, score / n_literals_b
+        return c, kept / n_literals_b
     elif(normalize == AU_NORMALIZE_MAX):
         n_literals_a = max(count_literals(c_a),1)
         n_literals_b = max(count_literals(c_b),1)
-        return c, score / max(max(n_literals_a, n_literals_b),1)
+        return c, kept / max(max(n_literals_a, n_literals_b),1)
     else:
-        return c, score
+        return c, f8(kept)
 
 @overload_method(ConditionsTypeClass, 'antiunify')
 def overload_conds_antiunify(c_a, c_b, return_score=False,
@@ -1813,7 +2237,6 @@ def conditions_from_facts(facts, _vars=None, add_neighbors=True,
      alpha_weight=1.0, beta_weight = 1.0, neighbor_alpha_weight = 1.0, neighbor_beta_weight = 1.0, 
      alpha_flags=[('visible',)], parent_flags=[('parent',)], beta_flags=[('relational',)]):
     
-    
     if(_vars is None):
         _vars = [Var(x._fact_type, f'A{i}') for i, x in enumerate(facts)]
 
@@ -1902,6 +2325,91 @@ def conditions_from_facts(facts, _vars=None, add_neighbors=True,
     # print(conds)
     # print("----------------------")
     return conds
+
+# ----------------------------------
+# : Replace
+
+@njit(cache=True)
+def conditions_replace(conds, d, c, lit):
+    conds.has_distr_dnf = False
+    conds.dnf[d][c] = lit
+    return conds
+
+@njit(cache=True)
+def conditions_replace_multi(conds, replacements):
+    conds.has_distr_dnf = False
+    for (d, c, lit) in replacements:
+        conds.dnf[d][c] = lit
+    return conds
+
+@njit(cache=True)
+def conditions_remove(conds, d, c):
+    conds.has_distr_dnf = False    
+    conj = conds.dnf[d]
+    del conj[c]
+    return conds
+
+@njit(cache=True)
+def conditions_remove_multi(conds, indicies):
+    # Sort to avoid index invalidation 
+    indicies = sorted(indicies, reverse=True)
+    conds.has_distr_dnf = False
+    for (d, c) in indicies:
+        conj = conds.dnf[d]
+        del conj[c]
+    return conds
+
+@njit(cache=True)
+def conditions_remove_var(conds, var_ind):
+    var = conds.vars[var_ind]
+
+    # Collect indicies of literals that use this var
+    remove_indicies = List.empty_list(i8_pair)
+    for d, conj in enumerate(conds.dnf):
+        for c, lit in enumerate(conj):
+            lit_okay = True
+            for ptr in lit.base_var_ptrs:
+                other_var = cast(ptr, VarType)
+                if(var == other_var):
+                    lit_okay = False
+                    break
+
+            if(not lit_okay):
+                remove_indicies.append((d,c))
+
+
+    # Make a new instance with these removed
+    conds = conditions_remove_multi(conds, remove_indicies)
+    v_ptr = cast(var, i8)
+    
+    # Remove from conds.vars and base_var_map
+    del conds.vars[var_ind]
+    conds.base_var_map = build_base_var_map(conds.vars)
+    distr_dnf = conds_get_distr_dnf(conds)
+
+    
+    return conds
+
+
+
+@njit(cache=True)
+def conditions_indicies_of(conds, lit):
+    for d, conj in enumerate(conds.dnf):
+        for c, _lit in enumerate(conj):
+            if(lit == _lit):
+                return d, c
+    return (-1,-1)
+
+
+i8_pair = Tuple((i8,i8))
+@njit(cache=True)
+def conditions_all_indicies_of(conds, lit):
+    indices = List.empty_list(i8_pair)
+    for d, conj in enumerate(conds.dnf):
+        for c, _lit in enumerate(conj):
+            if(lit == _lit):
+                indices.append((d,c))
+    return indices
 
 
 

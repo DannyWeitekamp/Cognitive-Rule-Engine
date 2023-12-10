@@ -350,9 +350,13 @@ def cre_obj_get_item_t_id_ptr(x, index):
     t_id, m_id, member_offset = _load_ptr(member_info_type, member_info_ptr)
     return t_id, m_id, data_ptr + member_offset
 
+import operator
 @generated_jit(cache=True,nopython=True)
-@overload_method(CREObjTypeClass,'get_item')
+@overload_method(CREObjTypeClass,'__getitem__')
+@overload(operator.getitem)
 def cre_obj_get_item(obj, item_type, index):
+    if not isinstance(obj, CREObjTypeClass):
+        return
     # print("obj", obj)
     # if(obj is not CREObjType): return
     def impl(obj, item_type, index):
@@ -362,7 +366,12 @@ def cre_obj_get_item(obj, item_type, index):
     return impl
 
 @generated_jit(cache=True,nopython=True)
+@overload_method(CREObjTypeClass,'__setitem__')
+@overload(operator.setitem)
 def cre_obj_set_item(obj, index, val):
+    if not isinstance(obj, CREObjTypeClass):
+        return
+        
     item_type = val
     if(isinstance(item_type,types.Literal)):
         item_type = item_type.literal_type

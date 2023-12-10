@@ -669,7 +669,7 @@ def search_for_explanations(self, goal, funcs=None, policy=None,
         # Apply the input funcs in the forward direction once.
         if(policy is None):
             if(funcs is None): raise ValueError("Must provide funcs or policy.")
-            # with PrintElapse("forward"):
+            # with PrintElapse(f"forward {depth}"):
             # print([o._type for o in funcs])
             forward_chain_one(self, funcs)
 
@@ -711,20 +711,12 @@ def search_for_explanations(self, goal, funcs=None, policy=None,
                 # print("arg_inds", arg_inds)
                 depth_policy.append((func, arg_inds))
 
-                # If policy args fail just skip
-                # except KeyError:
-                #     continue
-                    # print("DEPTH ERRR")
-                    # depth_policy.append(func)
-            # print(">>>", depth_policy)
-
-                
-
             # Apply policy
             forward_chain_one(self, depth_policy)
         
-        # with PrintElapse("query_goal"):
+        
         if(depth >= min_stop_depth):
+            # with PrintElapse("query_goal"):    
             found_at_depth = query_goal(self, g_typ, goal, min_solution_depth)
         
         # if(depth >= search_depth): break
@@ -848,6 +840,7 @@ def forward_chain_one(self, depth_policy=None):
                 sig = func.signature
                 # v = call_op_for_inds(self, func, sig.return_type, sig.args, self.curr_infer_depth, inds)
                 # print(v)
+
                 rec = apply_one(func, self, sig.return_type, sig.args,
                     inds, self.curr_infer_depth)
 
@@ -858,9 +851,11 @@ def forward_chain_one(self, depth_policy=None):
         # If no arg_inds are provided then apply all permutations 
         #  of arguments to the func.
         elif(func.n_args > 0):
+            # with PrintElapse(f"\tapply {func}"):
             rec = apply_multi(func, self,
                 self.curr_infer_depth)
 
+            # with PrintElapse(f"\trecord"):
             # Insert records
             if(rec is not None):
                 insert_record(self, rec, func.return_t_id, nxt_depth)

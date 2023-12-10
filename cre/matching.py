@@ -18,7 +18,9 @@ from cre.memset import MemSetType
 from cre.vector import VectorType
 from cre.var import VarType
 # from cre.op import CREFuncType
-from cre.func import CREFuncType, CFSTATUS_TRUTHY, get_best_call_self, set_base_arg_val_impl, REFKIND_UNICODE, REFKIND_STRUCTREF
+from cre.func import (CREFuncType, CFSTATUS_TRUTHY, CFSTATUS_FALSEY, CFSTATUS_NULL_DEREF
+
+        , get_best_call_self, set_base_arg_val_impl, REFKIND_UNICODE, REFKIND_STRUCTREF)
 from cre.conditions import LiteralType, build_distributed_dnf, ConditionsType
 from cre.vector import VectorType, new_vector
 from cre.fact import BaseFact, resolve_deref_data_ptr
@@ -991,15 +993,6 @@ def _upstream_true(u_tt, aligned, pind_i, pind_j):
     else:
         return u_tt[pind_j, pind_i]
 
-# @njit(cache=True, inline='always')
-# def _check_beta(negated, j, j_strt, j_end, inp_buffers_j, 
-#          head_ptrs_j, ind_j, match_head_ptrs_func, match_inp_ptrs, match_inp_inds):    
-#     inp_state_j = inp_buffers_j[ind_j]
-#     if(not inp_state_j.is_valid): return u1(0)
-#     match_inp_inds[j] = ind_j
-#     match_inp_ptrs[j_strt:j_end] = head_ptrs_j[ind_j]
-#     is_match = match_head_ptrs_func(match_inp_ptrs) ^ negated
-#     return is_match
 
 @njit(cache=True, inline='always')
 def _update_truth_table(tt, is_match, match_inp_inds, inp_state_i, inp_state_j):
@@ -1026,177 +1019,155 @@ def set_heads_from_data_ptrs(cf, i, data_ptrs):
         _memcpy(hi.head_data_ptr, data_ptrs[k], hi.head_size)
 
 @njit(cache=True)
-def update_matches(self):
-    head_ranges = self.op.head_ranges
-    n_vars = len(head_ranges)    
-    negated = self.lit.negated
-
-    # If is a beta node make sure the truth_table is big enough.
-    if(n_vars > 1):
-        resize_truth_table(self)
-
-    # Load the 'match' function for this node's op.
-    # match_head_ptrs_func = _func_from_address(match_heads_f_type, self.op.match_head_ptrs_addr)
-
-    # Get the best call_self() implmentation that ignores dereferencing
+def update_alpha_matches(self):
     
+    # Get the best call_self() implmentation that ignores dereferencing
     op = self.op
-    # if(op.call_self_addr == 0): print("BAD OP", op)
+    call_self_func = get_best_call_self(op,True)
+    tt = self.truth_table
+    negated = self.lit.negated    
+    input_state_buffers_i = self.input_state_buffers[0]
+    head_ptrs_i = self.head_ptr_buffers[0]
+    changed_inds_i = self.changed_inds[0]
+            
+    # Go through all of the changed candidates 
+    for ind_i in changed_inds_i:
+        inp_state_i = input_state_buffers_i[ind_i]
+
+        # Check if the op matches this candidate
+        set_heads_from_data_ptrs(op, 0, head_ptrs_i[ind_i])
+        is_match = (call_self_func(op) == CFSTATUS_TRUTHY) ^ negated
+        inp_state_i.true_count = i8(is_match)
+
+
+
+@njit(cache=True)
+def update_beta_matches(self):
+    
+    # Make sure the truth_table is big enough.
+    resize_truth_table(self)    
+    
+    # Get the best call_self() implmentation that ignores dereferencing
+    op = self.op
     call_self_func = get_best_call_self(op,True)
 
-
     # Buffers that will be loaded with ptrs, indrecs, or inds of candidates.
-    match_inp_ptrs = np.zeros(len(self.op.head_infos),dtype=np.int64)
+    # match_inp_ptrs = np.zeros(len(self.op.head_infos),dtype=np.int64)
     match_inp_inds = np.zeros(len(self.var_inds),dtype=np.int64)
     tt = self.truth_table
+    negated = self.lit.negated
 
-    # Loop through the (at most 2) variables for this node.
-    for i in range(n_vars):
+    # Loop through the 2 variables for this node.
+    for i in range(2):
         # Extract various things used below
-        # idrecs_to_inds_i = self.idrecs_to_inds[i]
         head_ptrs_i = self.head_ptr_buffers[i]
-        i_strt, i_end = head_ranges[i][0], head_ranges[i][1]
         changed_inds_i = self.changed_inds[i]
+    
+        # For every change in a candidate to the first variable we'll 
+        #  update against every other possible candidate for the second.
+        #  i.e. for i=0 we fill  whole rows in our truth table.
+        #  [?--?--?]
+        #  [X--X--X]
+        #  [?--?--?]
+        
+        # For every change in a candidate to the second variable we'll 
+        #  update against only the unchanged candidates for the first.
+        #  i.e. for i=1 we fill columns in our truth table, but skip
+        #   cells that were already updated.
+        #  [?--X--?]
+        #  [?--?--?]
+        #  [?--X--?]
 
-        # BETA CASE (i.e. n_vars = 2)
-        if(n_vars > 1):
-            # For every change in a candidate to the first variable we'll 
-            #  update against every other possible candidate for the second.
-            #  i.e. for i=0 we fill  whole rows in our truth table.
-            #  [?--?--?]
-            #  [X--X--X]
-            #  [?--?--?]
+        # When i=1, j=0 and vise versa
+        j = 1 if i == 0 else 0
+        
+        # Extract various things used below
+        head_ptrs_j = self.head_ptr_buffers[j]
+        inp_buffers_i = self.input_state_buffers[i]
+        inp_buffers_j = self.input_state_buffers[j]
+        pinds_i = self.inputs[i].match_inp_inds
+        pinds_j = self.inputs[j].match_inp_inds
+        aligned = self.upstream_aligned
+        same_parent = self.upstream_same_parents
+        
+        # Go through all of the changed candidates
+        for ind_i in changed_inds_i:
+            # Extract various things associated with 'ind_i'
+            inp_state_i  = inp_buffers_i[ind_i]
+            pind_i = pinds_i[ind_i]
             
-            # For every change in a candidate to the second variable we'll 
-            #  update against only the unchanged candidates for the first.
-            #  i.e. for i=1 we fill columns in our truth table, but skip
-            #   cells that were already updated.
-            #  [?--X--?]
-            #  [?--?--?]
-            #  [?--X--?]
+            # Fill in the 'i' part of ptrs, idrecs, inds 
+            set_heads_from_data_ptrs(op, i, head_ptrs_i[ind_i])
+            match_inp_inds[i] = ind_i
 
-            # When i=1, j=0 and vise versa
-            j = 1 if i == 0 else 0
+            # NOTE: Sections below have lots of repeated code. Couldn't find a way to inline
+            #  without incurring a ~4x slowdown.
             
-            # Extract various things used below
-            j_strt, j_end = head_ranges[j][0], head_ranges[j][1]        
-            # idrecs_to_inds_j = self.idrecs_to_inds[j]
-            head_ptrs_j = self.head_ptr_buffers[j]
-            inp_buffers_i = self.input_state_buffers[i]
-            inp_buffers_j = self.input_state_buffers[j]
-            pinds_i = self.inputs[i].match_inp_inds
-            pinds_j = self.inputs[j].match_inp_inds
-            aligned = self.upstream_aligned
-            same_parent = self.upstream_same_parents
-            
-            # Go through all of the changed candidates
-            for ind_i in changed_inds_i:
-                # Extract various things associated with 'ind_i'
-                inp_state_i  = inp_buffers_i[ind_i]
-                pind_i = pinds_i[ind_i]
+            # If there is a beta node upstream of to this one that shares the same
+            #  variables then we'll need to make sure we also check its truth table.
+            if(self.upstream_same_parents):
+                upstream_node = cast(self.upstream_node_ptr, CorgiNodeType)
+                u_tt = upstream_node.truth_table
 
-                # Clear a_id from idrec_i
-                # idrec_i = inp_state_i.idrec
-                # t_id_i, f_id_i, a_id_i = decode_idrec(idrec_i)
-                # idrec_i = encode_idrec(t_id_i, f_id_i, 0)
-                
-                # Fill in the 'i' part of ptrs, indrecs, inds 
-                set_heads_from_data_ptrs(op, i, head_ptrs_i[ind_i])
-                # match_inp_ptrs[i_strt:i_end] = head_ptrs_i[ind_i]
-                match_inp_inds[i] = ind_i
+                if(j > i):
+                    # Update the whole row/column
+                    for ind_j in range(self.inp_widths[j]):
+                        input_state_j = inp_buffers_j[ind_j]
+                        if(not _upstream_true(u_tt, aligned, pind_i, pinds_j[ind_j])):
+                            match_inp_inds[j] = ind_j
+                            _update_truth_table(tt, u1(0), match_inp_inds, inp_state_i, input_state_j)    
+                            continue
 
-                # NOTE: Sections below have lots of repeated code. Couldn't find a way to inline
-                #  without incurring a ~4x slowdown.
-                
-                # If there is a beta node upstream of to this one that shares the same
-                #  variables then we'll need to make sure we also check its truth table.
-                if(self.upstream_same_parents):
-                    upstream_node = cast(self.upstream_node_ptr, CorgiNodeType)
-                    u_tt = upstream_node.truth_table
+                        if(input_state_j.is_valid):
+                            match_inp_inds[j] = ind_j
 
-                    if(j > i):
-                        # Update the whole row/column
-                        for ind_j in range(self.inp_widths[j]):
-                            input_state_j = inp_buffers_j[ind_j]
-                            if(not _upstream_true(u_tt, aligned, pind_i, pinds_j[ind_j])):
-                                match_inp_inds[j] = ind_j
-                                _update_truth_table(tt, u1(0), match_inp_inds, inp_state_i, input_state_j)    
-                                continue
-
-                            if(input_state_j.is_valid):
-                                match_inp_inds[j] = ind_j
-
-                                # match_inp_ptrs[j_strt:j_end] = head_ptrs_j[ind_j]
-                                set_heads_from_data_ptrs(op, j, head_ptrs_j[ind_j])
-                                is_match = (call_self_func(op) == CFSTATUS_TRUTHY) ^ negated
-                                # is_match = match_head_ptrs_func(match_inp_ptrs) ^ negated
-                            else:
-                                is_match = u1(0)
-                            _update_truth_table(tt, is_match, match_inp_inds, inp_state_i, input_state_j)
-                    else:
-                        # Check just the unchanged parts, so to avoid repeat checks 
-                        for ind_j in self.unchanged_inds[j]:
-                            input_state_j = inp_buffers_j[ind_j]
-                            if(not _upstream_true(u_tt, aligned, pind_i, pinds_j[ind_j])):
-                                match_inp_inds[j] = ind_j
-                                _update_truth_table(tt, u1(0), match_inp_inds, inp_state_i, input_state_j)    
-                                continue
-
-                            if(input_state_j.is_valid):
-                                match_inp_inds[j] = ind_j
-                                # match_inp_ptrs[j_strt:j_end] = head_ptrs_j[ind_j]
-                                set_heads_from_data_ptrs(op, j, head_ptrs_j[ind_j])
-                                is_match = (call_self_func(op) == CFSTATUS_TRUTHY) ^ negated
-                                # is_match = match_head_ptrs_func(match_inp_ptrs) ^ negated
-                            else:
-                                is_match = u1(0)
-                            _update_truth_table(tt, is_match, match_inp_inds, inp_state_i, input_state_j)
-
-                # If no 'upstream_same_parents' then just update the truth table 
-                #  with the match values for all relevant pairs.
+                            set_heads_from_data_ptrs(op, j, head_ptrs_j[ind_j])
+                            is_match = (call_self_func(op) == CFSTATUS_TRUTHY) ^ negated
+                        else:
+                            is_match = u1(0)
+                        _update_truth_table(tt, is_match, match_inp_inds, inp_state_i, input_state_j)
                 else:
-                    if(j > i):
-                        # Update the whole row/column
-                        for ind_j in range(self.inp_widths[j]):
-                            input_state_j = inp_buffers_j[ind_j]
-                            if(input_state_j.is_valid):
-                                match_inp_inds[j] = ind_j
-                                # match_inp_ptrs[j_strt:j_end] = head_ptrs_j[ind_j]
-                                # is_match = match_head_ptrs_func(match_inp_ptrs) ^ negated
-                                set_heads_from_data_ptrs(op, j, head_ptrs_j[ind_j])
-                                is_match = (call_self_func(op) == CFSTATUS_TRUTHY) ^ negated
-                            else:
-                                is_match = u1(0)
-                            _update_truth_table(tt, is_match, match_inp_inds, inp_state_i, input_state_j)
-                    else:
-                        # Check just the unchanged parts, so to avoid repeat checks 
-                        for ind_j in self.unchanged_inds[j]:
-                            input_state_j = inp_buffers_j[ind_j]
-                            if(input_state_j.is_valid):
-                                match_inp_inds[j] = ind_j
-                                # match_inp_ptrs[j_strt:j_end] = head_ptrs_j[ind_j]
-                                # is_match = match_head_ptrs_func(match_inp_ptrs) ^ negated
-                                set_heads_from_data_ptrs(op, j, head_ptrs_j[ind_j])
-                                is_match = (call_self_func(op) == CFSTATUS_TRUTHY) ^ negated
-                            else:
-                                is_match = u1(0)
-                            _update_truth_table(tt, is_match, match_inp_inds, inp_state_i, input_state_j)
+                    # Check just the unchanged parts, so to avoid repeat checks 
+                    for ind_j in self.unchanged_inds[j]:
+                        input_state_j = inp_buffers_j[ind_j]
+                        if(not _upstream_true(u_tt, aligned, pind_i, pinds_j[ind_j])):
+                            match_inp_inds[j] = ind_j
+                            _update_truth_table(tt, u1(0), match_inp_inds, inp_state_i, input_state_j)    
+                            continue
 
-        # ALPHA CASE (i.e. n_var = 1)
-        else:
-            input_state_buffers_i = self.input_state_buffers[i]
-            
-            # Go through all of the changed candidates 
-            for ind_i in changed_inds_i:
-                inp_state_i = input_state_buffers_i[ind_i]
+                        if(input_state_j.is_valid):
+                            match_inp_inds[j] = ind_j
+                            set_heads_from_data_ptrs(op, j, head_ptrs_j[ind_j])
+                            is_match = (call_self_func(op) == CFSTATUS_TRUTHY) ^ negated
+                        else:
+                            is_match = u1(0)
+                        _update_truth_table(tt, is_match, match_inp_inds, inp_state_i, input_state_j)
 
-                # Check if the op matches this candidate
-                # match_inp_ptrs[i_strt:i_end] = head_ptrs_i[ind_i]
-                # is_match = match_head_ptrs_func(match_inp_ptrs) ^ negated
-                set_heads_from_data_ptrs(op, i, head_ptrs_i[ind_i])
-                is_match = (call_self_func(op) == CFSTATUS_TRUTHY) ^ negated
-                inp_state_i.true_count = i8(is_match)
-
+            # If no 'upstream_same_parents' then just update the truth table 
+            #  with the match values for all relevant pairs.
+            else:
+                if(j > i):
+                    # Update the whole row/column
+                    for ind_j in range(self.inp_widths[j]):
+                        input_state_j = inp_buffers_j[ind_j]
+                        if(input_state_j.is_valid):
+                            match_inp_inds[j] = ind_j
+                            set_heads_from_data_ptrs(op, j, head_ptrs_j[ind_j])
+                            is_match = (call_self_func(op) == CFSTATUS_TRUTHY) ^ negated
+                        else:
+                            is_match = u1(0)
+                        _update_truth_table(tt, is_match, match_inp_inds, inp_state_i, input_state_j)
+                else:
+                    # Check just the unchanged parts, so to avoid repeat checks 
+                    for ind_j in self.unchanged_inds[j]:
+                        input_state_j = inp_buffers_j[ind_j]
+                        if(input_state_j.is_valid):
+                            match_inp_inds[j] = ind_j
+                            set_heads_from_data_ptrs(op, j, head_ptrs_j[ind_j])
+                            is_match = (call_self_func(op) == CFSTATUS_TRUTHY) ^ negated
+                        else:
+                            is_match = u1(0)
+                        _update_truth_table(tt, is_match, match_inp_inds, inp_state_i, input_state_j)
 
 # -------------------------------------------
 # : update_output_changes()
@@ -1292,14 +1263,20 @@ def update_node(self):
     # print("-----------------------")
     # print("Update", self.lit)
     
-    # Updates input_states and produces changed_inds and unchanged_inds.
+
+    # Phase 1: Updates input_states and produces changed_inds and unchanged_inds.
+    #  also updates the head ptrs of for dereference chains.
     update_input_changes(self)
 
-    # For beta nodes recheck the changed_inds for one var against the
-    #   changed_inds and unchanged_inds of the other. Alpha nodes just check 
-    #   the changed_inds. Fills true_count (i.e. number of consistent match pairs)
-    #   for each input fact.
-    update_matches(self)    
+    # Phase 2: Update true_count / truth_table
+    if(len(self.op.head_ranges) == 1):
+        #  For Alpha nodes just check the changed_inds. Fills true_count 
+        # (i.e. number of consistent match pairs) for each input fact.
+        update_alpha_matches(self)
+    else:
+        #For beta nodes recheck the changed_inds for one var against the
+        #   changed_inds and unchanged_inds of the other.
+        update_beta_matches(self)
 
     # Ensure that idrecs for facts with true_count > 0 represented in 
     #  outputs. Track removals/changes for updating downstream nodes. 
@@ -1724,16 +1701,16 @@ def update_from_upstream_match(m_iter, m_node):
                 idrecs_set = new_idrecs_set
 
             # Only for print Statement
-            set_f_ids = np.empty(len(idrecs_set),dtype=np.int64)
-            for j, x in enumerate(idrecs_set):
-                set_f_ids[j] = decode_idrec(x)[1]
+            # set_f_ids = np.empty(len(idrecs_set),dtype=np.int64)
+            # for j, x in enumerate(idrecs_set):
+            #     set_f_ids[j] = decode_idrec(x)[1]
             # print(":", i, 'f_ids:', np.array([decode_idrec(x)[1] for x in idrecs]), "f_ids:", set_f_ids)
         else:
             m_node.idrecs = idrecs
             # print(":", "-", 'node:', np.array([decode_idrec(x)[1] for x in idrecs]))
 
     
-    # If multiple dependencies copy remaining contents of idrecs_set into an array.
+    # If multiple dependencies, copy remaining contents of idrecs_set into an array.
     if(multiple_deps):
         idrecs = np.empty((len(idrecs_set),), dtype=np.uint64)
         for i, idrec in enumerate(idrecs_set):
@@ -1943,6 +1920,8 @@ def _infer_unprovided(known_ptr, op, arg_ind):
     hr = op.head_ranges[arg_ind]
     if(hr.end-hr.start == 1):
         v = cast(op.head_infos[hr.start].var_ptr, VarType)
+        if(len(v.deref_infos) == 0):
+            return 0, True
         other_data_ptr = resolve_deref_data_ptr(cast(known_ptr,BaseFact), v.deref_infos)
         other_ptr = _load_ptr(i8, other_data_ptr)
         return other_ptr, False
@@ -1951,19 +1930,41 @@ def _infer_unprovided(known_ptr, op, arg_ind):
     # Fail Case
     return 0, True
 
+WN_VAR_TYPE = u8(1)
+WN_BAD_DEREF = u8(2)
+WN_INFER_UNPROVIDED = u8(3)
+WN_FAIL_MATCH = u8(4)
+
+np_why_not_type = np.dtype([
+    # Enum for ATTR or LIST
+    ('ptr', np.int64),
+    ('var_ind0', np.int64),
+    ('var_ind1', np.int64),
+    ('d_ind', np.int64),
+    ('c_ind', np.int64),
+    ('kind', np.uint64),
+])
+
+why_not_type = numba.from_dtype(np_why_not_type)
+
+@njit
+def new_why_not(ptr, var_ind0, var_ind1=-1, d_ind=-1, c_ind=-1, kind=0):
+    arr = np.empty(1,dtype=why_not_type)
+    arr[0].ptr = i8(ptr)
+    arr[0].var_ind0 = i8(var_ind0)
+    arr[0].var_ind1 = i8(var_ind1)
+    arr[0].d_ind = i8(d_ind)
+    arr[0].c_ind = i8(c_ind)
+    arr[0].kind = u8(kind)
+    return arr[0]
+
 # Compile implementation of set_base_arg for BaseFact type
 set_base_fact_arg = set_base_arg_val_impl(BaseFact)
 
 @njit(cache=True)
-def _score_match(conds, match_ptrs, zero_on_fail=False):
+def _score_match(conds, match_ptrs, why_nots=None, zero_on_fail=False):
     # Get the instance pointers from match_idrecs
-    # match_ptrs = match_ptrs_from_idrecs(ms, match_idrecs, len(conds.vars))
-    # corgi_graph = get_graph(ms, conds)
-
-    # print("START MATCH")
-
     cum_weight, total_weight = 0.0, 0.0
-    
     # Pad match_ptrs with zeros to account for variables in the conditions
     #  for which no match has been provided
     _match_ptrs = np.zeros(len(conds.vars), np.int64)
@@ -1985,17 +1986,17 @@ def _score_match(conds, match_ptrs, zero_on_fail=False):
         # NOTE: Need to handle inheritance here... isa()
         if(v.base_t_id != t_id):
             bad_vars[i] = u1(1)
+            if(why_nots is not None):
+                why_nots.append(new_why_not(
+                    cast(v,i8), i, kind=WN_VAR_TYPE))
+                    
             continue
 
         cum_weight += 1.0
         
-
     # NOTE: MAKE WORK FOR OR
-    for conj in conds.dnf:
-        for lit in conj:
-    # for lst in corgi_graph.nodes_by_nargs:
-        # for node in lst:
-            
+    for d_ind, conj in enumerate(conds.dnf):
+        for c_ind, lit in enumerate(conj):
             total_weight += lit.weight
 
             # Set arguments
@@ -2022,6 +2023,9 @@ def _score_match(conds, match_ptrs, zero_on_fail=False):
 
                 if(ptr_i == 0):
                     # print("ZERO PTR", var_ind)
+                    if(why_nots is not None):
+                        why_nots.append(new_why_not(cast(lit,i8), 
+                            var_ind, kind=WN_INFER_UNPROVIDED))
                     infer_fail = True
                     continue
 
@@ -2045,9 +2049,18 @@ def _score_match(conds, match_ptrs, zero_on_fail=False):
             if((status == CFSTATUS_TRUTHY) ^ lit.negated):
                 # print("OKAY", node.op, node.lit.weight)
                 cum_weight += lit.weight
-            elif(zero_on_fail):
+            else:
+                if(why_nots is not None):
+                    why_nots.append(new_why_not(
+                        cast(lit,i8),
+                        lit.var_inds[0],
+                        var_ind1=-1 if len(lit.var_inds) < 2 else lit.var_inds[1],
+                        d_ind=d_ind, c_ind=c_ind,
+                        kind=WN_FAIL_MATCH))
+
+                if(zero_on_fail):
                 # print("BAD Status", lit.op, status, CFSTATUS_TRUTHY)
-                return 0.0, 0.0
+                    return 0.0, 0.0
             # else:
                 # print("FAIL", node.op, node.lit.weight)
     # print("END")
@@ -2065,22 +2078,24 @@ def _ensure_ms(conds, ms):
 
 @njit(cache=True)
 def score_match(conds, match_ptrs):
-    # ms = _ensure_ms(conds, ms)
-    # corgi_graph = get_graph(ms, conds)
-    cum_weight, total_weight = _score_match(conds, match_ptrs, False)
+    cum_weight, total_weight = _score_match(conds, match_ptrs, None, False)
     return cum_weight / total_weight
 
 @njit(cache=True)
 def check_match(conds, match_ptrs):
-    # ms = _ensure_ms(conds, ms)
-    # corgi_graph = get_graph(ms, conds)
-    #TODO to make sure checking types
-    w, _ = _score_match(conds, match_ptrs, True)
+    w, _ = _score_match(conds, match_ptrs, None, True)
     return w != 0.0
 
 
-        # known = cast(known_ptr, BaseFact)
-        # print(known)
+# why_not_type = Tuple((LiteralType, u1))
+@njit(cache=True)
+def why_not_match(conds, match_ptrs):
+    why_nots = List.empty_list(why_not_type)
+    w, _ = _score_match(conds, match_ptrs, why_nots, False)
+    why_not_arr = np.empty(len(why_nots), dtype=why_not_type)
+    for i, wn in enumerate(why_nots):
+        why_not_arr[i] = wn
+    return why_not_arr
 
 
 

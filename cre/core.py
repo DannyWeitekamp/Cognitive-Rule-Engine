@@ -1,5 +1,12 @@
-#From here: https://github.com/znerol/py-fnvhash/blob/master/fnvhash/__init__.py
+import os
+from cre_caching import cache_dir, get_cache_path, import_from_cached
+from numba import config
+
+
+# config.CACHE_DIR = os.path.join(os.path.split(cache_dir)[0], "numba_cache")
+
 import numba
+
 from numba import types, njit
 from numba import void,b1,u1,u2,u4,u8,i1,i2,i4,i8,f4,f8,c8,c16,types, boolean
 from numba.core.types import unicode_type, float64
@@ -9,10 +16,10 @@ import numpy as np
 
 import numba.typed.typedlist as tl_mod 
 import numba.typed.typeddict as td_mod
-import os
-from cre.caching import cache_dir, get_cache_path, import_from_cached
 
-os.environ['NUMBA_CACHE_DIR'] = os.path.join(os.path.split(cache_dir)[0], "numba_cache")
+
+
+
 
 from numba.core.dispatcher import Dispatcher
 import numba.typed.typedlist as tl_mod 
@@ -31,8 +38,6 @@ def monkey_patch_caching(mod,exclude=[]):
 
 #They promised to fix this by 0.51.0, so we'll only run it if an earlier release
 # if(tuple([int(x) for x in numba.__version__.split('.')]) < (0,55,0)):
-
-
 
 #These will be filled in if the user registers a new type
 TYPE_ALIASES = {

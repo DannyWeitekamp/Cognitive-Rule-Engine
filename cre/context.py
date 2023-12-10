@@ -29,18 +29,21 @@ context_data_fields = {
 
 CREContextData, CREContextDataType, CREContextDataTypeClass  = define_structref("CREContextData",context_data_fields, define_constructor=False, return_type_class=True)
 
-@njit(types.void(CREContextDataType), cache=True)
+# @njit(types.void(CREContextDataType), cache=True)
+@njit(cache=True)
 def set_cre_context_data(context_data):
     _set_global(i8, "_CRE_context_data", cast(context_data,i8))
 
-@njit(CREContextDataType(), cache=True)
+# @njit(CREContextDataType(), cache=True)
+@njit(cache=True)
 def get_cre_context_data():
     context_data_ptr = _get_global(i8, "_CRE_context_data")
     _incref_ptr(context_data_ptr)
     return cast(context_data_ptr, CREContextDataType)
 
 u2_arr_type = u2[::1]
-@njit(CREContextDataType(unicode_type), cache=True)
+# @njit(CREContextDataType(unicode_type), cache=True)
+@njit(cache=True)
 def new_cre_context(name):
     st = new(CREContextDataType)
     st.name = name
@@ -53,12 +56,14 @@ def new_cre_context(name):
     return st 
 
 
-@njit(types.void(CREContextDataType, unicode_type, u2), cache=True)
+# @njit(types.void(CREContextDataType, unicode_type, u2), cache=True)
+@njit(cache=True)
 def assign_name_to_t_id(cd, name, t_id):
     cd.fact_to_t_id[name] = u2(t_id)
     cd.t_id_to_type_names[u2(t_id)] = name
 
-@njit(types.void(CREContextDataType, u2, u1, unicode_type), cache=True)
+# @njit(types.void(CREContextDataType, u2, u1, unicode_type), cache=True)
+@njit(cache=True)
 def assign_a_id_attr(cd, t_id, a_id, name):
     cd.attr_names[(u2(t_id), u1(a_id))] = name 
 

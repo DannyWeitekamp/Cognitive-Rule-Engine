@@ -610,6 +610,11 @@ def _decref_ptr(typingctx, raw_ptr):
     sig = void(raw_ptr)
     return sig, codegen
 
+@njit(cache=True)
+def decref_ptrs(ptrs):
+    for ptr in ptrs:
+        _decref_ptr(ptr)
+
 @intrinsic
 def _incref_ptr(typingctx, raw_ptr):
     def codegen(context, builder, sig, args):
@@ -660,6 +665,8 @@ def _struct_get_attr_offset(typingctx, inst, attr):
     '''Get the offset of the attribute 'attr' from the base address of the struct
         pointed to by structref 'inst'
     '''
+    if(not isinstance(attr,types.Literal)):
+        return
     attr_literal = attr.literal_value
     def codegen(context, builder, sig, args):
         inst_type,_ = sig.args
@@ -696,6 +703,8 @@ def struct_get_attr_offset(inst,attr):
 def _struct_get_attr_ptr(typingctx, inst, attr):
     '''Get the data ptr of the attribute 'attr' in 'inst'
     '''
+    if(not isinstance(attr, types.Literal)):
+        return
     attr_literal = attr.literal_value
     def codegen(context, builder, sig, args):
         inst_type,_ = sig.args
@@ -825,6 +834,8 @@ def _memcpy(typingctx, dst, src, nbytes):
 @intrinsic
 def _nullify_attr(typingctx, struct_type, _attr):
     # print(struct_type, _attr)
+    if(not isinstance(_attr, types.Literal)):
+        return
     attr = _attr.literal_value
     def codegen(context, builder, sig, args):
         [st,_] = args
@@ -844,6 +855,8 @@ def _nullify_attr(typingctx, struct_type, _attr):
 @intrinsic
 def _attr_is_null(typingctx, struct_type, _attr):
     # print(struct_type, _attr)
+    if(not isinstance(_attr, types.Literal)):
+        return
     attr = _attr.literal_value
     def codegen(context, builder, sig, args):
         [st,_] = args
@@ -1352,6 +1365,9 @@ def imp_dtor_w_del(context, module, instance_type, del_fn_symbol_name):
 
 @intrinsic
 def new_w_del(typingctx, struct_type, _del_fn_symbol_name):
+    if(not isinstance(_del_fn_symbol_name, types.Literal)):
+        return
+
     inst_type = struct_type.instance_type
     del_fn_symbol_name = _del_fn_symbol_name.literal_value
     def codegen(context, builder, signature, args):
@@ -1398,6 +1414,9 @@ def get_or_make_global(context, builder, typ,name):
 
 @intrinsic
 def _get_global(typingctx, _typ, _name):
+    if(not isinstance(_name,types.Literal)):
+        return
+
     typ = _typ.instance_type
     name = _name.literal_value
     def codegen(context, builder, sig, args):
@@ -1410,6 +1429,9 @@ def _get_global(typingctx, _typ, _name):
 
 @intrinsic
 def _set_global(typingctx, _typ, _name, val):
+    if(not isinstance(_name,types.Literal)):
+        return
+
     typ = _typ.instance_type
     name = _name.literal_value
     def codegen(context, builder, sig, args):
@@ -1473,9 +1495,11 @@ def _call_nounwind(typingctx, func, args):
 
 @intrinsic
 def _tuple_getitem(typingctx, tup, i):
+    if(not isinstance(i,types.Literal)):
+        return
+
     tup_type = tup
     ind = i.literal_value
-    print(tup, i, tup.types[ind])
     def codegen(context, builder, sig, args):
         tup, i = args
         return builder.extract_value(tup, ind)

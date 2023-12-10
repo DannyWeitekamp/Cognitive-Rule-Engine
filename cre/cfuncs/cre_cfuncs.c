@@ -34,6 +34,36 @@ NRT_MemInfo* meminfo_copy_unsafe(NRT_api_functions *nrt, NRT_MemInfo *mi) {
     }
 }
 
+/* TODO... Maybe
+struct Unicode_Type {
+    void*           data;
+    size_t          length;
+    short           kind;
+    unsigned short  is_ascii;    
+    Py_hash_t       hash;
+    NRT_MemInfo*    meminfo;
+    void*           parent;
+};
+
+
+void float_to_string(double x, Unicode_Type out_str){
+    (struct Unicode_Type) out_str;
+
+    int len = snprintf(NULL, 0, "%f", x);
+    // char *result = malloc(len + 1);
+    
+
+    mi = (struct MemInfo*) nrt->allocate(len+1);
+    snprintf(mi->data, len + 1, "%f", x);
+    new_mi->refct = 1;
+
+    out_str.data = data
+    out_str.meminfo = meminfo
+    out_str.length = len + 1
+
+}
+*/
+
 /*** START : ext_methods  ***/
 static PyMethodDef ext_methods[] = {
 #define declmethod(func) { #func , ( PyCFunction )func , METH_VARARGS , NULL }

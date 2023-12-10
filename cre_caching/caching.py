@@ -12,12 +12,15 @@ import shutil
 
 #Snatch AppDirs from numba numba and find the cache dir
 from numba.misc.appdirs import AppDirs
+from numba import config
 from base64 import b64encode
 
 #Resolve the location of the cache_dir
 appdirs = AppDirs(appname="cre", appauthor=False)
 cache_dir = os.path.join(appdirs.user_cache_dir,"cre_cache")
-os.environ['NUMBA_CACHE_DIR'] = os.path.join(os.path.split(cache_dir)[0], "numba_cache")
+# os.environ['NUMBA_CACHE_DIR'] = os.path.join(os.path.split(cache_dir)[0], "numba_cache")
+
+config.CACHE_DIR = os.path.join(os.path.split(cache_dir)[0], "numba_cache")
 print("CRE Cache Lives Here: ", cache_dir)
 
 #Make the cache_dir if it doesn't exist
@@ -168,8 +171,97 @@ def import_from_cached(name,hsh,targets,aot_module=None):
 				mod = _import_cached(name,hsh)
 	else:
 		mod = _import_cached(name,hsh)
-		
+	
+
 	return {x:getattr(mod,x) for x in targets}
+
+# ------------------------------------------
+# : Precise Cache locator to make writing CREFuncs less annoying 
+
+import cloudpickle
+from numba.core.caching import Cache, _SourceFileBackedLocatorMixin, _CacheLocator, _UserProvidedCacheLocator, CompileResultCacheImpl
+from numba.core.serialize import dumps
+from numba.core.dispatcher import Dispatcher
+from numba.extending import _Intrinsic
+from numba import config
+import dis
+
+class _PreciseCacheLocator(_UserProvidedCacheLocator):
+    def __init__(self, py_func, py_file):
+        self._py_func = py_func
+        cache_subpath = self.get_suitable_cache_subpath(py_file)
+        self._cache_path = os.path.join(config.CACHE_DIR, cache_subpath)
+
+        code =  self._py_func.__code__
+        glbs = self._py_func.__globals__
+
+        # Get __globals__ referenced in the function body
+        _vars = code.co_names
+        used_globals = {}
+        for k in _vars:
+        	if(k not in glbs):
+        		continue
+        	v = glbs[k]
+        	if(isinstance(v, (Dispatcher, _Intrinsic))):
+        		if(isinstance(v, _Intrinsic)):
+        			v_code = v._defn.__code__.co_code
+        		elif(isinstance(v, Dispatcher)):
+        			v_code = v.py_func.__code__.co_code
+
+        		# print("FUNC DEP", k, hashlib.sha256(dumps(v_code)).hexdigest()[:5])
+        		# if(isinstance(v, Dispatcher)):
+        		# 	print(dis.dis(v.py_func))
+        		# print(v_code)
+        		used_globals[k] = v_code
+        	else:
+        		used_globals[k] = v
+
+        # used_globals = {k:glbs[k]  if (
+        # 	k in glbs and
+        # 	not isinstance(glbs[k], (Dispatcher, _Intrinsic))
+        # )}
+
+        # Hash the function bytecode and subset of globals
+        func_bytes = code.co_code + dumps(used_globals)
+        self._func_hash = hashlib.sha256(func_bytes).hexdigest()
+
+        # print(used_globals)
+        # print(hashlib.sha256(code.co_code).hexdigest()[:5], hashlib.sha256(dumps(used_globals)).hexdigest()[:5])
+        # print("**", self._py_func.__name__, self._func_hash[:5])
+    
+    def get_source_stamp(self):
+
+        return self._func_hash
+
+    def get_disambiguator(self):
+        return self._func_hash[:10]
+
+    @classmethod
+    def from_function(cls, py_func, py_file):
+        # if not config.CACHE_DIR:
+        #     return
+        self = cls(py_func, py_file)
+        return self
+        
+
+class PreciseCacheImpl(CompileResultCacheImpl):
+    _locator_classes = [
+        _PreciseCacheLocator,
+        *CompileResultCacheImpl._locator_classes
+    ] 
+
+class PreciseCache(Cache):
+    """
+    Implements Cache that saves and loads CompileResult objects.
+    """
+    _impl_class = PreciseCacheImpl
+
+
+# Monkey Patch Dispatcher
+def enable_precise_caching(self):
+    self._cache = PreciseCache(self.py_func)
+# Dispatcher.enable_caching = enable_caching
+
 	# l = {x:getattr(mod,x) for x in targets}
 	# return {k:l[k] for k in targets}
 	# path = get_cache_path(name,hsh)

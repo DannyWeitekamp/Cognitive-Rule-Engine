@@ -7,7 +7,9 @@ from cre.context import cre_context
 from cre.obj import CREObjType
 from cre.fact import define_fact
 from cre.var import Var
+from cre.utils import PrintElapse
 from time import time_ns
+import difflib
 from cre.utils import  _raw_ptr_from_struct, _cast_structref
 
 import  cre.dynamic_exec
@@ -61,6 +63,28 @@ def test_var():
         l2 = Var(BOOP)
         assert l1.base_ptr == l1.B.base_ptr 
         assert l2.base_ptr == l2.B.base_ptr 
+
+        v0 = l1.B
+        assert v0(BOOP("A",1)) == 1
+        v1 = l1.A
+        assert v1(BOOP("A",1)) == "A"
+        v2 = l1
+        assert v2(BOOP("A",1)) == BOOP("A",1)
+
+        b = BOOP("A",1)
+        with PrintElapse("l1.B"):
+            v0(b)
+        with PrintElapse("l1.A"):
+            v1(b)
+        with PrintElapse("l1"):
+            v2(b)
+        with PrintElapse("l1.B"):
+            v0(b)
+        with PrintElapse("l1.A"):
+            v1(b)
+        with PrintElapse("l1"):
+            v2(b)
+
         
 
 
@@ -488,22 +512,29 @@ def test_anti_unify():
     x, y, z = Var(f8,'x'), Var(f8,'y'), Var(f8,'z')
     a, b, c, d = Var(f8,'a'), Var(f8,'b'), Var(f8,'c'), Var(f8,'d')
 
-    # Single Conjunction Case
+    # -------------
+    # : Single Conjunction Case
+    
     c1 = (x < y) & (y < z) & (y < z) & (z != x) & (y != 0) 
     c2 = (a < b) & (b < c) & (b < c) & (b < c) & (c != a) & (b != 0) & (d != 0)
     c12_ref = ((x < y) & (y < z) & (y < z) & (z != x) & (y != 0))
 
     c12 = c1.antiunify(c2) 
+    print(str(c12))
     assert str(c12) == str(c12_ref)
+    # raise ValueError()
 
-    # Disjunction of Conjunctions Case
-    c1 = ((x < y) & (z != x) & (y != 0) | # 1
-          (x < y) & (z == x) & (y != 7) | # 2
-          (x > y) & (z != x) & (y != 2)   # 3
+    # -------------
+    # : Disjunction of Conjunctions Case
+    #   (test alignment of conjuncts)
+
+    c1 = ((x < y) & (z != x) & (y != 0) | # 0
+          (x < y) & (z == x) & (y != 7) | # 1
+          (x > y) & (z != x) & (y != 2)   # 2
          )
-    c2 = ((a < b) & (c == a) & (b != 7) & (d > 0) | #2
-          (a < b) & (c != a) & (b != 0) |           #1
-          (a > b) & (c != a) & (b != 0) & (d != 7)  #3
+    c2 = ((a < b) & (c == a) & (b != 7) & (d > 0) | # 1
+          (a < b) & (c != a) & (b != 0) |           # 0
+          (a > b) & (c != a) & (b != 0) & (d != 7)  # 2
          )
 
     c12_ref = ((x < y) & (z != x) & (y != 0) |\
@@ -514,30 +545,49 @@ def test_anti_unify():
 
     print(str(c12))
     print(str(c12_ref))
+    print(score)
     assert str(c12) == str(c12_ref)
     assert score == 8./9.
 
+    # -------------
+    # : Test fix_same_var and fix_same_alias
+
+    # Baseline case
     c1 = (x < y) & (y < z) & (y < z) & (z != x) & (y != 0) 
     c2 = (x < y) & (z < y) & (z < y) & (x != z) & (z != 0) 
-    c12_ref = x & (x < y)
+    c12_ref = y & z & (y != 0) & (y < z) & (y < z)
+    c12, score = c1.antiunify(c2, return_score=True, fix_same_var=False)
+    print(str(c12))
+    print(str(c12_ref))
+    print_str_diff(str(c12),str(c12_ref))
+    assert str(c12) == str(c12_ref)
+    assert score == 3./5.
 
-    c12, score = c1.antiunify(c2, return_score=True, fix_same_var=True) #conds_antiunify(c1,c2)
-
+    # With fix_same_var=True
+    c1 = (x < y) & (y < z) & (y < z) & (z != x) & (y != 0) 
+    c2 = (x < y) & (z < y) & (z < y) & (x != z) & (z != 0) 
+    c12_ref = x & y & (x < y)
+    c12, score = c1.antiunify(c2, return_score=True, fix_same_var=True)
     print(str(c12))
     print(str(c12_ref))
     print_str_diff(str(c12),str(c12_ref))
     assert str(c12) == str(c12_ref)
     assert score == 1./5.
 
+    # With fix_same_alias=True
     X, Y, Z = Var(f8,'x'), Var(f8,'y'), Var(f8,'z')
-
     c1 = (x < y) & (y < z) & (y < z) & (z != x) & (y != 0) 
     c2 = (X < Y) & (Z < Y) & (Z < Y) & (X != Z) & (Z != 0) 
-    c12_ref = x & (x < y)
-
-    c12, score = c1.antiunify(c2, return_score=True, fix_same_alias=True) #conds_antiunify(c1,c2)
+    c12_ref = x & y & (x < y)
+    c12, score = c1.antiunify(c2, return_score=True, fix_same_alias=True)
+    print(str(c12))
+    print(str(c12_ref))
+    print("SCORE", score)
     assert str(c12) == str(c12_ref)
     assert score == 1./5.
+
+    # -------------
+    # : Edge cases
 
     # TODO: Edge cases, unconditioned variables / variables with no supporting literals
     c1 = x & y & z
@@ -550,14 +600,93 @@ def test_anti_unify():
     # assert str(c12) == str(c12_ref)
     # assert score == 1.
 
+def _check_removed(ca, cb, pattern):
+    has_removed = False
+    for a, b in zip(str(ca).split("\n"), str(cb).split("\n")):
+        if(a != b and pattern not in b):
+            has_removed = True
+    assert has_removed
+            
+def test_remove_replace():
+    x, y, z = Var(f8,'x'), Var(f8,'y'), Var(f8,'z')
 
+    # Disjunction of Conjunctions Case
+    c1 = ((x < y) & (z != x) & (y != 0) | # 1
+          (x < y) & (z == x) & (y != 7) | # 2
+          (x > y) & (z != x) & (y != 2)   # 3
+         )
+    # ----------
+    # : REMOVE
+    # Test remove() for literal indices
+    c1_str = str(c1)
+    _c1 = c1.remove(0,1)
+    _check_removed(c1, _c1, "~(z == x)")
+    assert str(c1) == c1_str # check no mutation
+
+    # Test remove() for list of literal indicies 
+    _c1 = c1.remove([(0,1), (0,2), (2,1)])
+    _check_removed(c1, _c1, "~(z == x)")
+    _check_removed(c1, _c1, "~(y == 0)")
+    assert str(c1) == c1_str # check no mutation
+
+    # Test remove() for list of literals
+    _c1 = c1.remove([z != x, y != 0])
+    _check_removed(c1, _c1, "~(z == x)")
+    _check_removed(c1, _c1, "~(y == 0)")
+    assert str(c1) == c1_str # check no mutation
+
+    # Test remove() for var_inds
+    _c1 = c1.remove([0, 2])
+    assert "x" not in str(_c1)
+    assert "z" not in str(_c1)
+    assert str(c1) == c1_str # check no mutation
+
+    # Test remove() for var instances
+    _c1 = c1.remove([x, z])
+    assert "x" not in str(_c1)
+    assert "z" not in str(_c1)
+    assert str(c1) == c1_str # check no mutation
+
+    # Remove mixed kinds
+    _c1 = c1.remove([(x < y),(1,2), z, 0])
+    _check_removed(c1, _c1, "x < y")
+    _check_removed(c1, _c1, "~(y == 7)")
+    print(c1)
+    print(_c1)
+    assert "z" not in str(_c1)
+    assert "x" not in str(_c1)
+
+    # ----------
+    # : REPLACE
+    # Test replace() literal indicies
+    _c1 = c1.replace(0, 1, (z != 8))
+    assert str(c1) == c1_str # check no mutation
+    assert "~(z == 8)" in str(_c1)
+
+    # Test replace() for list of literal indicies
+    _c1 = c1.replace([(0, 1, (z != 8)), (2, 1, (z != 9))])
+    assert str(c1) == c1_str # check no mutation
+    assert "~(z == 8)" in str(_c1)
+    assert "~(z == 9)" in str(_c1)
+    
+    # Test indicies_of()
+    assert _c1.indicies_of(~(z == 8)) == (0,1)
+    assert list(c1.all_indicies_of((x < y))) == [(0,0), (1,0)]
+
+    # Test replace using literal instances
+    _c1 = c1.replace([(z != x, z != 8), (y != 7, z != 9)])
+    assert str(c1) == c1_str # check no mutation
+    assert "~(z == 8)" in str(_c1)
+    assert "~(z == 9)" in str(_c1)
 
     
+
 
 if(__name__ == "__main__"):
     import faulthandler; faulthandler.enable()
     from cre.func import cre_func_unique_string
-    x, y, z = Var(f8,'x'), Var(f8,'y'), Var(f8,'z')
+    
+    
 
     # print(cre_func_unique_string((x + z) + (y + z)))
     # print(cre_func_unique_string((x + z) + (y + 1)))
@@ -585,4 +714,5 @@ if(__name__ == "__main__"):
     # test_eq()
     # 
     # exit()
+    # test_remove_replace()
 

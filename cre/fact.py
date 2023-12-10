@@ -31,7 +31,7 @@ from cre.utils import (cast, struct_get_attr_offset, _obj_cast_codegen,
                        _ptr_from_struct_codegen, CastFriendlyMixin, _obj_cast_codegen,
                        PrintElapse, _struct_get_data_ptr, _ptr_from_struct_incref,
                        deref_info_type, DEREF_TYPE_ATTR, DEREF_TYPE_LIST,
-                       _ptr_to_data_ptr, _list_base_from_ptr)
+                       _ptr_to_data_ptr, _list_base_from_ptr, _decref_ptr)
 from cre.obj import CREObjTypeClass, cre_obj_field_dict, CREObjModel, CREObjType, member_info_type, CREObjProxy
 
 from numba.core.typeconv import Conversion
@@ -501,8 +501,11 @@ class FactProxy(CREObjProxy):
     def get_ptr(self):
         return fact_to_ptr(self)
 
-    def get_ptr_incref(self):
+    def _get_ptr_incref(self):
         return fact_to_ptr_incref(self)
+
+    def _decref(self):
+        fact_decref(self)        
 
     def _gen_val_var_possibilities(self, self_var):
         for attr, config in self._fact_type.clean_spec.items():
@@ -614,12 +617,12 @@ class FactProxy(CREObjProxy):
         return str(self)
 
 
-    def resolve_deref(self, derefs):
-        if(not isinstance(derefs, np.ndarray)):
-            derefs = derefs.deref_infos
-        ctx = cre_context()
-        out_type = ctx.get_type(t_id=derefs[-1]['t_id'])
-        return resolve_deref(self, derefs, out_type)
+    # def resolve_deref(self, derefs):
+    #     if(not isinstance(derefs, np.ndarray)):
+    #         derefs = derefs.deref_infos
+    #     ctx = cre_context()
+    #     out_type = ctx.get_type(t_id=derefs[-1]['t_id'])
+    #     return resolve_deref(self, derefs, out_type)
 
     # def __eq__(self, other):
     #     from cre.dynamic_exec import fact_eq
@@ -1180,6 +1183,10 @@ def fact_to_basefact(fact):
 def fact_to_ptr_incref(fact):
     return _ptr_from_struct_incref(fact)
 
+@njit(types.void(CREObjType), cache=True)
+def fact_decref(fact):
+    return _decref_ptr(cast(fact,i8))
+
 
 ###### Fact Casting #######
 @generated_jit
@@ -1346,14 +1353,15 @@ def resolve_deref_data_ptr(fact, deref_infos):
         return 0
 
 
-@generated_jit(cache=True)
-def resolve_deref(self, deref_infos, out_type):
-    def impl(self, deref_infos, out_type):
-        data_ptr = resolve_deref_data_ptr(self, deref_infos)
-        if(data_ptr == 0):
-            raise AttributeError("Failed to dereference Fact.")
-        return _load_ptr(out_type, data_ptr)
-    return impl
+# @generated_jit(cache=True)
+
+# def resolve_deref(self, deref_infos, out_type):
+#     def impl(self, deref_infos, out_type):
+#         data_ptr = resolve_deref_data_ptr(self, deref_infos)
+#         if(data_ptr == 0):
+#             raise AttributeError("Failed to dereference Fact.")
+#         return _load_ptr(out_type, data_ptr)
+#     return impl
 
 
 

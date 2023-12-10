@@ -93,21 +93,38 @@ def int_to_str(x):
     # if(_x < 1e-2): _x = (_x * 1e2) % 10; l2 += 2; print(_x,"??2")
     # if(_x < 1e-1): _x = (_x * 1e1) % 10; l2 += 1; print(_x,"??1")
     
+#0.16666666666666666
+#0.1666666666666666
 
 @njit(cache=True)
 def get_n_digits(x):
-    l1,l2 = 0,-1
-    _x = x
+    l1,l2 = 1,-1
+    _x = x // 10
     while _x > 0:
         _x = _x // 10
         l1 += 1
 
-    _x = x % 10     
-    while _x > 1e-10:
+    last_not_9 = 0
+    _x = x % 10
+    overflow = 0
+    while _x > 1e-7:
+        l2 += 1        
         _x = (_x * 10) % 10
-        l2 += 1
-        if(l2 >= 16): break
-    return l1, l2
+        
+        # print(l2, _x, last_not_9)
+        if(l2 >= 14): 
+            overflow = 1
+            l2 = last_not_9
+            # print("break", l2, last_not_9)
+            break
+        elif(_x < 9.0):
+            last_not_9 = l2+1
+
+        
+        
+        
+    # print(">>", l1, l2, overflow)
+    return l1, l2, overflow
 
 
 @njit(cache=True)
@@ -137,13 +154,13 @@ def float_to_str(x):
 
     if(is_exp):
         offset_x = np.around(x * (10.0**-(e)),15)
-        l1, l2 = get_n_digits(offset_x)
+        l1, l2, rnd = get_n_digits(offset_x)
     elif(is_neg_exp):
         offset_x = np.around(x * (10**-(e)),15)
-        l1, l2 = get_n_digits(offset_x)
+        l1, l2, rnd = get_n_digits(offset_x)
     else:
         offset_x = x
-        l1,l2 = get_n_digits(x)
+        l1,l2, rnd = get_n_digits(x)
         l2 = max(1,l2) # Will have at least .0 
     
     use_dec = l2 > 0
@@ -167,7 +184,11 @@ def float_to_str(x):
     _x = offset_x % 10
     for i in range(l2):
         _x = (_x * 10) % 10
-        digit = int(_x)  
+        digit = int(_x)
+
+        # Round up if there are remaining digits
+        if(rnd and i == l2-1):
+            digit += 1
         
         _set_code_point(s,(isneg+l1)+i+use_dec,digit + DIGITS_START)
 
@@ -366,10 +387,38 @@ def byte_string_to_base64(byte_arr, n_char):
         _set_code_point(s, i, base64_alpha_num_ord[byte])
     return s
 
+if __name__ == "__main__":
+
+    # Check that long decimals work  
+    for i in range(100):
+        i = float(i)
+        for j in range(1,12):            
+            x,y = float_to_str(i/j), str(i/j)
+            # Only bother being the same 10 digits out
+            assert x[:12] == y[:12], f"rational not same {i}/{j}: {x} != {y}"
+
+    # Check that long decimals which have been rounded work  
+    for i in range(100):
+        i = float(i)
+        for j in range(1,12):            
+            x,y = float_to_str(round(i/j, 6)), str(round(i/j, 6))
+            # Only bother being the same 10 digits out
+            assert x[:12] == y[:12], f"rational not same {i}/{j}: {x} != {y}"            
+
+    # Check that big scientific notation numbers work
+    for i in range(100):
+        i = float(i)*1e17
+        for j in range(1,12):            
+            x,y = float_to_str(i/j), str(i/j)
+            assert x[-3:] == y[-3:], f"exp not same {i}/{j}: {x} != {y}"            
+            assert x[:12] == y[:12], f"dec not same {i}/{j}: {x} != {y}"            
 
 # @njit
 # def failed_int():
 #   int("1.2")
+
+#0.090909090909090
+#0.0909090909090909
 
 # print(repr(failed_str()))
 # print(repr(failed_float()))

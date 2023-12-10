@@ -685,13 +685,13 @@ if __name__ == "__main__":
     #     for i in range(100):
     #         Add3(i,a,b)
 
-    
+    test_numerical()
 
     # test_commutes()
     # test_no_mutate_on_compose()
     # test_numergitical()
     # test_string()
-    test_obj()
+    # test_obj()
     # test_mixed_types()
     # test_njit_compose()
     # test_compose_deref_bases()

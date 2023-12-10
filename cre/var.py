@@ -10,8 +10,12 @@ from numba.extending import SentryLiteralArgs, lower_cast, overload_method, intr
 from numba.core.typing.templates import AttributeTemplate
 from cre.context import cre_context, get_cre_context_data
 from cre.structref import define_structref, define_boxing, define_structref_template, CastFriendlyStructref
-from cre.fact import define_fact, BaseFact, cast_fact, DeferredFactRefType, Fact, _standardize_type
-from cre.utils import cast, PrintElapse, ptr_t, decode_idrec, lower_getattr,  lower_setattr, lower_getattr, _decref_ptr, _incref_ptr, _incref_structref, _ptr_from_struct_incref
+from cre.fact import (define_fact, BaseFact, cast_fact,
+            DeferredFactRefType, Fact, _standardize_type, resolve_deref_data_ptr)
+from cre.utils import (cast, PrintElapse, ptr_t,
+    decode_idrec, lower_getattr,  lower_setattr, lower_getattr,
+    _decref_ptr, _incref_ptr, _incref_structref, _ptr_from_struct_incref,
+    _load_ptr, _ptr_to_data_ptr)
 from cre.utils import assign_to_alias_in_parent_frame, encode_idrec, _obj_cast_codegen
 from cre.vector import VectorType
 from cre.obj import cre_obj_field_dict,CREObjType, CREObjTypeClass, CREObjProxy, set_chr_mbrs
@@ -482,12 +486,24 @@ class Var(StructRefProxy):
     def with_alias(self, alias):
         return var_with_alias(self, alias)
 
+    def __call__(self, fact):
+        deref_infos = var_get_deref_infos(self)
+        if(len(deref_infos) > 0):
+            data_ptr = resolve_deref_data_ptr(fact, deref_infos)
+            t_id = var_get_head_t_id(self)
+            load_ptr = get_load_ptr_impl(cre_context().get_type(t_id=t_id))
+            return load_ptr(data_ptr)
+        else:
+            return fact
+        
+
+
 
 # Manually define the boxing to avoid constructor overloading
 define_boxing(VarTypeClass, Var)
 
 #### Get Attribute Overloading ####
-
+from numba.core.errors import NumbaAttributeError
 @infer_getattr
 class StructAttribute(AttributeTemplate):
     key = VarTypeClass
@@ -508,7 +524,7 @@ class StructAttribute(AttributeTemplate):
         head_type = typ.head_type
         #TODO Should check that alld subtype references are valid
         if(not hasattr(head_type,'field_dict')):
-            raise AttributeError(f"Cannot dereference attribute '{attr}' of {typ}.")
+            raise NumbaAttributeError(f"Cannot dereference attribute '{attr}' of {typ}.")
 
         # base_type = typ.field_dict['base_type']
         if(attr in head_type.field_dict):
@@ -523,7 +539,7 @@ class StructAttribute(AttributeTemplate):
             # attrty = VarTypeClass([(k,v) for k,v, in field_dict.items()])
             return attrty
         else:
-            raise AttributeError(f"{typ} has no attribute '{attr}'")
+            raise NumbaAttributeError(f"{typ} has no attribute '{attr}'")
 
 @lower_getattr_generic(VarTypeClass)
 def var_getattr_impl(context, builder, typ, val, attr):
@@ -874,7 +890,7 @@ def var_copy(self):
         # If we are copying a Var with derefs then we need to borrow a
         #  reference to the original base.
         base_ptr_ref = lower_getattr(self, "base_ptr_ref")
-        if(not base_ptr_ref == 0):
+        if(not i8(base_ptr_ref) == 0):
             _incref_ptr(base_ptr_ref)
         lower_setattr(st,'base_ptr_ref', base_ptr_ref)
         lower_setattr(st,'base_ptr', lower_getattr(self,"base_ptr"))
@@ -1063,6 +1079,22 @@ def _var_deref(typingctx, typ, attr_type):
 def var_deref(self,attr):
     return _var_deref(self,literally(attr))
 
+# @njit(cache=True)
+# def _var_apply_deref(self, fact):
+#     data_ptr = resolve_deref_data_ptr(fact, self.deref_infos)
+#     return data_ptr, self.head_t_id
 
 
-
+from numba.core.typing.typeof import typeof
+load_ptr_overloads = {}
+def get_load_ptr_impl(nb_val_type):
+    ''' Implementation for loading a value 'val_type' from a data pointer'''
+    if(nb_val_type is Fact):
+        nb_val_type = BaseFact
+    if(nb_val_type not in load_ptr_overloads):
+        @njit(nb_val_type(i8),cache=True)
+        def load_ptr_impl(data_ptr):
+            val = _load_ptr(nb_val_type, data_ptr)
+            return val
+        load_ptr_overloads[nb_val_type] = load_ptr_impl
+    return load_ptr_overloads[nb_val_type]

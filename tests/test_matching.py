@@ -186,36 +186,44 @@ def test_check_and_score_match():
         print("match", match)
         print(conds.check_match(match, ms))
         print(conds.score_match(match, ms))
+        
         assert conds.check_match(match, ms) == True
         assert conds.score_match(match, ms) == 1.0
+        assert conds.why_not_match(match, ms) == []
 
         match =[bps[9], bps[7]]
         assert conds.check_match(match, ms) == False
         print("--------------_")
         print(conds.score_match(match, ms))
         assert conds.score_match(match, ms) == 2./3
+        print("why_not", conds.why_not_match(match, ms))
 
         conds = a & b & c & (a.name != "7") & (a.val < b.val) & (b.val < c.val)
 
         match =[bps[6], bps[7], bps[9]]
         assert conds.check_match(match, ms) == True
         assert conds.score_match(match, ms) == 1.0
+        assert conds.why_not_match(match, ms) == []
+
 
         match =[bps[7], bps[8],bps[9]]
         assert conds.check_match(match, ms) == False
         assert conds.score_match(match, ms) == 5./6
+        print("why_not", conds.why_not_match(match, ms))
 
         match =[bps[8], bps[0],bps[9]]
         print(conds.check_match(match, ms))
         print(conds.score_match(match, ms))
         assert conds.check_match(match, ms) == False
         assert conds.score_match(match, ms) == 5./6
+        print("why_not", conds.why_not_match(match, ms))
 
         match =[bps[9], bps[4],bps[0]]
         print(conds.check_match(match, ms))
         print(conds.score_match(match, ms))
         assert conds.check_match(match, ms) == False
         assert conds.score_match(match, ms) == 4./6
+        print("why_not", conds.why_not_match(match, ms))
 
 
 def test_multiple_deref():

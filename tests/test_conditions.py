@@ -507,7 +507,7 @@ def test_eq():
         assert not eq(a1,b2)
         assert not eq(a1,b3)
 
-from cre.conditions import conds_to_lit_sets, make_base_ptrs_to_inds, score_remaps
+# from cre.conditions import conds_to_lit_sets, make_base_ptrs_to_inds#, score_remaps
 def test_anti_unify():
     x, y, z = Var(f8,'x'), Var(f8,'y'), Var(f8,'z')
     a, b, c, d = Var(f8,'a'), Var(f8,'b'), Var(f8,'c'), Var(f8,'d')
@@ -519,8 +519,12 @@ def test_anti_unify():
     c2 = (a < b) & (b < c) & (b < c) & (b < c) & (c != a) & (b != 0) & (d != 0)
     c12_ref = ((x < y) & (y < z) & (y < z) & (z != x) & (y != 0))
 
+    # c1.structure_map(c2) 
+    # c2.structure_map(c1) 
     c12 = c1.antiunify(c2) 
-    print(str(c12))
+    with PrintElapse("antiunify"):
+        c12 = c1.antiunify(c2) 
+    # print(str(c12))
     assert str(c12) == str(c12_ref)
     # raise ValueError()
 
@@ -543,11 +547,11 @@ def test_anti_unify():
 
     c12, score = c1.antiunify(c2,return_score=True) #conds_antiunify(c1,c2)
 
-    print(str(c12))
     print(str(c12_ref))
+    print(str(c12))
     print(score)
     assert str(c12) == str(c12_ref)
-    assert score == 8./9.
+    assert score == 11./12.
 
     # -------------
     # : Test fix_same_var and fix_same_alias
@@ -555,13 +559,13 @@ def test_anti_unify():
     # Baseline case
     c1 = (x < y) & (y < z) & (y < z) & (z != x) & (y != 0) 
     c2 = (x < y) & (z < y) & (z < y) & (x != z) & (z != 0) 
-    c12_ref = y & z & (y != 0) & (y < z) & (y < z)
+    c12_ref = x & y & z & (y != 0) & (y < z) & (y < z)
     c12, score = c1.antiunify(c2, return_score=True, fix_same_var=False)
-    print(str(c12))
     print(str(c12_ref))
-    print_str_diff(str(c12),str(c12_ref))
+    print(str(c12))
+    # print_str_diff(str(c12),str(c12_ref))
     assert str(c12) == str(c12_ref)
-    assert score == 3./5.
+    assert score == 6./8.
 
     # With fix_same_var=True
     c1 = (x < y) & (y < z) & (y < z) & (z != x) & (y != 0) 
@@ -572,7 +576,7 @@ def test_anti_unify():
     print(str(c12_ref))
     print_str_diff(str(c12),str(c12_ref))
     assert str(c12) == str(c12_ref)
-    assert score == 1./5.
+    assert score == 3./8.
 
     # With fix_same_alias=True
     X, Y, Z = Var(f8,'x'), Var(f8,'y'), Var(f8,'z')
@@ -584,7 +588,7 @@ def test_anti_unify():
     print(str(c12_ref))
     print("SCORE", score)
     assert str(c12) == str(c12_ref)
-    assert score == 1./5.
+    assert score == 3./8.
 
     # -------------
     # : Edge cases
@@ -599,6 +603,8 @@ def test_anti_unify():
     print(score)
     # assert str(c12) == str(c12_ref)
     # assert score == 1.
+
+    # TODO: Need case more case where a variable is dropped 
 
 def _check_removed(ca, cb, pattern):
     has_removed = False

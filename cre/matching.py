@@ -24,6 +24,7 @@ from cre.func import (CREFuncType, CFSTATUS_TRUTHY, CFSTATUS_FALSEY, CFSTATUS_NU
 from cre.conditions import LiteralType, build_distributed_dnf, ConditionsType
 from cre.vector import VectorType, new_vector
 from cre.fact import BaseFact, resolve_deref_data_ptr
+from cre.why_not import new_why_not, why_not_type, WN_VAR_TYPE, WN_BAD_DEREF, WN_INFER_UNPROVIDED, WN_FAIL_MATCH
 import cloudpickle
 
 from numba.core.imputils import (lower_cast)
@@ -1930,33 +1931,33 @@ def _infer_unprovided(known_ptr, op, arg_ind):
     # Fail Case
     return 0, True
 
-WN_VAR_TYPE = u8(1)
-WN_BAD_DEREF = u8(2)
-WN_INFER_UNPROVIDED = u8(3)
-WN_FAIL_MATCH = u8(4)
+# WN_VAR_TYPE = u8(1)
+# WN_BAD_DEREF = u8(2)
+# WN_INFER_UNPROVIDED = u8(3)
+# WN_FAIL_MATCH = u8(4)
 
-np_why_not_type = np.dtype([
-    # Enum for ATTR or LIST
-    ('ptr', np.int64),
-    ('var_ind0', np.int64),
-    ('var_ind1', np.int64),
-    ('d_ind', np.int64),
-    ('c_ind', np.int64),
-    ('kind', np.uint64),
-])
+# np_why_not_type = np.dtype([
+#     # Enum for ATTR or LIST
+#     ('ptr', np.int64),
+#     ('var_ind0', np.int64),
+#     ('var_ind1', np.int64),
+#     ('d_ind', np.int64),
+#     ('c_ind', np.int64),
+#     ('kind', np.uint64),
+# ])
 
-why_not_type = numba.from_dtype(np_why_not_type)
+# why_not_type = numba.from_dtype(np_why_not_type)
 
-@njit
-def new_why_not(ptr, var_ind0, var_ind1=-1, d_ind=-1, c_ind=-1, kind=0):
-    arr = np.empty(1,dtype=why_not_type)
-    arr[0].ptr = i8(ptr)
-    arr[0].var_ind0 = i8(var_ind0)
-    arr[0].var_ind1 = i8(var_ind1)
-    arr[0].d_ind = i8(d_ind)
-    arr[0].c_ind = i8(c_ind)
-    arr[0].kind = u8(kind)
-    return arr[0]
+# @njit
+# def new_why_not(ptr, var_ind0, var_ind1=-1, d_ind=-1, c_ind=-1, kind=0):
+#     arr = np.empty(1,dtype=why_not_type)
+#     arr[0].ptr = i8(ptr)
+#     arr[0].var_ind0 = i8(var_ind0)
+#     arr[0].var_ind1 = i8(var_ind1)
+#     arr[0].d_ind = i8(d_ind)
+#     arr[0].c_ind = i8(c_ind)
+#     arr[0].kind = u8(kind)
+#     return arr[0]
 
 # Compile implementation of set_base_arg for BaseFact type
 set_base_fact_arg = set_base_arg_val_impl(BaseFact)

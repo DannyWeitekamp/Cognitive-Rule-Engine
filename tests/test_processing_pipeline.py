@@ -334,9 +334,9 @@ def test_condition_generalizing():
         sel_c, arg_c0, arg_c1 = itemgetter("3_carry", "2_upper","2_lower")(fact_map)
         c_c = Conditions.from_facts([sel_c, arg_c0, arg_c1], varz)
         # c_c = conditions_from_facts([sel_c, arg_c0, arg_c1], varz)
-        c_abc = c_ab.antiunify(c_c)
+        c_abc = c_ab.antiunify(c_c, drop_unconstr=True)
 
-        print(repr(c_abc))
+        print(str(c_abc))
         
         match_names = [[x.id for x in match][:3] for match in c_abc.get_matches(wm)]
         print(match_names)
@@ -379,7 +379,7 @@ def test_condition_generalizing():
         c = Conditions.from_facts([sel_c, arg_c0, arg_c1], varz,
         # c = conditions_from_facts([sel_c, arg_c0, arg_c1], varz,
              neighbor_req_n_adj=2, alpha_flags=("visible", "few_valued"))
-        print(c)
+        print(str(c))
         match_names = [[x.id for x in match][:3] for match in c_abc.get_matches(wm)]
         print(match_names)
         assert match_names == [['1_carry', '0_upper', '0_lower']] #??
@@ -401,7 +401,8 @@ if __name__ == "__main__":
 
 
     # test_pipeline()
-    # test_condition_generalizing()
+    test_condition_generalizing()
+    raise ValueError()
     for i in range(2):
         args,_ = setup_pipeline_first_run()
         with PrintElapse("first_run"):

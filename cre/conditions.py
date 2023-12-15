@@ -316,12 +316,12 @@ class Conditions(structref.StructRefProxy):
         return why_nots
 
     def antiunify(self, other, return_score=False, normalize='left',
-         fix_same_var=False, fix_same_alias=False):
+         fix_same_var=False, fix_same_alias=False, drop_unconstr=False):
         norm_enum = resolve_normalize_enum(normalize)
         if(not isinstance(other, Conditions)):
             other = Conditions(other)
         new_conds, score = conds_antiunify(self, other, norm_enum,
-                                    fix_same_var, fix_same_alias) 
+                               fix_same_var, fix_same_alias, drop_unconstr) 
         if(return_score):
             return new_conds, score
         else:
@@ -2184,7 +2184,7 @@ def _score_and_mask(c_a, c_b, lit_groups, alignment, remap):
     return score, keep_mask_a, keep_mask_b
 
 @njit(cache=True)
-def get_unambiguous_inds(cum_score_matrix, a_fixed_inds):
+def get_unambiguous_inds(cum_score_matrix, a_fixed_inds, drop_unconstr):
     unamb_inds = a_fixed_inds.copy()
     unconstr_mask = np.zeros(len(a_fixed_inds),dtype=np.uint8)
     new_unamb = 0
@@ -2196,29 +2196,36 @@ def get_unambiguous_inds(cum_score_matrix, a_fixed_inds):
 
         # Find any assignments with non-zero score
         cnt = 0
-        non_zero_b_ind = -1
+        nz_b_ind = -1
         for b_ind in range(M):
             if(cum_score_matrix[a_ind,b_ind] != 0):
                 cnt += 1
-                non_zero_b_ind = b_ind
+                nz_b_ind = b_ind
 
         # If there is exactly one assignment with a non-zero
         #  score then apply that assignment.
         if(cnt == 1):
-            new_unamb += 1
-            unamb_inds[a_ind] = non_zero_b_ind
+            scores_a_to_b = cum_score_matrix[:,nz_b_ind]
+            # if(np.max(scores_a_to_b) == cum_score_matrix[a_ind,nz_b_ind]):
+            if(np.sum(scores_a_to_b != 0) == 1):
+                new_unamb += 1
+                unamb_inds[a_ind] = nz_b_ind
         # Or if they all have a score of zero then mark
-        #  them as unconstrainted.
+        #  them as unconstrainted or drop if drop_unconstr
         elif(cnt == 0):
-            unconstr_mask[a_ind] = 1
+            if(drop_unconstr):
+                unamb_inds[a_ind] = -1
+            else:
+                unconstr_mask[a_ind] = 1
+
             
     # For variables which are made unconstrained by the
     #  remap so far, greedily assign each i -> j which 
     #  is maximally diagonal, otherwise drop (i.e. i -> -1).
     unassigned_j_mask = np.ones(M,dtype=np.uint8)
     unassigned_j_mask[unamb_inds[unamb_inds >= 0]] = 0
-    # print(": ", unamb_inds)
     # print(cum_score_matrix)
+    # print(": ", unamb_inds)
     # print("unconstrained i:", np.nonzero(unconstr_mask)[0])
     # print("unassigned j:", np.nonzero(unassigned_j_mask)[0])
     for i in np.nonzero(unconstr_mask)[0]:
@@ -2260,16 +2267,18 @@ def get_best_ind_iter(cum_score_matrix, a_fixed_inds):
 
         inds = inds[:np.argmin(row[inds])]
         scores = row[inds]
-        # NOTE: Maybe harmonic mean is better?
-        # amb = (len(scores)-1)/np.mean(1/(1+scores[0] - scores[1:]))
-        unamb = (scores[0],np.mean(scores[0] - scores[1:]))
+        max_diff = scores[0] - scores[1:]
+        
+        if(len(max_diff) > 0):
+            # NOTE: Maybe harmonic mean is better?
+            # amb = (len(scores)-1)/np.mean(1/(1+max_diff))
+            unamb = (scores[0], np.mean(scores[0] - scores[1:]))
+        else:
+            unamb = (scores[0], scores[0])
         if(unamb > best_unamb):
             best_iter = (i, inds)
             best_unamb = unamb
 
-        # print(row)
-    #     print(i, inds, scores, unamb)
-    # print("BEST", best_unamb, best_iter)
     return best_iter
 
 
@@ -2310,7 +2319,7 @@ def make_lit_groups(c_a, c_b):
 
 
                 groups_ij.append((c_inds_a, var_inds_a, c_inds_b, var_inds_b))
-            print("IJ", i, j, len(groups_ij))
+            # print("IJ", i, j, len(groups_ij))
     return lit_groups
 
 
@@ -2324,7 +2333,7 @@ stack_item_type = Tuple((i8,i8,i8[::1],i2[::1]))
 
 
 @njit(cache=True)
-def _conds_structure_map(c_a, c_b, fix_same_var, fix_same_alias):
+def _conds_structure_map(c_a, c_b, fix_same_var, fix_same_alias, drop_unconstr):
     Da, Db = len(c_a.dnf), len(c_b.dnf)
     N, M = len(c_a.vars), len(c_b.vars)
 
@@ -2363,7 +2372,8 @@ def _conds_structure_map(c_a, c_b, fix_same_var, fix_same_alias):
             # print(alignment, fixed_inds)
 
             # Look for unambiguous remaps in the new matrix
-            fixed_inds, unamb_cnt = get_unambiguous_inds(cum_score_matrix, fixed_inds)
+            fixed_inds, unamb_cnt = get_unambiguous_inds(
+                cum_score_matrix, fixed_inds, drop_unconstr)
             
             if(unamb_cnt == 0):
                 break
@@ -2383,10 +2393,9 @@ def _conds_structure_map(c_a, c_b, fix_same_var, fix_same_alias):
         if(score_bound < best_score):
             backtrack = True
         
-
+        
         # Case: All vars fixed so store remap. Then backtrack. 
         elif(np.all(fixed_inds != -2)):
-
             # Future NOTE: If remap is recalculated w/ 
             #  align_greedy then unmatched symbols are dropped, 
             #  but they are kept if just use fixed_inds.
@@ -2508,13 +2517,14 @@ def _structure_map_make_why_nots(c_a, c_b, alignment, remap, keep_mask_a, keep_m
 # -------------------------------
 # : Antiunify
 @njit(cache=True)
-def _conds_antiunify(c_a, c_b, fix_same_var, fix_same_alias):
+def _conds_antiunify(c_a, c_b, fix_same_var, fix_same_alias, drop_unconstr):
     score, alignment, remap, keep_mask_a, keep_mask_b = \
-        _conds_structure_map(c_a, c_b, fix_same_var, fix_same_alias)
+        _conds_structure_map(c_a, c_b, fix_same_var, fix_same_alias,
+            drop_unconstr)
 
-    print("REMAP", remap)
-    print("MA", keep_mask_a)
-    print("MB", keep_mask_b)
+    # print("REMAP", remap)
+    # print("MA", keep_mask_a)
+    # print("MB", keep_mask_b)
     # why_nots_a, why_nots_b = _structure_map_make_why_nots(
     #     c_a, c_b, alignment, remap, keep_mask_a, keep_mask_b)
 
@@ -2537,7 +2547,6 @@ def _conds_antiunify(c_a, c_b, fix_same_var, fix_same_alias):
         dnf.append(new_conj)
 
     _vars = List([v for i, v in enumerate(c_a.vars) if remap[i] != -1])
-    print(_vars)
     return _conditions_ctor_var_list(_vars, dnf), score
     # new_lit = literal_ctor(lit.op)
     # new_lit.negated = lit.negated
@@ -2638,11 +2647,12 @@ def resolve_normalize_enum(option):
 
 @njit(cache=True)
 def conds_antiunify(c_a, c_b, normalize=1,
-         fix_same_var=False, fix_same_alias=False):
-    c, kept = _conds_antiunify(c_a, c_b, fix_same_var, fix_same_alias)
+         fix_same_var=False, fix_same_alias=False,
+         drop_unconstr=False):
+    c, kept = _conds_antiunify(c_a, c_b,
+             fix_same_var, fix_same_alias, drop_unconstr)
     if(normalize == AU_NORMALIZE_LEFT):
         n_total_a = len(c_a.vars) + count_literals(c_a)
-        print("N TOTAL", n_total_a)
         return c, kept / n_total_a
     elif(normalize == AU_NORMALIZE_RIGHT):
         n_total_b = len(c_b.vars) + count_literals(c_b)

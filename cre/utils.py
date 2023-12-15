@@ -93,12 +93,14 @@ class CastFriendlyMixin():
         from numba.core.errors import NumbaExperimentalFeatureWarning
         # print(other.__dict__)
         if issubclass(type(self), type(other)):
-            if len(other._fields) > len(self._fields):
-                return
-            for other_fd, self_fd in zip(other._fields,
-                                         self._fields):
-                if not other_fd == self_fd and other_fd[1] != types.Any and self_fd[1] != types.Any:
+
+            if hasattr(other,'_fields') and hasattr(self,'_fields'):
+                if(len(other._fields) > len(self._fields)):
                     return
+                for other_fd, self_fd in zip(other._fields,
+                                             self._fields):
+                    if not other_fd == self_fd and other_fd[1] != types.Any and self_fd[1] != types.Any:
+                        return
             # warnings.warn(f"{self} has been considered a subtype of {other} "
             #               f" This is an experimental feature.",
             #               category=NumbaExperimentalFeatureWarning)

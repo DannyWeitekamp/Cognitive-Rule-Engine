@@ -524,14 +524,15 @@ def test_anti_unify():
     c12 = c1.antiunify(c2) 
     with PrintElapse("antiunify"):
         c12 = c1.antiunify(c2) 
-    # print(str(c12))
+    print(str(c12_ref))
+    print(str(c12))
     assert str(c12) == str(c12_ref)
     # raise ValueError()
 
     # -------------
     # : Disjunction of Conjunctions Case
     #   (test alignment of conjuncts)
-
+    print("---")
     c1 = ((x < y) & (z != x) & (y != 0) | # 0
           (x < y) & (z == x) & (y != 7) | # 1
           (x > y) & (z != x) & (y != 2)   # 2
@@ -552,7 +553,9 @@ def test_anti_unify():
     print(score)
     assert str(c12) == str(c12_ref)
     assert score == 11./12.
-
+    print("---")
+    print(AND(x, y, z))
+    print("---")
     # -------------
     # : Test fix_same_var and fix_same_alias
 
@@ -570,30 +573,30 @@ def test_anti_unify():
     # With fix_same_var=True
     c1 = (x < y) & (y < z) & (y < z) & (z != x) & (y != 0) 
     c2 = (x < y) & (z < y) & (z < y) & (x != z) & (z != 0) 
-    c12_ref = x & y & (x < y)
+    c12_ref = x & y & z & (x < y)
     c12, score = c1.antiunify(c2, return_score=True, fix_same_var=True)
-    print(str(c12))
     print(str(c12_ref))
-    print_str_diff(str(c12),str(c12_ref))
+    print(str(c12))
+    print("SCORE", score)
     assert str(c12) == str(c12_ref)
-    assert score == 3./8.
+    assert score == 4./8.
 
     # With fix_same_alias=True
     X, Y, Z = Var(f8,'x'), Var(f8,'y'), Var(f8,'z')
     c1 = (x < y) & (y < z) & (y < z) & (z != x) & (y != 0) 
     c2 = (X < Y) & (Z < Y) & (Z < Y) & (X != Z) & (Z != 0) 
-    c12_ref = x & y & (x < y)
+    c12_ref = x & y & z & (x < y)
     c12, score = c1.antiunify(c2, return_score=True, fix_same_alias=True)
-    print(str(c12))
     print(str(c12_ref))
+    print(str(c12))
     print("SCORE", score)
     assert str(c12) == str(c12_ref)
-    assert score == 3./8.
+    assert score == 4./8.
 
     # -------------
     # : Edge cases
 
-    # TODO: Edge cases, unconditioned variables / variables with no supporting literals
+    # Edge case: variables with no supporting literals
     c1 = x & y & z
     c2 = X & Y & Z
     c12_ref = x & y & z
@@ -601,8 +604,8 @@ def test_anti_unify():
     print("A", c12_ref)
     print("B", c12)
     print(score)
-    # assert str(c12) == str(c12_ref)
-    # assert score == 1.
+    assert str(c12) == str(c12_ref)
+    assert score == 1.
 
     # TODO: Need case more case where a variable is dropped 
 

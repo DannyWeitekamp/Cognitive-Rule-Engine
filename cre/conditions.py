@@ -1455,13 +1455,21 @@ def remap_is_valid(remap, poss_remaps):
         poss_remaps[i, j]
 
 @njit(cache=True)
-def align_greedy(score_matrix, prt=False):
+def align_greedy(score_matrix):#, prt=False):
     N, M = score_matrix.shape
     alignment = -np.ones(N, dtype=np.int16)
     covered = -np.ones(M, dtype=np.int16)
-    scores = np.zeros(N, dtype=np.int64)
+    # scores = np.zeros(N, dtype=np.int64)
+    # diag_penalty = 1.0/(N+M)
+    # biased_scores = np.empty((N,M),dtype=np.float32)
+    # for i in range(N):
+    #     for j in range(M):
+    #         biased_scores[i,j] = -float(score_matrix[i,j] 
+    #                                 - abs(i-j)*diag_penalty
+    #                               )
     
     c = 0
+    # for flat_ind in np.argsort(biased_scores.flatten()):
     for flat_ind in np.argsort(score_matrix.flatten())[::-1]:
         i, j = flat_ind // M, flat_ind % M
         score = score_matrix[i,j]
@@ -1472,15 +1480,23 @@ def align_greedy(score_matrix, prt=False):
                     
         if(alignment[i] == -1 and j not in covered):
             alignment[i] = i2(j)
-            scores[i] = score
+            # scores[i] = score
             covered[c] = i2(j)
             c += 1
 
-    if(prt):
-        print(score_matrix)
-        print(np.sum(scores), alignment)
-    return scores, alignment
+    # if(prt):
+    #     print(score_matrix)
+    #     print(np.sum(scores), alignment)
+    return alignment
 
+@njit(cache=True)
+def score_remap(remap, score_matrix, beta_matrix):
+    score = u2(0)
+    for i, j in enumerate(remap):
+        s = score_matrix[i,j]
+        b = beta_matrix[i,j]
+        score += s - (b >> 1) + u2(s != 0)
+    return score
 
 # @njit(cache=True, locals={"remaps":i2[:,::1]})
 # def get_possible_remap_inds(a_ind_set, b_ind_set, n_a, n_b, a_fixed_inds):
@@ -1569,24 +1585,7 @@ def align_greedy(score_matrix, prt=False):
 #     return remaps
 
 
-@njit(cache=True)
-def get_matched_masks(lit_set_a, lit_set_b, remap):
-# def get_matched_mask(a_ind_set, b_ind_set, remap):
-    a_inds_remapped = np.empty(len(lit_set_a[0][0].var_inds),dtype=np.int16)
-    matched_As = np.zeros(len(lit_set_a),dtype=np.uint8)
-    matched_Bs = np.zeros(len(lit_set_b),dtype=np.uint8)
-    for i, (lit_a, _) in enumerate(lit_set_a):
-        # Apply this mapping for A -> B 
-        for ix, var_ind in enumerate(lit_a.var_inds):
-           a_inds_remapped[ix] = remap[var_ind]
 
-        # Greedily assign literals in remapped A to literals in B
-        for j, (lit_b, _) in enumerate(lit_set_b):
-            if(not matched_Bs[j] and np.array_equal(a_inds_remapped, lit_b.var_inds)):
-                matched_As[i] = 1
-                matched_Bs[j] = 1
-                break
-    return matched_As, matched_Bs
 
 # @njit(cache=True)
 # def try_merge_remaps(ref_remap, remap):
@@ -1948,8 +1947,10 @@ def get_fixed_inds(c_a, c_b, map_same_var, map_same_alias):
 # : Structure Mapping
 
 @njit
-def _calc_remap_score_matrices(ls_as, ls_bs, N, M, a_fixed_inds):
-    remap_score_matrices = np.zeros((len(ls_as), len(ls_bs), N, M), dtype=np.int32)
+def _calc_remap_score_matrices(lit_groups, shape, a_fixed_inds):
+    Da, Db, N, M = shape
+    remap_score_matrices = np.zeros((Da, Db, N, M), dtype=np.uint16)
+    beta_score_matrices = np.zeros((Da, Db, N, M), dtype=np.uint16)
 
     b_fixed_inds = np.full(M, -2, dtype=np.int16)
     for i,j in enumerate(a_fixed_inds):
@@ -1958,26 +1959,28 @@ def _calc_remap_score_matrices(ls_as, ls_bs, N, M, a_fixed_inds):
 
     # print(b_fixed_inds)
     # For each conjunct pair
-    for i, ls_a in enumerate(ls_as):
-        for j, ls_b in enumerate(ls_bs):
+    for i, groups_i in enumerate(lit_groups):
+        for j, groups_ij in enumerate(groups_i):
             score_matrix = remap_score_matrices[i, j]
+            beta_matrix = beta_score_matrices[i, j]
 
+            for _, var_inds_a, _, var_inds_b in groups_ij: 
             # Intersect the literals which are common between the conjuncts
-            op_key_intersection = intersect_keys(ls_a, ls_b)
-            for k in op_key_intersection:
-                lits_a, lits_b = ls_a[k], ls_b[k]
+            # op_key_intersection = intersect_keys(ls_a, ls_b)
+            # for k in op_key_intersection:
+                # lits_a, lits_b = ls_a[k], ls_b[k]
 
                 # For each literal in A
-                for lit_a, _ in lits_a:
-                    ind_a0 = lit_a.var_inds[0]
+                for v_inds_a in var_inds_a:
+                    ind_a0 = v_inds_a[0]
                     fix_b0 = a_fixed_inds[ind_a0]
 
                     # Alpha Case
-                    if(len(lit_a.var_inds) == 1):
+                    if(len(v_inds_a) == 1):
                         # if(a_fixed_inds[ind_a0] != -1):
 
-                        for lit_b, _ in lits_b:
-                            ind_b0 = lit_b.var_inds[0]
+                        for v_inds_b in var_inds_b:
+                            ind_b0 = v_inds_b[0]
                             if((fix_b0 == -2 or fix_b0 == ind_b0)):
                                 # print("alpha", lit_a, lit_b)
                                 score_matrix[ind_a0, ind_b0] += 1
@@ -1985,12 +1988,12 @@ def _calc_remap_score_matrices(ls_as, ls_bs, N, M, a_fixed_inds):
 
                     # Beta Case
                     else:
-                        ind_a1 = lit_a.var_inds[1]
+                        ind_a1 = v_inds_a[1]
                         # print("INDS", ind_a0, ind_a1, a_fixed_inds[ind_a0], a_fixed_inds[ind_a1])
                         fix_b1 = a_fixed_inds[ind_a1]
-                        for lit_b, _ in lits_b:
-                            ind_b0 = lit_b.var_inds[0]
-                            ind_b1 = lit_b.var_inds[1]
+                        for v_inds_b in var_inds_b:
+                            ind_b0 = v_inds_b[0]
+                            ind_b1 = v_inds_b[1]
                             fix_a0 = b_fixed_inds[ind_b0]
                             fix_a1 = b_fixed_inds[ind_b1]
                             if((fix_b0 == -2 or fix_b0 == ind_b0) and
@@ -2001,9 +2004,12 @@ def _calc_remap_score_matrices(ls_as, ls_bs, N, M, a_fixed_inds):
                                 # print("did apply", ind_a0, ind_b0, ";", ind_a1, ind_b1)
                                 score_matrix[ind_a0, ind_b0] += 1
                                 score_matrix[ind_a1, ind_b1] += 1
+                                beta_matrix[ind_a0, ind_b0] += 1
+                                beta_matrix[ind_a1, ind_b1] += 1
+
                         # print(f"({ind_a0} -> {ind_b0}) => ({ind_a1} -> {ind_b1})")
                         # print(f"({ind_a1} -> {ind_b1}) => ({ind_a0} -> {ind_b0})")
-    return remap_score_matrices
+    return remap_score_matrices, beta_score_matrices
 
 
 
@@ -2068,88 +2074,119 @@ def _calc_remap_score_matrices(ls_as, ls_bs, N, M, a_fixed_inds):
 
 
 @njit(cache=True)
-def _get_best_alignment(remap_score_matrices):
+def _get_best_alignment(remap_score_matrices, beta_score_matrices):
     l_a, l_b, N, M = remap_score_matrices.shape
 
     if(N == 1 and M == 1):
-        return np.zeros(1, dtype=np.int16), remap_score_matrices[0,0]
+        return (np.zeros(1, dtype=np.int16),
+                remap_score_matrices[0,0],
+                beta_score_matrices[0,0])
 
     # Fill in a matrix which captures the best remap 
     #  for each conjunct pair. This is an upper bound
     #  on the score contribution of the best remap of the
     #  the best alignment.
-    upb_alignment_matrix = np.zeros((l_a, l_b), dtype=np.int32)
+    upb_alignment_matrix = np.zeros((l_a, l_b), dtype=np.uint16)
     remaps = np.empty((l_a, l_b, N), dtype=np.int16)
     for i in range(l_a):
         for j in range(l_b):
-            scores, remap = align_greedy(remap_score_matrices[i,j])
-            upb_alignment_matrix[i, j] = np.sum(scores, dtype=np.int32)
+            remap = align_greedy(remap_score_matrices[i,j])
+            upb_alignment_matrix[i, j] = score_remap(remap,
+                remap_score_matrices[i,j], beta_score_matrices[i,j])
 
     # Assume that the best alignment is just the one that
     #  maximizes these upper bounds
-    _, alignment = align_greedy(upb_alignment_matrix)
+    alignment = align_greedy(upb_alignment_matrix)
 
-    cum_score_matrix = np.zeros((N, M), dtype=np.int32)
+    cum_score_matrix = np.zeros((N, M), dtype=np.uint16)
+    cum_beta_matrix = np.zeros((N, M), dtype=np.uint16)
     for i,j in enumerate(alignment):
         cum_score_matrix += remap_score_matrices[i,j]
+        cum_beta_matrix += beta_score_matrices[i,j]
 
     
-    return alignment, cum_score_matrix
+    return alignment, cum_score_matrix, cum_beta_matrix
 
+
+@njit(cache=True)
+def get_matched_masks(group, remap):
+# def get_matched_mask(a_ind_set, b_ind_set, remap):
+    _, var_inds_a, _, var_inds_b = group
+
+    a_inds_remapped = np.empty(len(var_inds_a[0]),dtype=np.int16)
+    matched_As = np.zeros(len(var_inds_a),dtype=np.uint8)
+    matched_Bs = np.zeros(len(var_inds_b),dtype=np.uint8)
+    
+    for i, v_inds_a in enumerate(var_inds_a):
+        # Apply this mapping for A -> B 
+        for ix, var_ind in enumerate(v_inds_a):
+           a_inds_remapped[ix] = remap[var_ind]
+
+        # Greedily assign literals in remapped A to literals in B
+        for j, v_inds_b in enumerate(var_inds_b):
+            if(not matched_Bs[j] and np.array_equal(a_inds_remapped, v_inds_b)):
+                matched_As[i] = 1
+                matched_Bs[j] = 1
+                break
+    return matched_As, matched_Bs
 
 # from numba import i8
 @njit(cache=True)
-def _score_and_mask_conj(conj_a, conj_b, ls_a, ls_b, remap):
+def _score_and_mask_conj(conj_a, conj_b, groups, remap):
     
     keep_mask_a = np.zeros(len(conj_a), dtype=np.uint8)
     keep_mask_b = np.zeros(len(conj_b), dtype=np.uint8)
 
-    op_key_intersection = intersect_keys(ls_a, ls_b)
-    score = 0
-    for unq_key in op_key_intersection:
-        lit_set_a = ls_a[unq_key]
-        lit_set_b = ls_b[unq_key]
-        mm_a, mm_b = get_matched_masks(lit_set_a, lit_set_b, remap)
+    # op_key_intersection = intersect_keys(ls_a, ls_b)
+    score = u2(0)
+    for group in groups: 
+        c_inds_a, _, c_inds_b, _ = group
+        # lit_set_a = ls_a[unq_key]
+        # lit_set_b = ls_b[unq_key]
+        # mm_a, mm_b = get_matched_masks(lit_set_a, lit_set_b, remap)
+        mm_a, mm_b = get_matched_masks(group, remap)
 
-        for keep_it, (lit, (_, c_ind)) in zip(mm_a, lit_set_a):
+        for keep_it, c_ind in zip(mm_a, c_inds_a):
             # print("KEEP" if keep_it else "TOSS", lit)
             keep_mask_a[c_ind] = keep_it
             score += keep_it
 
-        for keep_it, (lit, (_, c_ind)) in zip(mm_b, lit_set_b):
+        for keep_it, c_ind in zip(mm_b, c_inds_b):
             # print("KEEP" if keep_it else "TOSS", lit)
             keep_mask_b[c_ind] = keep_it
 
     return score, keep_mask_a, keep_mask_b
 
 @njit
-def _score_and_mask(c_a, c_b, ls_as, ls_bs, alignment, remap):
+def _score_and_mask(c_a, c_b, lit_groups, alignment, remap):
     max_conj_len_a = max([len(conj) for conj in c_a.dnf])
     max_conj_len_b = max([len(conj) for conj in c_b.dnf])
     keep_mask_a = np.zeros((len(c_a.dnf), max_conj_len_a), dtype=np.uint8)
     keep_mask_b = np.zeros((len(c_b.dnf), max_conj_len_b), dtype=np.uint8)
     
     # +1 for every Var which is kept 
-    score = np.sum(remap != -1)
+    score = np.sum(remap != -1, dtype=np.uint16)
 
     # +1 for every literal across all disjunctions kept 
     for i, j in enumerate(alignment):
-        ls_a, ls_b = ls_as[i], ls_bs[j]
+        groups_ij = lit_groups[i][j]
+        
+        # ls_a, ls_b = ls_as[i], ls_bs[j]
         conj_a, conj_b = c_a.dnf[i], c_b.dnf[j],
         _score, _keep_mask_a, _keep_mask_b = _score_and_mask_conj(
-            conj_a, conj_b, ls_a, ls_b, remap
+            conj_a, conj_b, groups_ij, remap
         )
+        # print("grp", i, j, _keep_mask_a, f"L={len(groups_ij)}")
         keep_mask_a[i,:len(_keep_mask_a)] = _keep_mask_a
         keep_mask_b[j,:len(_keep_mask_b)] = _keep_mask_b
         
-
         score += _score
     return score, keep_mask_a, keep_mask_b
-    print("SCORE", score)
 
 @njit(cache=True)
 def get_unambiguous_inds(cum_score_matrix, a_fixed_inds):
     unamb_inds = a_fixed_inds.copy()
+    unconstr_mask = np.zeros(len(a_fixed_inds),dtype=np.uint8)
     new_unamb = 0
     N, M = cum_score_matrix.shape
     for a_ind in range(N):
@@ -2167,13 +2204,40 @@ def get_unambiguous_inds(cum_score_matrix, a_fixed_inds):
 
         # If there is exactly one assignment with a non-zero
         #  score then apply that assignment.
-        # (OR) If they all have a score of zero then assign
-        #  as a drop (i.e. =-1)
-        if(cnt <= 1):
-            # Don't count drops toward new unambiguous count
-            if(cnt == 1):
-                new_unamb += 1
+        if(cnt == 1):
+            new_unamb += 1
             unamb_inds[a_ind] = non_zero_b_ind
+        # Or if they all have a score of zero then mark
+        #  them as unconstrainted.
+        elif(cnt == 0):
+            unconstr_mask[a_ind] = 1
+            
+    # For variables which are made unconstrained by the
+    #  remap so far, greedily assign each i -> j which 
+    #  is maximally diagonal, otherwise drop (i.e. i -> -1).
+    unassigned_j_mask = np.ones(M,dtype=np.uint8)
+    unassigned_j_mask[unamb_inds[unamb_inds >= 0]] = 0
+    # print(": ", unamb_inds)
+    # print(cum_score_matrix)
+    # print("unconstrained i:", np.nonzero(unconstr_mask)[0])
+    # print("unassigned j:", np.nonzero(unassigned_j_mask)[0])
+    for i in np.nonzero(unconstr_mask)[0]:
+        min_j  = -1
+        min_dist = 100000
+        for j, unassigned in enumerate(unassigned_j_mask):
+            if(unassigned):
+                dist = abs(i-j)
+                if(dist < min_dist):
+                    min_j = j
+                    min_dist = dist
+
+        if(min_j != -1):
+            unassigned_j_mask[min_j] = 0
+            unamb_inds[i] = min_j
+        else:
+            unamb_inds[i] = -1
+    # print(":>", unamb_inds)
+    # print()
 
     return unamb_inds, new_unamb
 
@@ -2187,7 +2251,7 @@ def get_best_ind_iter(cum_score_matrix, a_fixed_inds):
         if(a_fixed_inds[i] != -2):
             continue
 
-        row = cum_score_matrix[i]
+        row = cum_score_matrix[i].astype(np.int32)
         inds = np.argsort(-row)
 
         # Don't make iterators for rows of all zeros
@@ -2208,65 +2272,140 @@ def get_best_ind_iter(cum_score_matrix, a_fixed_inds):
     # print("BEST", best_unamb, best_iter)
     return best_iter
 
+
+lit_groups_type = Tuple((i8[::1], i8[:,::1],i8[::1], i8[:,::1]))
+lit_groups_list_type =  ListType(lit_groups_type)
+
+@njit
+def make_lit_groups(c_a, c_b):
+    ls_as = conds_to_lit_sets(c_a)
+    ls_bs = conds_to_lit_sets(c_b)
+
+    lit_groups = List()
+    for i, ls_a in enumerate(ls_as):
+        groups_i = List.empty_list(lit_groups_list_type)
+        lit_groups.append(groups_i)
+
+        for j, ls_b in enumerate(ls_bs):
+            
+            groups_ij = List.empty_list(lit_groups_type)
+            groups_i.append(groups_ij)
+            # Intersect the literals which are common between the conjuncts
+            op_key_intersection = intersect_keys(ls_a, ls_b)
+            for k in op_key_intersection:
+                lits_a, lits_b = ls_a[k], ls_b[k]
+
+                c_inds_a = np.empty(len(lits_a),dtype=np.int64)
+                var_inds_a = np.empty((len(lits_a),len(lits_a[0][0].var_inds)),dtype=np.int64)
+                c_inds_b = np.empty(len(lits_b),dtype=np.int64)
+                var_inds_b = np.empty((len(lits_b),len(lits_b[0][0].var_inds)),dtype=np.int64)
+
+                for ind, (lit_a, (_,c_ind)) in enumerate(lits_a):
+                    c_inds_a[ind] = c_ind
+                    var_inds_a[ind] = lit_a.var_inds
+
+                for ind, (lit_b, (_,c_ind)) in enumerate(lits_b):
+                    c_inds_b[ind] = c_ind
+                    var_inds_b[ind] = lit_b.var_inds
+
+
+                groups_ij.append((c_inds_a, var_inds_a, c_inds_b, var_inds_b))
+            print("IJ", i, j, len(groups_ij))
+    return lit_groups
+
+
+
+
+
+
+
 align_remap_type = Tuple((i8, i2[::1], i2[::1]))
 stack_item_type = Tuple((i8,i8,i8[::1],i2[::1]))
 
 
 @njit(cache=True)
 def _conds_structure_map(c_a, c_b, fix_same_var, fix_same_alias):
-    ls_as = conds_to_lit_sets(c_a)
-    ls_bs = conds_to_lit_sets(c_b)
-
+    Da, Db = len(c_a.dnf), len(c_b.dnf)
     N, M = len(c_a.vars), len(c_b.vars)
 
     # Fixed indicies -2 for unassigned -1 for no valid assignment
-    a_fixed_inds = get_fixed_inds(c_a, c_b, False, fix_same_alias)
-    a_fixed_inds = np.full(len(c_a.vars), -2, dtype=np.int16)
-    a_fixed_inds[0] = 0
+    a_fixed_inds = get_fixed_inds(c_a, c_b, fix_same_var, fix_same_alias)
+    lit_groups = make_lit_groups(c_a, c_b)
     
-    # _get_supported_remaps(ls_as, ls_bs, N, M, a_fixed_inds)
-
     fixed_inds = a_fixed_inds.copy()
     remaps = List.empty_list(align_remap_type)
     iter_stack = List.empty_list(stack_item_type)
     it = None
     c = 0
+    score, best_score, score_bound = u2(0), u2(0), u2(0)
+    best_result = None
+
 
     # Outer loop handles generation of iterators over ambiguous
     #  variable assignments. 
-    # while(True):
-    for _ in range(100):
-        # Inner loop handles recalculation of score matricies,
-        #  on the basis of this iteration's current fixed_inds.
+    while(True):
+        # Inner loop recalcs score matricies, from current fixed_inds.
         #  Loops multiple times if new scores imply some previously
         #  unfixed variable now has an unambiguous mapping.
-        for __ in range(100):
+        while(True):
             # Recalculate the score matrix w/ fixed_inds
-            remap_score_matrices = _calc_remap_score_matrices(
-                ls_as, ls_bs, N, M, fixed_inds
-            )
+            remap_score_matrices, beta_score_matrices = (
+                _calc_remap_score_matrices(
+                    lit_groups, (Da, Db, N, M), fixed_inds
+            ))
 
             # Find the alignment and cumulative score matrix. Required
             #  for when either condition is disjoint (i.e. has an OR()).
-            alignment, cum_score_matrix = \
-                    _get_best_alignment(remap_score_matrices)
-
+            alignment, cum_score_matrix, cum_beta_matrix = (
+                _get_best_alignment(remap_score_matrices, beta_score_matrices)
+            )
             # print(cum_score_matrix)
+            # print(alignment, fixed_inds)
 
             # Look for unambiguous remaps in the new matrix
             fixed_inds, unamb_cnt = get_unambiguous_inds(cum_score_matrix, fixed_inds)
             
             if(unamb_cnt == 0):
                 break
-            # print("new_unambiguious", fixed_inds, unamb_cnt)
-        # Case: All vars fixed so store remap. Then backtrack. 
-        if(np.all(fixed_inds != -2)):
-            scores, remap = align_greedy(cum_score_matrix, prt=True)
-            # Sum and add +1 for all non-dropped variables
-            score_bound = np.sum(scores + (scores != 0)) 
-            remaps.append((score_bound, alignment, remap))
-            # print("REMAP", score_bound, remap)
 
+        # print("new_unambiguious", fixed_inds, unamb_cnt)
+        
+        score_bound = score_remap(
+            np.argmax(cum_score_matrix, axis=1),
+            cum_score_matrix, cum_beta_matrix
+        )
+
+        # print(f"BEST={best_score}", f"BOUND={score_bound}")
+        backtrack = False
+
+        # Case: Abandon if the upper bound on the current assignment's 
+        #   score is less than the current best score. 
+        if(score_bound < best_score):
+            backtrack = True
+        
+
+        # Case: All vars fixed so store remap. Then backtrack. 
+        elif(np.all(fixed_inds != -2)):
+
+            # Future NOTE: If remap is recalculated w/ 
+            #  align_greedy then unmatched symbols are dropped, 
+            #  but they are kept if just use fixed_inds.
+            # remap = align_greedy(cum_score_matrix)
+            remap = fixed_inds.copy()
+            remaps.append((score_bound, alignment, remap))
+            score, keep_mask_a, keep_mask_b = _score_and_mask(
+                c_a, c_b, lit_groups, alignment, remap)
+
+            # print(cum_score_matrix)
+            # print("IS SAME!", np.array_equal(fixed_inds, remap), fixed_inds, remap)
+
+            if(score > best_score):
+                best_result = (alignment, remap, keep_mask_a, keep_mask_b)
+                best_score = score
+
+            backtrack = True
+
+        if(backtrack):
             if(len(iter_stack) == 0):
                 # Case: All iterators exhausted (i.e. Finished)
                 break
@@ -2284,28 +2423,17 @@ def _conds_structure_map(c_a, c_b, fix_same_var, fix_same_alias):
 
             # Case: fixed_inds has been set by popping from stack
         else:
-            # Case: some assignments ambiguous so make next iter
+            # Case: some assignments ambiguous so make next iter.
+            #  'fixed_inds' is set to the first choice of i -> j.
+            #  Iterator for rest are pushed to stack. 
             (i,js) = get_best_ind_iter(cum_score_matrix, fixed_inds)
             iter_stack.append((i, 1, js, fixed_inds.copy()))
-            # print("PUSH", i, 1, js, fixed_inds.copy())
             fixed_inds[i] = js[0]
+            # print("PUSH", i, 1, js, fixed_inds.copy())
 
-            # Case: fixed_inds has been set to the first choice
-            #  of i -> j. Iterator for rest are pushed to stack. 
-
-    for score_bound, alignment, remap in remaps:
-        score, keep_mask_a, keep_mask_b = _score_and_mask(
-            c_a, c_b, ls_as, ls_bs, alignment, remap)
-
-        print(f"S={score}", f"B={score_bound}", remap)
-
-
-    score_bound, alignment, remap = remaps[0]
-    # for alignment, remap in remaps:    
-    score, keep_mask_a, keep_mask_b = _score_and_mask(
-        c_a, c_b, ls_as, ls_bs, alignment, remap)
-
-    return score, alignment, remap, keep_mask_a, keep_mask_b
+    if(best_result is not None):
+        alignment, remap, keep_mask_a, keep_mask_b = best_result
+        return best_score, alignment, remap, keep_mask_a, keep_mask_b
 
 
 # -------------------------------
@@ -2385,6 +2513,8 @@ def _conds_antiunify(c_a, c_b, fix_same_var, fix_same_alias):
         _conds_structure_map(c_a, c_b, fix_same_var, fix_same_alias)
 
     print("REMAP", remap)
+    print("MA", keep_mask_a)
+    print("MB", keep_mask_b)
     # why_nots_a, why_nots_b = _structure_map_make_why_nots(
     #     c_a, c_b, alignment, remap, keep_mask_a, keep_mask_b)
 
@@ -2407,6 +2537,7 @@ def _conds_antiunify(c_a, c_b, fix_same_var, fix_same_alias):
         dnf.append(new_conj)
 
     _vars = List([v for i, v in enumerate(c_a.vars) if remap[i] != -1])
+    print(_vars)
     return _conditions_ctor_var_list(_vars, dnf), score
     # new_lit = literal_ctor(lit.op)
     # new_lit.negated = lit.negated
@@ -2510,15 +2641,15 @@ def conds_antiunify(c_a, c_b, normalize=1,
          fix_same_var=False, fix_same_alias=False):
     c, kept = _conds_antiunify(c_a, c_b, fix_same_var, fix_same_alias)
     if(normalize == AU_NORMALIZE_LEFT):
-        n_total_a = len(c_a.vars) + max(count_literals(c_a),1)
+        n_total_a = len(c_a.vars) + count_literals(c_a)
         print("N TOTAL", n_total_a)
         return c, kept / n_total_a
     elif(normalize == AU_NORMALIZE_RIGHT):
-        n_total_b = len(c_b.vars) +max(count_literals(c_b),1)
+        n_total_b = len(c_b.vars) + count_literals(c_b)
         return c, kept / n_total_b
     elif(normalize == AU_NORMALIZE_MAX):
-        n_total_a = len(c_a.vars) + max(count_literals(c_a),1)
-        n_total_b = len(c_b.vars) + max(count_literals(c_b),1)
+        n_total_a = len(c_a.vars) + count_literals(c_a)
+        n_total_b = len(c_b.vars) + count_literals(c_b)
         return c, kept / max(max(n_total_a, n_total_b),1)
     else:
         return c, f8(kept)

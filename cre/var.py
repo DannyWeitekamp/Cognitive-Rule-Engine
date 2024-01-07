@@ -490,9 +490,12 @@ class Var(StructRefProxy):
         deref_infos = var_get_deref_infos(self)
         if(len(deref_infos) > 0):
             data_ptr = resolve_deref_data_ptr(fact, deref_infos)
+            load_ptr_i8 = get_load_ptr_impl(i8)
+            if(load_ptr_i8(data_ptr) == 0):
+                return None
             t_id = var_get_head_t_id(self)
-            load_ptr = get_load_ptr_impl(cre_context().get_type(t_id=t_id))
-            return load_ptr(data_ptr)
+            load_ptr_fact = get_load_ptr_impl(cre_context().get_type(t_id=t_id))            
+            return load_ptr_fact(data_ptr)
         else:
             return fact
         

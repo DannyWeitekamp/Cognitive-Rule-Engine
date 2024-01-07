@@ -492,7 +492,7 @@ def build_corgi_graph(ms, c):
     total_weight = 0
 
     # Link nodes together. 'nodes_by_nargs' should already be ordered
-    # so that alphas are before 2-way, 3-way, etc. betas. 
+    # so that alphas (1-way) are before betas (2-way), 3-way, etc. . 
     for i, nodes in enumerate(nodes_by_nargs):
         for node in nodes:
             # print("node", node.lit)

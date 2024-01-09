@@ -541,7 +541,7 @@ def foo(x):
     return y
 
 
-from cre.matching import get_graph, match_iter_next_ptrs
+from cre.matching import match_iter_next_ptrs
 
 def test_swap_memset():
     with NRTStatsEnabled:
@@ -743,8 +743,8 @@ if(__name__ == "__main__"):
     # print(alloc_stats1.alloc-alloc_stats1.free, alloc_stats2.alloc-alloc_stats2.free)
 
 
-    # test_ref_matching()
-    test_check_and_score_match()
+    test_ref_matching()
+    # test_check_and_score_match()
     # test_multiple_deref()
     # test_matching_unconditioned()
     # test_list()

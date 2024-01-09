@@ -77,6 +77,7 @@ def define_structref_template(name, fields, define_constructor=True,define_boxin
         
     ctor, type_class = import_from_cached(name,hash_code,[name,f"{name}TypeTemplate"]).values()
     ctor._hash_code = hash_code
+    type_class.__str__ = type_class.__repr__ = lambda self : name + "Type"
     return ctor, type_class
 
 def define_structref(name, fields, define_constructor=True, define_boxing=True, return_type_class=False):

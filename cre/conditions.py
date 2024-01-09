@@ -208,7 +208,7 @@ conditions_fields_dict = {
     # The Disjunctive Normal Form of the condition.
     'dnf': dnf_type,
 
-    # A mapping from Var pointers to their associated index
+    # Mapping from each base Var its associated index
     'base_var_map': DictType(i8,i8),
 
     # Wether or not the conditions object has been initialized
@@ -224,8 +224,10 @@ conditions_fields_dict = {
 
 
     # Keep around an anonymous reference to the matcher_inst
-    #  can be casted to specialize to implementation
+    #  and partial_matcher_inst which can be cast to
+    #  specialized to implementations.
     "matcher_inst" : types.optional(StructRefType), # Keep this so we can check for zero
+    "partial_matcher_inst" : types.optional(StructRefType), # Keep this so we can check for zero
     # "matcher_inst_meminfo" : meminfo_type, # Keep this so it is decreffed
 
     # # The alpha parts of '.dnf' organized by which Var in 'vars' they use 
@@ -281,6 +283,17 @@ class Conditions(structref.StructRefProxy):
     def get_matches(self, ms=None):
         from cre.matching import MatchIterator
         return MatchIterator(ms, self)
+
+    def get_partial_matches(self, ms=None, match=None,
+                    tolerance=0.0, return_scores=False):
+        from cre.partial_matching import PartialMatchIterator
+        match_ptrs = np.zeros(len(self.vars), dtype=np.int64)
+        if(match):
+            for i, fact in enumerate(match):
+                if(fact is not None):
+                    match_ptrs[i] = fact.get_ptr()
+        return PartialMatchIterator(ms, self, match_ptrs,
+                 tolerance=tolerance, return_scores=return_scores)
 
     def _match_to_ptrs(self, match):
         ptrs = np.zeros(len(match), dtype=np.int64)
@@ -1336,14 +1349,14 @@ if(False):
 
 
 @njit(cache=True)
-def build_distributed_dnf(c, index_map=None):
+def build_distributed_dnf(c):#, index_map=None):
     # print("c.vars", c.vars)
     distr_dnf = List.empty_list(distr_conj_type)
 
-    if(index_map is None):
-        index_map = Dict.empty(i8, i8)
-        for i, v in enumerate(c.vars):
-            index_map[i8(v.base_ptr)] = i
+    # if(index_map is None):
+    #     index_map = Dict.empty(i8, i8)
+    #     for i, v in enumerate(c.vars):
+    #         index_map[i8(v.base_ptr)] = i
 
     # Fill with empty lists
     for conjunct in c.dnf:
@@ -1358,7 +1371,8 @@ def build_distributed_dnf(c, index_map=None):
         for j, lit in enumerate(conjunct):
             max_ind = -1
             for base_ptr in lit.op.base_var_ptrs:
-                ind = index_map[i8(base_ptr)]
+                # ind = index_map[i8(base_ptr)]
+                ind = c.base_var_map[i8(base_ptr)]
                 if(ind > max_ind): max_ind = ind
 
             insertion_conj = distr_conjuct[max_ind]

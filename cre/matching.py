@@ -224,7 +224,6 @@ base_corgi_node_field_dict = {
 
 CorgiNode, CorgiNodeType = define_structref("CorgiNode", base_corgi_node_field_dict, define_constructor=False)
 
-
 u8_arr_typ = u8[::1]
 i8_arr_typ = i8[::1]
 i8_x2_arr_typ = i8[:,::1]
@@ -290,14 +289,14 @@ def node_ctor(ms, t_ids, var_inds,lit=None):
 
     return st
 
-
 # -----------------------------------------------------------------------
-# : CorgiGraph
+# : Generic Matcher Graph
 
 node_arg_pair_type = Tuple((CorgiNodeType,i8))
 node_arg_list_type = ListType(node_arg_pair_type)
 node_io_list_type = ListType(NodeIOType)
-corgi_graph_field_dict = {
+
+matcher_graph_field_dict = {
     # The change_head of the working memory at the last graph update.
     "change_head" : i8,
 
@@ -310,17 +309,9 @@ corgi_graph_field_dict = {
     # The number of nodes in the graph
     "n_nodes" : i8,
 
-    # Maps a var_ind to its associated root node (i.e. the node that 
-    #  holds all match candidates for a fact_type before filtering).
-    "var_root_nodes" : DictType(i8,CorgiNodeType),
-
-    # TODO: Replace with list/array for speed?
-    # The map a var_ind to the most downstream node that constrains that var.
-    "var_end_nodes" : DictType(i8,CorgiNodeType),
-
-    # A matrix of size (n_var, n_var) with weak pointers to the most 
-    #  downstream beta nodes connecting each pair of vars. 
-    "var_end_join_ptrs" : i8[::,::1],
+    # List of root nodes (i.e. the nodes that holds all
+    #   match candidates for a fact_type before filtering).
+    "root_nodes" : ListType(CorgiNodeType),
 
     # Maps (t_id, 0, a_id) idrec patterns to (node,arg_ind) that should be 
     #  rechecked based on that pattern.
@@ -329,34 +320,61 @@ corgi_graph_field_dict = {
     # Maps t_ids to the root node outputs associated with facts of that t_id.
     "global_t_id_root_map" : DictType(u2, NodeIOType),
 
-    # A reference to the prototype instance for match iterators on this graph.
-    "match_iter_prototype_inst" : types.optional(StructRefType), #NOTE: Should really use deferred type
-
     # The sum of weights of all literals in the graph
     "total_weight" : f4,
 }
-
-
-CorgiGraph, CorgiGraphType = define_structref("CorgiGraph", corgi_graph_field_dict, define_constructor=False)
-
-
+MatcherGraph, MatcherGraphType = define_structref("MatcherGraph", matcher_graph_field_dict, define_constructor=False)
 
 @njit(cache=True)
-def corgi_graph_ctor(ms, conds, nodes_by_nargs, n_nodes, var_root_nodes, var_end_nodes,
-                var_end_join_ptrs, global_modify_map, global_t_id_root_map, total_weight):
+def matcher_graph_ctor(ms, conds, nodes_by_nargs, n_nodes, root_nodes, global_modify_map,
+                     global_t_id_root_map, total_weight):
     st = new(CorgiGraphType)
     st.change_head = 0
     st.memset = ms
     st.nodes_by_nargs = nodes_by_nargs
     st.n_nodes = n_nodes
-    st.var_root_nodes = var_root_nodes
-    st.var_end_nodes = var_end_nodes
-    st.var_end_join_ptrs = var_end_join_ptrs
+    st.root_nodes = root_nodes
     st.global_modify_map = global_modify_map
     st.global_t_id_root_map = global_t_id_root_map
     # st.match_iter_prototype_ptr = 0
     st.total_weight = total_weight
-    
+    return st
+
+# -----------------------------------------------------------------------
+# : CorgiGraph
+
+corgi_graph_field_dict = {
+    **matcher_graph_field_dict,
+    # TODO: Replace with list/array for speed?
+    # The map a var_ind to the most downstream node that constrains that var.
+    "end_nodes" : ListType(CorgiNodeType),
+
+    # A matrix of size (n_var, n_var) with weak pointers to the most 
+    #  downstream beta nodes connecting each pair of vars. 
+    "var_end_join_ptrs" : i8[::,::1],
+
+    # A reference to the prototype instance for match iterators on this graph.
+    "match_iter_prototype_inst" : types.optional(StructRefType), #NOTE: Should really use deferred type
+}
+CorgiGraph, CorgiGraphType = define_structref("CorgiGraph", corgi_graph_field_dict, define_constructor=False)
+
+
+@njit(cache=True)
+def corgi_graph_ctor(ms, conds, nodes_by_nargs, n_nodes, root_nodes, global_modify_map,
+                     global_t_id_root_map, total_weight, end_nodes, var_end_join_ptrs) :
+    st = new(CorgiGraphType)
+    st.change_head = 0
+    st.memset = ms
+    st.nodes_by_nargs = nodes_by_nargs
+    st.n_nodes = n_nodes
+    st.root_nodes = root_nodes
+    st.global_modify_map = global_modify_map
+    st.global_t_id_root_map = global_t_id_root_map
+    st.total_weight = total_weight
+
+    st.end_nodes = end_nodes
+    st.var_end_join_ptrs = var_end_join_ptrs
+    # st.match_iter_prototype_ptr = 0
     return st
 
 
@@ -371,7 +389,7 @@ def conds_get_corgi_graph(self):
 # : build_corgi_graph()
 
 @njit(cache=True)
-def _get_degree_order(c, index_map):
+def _get_degree_order(c):#, index_map):
     ''' Order vars by decreasing beta degree --- the number of other 
         vars that they share beta literals with. Implements heuristic
         that the most beta-constrained nodes are matched first. 
@@ -382,7 +400,8 @@ def _get_degree_order(c, index_map):
             for lit in var_conjuct:
                 var_inds = np.empty((len(lit.base_var_ptrs),),dtype=np.int64)
                 for i, base_var_ptr in enumerate(lit.base_var_ptrs):
-                    var_inds[i] = index_map[i8(base_var_ptr)]
+                    # var_inds[i] = index_map[i8(base_var_ptr)]
+                    var_inds[i] = c.base_var_map[i8(base_var_ptr)]
                 if(len(var_inds) > 1):
                     has_pairs[var_inds[0],var_inds[1]] = 1
                     has_pairs[var_inds[1],var_inds[0]] = 1
@@ -404,22 +423,49 @@ def _mod_map_insert(idrec, mod_map, node, arg_ind):
 
 CorgiNode_List_type = ListType(CorgiNodeType)
 
-@njit(cache=True,locals={})
-def _make_corgi_nodes(ms, c, index_map):
-    nodes_by_nargs = List.empty_list(CorgiNode_List_type)
-    nodes_by_nargs.append(List.empty_list(CorgiNodeType))
-    global_modify_map = Dict.empty(u8, node_arg_list_type)
-
+@njit(cache=True, locals={})
+def make_root_nodes(ms, c):
     # Make an identity node (i.e. lit,op=None) so there are always alphas
+    root_nodes = List.empty_list(CorgiNodeType)
     for j in range(len(c.vars)):
         t_ids = np.empty((1,),dtype=np.uint16)
         var_inds = np.empty((1,),dtype=np.int64)
         base_var = c.vars[j]
         t_ids[0] = base_var.base_t_id
-        var_inds[0] = index_map[i8(base_var.base_ptr)]
-        nodes_by_nargs[0].append(node_ctor(ms, t_ids, var_inds,lit=None))
+        # var_inds[0] = index_map[i8(base_var.base_ptr)]
+        var_inds[0] = c.base_var_map[i8(base_var.base_ptr)]
+        root_nodes.append(node_ctor(ms, t_ids, var_inds, lit=None))
+    return root_nodes
 
-    degree_order = _get_degree_order(c, index_map)
+@njit(cache=True,locals={})
+def make_literal_nodes(ms, c):
+    # # Build a map from base var ptrs to indicies
+    # index_map = Dict.empty(i8, i8)
+    # for i, v in enumerate(c.vars):
+    #     index_map[i8(v.base_ptr)] = i
+
+    # for x,y in index_map.items():
+    #     print(x, y, "==", c.base_var_map[x])
+    # print(len(index_map),"==", len(c.base_var_map))
+
+    # Reorganize the dnf into a distributed dnf with one dnf per var
+    if(not c.has_distr_dnf):
+        build_distributed_dnf(c)#,index_map)
+
+    nodes_by_nargs = List.empty_list(CorgiNode_List_type)
+    nodes_by_nargs.append(List.empty_list(CorgiNodeType))
+    global_modify_map = Dict.empty(u8, node_arg_list_type)
+
+    # Make an identity node (i.e. lit,op=None) so there are always alphas
+    # for j in range(len(c.vars)):
+    #     t_ids = np.empty((1,),dtype=np.uint16)
+    #     var_inds = np.empty((1,),dtype=np.int64)
+    #     base_var = c.vars[j]
+    #     t_ids[0] = base_var.base_t_id
+    #     var_inds[0] = index_map[i8(base_var.base_ptr)]
+    #     nodes_by_nargs[0].append(node_ctor(ms, t_ids, var_inds,lit=None))
+
+    degree_order = _get_degree_order(c)
 
     # print("degree_order", degree_order)
 
@@ -434,7 +480,8 @@ def _make_corgi_nodes(ms, c, index_map):
                 t_ids = np.empty((nargs,),dtype=np.uint16)
                 var_inds = np.empty((nargs,),dtype=np.int64)
                 for i, base_var_ptr in enumerate(lit.base_var_ptrs):
-                    var_inds[i] = index_map[i8(base_var_ptr)]
+                    # var_inds[i] = index_map[i8(base_var_ptr)]
+                    var_inds[i] = c.base_var_map[i8(base_var_ptr)]
                     base_var = cast(base_var_ptr, VarType)
                     t_id = base_var.base_t_id
                     t_ids[i] = t_id
@@ -470,26 +517,40 @@ def arr_is_unique(arr):
 
 
 @njit(cache=True)
-def build_corgi_graph(ms, c):
-    # Build a map from base var ptrs to indicies
-    index_map = Dict.empty(i8, i8)
-    for i, v in enumerate(c.vars):
-        index_map[i8(v.base_ptr)] = i
-
-    # Reorganize the dnf into a distributed dnf with one dnf per var
-    if(not c.has_distr_dnf):
-        build_distributed_dnf(c,index_map)
-    
-    # Make all of the CORGI nodes
-    nodes_by_nargs, global_modify_map = \
-         _make_corgi_nodes(ms, c, index_map)
-
+def init_root_nodes(root_nodes):
     global_t_id_root_map = Dict.empty(u2, NodeIOType)
+
+    for var_ind, node in enumerate(root_nodes):
+        # There is exactly one unique root node per t_id
+        t_id = node.t_ids[0]
+        if(t_id not in global_t_id_root_map):
+            root = new_NodeIO()
+            root.is_root = True
+
+            global_t_id_root_map[t_id] = root
+
+        root = global_t_id_root_map[t_id]
+        inputs = List.empty_list(NodeIOType)
+        inputs.append(root)
+        node.inputs = inputs
+
+        # Short circut the input to the output for identity nodes
+        node.outputs = node.inputs
+
+    return global_t_id_root_map
+
+
+@njit(cache=True)
+def build_corgi_graph(ms, c):
+    # Make all of the CORGI nodes
+    root_nodes = make_root_nodes(ms, c)
+    global_t_id_root_map = init_root_nodes(root_nodes)
+    nodes_by_nargs, global_modify_map = \
+         make_literal_nodes(ms, c)
     var_end_join_ptrs = np.zeros((len(c.vars),len(c.vars)),dtype=np.int64)
-    var_end_nodes = Dict.empty(i8,CorgiNodeType)
-    var_root_nodes = Dict.empty(i8,CorgiNodeType)
+    end_nodes = root_nodes.copy()#Dict.empty(i8,CorgiNodeType)
     n_nodes = 0
-    total_weight = 0
+    total_weight = float(len(root_nodes))
 
     # Link nodes together. 'nodes_by_nargs' should already be ordered
     # so that alphas (1-way) are before betas (2-way), 3-way, etc. . 
@@ -499,30 +560,31 @@ def build_corgi_graph(ms, c):
             inputs = List.empty_list(NodeIOType)
             for j, var_ind in enumerate(node.var_inds):
                 # print("ind", ind)
-                if(var_ind in var_end_nodes):
-                    # Set the .inputs of this node to be the NodeIOs from the
-                    #   .outputs of the last node in the graph to check against 'var_ind' 
-                    e_node = var_end_nodes[var_ind]
-                    om = e_node.outputs[np.min(np.nonzero(e_node.var_inds==var_ind)[0])]
-                    inputs.append(om)
-                    node.upstream_node_ptr = cast(e_node, i8)
-                    # print("wire", var_ind, e_node.lit, '[', np.min(np.nonzero(e_node.var_inds==var_ind)[0]),']', "->",  node.lit, "[", j, "]")
-                else:
+                # if(var_ind in end_nodes):
+                # Set the .inputs of this node to be the NodeIOs from the
+                #   .outputs of the last node in the graph to check against 'var_ind' 
+                e_node = end_nodes[var_ind]
+                om = e_node.outputs[np.min(np.nonzero(e_node.var_inds==var_ind)[0])]
+                inputs.append(om)
+                node.upstream_node_ptr = cast(e_node, i8)
+                # print("wire", var_ind, e_node.lit, '[', np.min(np.nonzero(e_node.var_inds==var_ind)[0]),']', "->",  node.lit, "[", j, "]")
+                # else:
 
-                    t_id = node.t_ids[j]
-                    if(t_id not in global_t_id_root_map):
-                        root = new_NodeIO()
-                        root.is_root = True
+                #     t_id = node.t_ids[j]
+                #     if(t_id not in global_t_id_root_map):
+                #         root = new_NodeIO()
+                #         root.is_root = True
 
-                        global_t_id_root_map[t_id] = root
-                    root = global_t_id_root_map[t_id]
+                #         global_t_id_root_map[t_id] = root
+                #     root = global_t_id_root_map[t_id]
 
-                    inputs.append(root)
-                    var_root_nodes[var_ind] = node
+                #     inputs.append(root)
+                #     var_root_nodes[var_ind] = node
 
             node.inputs = inputs
 
             if(len(inputs) == 2):
+                # print("FILL END JOINS")
                 p1, p2 = inputs[0].parent_node_ptr, inputs[1].parent_node_ptr
                 node.upstream_same_parents = (p1 != 0 and p1 == p2)
                 if(node.upstream_same_parents):
@@ -538,12 +600,8 @@ def build_corgi_graph(ms, c):
                 #      vi_b if vi_a < vi_b else vi_a, node.lit)
                 
 
-            # Short circut the input to the output for identity nodes
-            if(node.lit is None):
-                node.outputs = node.inputs
-                total_weight += 1.0 
-            else:
-                total_weight += node.lit.weight 
+            
+            total_weight += node.lit.weight 
             
 
             n_nodes += 1
@@ -551,10 +609,22 @@ def build_corgi_graph(ms, c):
 
             # Make this node the new end node for the vars it takes as inputs
             for var_ind in node.var_inds:
-                var_end_nodes[var_ind] = node
-            
-    return corgi_graph_ctor(ms, c, nodes_by_nargs, n_nodes, var_root_nodes, var_end_nodes,
-              var_end_join_ptrs, global_modify_map, global_t_id_root_map, total_weight)
+                end_nodes[var_ind] = node
+
+    # Prepend the root nodes to the 1-arg nodes
+    # TODO: Should be reducable to one line: 'root_nodes+nodes_by_nargs[0]'
+    #   but overload for __add__ missing in List
+    L = len(root_nodes)+len(nodes_by_nargs[0])
+    alpha_nodes = List.empty_list(CorgiNodeType, L)
+    for node in root_nodes:
+        alpha_nodes.append(node)
+    for node in nodes_by_nargs[0]:
+        alpha_nodes.append(node)
+    nodes_by_nargs[0] = alpha_nodes
+
+    return corgi_graph_ctor(ms, c, nodes_by_nargs, n_nodes, 
+                root_nodes, global_modify_map, global_t_id_root_map,
+                 total_weight, end_nodes, var_end_join_ptrs)
 
 
 # -----------------------------------------------------------------------
@@ -1294,7 +1364,7 @@ def update_graph(graph):
     # print("PARSED")
     for lst in graph.nodes_by_nargs:
         for node in lst:
-            # print(node)
+            # print("NODE", node)
             update_node(node)        
 
 
@@ -1520,12 +1590,12 @@ def new_match_iter(graph):
 
         #Make a list of var_inds
         var_inds = List.empty_list(i8)
-        for i in range(len(graph.var_end_nodes)-1,-1,-1):
+        for i in range(len(graph.end_nodes)-1,-1,-1):
             var_inds.append(i) 
 
         # Loop downstream to upstream through the end nodes. Build a MatchIterNode
         #  for each end node to help us iterate over valid matches in the graph.
-        # for var_ind in range(len(graph.var_end_nodes)-1,-1,-1):
+        # for var_ind in range(len(graph.end_nodes)-1,-1,-1):
         m_node_ind = 0;
         while(len(var_inds) > 0):
             # print_ind = np.empty(len(handled_vars))
@@ -1533,7 +1603,7 @@ def new_match_iter(graph):
             #     print_ind[q] = k
 
             var_ind = var_inds.pop()
-            node = graph.var_end_nodes[var_ind]
+            node = graph.end_nodes[var_ind]
 
             # Instantiate a prototype m_node for the end node for this Var.
             m_node = new(MatchIterNodeType)
@@ -1549,9 +1619,9 @@ def new_match_iter(graph):
 
             # print("END NODE", var_ind, m_node.m_node_ind, node.lit, m_node.associated_arg_ind)
             
-            dep_m_node_inds = np.empty((len(graph.var_end_nodes)),dtype=np.int64)
-            dep_arg_inds = np.empty((len(graph.var_end_nodes)),dtype=np.int64)
-            dep_node_ptrs = np.empty((len(graph.var_end_nodes)),dtype=np.int64)
+            dep_m_node_inds = np.empty((len(graph.end_nodes)),dtype=np.int64)
+            dep_arg_inds = np.empty((len(graph.end_nodes)),dtype=np.int64)
+            dep_node_ptrs = np.empty((len(graph.end_nodes)),dtype=np.int64)
             c = 0
             for j, ptr in enumerate(graph.var_end_join_ptrs[m_node.var_ind]):
                 if(ptr != 0 and j in handled_vars):
@@ -1853,7 +1923,7 @@ def fact_ptrs_as_tuple(typs, ptr_arr):
 
 
 @njit(cache=True)
-def get_graph(ms, conds):
+def get_matcher_graph(ms, conds):
     needs_new_graph = False
 
     if(conds.matcher_inst is None):
@@ -1867,12 +1937,13 @@ def get_graph(ms, conds):
     conds.matcher_inst = cast(graph, StructRefType)
     return graph
 
+
 @njit(MatchIteratorType(MemSetType, ConditionsType), cache=True)
 def get_match_iter(ms, conds):
 
     # Performance Note: In integration benchmarks w/ AL get_graph  
     #  takes up about half of the time for a cold match.  
-    corgi_graph = get_graph(ms, conds) 
+    corgi_graph = get_matcher_graph(ms, conds) 
 
     update_graph(corgi_graph)
     m_iter = new_match_iter(corgi_graph)

@@ -1508,6 +1508,10 @@ class MatchIterator(structref.StructRefProxy):
     def __iter__(self):
         return self
 
+    def est_len(self):
+        lower, upper = m_iter_est_len(self)
+        return lower, upper
+
 
 @structref.register
 class MatchIteratorTypeClass(CastFriendlyMixin, types.StructRef):
@@ -1937,6 +1941,29 @@ def get_matcher_graph(ms, conds):
     conds.matcher_inst = cast(graph, StructRefType)
     return graph
 
+@njit(cache=True)
+def m_iter_est_len(m_iter):
+    if(m_iter.is_empty and not m_iter.iter_started):
+        return 0.0, 0.0
+    else:
+        lower_len = 1.0
+        upper_len = 1.0
+        for i, m_node in enumerate(m_iter.iter_nodes):
+            associated_output = m_node.node.outputs[m_node.associated_arg_ind]
+            # Note: This assumes that idrecs_to_inds deletes
+            #  missing idrecs after an update (which maybe isn't
+            #  yet fully tested)
+            n_idrecs = len(associated_output.idrecs_to_inds)
+            if(len(m_node.dep_m_node_inds) == 0):
+                lower_len *= n_idrecs
+            upper_len *= n_idrecs
+            if(n_idrecs == 0):
+                # print("SECOND")
+                return 0.0, 0.0
+    return lower_len, upper_len
+
+
+
 
 @njit(MatchIteratorType(MemSetType, ConditionsType), cache=True)
 def get_match_iter(ms, conds):
@@ -1948,9 +1975,12 @@ def get_match_iter(ms, conds):
     update_graph(corgi_graph)
     m_iter = new_match_iter(corgi_graph)
     # print("DEPS:", repr_match_iter_dependencies(m_iter))
+
+    
     if(len(m_iter.iter_nodes) == 0):
         m_iter.is_empty = True
         return m_iter
+
     for i in range(len(m_iter.iter_nodes)):
         m_node = m_iter.iter_nodes[i]
         m_node.curr_ind = 0

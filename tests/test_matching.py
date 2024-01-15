@@ -17,10 +17,14 @@ import pytest
 def match_names(c,ms=None):
     out = []
     m_iter = c.get_matches(ms)
+    lower, upper = m_iter.est_len()
+    print(f"L={lower}",f"U={upper}")
     # print(repr_match_iter_dependencies(m_iter))
     for m in m_iter:
         # print(m)
         out.append([x.name for x in m])
+
+    assert lower <= len(out) and upper >= len(out)
         # print("X")
     return out
 
@@ -743,7 +747,7 @@ if(__name__ == "__main__"):
     # print(alloc_stats1.alloc-alloc_stats1.free, alloc_stats2.alloc-alloc_stats2.free)
 
 
-    test_ref_matching()
+    # test_ref_matching()
     # test_check_and_score_match()
     # test_multiple_deref()
     # test_matching_unconditioned()
@@ -754,6 +758,6 @@ if(__name__ == "__main__"):
     # _test_NOT()
     # test_b_matching_1_t_4_lit()
     # test_multiple_types()
-    # test_same_parents()
+    test_same_parents()
     # test_mem_leaks()
 

@@ -276,16 +276,17 @@ class Conditions(structref.StructRefProxy):
     def __invert__(self):
         return conditions_not(self)
 
-    def get_ptr_matches(self,ms=None):
+    def get_ptr_matches(self, ms=None):
         from cre.matching import get_ptr_matches
         return get_ptr_matches(self,ms)
 
-    def get_matches(self, ms=None):
+    def get_matches(self, ms=None, **kwargs):
         from cre.matching import MatchIterator
-        return MatchIterator(ms, self)
+        return MatchIterator(ms, self, **kwargs)
 
     def get_partial_matches(self, ms=None, match=None,
-                    tolerance=0.0, return_scores=False):
+                    tolerance=0.0, return_scores=False,
+                     **kwargs):
         from cre.partial_matching import PartialMatchIterator
         match_ptrs = np.zeros(len(self.vars), dtype=np.int64)
         if(match):
@@ -293,7 +294,8 @@ class Conditions(structref.StructRefProxy):
                 if(fact is not None):
                     match_ptrs[i] = fact.get_ptr()
         return PartialMatchIterator(ms, self, match_ptrs,
-                 tolerance=tolerance, return_scores=return_scores)
+                 tolerance=tolerance, return_scores=return_scores,
+                 **kwargs)
 
     def _match_to_ptrs(self, match):
         ptrs = np.zeros(len(match), dtype=np.int64)
@@ -330,15 +332,17 @@ class Conditions(structref.StructRefProxy):
 
     def antiunify(self, other, return_score=False, normalize='left',
          fix_same_var=False, fix_same_alias=False, fixed_inds=None, 
-         drop_unconstr=False):
+         drop_unconstr=False, drop_no_beta=False):
         norm_enum = resolve_normalize_enum(normalize)
         if(not isinstance(other, Conditions)):
             other = Conditions(other)
 
         if(fixed_inds is None):
-            fixed_inds = get_fixed_inds(self, other, fix_same_var, fix_same_alias)
+            fixed_inds = get_fixed_inds(self, other,
+                 fix_same_var, fix_same_alias)
 
-        new_conds, score = conds_antiunify(self, other, fixed_inds, norm_enum, drop_unconstr) 
+        new_conds, score = conds_antiunify(self, other,
+                 fixed_inds, norm_enum, drop_unconstr, drop_no_beta) 
         if(return_score):
             return new_conds, score
         else:
@@ -349,13 +353,13 @@ class Conditions(structref.StructRefProxy):
 
     def structure_map(self, other, fix_same_var=False, 
             fix_same_alias=False, fixed_inds=None, 
-            drop_unconstr=False):
+            drop_unconstr=False, drop_no_beta=False):
 
         # Fixed indicies -2 for unassigned -1 for no valid assignment
         if(fixed_inds is None):
             fixed_inds = get_fixed_inds(self, other, fix_same_var, fix_same_alias)
         return conds_structure_map(self, other,
-                fixed_inds, drop_unconstr)
+                fixed_inds, drop_unconstr, drop_no_beta)
     
     @property
     def var_base_types(self):
@@ -1109,6 +1113,8 @@ def OR(*args):
 
 def AND(*args):
     # Note: Can probably njit a lot of this to make it faster.
+    if(len(args) == 0):
+        return None
 
     if(len(args) == 1):
         return Conditions(args[0])
@@ -1659,7 +1665,8 @@ def _score_and_mask(c_a, c_b, lit_groups, alignment, remap):
     return score, keep_mask_a, keep_mask_b
 
 @njit(cache=True)
-def get_unambiguous_inds(cum_score_matrix, a_fixed_inds, drop_unconstr):
+def get_unambiguous_inds(cum_score_matrix, cum_beta_matrix,
+        a_fixed_inds, drop_unconstr, drop_no_beta):
     unamb_inds = a_fixed_inds.copy()
     unconstr_mask = np.zeros(len(a_fixed_inds),dtype=np.uint8)
     new_unamb = 0
@@ -1671,15 +1678,23 @@ def get_unambiguous_inds(cum_score_matrix, a_fixed_inds, drop_unconstr):
 
         # Find any assignments with non-zero score
         cnt = 0
+        beta_cnt = 0
         nz_b_ind = -1
         for b_ind in range(M):
             if(cum_score_matrix[a_ind,b_ind] != 0):
                 cnt += 1
                 nz_b_ind = b_ind
+            if(cum_beta_matrix[a_ind,b_ind] != 0):
+                beta_cnt += 1
+
+        # If drop_no_beta=True and no beta literals 
+        #  support any assignment to a_ind and then drop.
+        if(drop_no_beta and beta_cnt == 0):
+            unamb_inds[a_ind] = -1
 
         # If there is exactly one assignment with a non-zero
         #  score then apply that assignment.
-        if(cnt == 1):
+        elif(cnt == 1):
             scores_a_to_b = cum_score_matrix[:,nz_b_ind]
             # if(np.max(scores_a_to_b) == cum_score_matrix[a_ind,nz_b_ind]):
             if(np.sum(scores_a_to_b != 0) == 1):
@@ -1692,6 +1707,7 @@ def get_unambiguous_inds(cum_score_matrix, a_fixed_inds, drop_unconstr):
                 unamb_inds[a_ind] = -1
             else:
                 unconstr_mask[a_ind] = 1
+
 
             
     # For variables which are made unconstrained by the
@@ -1856,14 +1872,16 @@ stack_item_type = Tuple((i8,i8,i8[::1],i2[::1]))
 
 
 @njit(cache=True)
-def conds_structure_map(c_a, c_b, a_fixed_inds, drop_unconstr):
+def conds_structure_map(c_a, c_b, a_fixed_inds,
+     drop_unconstr, drop_no_beta):
     Da, Db = len(c_a.dnf), len(c_b.dnf)
     N, M = len(c_a.vars), len(c_b.vars)
 
     
     lit_groups = make_lit_groups(c_a, c_b)
     
-    fixed_inds = a_fixed_inds.copy()
+    fixed_inds = np.full(N,-2,dtype=np.int16)
+    fixed_inds[:len(a_fixed_inds)] = a_fixed_inds
     remaps = List.empty_list(align_remap_type)
     iter_stack = List.empty_list(stack_item_type)
     it = None
@@ -1895,7 +1913,8 @@ def conds_structure_map(c_a, c_b, a_fixed_inds, drop_unconstr):
 
             # Look for unambiguous remaps in the new matrix
             fixed_inds, unamb_cnt = get_unambiguous_inds(
-                cum_score_matrix, fixed_inds, drop_unconstr)
+                cum_score_matrix, cum_beta_matrix, fixed_inds, 
+                drop_unconstr, drop_no_beta)
             
             if(unamb_cnt == 0):
                 break
@@ -1961,6 +1980,15 @@ def conds_structure_map(c_a, c_b, a_fixed_inds, drop_unconstr):
 
     if(best_result is not None):
         alignment, remap, keep_mask_a, keep_mask_b = best_result
+        return best_score, alignment, remap, keep_mask_a, keep_mask_b
+    else:
+        # Make return consistent with no valid mapping
+        alignment = np.arange(len(c_a.dnf),dtype=np.int16)
+        remap = np.full(N, -1, dtype=np.int16)
+        max_conj_len_a = max([len(conj) for conj in c_a.dnf])
+        max_conj_len_b = max([len(conj) for conj in c_b.dnf])
+        keep_mask_a = np.zeros((len(c_a.dnf), max_conj_len_a), dtype=np.uint8)
+        keep_mask_b = np.zeros((len(c_b.dnf), max_conj_len_b), dtype=np.uint8)
         return best_score, alignment, remap, keep_mask_a, keep_mask_b
 
 
@@ -2048,9 +2076,10 @@ def conds_masked_copy(conds, keep_mask, remap=None):
 
 
 @njit(cache=True)
-def _conds_antiunify(c_a, c_b, a_fixed_inds, drop_unconstr):
+def _conds_antiunify(c_a, c_b, a_fixed_inds, drop_unconstr, drop_no_beta):
     score, alignment, remap, keep_mask_a, keep_mask_b = \
-        conds_structure_map(c_a, c_b, a_fixed_inds, drop_unconstr)
+        conds_structure_map(c_a, c_b, a_fixed_inds,
+         drop_unconstr, drop_no_beta)
     return conds_masked_copy(c_a, keep_mask_a, remap), score
     
 
@@ -2083,8 +2112,9 @@ def count_literals(self):
 
 @njit(cache=True)
 def conds_antiunify(c_a, c_b, a_fixed_inds, normalize=1,
-         drop_unconstr=False):
-    c, kept = _conds_antiunify(c_a, c_b, a_fixed_inds, drop_unconstr)
+         drop_unconstr=False, drop_no_beta=False):
+    c, kept = _conds_antiunify(c_a, c_b, a_fixed_inds,
+        drop_unconstr, drop_no_beta)
     if(normalize == AU_NORMALIZE_LEFT):
         n_total_a = len(c_a.vars) + count_literals(c_a)
         return c, kept / n_total_a

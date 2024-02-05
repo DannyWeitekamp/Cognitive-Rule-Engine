@@ -519,7 +519,7 @@ def print_sm(score_matrix):
 
 class PartialMatchIterator:
     def __init__(self, ms, conds, match_ptrs=None, tolerance=0.0,
-                    return_scores=False):#, kind="fact", recover_types=False):
+                    return_scores=False, match_len=None):#, kind="fact", recover_types=False):
         self.return_scores = return_scores
         var_base_types = conds.var_base_types
         self.proxy_types = [x._fact_proxy for x in var_base_types]
@@ -532,6 +532,7 @@ class PartialMatchIterator:
         var_base_types = conds.var_base_types
         
         self.curr_ind = 0
+        self.match_len = match_len
 
     def __next__(self):
         if(self.curr_ind >= len(self.match_ptrs)):
@@ -549,7 +550,10 @@ class PartialMatchIterator:
                 arr.append(instance)
             else:
                 arr.append(None)
-            
+
+        if(self.match_len):
+            arr = arr[:self.match_len]
+
         if(self.return_scores):
             return (score, arr)
         else:

@@ -1438,9 +1438,10 @@ match_iter_kinds = {
 
 class MatchIterator(structref.StructRefProxy):
     ''' '''
-    __slots__ = ('kind', 'recover_types' , 'output_types', 'proxy_types')
+    __slots__ = ('kind', 'recover_types' , 'output_types', 'proxy_types', 'match_len')
     m_iter_type_cache = {}
-    def __new__(cls, ms, conds, kind="fact", recover_types=False):
+    def __new__(cls, ms, conds, kind="fact", recover_types=False,
+                    match_len=None):
         # Make a generic MatchIterator (reuses graph if conds already has one)
         generic_m_iter = get_match_iter(ms, conds)
         kind = match_iter_kinds[kind]
@@ -1470,6 +1471,7 @@ class MatchIterator(structref.StructRefProxy):
 
         self.kind = kind
         self.recover_types = recover_types
+        self.match_len = match_len
         return self
             
         
@@ -1484,19 +1486,24 @@ class MatchIterator(structref.StructRefProxy):
                     empty, ptrs = match_iter_next_ptrs(self)
                     if(empty): raise StopIteration()
 
-                    arr = []
+                    out = []
                     for ptr, proxy_typ in zip(ptrs, self.proxy_types):
                         mi = ptr_to_meminfo(ptr)
                         instance = super(StructRefProxy,proxy_typ).__new__(proxy_typ)
                         instance._type = proxy_typ
                         instance._meminfo = mi
-                        arr.append(instance)
-                    return arr
+                        out.append(instance)
+                    if(self.match_len):
+                        out = out[:self.match_len]
+                    return out
             elif(self.kind == MATCH_ITER_PTR_KIND):
                 empty, out = match_iter_next_ptrs(self)
             else:
                 empty, out = match_iter_next_idrecs(self)
             if(empty): raise StopIteration()
+
+            if(self.match_len):
+                out = out[:self.match_len]
             return out
 
         # Catch system errors. Needed for Cprofiling to work

@@ -47,6 +47,7 @@ import itertools
 from cre.default_funcs import Identity
 
 
+
 '''
 This file implements the SetChainingPlanner which solves planning problems
 akin to the "24 game" (given 4 numbers find a way to manipulate them to get 24)
@@ -563,6 +564,18 @@ def planner_declare_overload(planner, val, var=None, is_const=False):
 def planner_declare(planner, val, var=None, is_const=False):
     return _planner_declare(planner, val, var, is_const)
 
+
+@njit(cache=True)
+def get_val_map(planner, d_type, t_id):
+    ptr = planner.val_map_ptr_dict[u2(t_id)]
+    val_map =  _dict_from_ptr(d_type, ptr)
+    return val_map
+
+def print_val_map(planner, val_typ):
+    t_id = cre_context().get_t_id(_type=val_typ)
+    d_type = DictType(val_typ,Tuple((i8,i8,i8)))  
+    print(list(get_val_map(planner, d_type, t_id).keys()))
+
 #------------------------------------------------------------------
 # : Explanation Search Main Loop
 # @generated_jit(cache=True)
@@ -859,6 +872,9 @@ def forward_chain_one(self, depth_policy=None):
             # Insert records
             if(rec is not None):
                 insert_record(self, rec, func.return_t_id, nxt_depth)
+
+                # print("DEPTH:", nxt_depth, func)
+                # print_val_map(self, func.return_type)
         else:
             # Constant CREFunc case ignore at forward step
             continue

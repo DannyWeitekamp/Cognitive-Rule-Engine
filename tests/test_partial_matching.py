@@ -31,7 +31,7 @@ def test_partial_match():
 
         conds = a & b & c & (a.name != "7") & (a.val < b.val) & (b.val < c.val)
 
-        partial_match(ms, conds)
+        conds.get_partial_matches(ms)
 
 
 def test_mc_add_case():
@@ -59,16 +59,16 @@ def test_mc_add_case():
         c_a = Conditions.from_facts([sel_a, arg_a0, arg_a1], varz)
 
         with PrintElapse("partial_match (load)"):
-            partial_match(wm, c_a, None, .2)
+            c_a.get_partial_matches(wm, None, .2)
 
         
         
 
         c_a = Conditions.from_facts([sel_a, arg_a0, arg_a1], varz)
         with PrintElapse("partial_match (first)"):
-            partial_match(wm, c_a, None, .2)
+            c_a.get_partial_matches(wm, None, .2)
         with PrintElapse("partial_match (second)"):
-            partial_match(wm, c_a, None, .2)
+            c_a.get_partial_matches(wm, None, .2)
 
         with PrintElapse("from py"):
             for score, match in c_a.get_partial_matches(wm,return_scores=True):

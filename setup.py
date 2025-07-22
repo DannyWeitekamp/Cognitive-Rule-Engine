@@ -13,12 +13,18 @@ else:
     raise RuntimeError("Unable to find version string in %s." % (VERSIONFILE,))
 
 # TODO: Remove once version dependancy issues in caching are fixed
-__version__ = "0.4.4"
+__version__ = "0.5"
 
 
 # Read requirements.txt for requirements
-with open('requirements.txt') as f: 
-    requirements = f.readlines() 
+#with open('requirements.txt') as f: 
+#    requirements = f.readlines() 
+
+requirements = [
+    "numba==0.58.1",
+    "numpy==1",
+    "cloudpickle"
+]
 
   
 long_description = 'CRE is a high-performance forward-chaining rule engine for Python built with the numba just-in-time compiler toolset.' 

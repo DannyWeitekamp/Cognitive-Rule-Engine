@@ -38,7 +38,7 @@ jobs:
       - name: Install Numba
         run: |
           python3 -m pip install pip --upgrade
-          python3 -m pip install numba
+          python3 -m pip install numba==0.58.1
 
       - name: Build wheels
         uses: pypa/cibuildwheel@v2.23.3

@@ -13,7 +13,7 @@ else:
     raise RuntimeError("Unable to find version string in %s." % (VERSIONFILE,))
 
 # TODO: Remove once version dependancy issues in caching are fixed
-__version__ = "0.5"
+__version__ = "0.5.1"
 
 
 # Read requirements.txt for requirements
@@ -22,7 +22,7 @@ __version__ = "0.5"
 
 requirements = [
     "numba==0.58.1",
-    "numpy==1",
+    "numpy<=1.26.4",
     "cloudpickle"
 ]
 

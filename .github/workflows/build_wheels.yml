@@ -41,7 +41,7 @@ jobs:
           python3 -m pip install numba==0.58.1
 
       - name: Build wheels
-        uses: pypa/cibuildwheel@v3.01
+        uses: pypa/cibuildwheel@v3.0.1
         with:
           dependency-versions : "./constraints.txt"
 

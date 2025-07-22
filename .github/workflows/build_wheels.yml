@@ -25,7 +25,7 @@ jobs:
     strategy:
       fail-fast: False
       matrix:
-        os: [ubuntu-22.04, windows-2022, macos-12] # macosx_x86_64, win_amd64
+        os: [ubuntu-24.04, windows-2024, macos-12] # macosx_x86_64, win_amd64
         # python: ["cp39"] #"cp310", "cp311", "cp312"]  # "pp39"
         # python-version: ["3.9", "3.10"] #"3.8", "pypy3"]
 

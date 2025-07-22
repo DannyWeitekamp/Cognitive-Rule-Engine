@@ -1,1 +1,3 @@
-
+[tool.cibuildwheel]
+# Use your own pip constraints file
+dependency-versions = { file = "./requirements.txt" }

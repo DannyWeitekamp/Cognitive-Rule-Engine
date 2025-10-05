@@ -367,7 +367,8 @@ class Var(StructRefProxy):
             # print("ObjEquals")
             # with PrintElapse("new_ObjEquals"):
             return to_cond(ObjEquals(self,other))
-        # print("Equals")
+            
+        print("Equals", self, other)
         return Equals(self, other)
     def __ne__(self, other): 
         return ~(self == other)

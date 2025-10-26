@@ -1,0 +1,230 @@
+sp {valentines*propose*initialize
+   (state <s> ^superstate nil
+             -^name)
+-->
+   (write (crlf) |PROPOSE INITIALIZE|)
+   (<s> ^operator <o> ^wminfo <wminf>)
+   (<o> ^name initialize-valentines)
+   (<wminf> ^wmtarget 50  # SET Number of objects in working memory 50, 100, 150
+            ^wmtotal 0)
+}
+
+sp {valentines*apply*match
+    (state <s> ^name valentines
+            #^operator.name do-match
+    		   ^employee <E>
+    		   ^department <D>
+    		   ^project <P>
+
+            # Uncomment <V3> <V4> here and below to increase number of Valentines
+    		   ^employee <V1> <V2> # <V3> <V4> 
+            ^wminfo <wminf>
+    )
+    (<wminf> ^wmtotal <t> ^wmtarget <t>)
+    (<E> ^num <e1> ^dept_num <d1> ^home_city <c1>)
+    (<D>  ^num <d1> ^city Houston ^city <dc> {<dc> <> <c1>})
+    (<P> ^proj_num <p1> ^emp_num <e1>)
+    (<V1> ^home_city <b> {<b> <> <dc>} ^num <e2> {<e2> <> <e1>})
+    (<V2> ^home_city <c> {<c> <> <dc>} ^num <e3> {<e3> <> <e1> <> <e2>})
+    #(<V3> ^home_city <d> {<d> <> <dc>} ^num <e4> {<e4> <> <e1> <> <e2> <> <e3>})
+    #(<V4> ^home_city <e> {<e> <> <dc>} ^num <e5> {<e5> <> <e1> <> <e2> <> <e3> <> <e4>})
+-->
+   #(write (crlf) |DID MATCH| <t>)
+	#(write (crlf) |THIRD: E=| <e1> |, D=| <d1> |, P=| <p1> |, V1=| <e2> )#|, V2=| <e3>)
+	(halt)
+}
+
+
+
+sp {valentines*apply*initialize50
+   (state <s> ^operator.name initialize-valentines
+              ^wminfo <wminf>)
+   #(<o1> ^name initialize-valentines50)
+   (<wminf> ^wmtotal 0 ^wmtarget <t>)
+-->
+   (write (crlf) |INITIALIZE50|)
+   (<s> ^name valentines
+        ^employee <e1> <e10> <e3> <e17> <e5> <e19> <e7> <e8> <e24> <e2> <e11> <e26> <e13> <e23> <e15> <e16> <e4> <e18> <e6> <e20> <e21> <e22> <e14> <e9> <e25> <e12> 
+        ^project <p1> <p2> <p3> <p4> <p5> <p6> <p7> <p8> <p9> <p10> <p11> <p12> 
+        ^department <d1> <d2> <d3> <d4> <d5> <d6> <d7> <d8> <d9> <d10> <d11> <d12>
+        ^wminfo <wminf>
+        )
+   (<e1> ^type employee ^num 1 ^home_city Seattle ^salary 6000 ^dept_num 1 ^level 0)
+   (<e10> ^type employee ^num 10 ^home_city Orlando ^salary 3000 ^dept_num 1 ^level 0)
+   (<e3> ^type employee ^num 3 ^home_city Orlando ^salary 4800 ^dept_num 1 ^level 0)
+   (<e17> ^type employee ^num 17 ^home_city Orlando ^salary 3000 ^dept_num 2 ^level 0)
+   (<e5> ^type employee ^num 5 ^home_city Seattle ^salary 4800 ^dept_num 2 ^level 0)
+   (<e19> ^type employee ^num 19 ^home_city LA ^salary 3000 ^dept_num 2 ^level 0)
+   (<e7> ^type employee ^num 7 ^home_city Seattle ^salary 4500 ^dept_num 2 ^level 0)
+   (<e8> ^type employee ^num 8 ^home_city Dallas ^salary 4500 ^dept_num 3 ^level 0)
+   (<e24> ^type employee ^num 24 ^home_city LA ^salary 2500 ^dept_num 4 ^level 0)
+   (<e2> ^type employee ^num 2 ^home_city Dallas ^salary 5000 ^dept_num 4 ^level 0)
+   (<e11> ^type employee ^num 11 ^home_city Dallas ^salary 3500 ^dept_num 5 ^level 0)
+   (<e26> ^type employee ^num 26 ^home_city Dallas ^salary 2000 ^dept_num 5 ^level 0)
+   (<e13> ^type employee ^num 13 ^home_city LA ^salary 3000 ^dept_num 6 ^level 0)
+   (<e23> ^type employee ^num 23 ^home_city New York ^salary 2500 ^dept_num 6 ^level 0)
+   (<e15> ^type employee ^num 15 ^home_city LA ^salary 3000 ^dept_num 7 ^level 0)
+   (<e16> ^type employee ^num 16 ^home_city LA ^salary 3000 ^dept_num 7 ^level 0)
+   (<e4> ^type employee ^num 4 ^home_city Chicago ^salary 3000 ^dept_num 7 ^level 0)
+   (<e18> ^type employee ^num 18 ^home_city LA ^salary 3000 ^dept_num 8 ^level 0)
+   (<e6> ^type employee ^num 6 ^home_city LA ^salary 4500 ^dept_num 8 ^level 0)
+   (<e20> ^type employee ^num 20 ^home_city LA ^salary 3500 ^dept_num 8 ^level 0)
+   (<e21> ^type employee ^num 21 ^home_city LA ^salary 2500 ^dept_num 9 ^level 0)
+   (<e22> ^type employee ^num 22 ^home_city LA ^salary 3000 ^dept_num 9 ^level 0)
+   (<e14> ^type employee ^num 14 ^home_city LA ^salary 3000 ^dept_num 9 ^level 0)
+   (<e9> ^type employee ^num 9 ^home_city New York ^salary 4000 ^dept_num 9 ^level 0)
+   (<e25> ^type employee ^num 25 ^home_city New York ^salary 2500 ^dept_num 10 ^level 0)
+   (<e12> ^type employee ^num 12 ^home_city LA ^salary 3500 ^dept_num 10 ^level 0)
+   (<p1> ^type project ^proj_num 10780 ^emp_num 7)
+   (<p2> ^type project ^proj_num 10781 ^emp_num 8)
+   (<p3> ^type project ^proj_num 10781 ^emp_num 9)
+   (<p4> ^type project ^proj_num 10781 ^emp_num 1)
+   (<p5> ^type project ^proj_num 10782 ^emp_num 2)
+   (<p6> ^type project ^proj_num 10782 ^emp_num 3)
+   (<p7> ^type project ^proj_num 10783 ^emp_num 4)
+   (<p8> ^type project ^proj_num 10784 ^emp_num 5)
+   (<p9> ^type project ^proj_num 10785 ^emp_num 6)
+   (<p10> ^type project ^proj_num 10785 ^emp_num 10)
+   (<p11> ^type project ^proj_num 10785 ^emp_num 11)
+   (<p12> ^type project ^proj_num 10786 ^emp_num 12)
+   (<d1> ^type department ^city LA ^num 1)
+   (<d2> ^type department ^city LA ^num 2)
+   (<d3> ^type department ^city LA ^num 3)
+   (<d4> ^type department ^city New York ^num 4)
+   (<d5> ^type department ^city New York ^num 5)
+   (<d6> ^type department ^city New York ^num 6)
+   (<d7> ^type department ^city Houston ^num 7)
+   (<d8> ^type department ^city Houston ^num 8)
+   (<d9> ^type department ^city Houston ^num 9)
+   (<d10> ^type department ^city Chicago ^num 10)
+   (<d11> ^type department ^city Chicago ^num 11)
+   (<d12> ^type department ^city Phoenix ^num 12)
+   (<wminf> ^wmtotal 50 ^wmtarget <t>)
+}
+
+sp {valentines*apply*initialize100
+   (state <s> ^wminfo <wminf> 
+   )
+   (<wminf> ^wmtotal 50 ^wmtarget <t> {<t> > 50})
+-->
+   (write (crlf) |INITIALIZE100|)
+   (<s> ^name valentines
+        ^employee <e1> <e10> <e3> <e17> <e5> <e19> <e7> <e8> <e24> <e2> <e11> <e26> <e13> <e23> <e15> <e16> <e4> <e18> <e6> <e20> <e21> <e22> <e14> <e9> <e25> <e12> 
+        ^project <p1> <p2> <p3> <p4> <p5> <p6> <p7> <p8> <p9> <p10> <p11> <p12> 
+        ^department <d1> <d2> <d3> <d4> <d5> <d6> <d7> <d8> <d9> <d10> <d11> <d12>
+        ^wminfo <wminf>)
+   (<e1> ^type employee ^num 101 ^home_city Seattle ^salary 6000 ^dept_num 101 ^level 0)
+   (<e10> ^type employee ^num 110 ^home_city Orlando ^salary 3000 ^dept_num 101 ^level 0)
+   (<e3> ^type employee ^num 103 ^home_city Orlando ^salary 4800 ^dept_num 101 ^level 0)
+   (<e17> ^type employee ^num 117 ^home_city Orlando ^salary 3000 ^dept_num 102 ^level 0)
+   (<e5> ^type employee ^num 105 ^home_city Seattle ^salary 4800 ^dept_num 102 ^level 0)
+   (<e19>^type employee ^num 119 ^home_city LA ^salary 3000 ^dept_num 102 ^level 0)
+   (<e7> ^type employee ^num 107 ^home_city Seattle ^salary 4500 ^dept_num 102 ^level 0)
+   (<e8> ^type employee ^num 108 ^home_city Dallas ^salary 4500 ^dept_num 103 ^level 0)
+   (<e24> ^type employee ^num 124 ^home_city LA ^salary 2500 ^dept_num 104 ^level 0)
+   (<e2> ^type employee ^num 102 ^home_city Dallas ^salary 5000 ^dept_num 104 ^level 0)
+   (<e11> ^type employee ^num 111 ^home_city Dallas ^salary 3500 ^dept_num 105 ^level 0)
+   (<e26> ^type employee ^num 126 ^home_city Dallas ^salary 2000 ^dept_num 105 ^level 0)
+   (<e13> ^type employee ^num 113 ^home_city LA ^salary 3000 ^dept_num 106 ^level 0)
+   (<e23> ^type employee ^num 123 ^home_city New York ^salary 2500 ^dept_num 106 ^level 0)
+   (<e15> ^type employee ^num 115 ^home_city LA ^salary 3000 ^dept_num 107 ^level 0)
+   (<e16> ^type employee ^num 116 ^home_city LA ^salary 3000 ^dept_num 107 ^level 0)
+   (<e4> ^type employee ^num 104 ^home_city Chicago ^salary 3000 ^dept_num 107 ^level 0)
+   (<e18> ^type employee ^num 118 ^home_city LA ^salary 3000 ^dept_num 108 ^level 0)
+   (<e6> ^type employee ^num 106 ^home_city LA ^salary 4500 ^dept_num 108 ^level 0)
+   (<e20> ^type employee ^num 120 ^home_city LA ^salary 3500 ^dept_num 108 ^level 0)
+   (<e21> ^type employee ^num 121 ^home_city LA ^salary 2500 ^dept_num 109 ^level 0)
+   (<e22> ^type employee ^num 122 ^home_city LA ^salary 3000 ^dept_num 109 ^level 0)
+   (<e14> ^type employee ^num 114 ^home_city LA ^salary 3000 ^dept_num 109 ^level 0)
+   (<e9> ^type employee ^num 109 ^home_city New York ^salary 4000 ^dept_num 109 ^level 0)
+   (<e25> ^type employee ^num 125 ^home_city New York ^salary 2500 ^dept_num 110 ^level 0)
+   (<e12> ^type employee ^num 112 ^home_city LA ^salary 3500 ^dept_num 110 ^level 0)
+   (<p1> ^type project ^proj_num 11780 ^emp_num 107)
+   (<p2> ^type project ^proj_num 11781 ^emp_num 108)
+   (<p3> ^type project ^proj_num 11781 ^emp_num 109)
+   (<p4> ^type project ^proj_num 11781 ^emp_num 101)
+   (<p5> ^type project ^proj_num 11782 ^emp_num 102)
+   (<p6> ^type project ^proj_num 11782 ^emp_num 103)
+   (<p7> ^type project ^proj_num 11783 ^emp_num 104)
+   (<p8> ^type project ^proj_num 11784 ^emp_num 105)
+   (<p9> ^type project ^proj_num 11785 ^emp_num 106)
+   (<p10> ^type project ^proj_num 11785 ^emp_num 110)
+   (<p11> ^type project ^proj_num 11785 ^emp_num 111)
+   (<p12> ^type project ^proj_num 11786 ^emp_num 112)
+   (<d1> ^type department ^city LA ^num 101)
+   (<d2> ^type department ^city LA ^num 102)
+   (<d3> ^type department ^city LA ^num 103)
+   (<d4> ^type department ^city New York ^num 104)
+   (<d5> ^type department ^city New York ^num 105)
+   (<d6> ^type department ^city New York ^num 106)
+   (<d7> ^type department ^city Houston ^num 107)
+   (<d8> ^type department ^city Houston ^num 108)
+   (<d9> ^type department ^city Houston ^num 109)
+   (<d10> ^type department ^city Chicago ^num 110)
+   (<d11> ^type department ^city Chicago ^num 111)
+   (<d12> ^type department ^city Phoenix ^num 112)
+   (<wminf> ^wmtotal 100 ^wmtarget <t>)
+}
+
+sp {valentines*apply*initialize150
+   (state <s> ^wminfo <wminf>)
+   (<wminf> ^wmtotal 100 ^wmtarget <t> {<t> > 100})
+-->
+   (write (crlf) |INITIALIZE150|)
+   (<s> ^name valentines
+        ^employee <e1> <e10> <e3> <e17> <e5> <e19> <e7> <e8> <e24> <e2> <e11> <e26> <e13> <e23> <e15> <e16> <e4> <e18> <e6> <e20> <e21> <e22> <e14> <e9> <e25> <e12> 
+        ^project <p1> <p2> <p3> <p4> <p5> <p6> <p7> <p8> <p9> <p10> <p11> <p12> 
+        ^department <d1> <d2> <d3> <d4> <d5> <d6> <d7> <d8> <d9> <d10> <d11> <d12>
+        ^wminfo <wminf>)
+   (<e1> ^type employee ^num 201 ^home_city Seattle ^salary 6000 ^dept_num 201 ^level 0)
+   (<e10> ^type employee ^num 210 ^home_city Orlando ^salary 3000 ^dept_num 201 ^level 0)
+   (<e3> ^type employee ^num 203 ^home_city Orlando ^salary 4800 ^dept_num 201 ^level 0)
+   (<e17> ^type employee ^num 217 ^home_city Orlando ^salary 3000 ^dept_num 202 ^level 0)
+   (<e5> ^type employee ^num 205 ^home_city Seattle ^salary 4800 ^dept_num 202 ^level 0)
+   (<e19>^type employee ^num 219 ^home_city LA ^salary 3000 ^dept_num 202 ^level 0)
+   (<e7> ^type employee ^num 207 ^home_city Seattle ^salary 4500 ^dept_num 202 ^level 0)
+   (<e8> ^type employee ^num 208 ^home_city Dallas ^salary 4500 ^dept_num 203 ^level 0)
+   (<e24> ^type employee ^num 224 ^home_city LA ^salary 2500 ^dept_num 204 ^level 0)
+   (<e2> ^type employee ^num 202 ^home_city Dallas ^salary 5000 ^dept_num 204 ^level 0)
+   (<e11> ^type employee ^num 211 ^home_city Dallas ^salary 3500 ^dept_num 205 ^level 0)
+   (<e26> ^type employee ^num 226 ^home_city Dallas ^salary 2000 ^dept_num 205 ^level 0)
+   (<e13> ^type employee ^num 213 ^home_city LA ^salary 3000 ^dept_num 206 ^level 0)
+   (<e23> ^type employee ^num 223 ^home_city New York ^salary 2500 ^dept_num 206 ^level 0)
+   (<e15> ^type employee ^num 215 ^home_city LA ^salary 3000 ^dept_num 207 ^level 0)
+   (<e16> ^type employee ^num 216 ^home_city LA ^salary 3000 ^dept_num 207 ^level 0)
+   (<e4> ^type employee ^num 204 ^home_city Chicago ^salary 3000 ^dept_num 207 ^level 0)
+   (<e18> ^type employee ^num 218 ^home_city LA ^salary 3000 ^dept_num 208 ^level 0)
+   (<e6> ^type employee ^num 206 ^home_city LA ^salary 4500 ^dept_num 208 ^level 0)
+   (<e20> ^type employee ^num 220 ^home_city LA ^salary 3500 ^dept_num 208 ^level 0)
+   (<e21> ^type employee ^num 221 ^home_city LA ^salary 2500 ^dept_num 209 ^level 0)
+   (<e22> ^type employee ^num 222 ^home_city LA ^salary 3000 ^dept_num 209 ^level 0)
+   (<e14> ^type employee ^num 214 ^home_city LA ^salary 3000 ^dept_num 209 ^level 0)
+   (<e9> ^type employee ^num 209 ^home_city New York ^salary 4000 ^dept_num 209 ^level 0)
+   (<e25> ^type employee ^num 225 ^home_city New York ^salary 2500 ^dept_num 210 ^level 0)
+   (<e12> ^type employee ^num 212 ^home_city LA ^salary 3500 ^dept_num 210 ^level 0)
+   (<p1> ^type project ^proj_num 12780 ^emp_num 207)
+   (<p2> ^type project ^proj_num 12781 ^emp_num 208)
+   (<p3> ^type project ^proj_num 12781 ^emp_num 209)
+   (<p4> ^type project ^proj_num 12781 ^emp_num 201)
+   (<p5> ^type project ^proj_num 12782 ^emp_num 202)
+   (<p6> ^type project ^proj_num 12782 ^emp_num 203)
+   (<p7> ^type project ^proj_num 12783 ^emp_num 204)
+   (<p8> ^type project ^proj_num 12784 ^emp_num 205)
+   (<p9> ^type project ^proj_num 12785 ^emp_num 206)
+   (<p10> ^type project ^proj_num 12785 ^emp_num 210)
+   (<p11> ^type project ^proj_num 12785 ^emp_num 211)
+   (<p12> ^type project ^proj_num 12786 ^emp_num 212)
+   (<d1> ^type department ^city LA ^num 201)
+   (<d2> ^type department ^city LA ^num 202)
+   (<d3> ^type department ^city LA ^num 203)
+   (<d4> ^type department ^city New York ^num 204)
+   (<d5> ^type department ^city New York ^num 205)
+   (<d6> ^type department ^city New York ^num 206)
+   (<d7> ^type department ^city Houston ^num 207)
+   (<d8> ^type department ^city Houston ^num 208)
+   (<d9> ^type department ^city Houston ^num 209)
+   (<d10> ^type department ^city Chicago ^num 210)
+   (<d11> ^type department ^city Chicago ^num 211)
+   (<d12> ^type department ^city Phoenix ^num 212)
+   (<wminf> ^wmtotal 150 ^wmtarget <t>)
+}

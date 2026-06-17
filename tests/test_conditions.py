@@ -523,7 +523,8 @@ def test_anti_unify():
     # c2.structure_map(c1) 
     c12 = c1.antiunify(c2) 
     with PrintElapse("antiunify"):
-        c12 = c1.antiunify(c2) 
+        for i in range(100):
+            c12 = c1.antiunify(c2) 
     print(str(c12_ref))
     print(str(c12))
     assert str(c12) == str(c12_ref)

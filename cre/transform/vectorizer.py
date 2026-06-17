@@ -99,6 +99,21 @@ def vectorizer_apply(self, mem):
     # fact_types = tuple([get_fact_type(t) for t in val_types])
     def impl(self, mem):
 
+        # (obj_id, attribute name) : value
+        # ("box1", "value", 'red')
+        # ("box1", "value", 'blue')
+        # ("box1", "value", 'green')
+
+        # Nominal Encoding
+        # [..., 0] # red
+        # [..., 1] # blue 
+        # [..., 2] # green
+
+        # One hot encoding
+        # [..., 1, 0, 0] # red
+        # [..., 0, 1, 0] # blue 
+        # [..., 0, 0, 1] # green
+
         slot_map  = self.slot_map
         inv_slot_map  = self.inv_slot_map
         one_hot_map  = self.one_hot_map

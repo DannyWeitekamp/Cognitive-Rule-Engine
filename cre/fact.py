@@ -393,7 +393,7 @@ def _standardize_conversions(conversions, attr_type, context):
     stand_conv = {}
     for conv_type, conv_op in conversions.items():
         conv_type = _standardize_type(conv_type, context)
-        print(attr_type)
+        # print(attr_type)
         if(isinstance(conv_op, UntypedCREFunc)): conv_op = conv_op(attr_type)
         assert conv_op.return_type == conv_type, f"{conv_op} does not return conversion type {conv_type}."
         stand_conv[conv_type] = conv_op
@@ -824,7 +824,7 @@ def gen_fact_src(typ, fields, t_id, inherit_from=None, specialization_name=None,
 
     as_dict_setters = []
     for attr,t in fields:
-        print(attr, t)
+        # print(attr, t)
         if(isinstance(t, Fact)):
             s = f"'{attr}':getattr(get_{attr}(self), key_attr, None)"
         elif(isinstance(t, ListType)):

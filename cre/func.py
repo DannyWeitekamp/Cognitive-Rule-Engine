@@ -178,7 +178,8 @@ def CREFunc_method(cf_type, sig, _fn_name=None, on_error='error',**kwargs):
     '''A decorator used in CREFunc codegens for trying to compile member
          methods like 'call_heads' and registering their ptrs as globals.
     '''
-    def wrapper(func):        
+    def wrapper(func):
+
         if(isinstance(func,Dispatcher)):
             dispatcher = func
             fn_name = func.py_func.__name__ if _fn_name is None else _fn_name 
@@ -2281,7 +2282,13 @@ def upcast(context, builder, fromty, toty, val):
 call_pyfunc = cloudpickle.loads({call_bytes})
 {"".join([f'h{i}_type, ' for i in range(len(arg_types))]) + " = arg_types" if(len(arg_types)) else ""}
 
-call_heads = CREFunc_method(cf_type, call_sig, 'call_heads', on_error={on_error_call!r})(call_pyfunc)
+
+call_heads = {
+    f"CREFunc_method(cf_type, call_sig, 'call_heads', on_error={on_error_call!r})(call_pyfunc)"
+    if nopy_call != False
+    else "None"
+}
+
 if(call_heads is None):
     @CREFunc_method(cf_type, call_sig, 'call_heads')
     def call_heads({arg_names}):
